@@ -1,9 +1,62 @@
 @import "tailwindcss";
 
+/* =============================================================================
+   Style Tokens System
+
+   Aesthetic: Brutalist / High Modernist
+   - Sharp geometry, no rounded corners
+   - Hard-edged offset shadows
+   - Monumental weight, decisive contrast
+   ============================================================================= */
+
 @theme {
+  /* --------------------------------------------------------------------------
+     Light Mode (Default)
+     -------------------------------------------------------------------------- */
+
+  /* Page */
   --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.18 0 0);
-  --color-border: oklch(0.9 0 0);
+  --color-foreground: oklch(0.145 0 0);
+
+  /* Surfaces */
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+
+  /* Primary */
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+
+  /* Secondary */
+  --color-secondary: oklch(0.96 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+
+  /* Muted */
+  --color-muted: oklch(0.96 0 0);
+  --color-muted-foreground: oklch(0.45 0 0);
+
+  /* Accent */
+  --color-accent: oklch(0.96 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+
+  /* Destructive */
+  --color-destructive: oklch(0.55 0.2 25);
+  --color-destructive-foreground: oklch(0.985 0 0);
+
+  /* Utilities */
+  --color-border: oklch(0.90 0 0);
+  --color-input: oklch(0.90 0 0);
+  --color-ring: oklch(0.70 0 0);
+
+  /* Radius: banned */
+  --radius: 0;
+
+  /* Shadows: hard-edged, bottom-right offset */
+  --shadow-sm: 2px 2px 0 0 oklch(0 0 0 / 0.15);
+  --shadow-md: 4px 4px 0 0 oklch(0 0 0 / 0.2);
+  --shadow-lg: 6px 6px 0 0 oklch(0 0 0 / 0.25);
+  --shadow-xl: 8px 8px 0 0 oklch(0 0 0 / 0.3);
 }
 
 :root {
@@ -15,9 +68,50 @@
 }
 
 @theme .dark {
-  --color-background: oklch(0.12 0 0);
-  --color-foreground: oklch(0.98 0 0);
+  /* --------------------------------------------------------------------------
+     Dark Mode
+     -------------------------------------------------------------------------- */
+
+  /* Page */
+  --color-background: oklch(0.145 0 0);
+  --color-foreground: oklch(0.985 0 0);
+
+  /* Surfaces (slightly elevated from background) */
+  --color-card: oklch(0.17 0 0);
+  --color-card-foreground: oklch(0.985 0 0);
+  --color-popover: oklch(0.17 0 0);
+  --color-popover-foreground: oklch(0.985 0 0);
+
+  /* Primary */
+  --color-primary: oklch(0.985 0 0);
+  --color-primary-foreground: oklch(0.205 0 0);
+
+  /* Secondary */
+  --color-secondary: oklch(0.22 0 0);
+  --color-secondary-foreground: oklch(0.985 0 0);
+
+  /* Muted */
+  --color-muted: oklch(0.22 0 0);
+  --color-muted-foreground: oklch(0.65 0 0);
+
+  /* Accent */
+  --color-accent: oklch(0.22 0 0);
+  --color-accent-foreground: oklch(0.985 0 0);
+
+  /* Destructive */
+  --color-destructive: oklch(0.55 0.2 25);
+  --color-destructive-foreground: oklch(0.985 0 0);
+
+  /* Utilities */
   --color-border: oklch(0.25 0 0);
+  --color-input: oklch(0.25 0 0);
+  --color-ring: oklch(0.55 0 0);
+
+  /* Shadows: stronger opacity for dark backgrounds */
+  --shadow-sm: 2px 2px 0 0 oklch(0 0 0 / 0.4);
+  --shadow-md: 4px 4px 0 0 oklch(0 0 0 / 0.5);
+  --shadow-lg: 6px 6px 0 0 oklch(0 0 0 / 0.6);
+  --shadow-xl: 8px 8px 0 0 oklch(0 0 0 / 0.7);
 }
 
 body {
