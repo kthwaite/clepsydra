@@ -1,11 +1,17 @@
 [package]
 name = "clepsydra"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
+
+[[bin]]
+name = "clepsydra"
+path = "src/bin/cli.rs"
 
 [dependencies]
 axum = "0.8.8"
+clap = { version = "4.5.56", features = ["derive"] }
 config = "0.15.19"
+markdown = "1.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.49.0", features = ["full"] }
 tower = "0.5.3"

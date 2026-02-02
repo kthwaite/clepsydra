@@ -1,11 +1,11 @@
-use axum::{response::IntoResponse, routing::get, Router};
-use config::{Config, Environment, File};
+use axum::{Router, response::IntoResponse, routing::get};
+use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::{info, Level};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing::{Level, info};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Debug, Deserialize)]
 struct Settings {
@@ -19,7 +19,7 @@ struct ServerSettings {
 }
 
 impl Settings {
-    fn load() -> Result<Self, config::ConfigError> {
+    fn load() -> Result<Self, ConfigError> {
         // Precedence (later wins): defaults < config.toml < env vars
         // Env vars use: CLEPSYDRA__SERVER__HOST / CLEPSYDRA__SERVER__PORT
         Config::builder()
@@ -32,8 +32,7 @@ impl Settings {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Logging via `tracing`.
     // Configure with `RUST_LOG=debug` (or e.g. `RUST_LOG=clepsydra=debug,tower_http=debug`).
     fmt()
@@ -45,9 +44,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let settings = Settings::load()?;
 
-    let app = Router::new().route("/", get(root)).layer(
-        ServiceBuilder::new().layer(TraceLayer::new_for_http()),
-    );
+    let app = Router::new()
+        .route("/", get(root))
+        .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
 
