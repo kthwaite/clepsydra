@@ -1,8 +1,12 @@
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use clepsydra::vault::Vault;
-use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::derivation::{Deriver, IndexedPage};
+use clepsydra::vault::index::{IndexError, VaultIndex};
 use clepsydra::vault::init::init_vault;
+use rusqlite::Transaction;
 use tempfile::TempDir;
 
 /// Helper: initialize a vault in a temp directory, write markdown files, and
@@ -441,4 +445,52 @@ fn duplicate_uuid_resolved_by_created_at() {
         dup_warnings.is_empty(),
         "re-index should produce no duplicate warnings, got: {dup_warnings:?}"
     );
+}
+
+// -----------------------------------------------------------------------
+// Task 7: custom deriver registration
+// -----------------------------------------------------------------------
+
+/// A no-op deriver that counts how many times it's called.
+struct CountingDeriver {
+    count: Arc<AtomicUsize>,
+}
+
+impl Deriver for CountingDeriver {
+    fn name(&self) -> &str {
+        "counting"
+    }
+
+    fn derive(
+        &self,
+        _page: &IndexedPage,
+        _page_id: &str,
+        _tx: &Transaction,
+    ) -> Result<(), IndexError> {
+        self.count.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+#[test]
+fn custom_deriver_is_called_during_build() {
+    let page = r#"---
+id: 00000000-0000-0000-0000-000000000099
+title: Test
+---
+Content.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("test.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    index.register_deriver(Box::new(CountingDeriver {
+        count: Arc::clone(&call_count),
+    }));
+
+    index.build(&vault).unwrap();
+
+    assert_eq!(call_count.load(Ordering::Relaxed), 1, "custom deriver should be called once per page");
 }
