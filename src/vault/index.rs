@@ -135,6 +135,24 @@ impl VaultIndex {
         })
     }
 
+    /// Open the index database with NO derivers registered.
+    ///
+    /// Useful for testing or for callers who want to register a custom set
+    /// of derivers via [`register_deriver`].
+    pub fn open_bare(db_path: &Path) -> Result<Self, IndexError> {
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(db_path)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(SCHEMA)?;
+
+        Ok(Self {
+            conn,
+            derivers: Vec::new(),
+        })
+    }
+
     /// Borrow the underlying connection (primarily for test inspection).
     pub fn connection(&self) -> &Connection {
         &self.conn

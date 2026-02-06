@@ -494,3 +494,52 @@ Content.
 
     assert_eq!(call_count.load(Ordering::Relaxed), 1, "custom deriver should be called once per page");
 }
+
+// -----------------------------------------------------------------------
+// Task 8: open_bare() constructor
+// -----------------------------------------------------------------------
+
+#[test]
+fn open_bare_has_no_derivers() {
+    let page = r#"---
+id: 00000000-0000-0000-0000-0000000000aa
+title: Bare
+tags:
+  - test
+---
+See [[Other]].
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("bare.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open_bare(&db_path).unwrap();
+
+    let stats = index.build(&vault).unwrap();
+    assert_eq!(stats.pages_indexed, 1);
+
+    // Pages table should have the row (upsert is in build(), not in derivers)
+    let page_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(page_count, 1);
+
+    // But derived tables should be empty (no derivers registered)
+    let cn_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM canonical_names", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(cn_count, 0, "bare index should have no canonical_names");
+
+    let link_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM links", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(link_count, 0, "bare index should have no links");
+
+    let tag_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(tag_count, 0, "bare index should have no tags");
+}
