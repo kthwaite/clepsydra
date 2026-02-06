@@ -1,0 +1,611 @@
+use std::fs;
+use std::sync::{Arc, Mutex};
+
+use axum::Router;
+use axum::http::StatusCode;
+use axum_test::TestServer;
+
+use clepsydra::api::{AppState, api_router};
+use clepsydra::vault::Vault;
+use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::init::init_vault;
+use tempfile::TempDir;
+
+/// Set up a test server backed by a fresh vault in a temporary directory.
+fn setup_server() -> (TestServer, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let state = Arc::new(AppState {
+        vault,
+        index: Mutex::new(index),
+        warnings: Mutex::new(Vec::new()),
+    });
+
+    let app: Router = Router::new()
+        .nest("/api/vault", api_router())
+        .with_state(state);
+
+    let server = TestServer::new(app).unwrap();
+    (server, tmp)
+}
+
+#[tokio::test]
+async fn create_and_get_page() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page
+    let res = server
+        .post("/api/vault/pages/hello.md")
+        .json(&serde_json::json!({
+            "title": "Hello World",
+            "tags": ["greeting"],
+            "body": "# Hello\n\nThis is a test page."
+        }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["path"], "hello.md");
+    assert_eq!(body["meta"]["title"], "Hello World");
+    assert_eq!(body["body"], "# Hello\n\nThis is a test page.");
+
+    // Get the page back
+    let res = server.get("/api/vault/pages/hello.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["path"], "hello.md");
+    assert_eq!(body["meta"]["title"], "Hello World");
+}
+
+#[tokio::test]
+async fn create_duplicate_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page
+    server
+        .post("/api/vault/pages/dup.md")
+        .json(&serde_json::json!({ "title": "Dup" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    // Try to create the same page again
+    let res = server
+        .post("/api/vault/pages/dup.md")
+        .json(&serde_json::json!({ "title": "Dup Again" }))
+        .await;
+
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn get_nonexistent_returns_404() {
+    let (server, _tmp) = setup_server();
+
+    let res = server.get("/api/vault/pages/no-such-page.md").await;
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_page_no_backlinks() {
+    let (server, _tmp) = setup_server();
+
+    // Create and then delete
+    server
+        .post("/api/vault/pages/ephemeral.md")
+        .json(&serde_json::json!({ "title": "Ephemeral" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let res = server.delete("/api/vault/pages/ephemeral.md").await;
+    res.assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    // Confirm it's gone
+    let res = server.get("/api/vault/pages/ephemeral.md").await;
+    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn path_traversal_rejected() {
+    let (server, _tmp) = setup_server();
+
+    // VaultPath rejects `..` components. HTTP normalizes `../` in URL paths,
+    // so we test with percent-encoded `..` (%2e%2e) in a path segment that
+    // Axum will decode for the wildcard parameter.
+    let res = server
+        .post("/api/vault/pages/%2e%2e/%2e%2e/etc/passwd")
+        .json(&serde_json::json!({ "title": "Evil" }))
+        .await;
+
+    let status = res.status_code();
+    // Must not succeed — either 400 (VaultPath rejects `..`) or 404 (Axum
+    // normalizes it away) are acceptable security outcomes
+    assert_ne!(
+        status,
+        axum::http::StatusCode::CREATED,
+        "path traversal must not succeed"
+    );
+}
+
+#[tokio::test]
+async fn list_pages() {
+    let (server, _tmp) = setup_server();
+
+    // Create two pages
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({ "title": "Alpha" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({ "title": "Beta" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 2);
+}
+
+#[tokio::test]
+async fn create_and_list_folder() {
+    let (server, _tmp) = setup_server();
+
+    // Create a folder
+    let res = server.post("/api/vault/folders/notes").await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    // List top-level folders
+    let res = server.get("/api/vault/folders").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+
+    // Should contain our "notes" folder (and maybe "_attachments" but that's excluded by default)
+    let folder_names: Vec<&str> = body.iter().filter_map(|f| f["name"].as_str()).collect();
+    assert!(
+        folder_names.contains(&"notes"),
+        "expected 'notes' in folders, got: {folder_names:?}"
+    );
+}
+
+#[tokio::test]
+async fn list_attachments_empty() {
+    let (server, _tmp) = setup_server();
+
+    let res = server.get("/api/vault/attachments").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert!(body.is_empty(), "expected empty attachments list");
+}
+
+// ---------------------------------------------------------------------------
+// Move page tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn move_page_rewrites_backlinks() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create target page
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create source page that links to target
+    server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({"title": "Source", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index to register links
+    let res = server.post("/api/vault/index/rebuild").await;
+    res.assert_status_ok();
+
+    // Move target.md -> renamed.md
+    let res = server
+        .post("/api/vault/pages-move/target.md")
+        .json(&serde_json::json!({"destination": "renamed.md"}))
+        .await;
+    assert_eq!(res.status_code(), StatusCode::OK);
+
+    // Verify file moved
+    assert!(
+        !vault_root.join("target.md").exists(),
+        "target.md should not exist after move"
+    );
+    assert!(
+        vault_root.join("renamed.md").exists(),
+        "renamed.md should exist after move"
+    );
+
+    // Verify backlink was rewritten in source.md
+    let content = fs::read_to_string(vault_root.join("source.md")).unwrap();
+    assert!(
+        !content.contains("[[Target]]"),
+        "old link should be rewritten, but found: {content}"
+    );
+    // The new link should reference "renamed" (the new stem)
+    assert!(
+        content.contains("[[renamed]]"),
+        "expected [[renamed]] in rewritten content, but found: {content}"
+    );
+}
+
+#[tokio::test]
+async fn move_page_nonexistent_returns_404() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages-move/nonexistent.md")
+        .json(&serde_json::json!({"destination": "new.md"}))
+        .await;
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn move_page_destination_exists_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    // Create two pages
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Try to move a.md -> b.md (b.md already exists)
+    let res = server
+        .post("/api/vault/pages-move/a.md")
+        .json(&serde_json::json!({"destination": "b.md"}))
+        .await;
+    assert_eq!(res.status_code(), StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// Delete with backlinks tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn delete_with_backlinks_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    // Create target page
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create linker page that links to target
+    server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index to register links
+    server.post("/api/vault/index/rebuild").await;
+
+    // DELETE target without force -> 409 with backlinks list
+    let res = server.delete("/api/vault/pages/target.md").await;
+    assert_eq!(res.status_code(), StatusCode::CONFLICT);
+
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["detail"]["backlinks"].is_array(),
+        "expected backlinks in error detail, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn delete_force_plain_text_rewrites() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create target page
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create linker page that links to target
+    server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index to register links
+    server.post("/api/vault/index/rebuild").await;
+
+    // DELETE target?force=true&rewrite=plain_text -> 204
+    let res = server
+        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
+        .await;
+    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
+
+    // Verify target is deleted
+    assert!(!vault_root.join("target.md").exists());
+
+    // Verify linker.md has plain text instead of [[Target]]
+    let content = fs::read_to_string(vault_root.join("linker.md")).unwrap();
+    assert!(
+        !content.contains("[[Target]]"),
+        "old link should be rewritten, but found: {content}"
+    );
+    assert!(
+        content.contains("Target"),
+        "display text should remain as plain text, but found: {content}"
+    );
+    // Should NOT have wikilink brackets
+    assert!(
+        !content.contains("[["),
+        "should not have wikilink brackets, but found: {content}"
+    );
+}
+
+#[tokio::test]
+async fn delete_force_unlink_rewrites() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create target page
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create linker page that links to target
+    server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index to register links
+    server.post("/api/vault/index/rebuild").await;
+
+    // DELETE target?force=true&rewrite=unlink -> 204
+    let res = server
+        .delete("/api/vault/pages/target.md?force=true&rewrite=unlink")
+        .await;
+    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
+
+    // Verify target is deleted
+    assert!(!vault_root.join("target.md").exists());
+
+    // Verify linker.md has strikethrough text instead of [[Target]]
+    let content = fs::read_to_string(vault_root.join("linker.md")).unwrap();
+    assert!(
+        !content.contains("[[Target]]"),
+        "old link should be rewritten, but found: {content}"
+    );
+    assert!(
+        content.contains("~~Target~~"),
+        "expected strikethrough ~~Target~~, but found: {content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Index query endpoint tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn index_backlinks() {
+    let (server, _tmp) = setup_server();
+
+    // Create target and linker pages
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild to register links
+    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+
+    // Query backlinks for target.md
+    let res = server.get("/api/vault/index/backlinks/target.md").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1, "expected 1 backlink, got: {body:?}");
+    assert_eq!(body[0]["path"], "linker.md");
+}
+
+#[tokio::test]
+async fn index_tags() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A", "tags": ["rust", "web"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B", "tags": ["rust"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index so tags are fresh
+    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+
+    let res = server.get("/api/vault/index/tags").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+
+    // "rust" should appear with count 2, "web" with count 1
+    let rust_entry = body.iter().find(|e| e["tag"] == "rust");
+    assert!(rust_entry.is_some(), "expected 'rust' tag, got: {body:?}");
+    assert_eq!(rust_entry.unwrap()["count"], 2);
+
+    let web_entry = body.iter().find(|e| e["tag"] == "web");
+    assert!(web_entry.is_some(), "expected 'web' tag, got: {body:?}");
+    assert_eq!(web_entry.unwrap()["count"], 1);
+}
+
+#[tokio::test]
+async fn index_stats() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({"title": "Alpha", "tags": ["t1"], "body": "See [[Beta]]."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({"title": "Beta", "tags": ["t2"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+
+    let res = server.get("/api/vault/index/stats").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+
+    assert_eq!(body["pages"], 2);
+    assert!(body["links_total"].as_i64().unwrap() >= 1);
+    assert_eq!(body["tags"], 2); // t1 and t2
+}
+
+#[tokio::test]
+async fn index_rebuild() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page first
+    server
+        .post("/api/vault/pages/test.md")
+        .json(&serde_json::json!({"title": "Test"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server.post("/api/vault/index/rebuild").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["pages_indexed"].as_i64().unwrap() >= 0);
+}
+
+// ---------------------------------------------------------------------------
+// Get page by UUID test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_page_by_uuid() {
+    let (server, _tmp) = setup_server();
+
+    // Create a page
+    let res = server
+        .post("/api/vault/pages/uuid-test.md")
+        .json(&serde_json::json!({"title": "UUID Test", "body": "Content here."}))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+
+    // The page ID should be in the meta
+    let page_id = created["meta"]["id"].as_str().unwrap();
+
+    // Fetch by UUID
+    let res = server
+        .get(&format!("/api/vault/pages/by-id/{page_id}"))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["path"], "uuid-test.md");
+    assert_eq!(body["meta"]["title"], "UUID Test");
+    assert_eq!(body["body"], "Content here.");
+}
+
+// ---------------------------------------------------------------------------
+// Folder move test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn move_folder_rewrites_all_contained_pages() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create folder with a page inside
+    server
+        .post("/api/vault/folders/notes")
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/notes/design.md")
+        .json(&serde_json::json!({"title": "Design Notes", "body": "Some design notes."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create external page that links to the page inside the folder
+    server
+        .post("/api/vault/pages/index.md")
+        .json(&serde_json::json!({"title": "Index", "body": "See [[Design Notes]] for details."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // Move the folder
+    let res = server
+        .post("/api/vault/folders-move/notes")
+        .json(&serde_json::json!({"destination": "docs"}))
+        .await;
+    assert_eq!(
+        res.status_code(),
+        StatusCode::OK,
+        "move folder failed: {:?}",
+        res.text()
+    );
+
+    // Verify old folder is gone, new folder exists
+    assert!(
+        !vault_root.join("notes").exists(),
+        "old folder should not exist"
+    );
+    assert!(
+        vault_root.join("docs/design.md").exists(),
+        "page should exist in new folder"
+    );
+
+    // Verify backlink in index.md was rewritten
+    let content = fs::read_to_string(vault_root.join("index.md")).unwrap();
+    assert!(
+        !content.contains("[[Design Notes]]"),
+        "old link should be rewritten, but found: {content}"
+    );
+}
