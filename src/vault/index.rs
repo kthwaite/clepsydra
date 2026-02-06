@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::Utc;
 use rusqlite::{Connection, params};
@@ -10,8 +10,13 @@ use walkdir::WalkDir;
 
 use super::Vault;
 use super::canonical::CanonicalName;
-use super::link::{Link, LinkKind, extract_links, extract_property_refs};
-use super::page::{PageMeta, parse_frontmatter, write_page_content};
+use super::derivation::{Deriver, IndexedPage};
+use super::derivers::canonical_names::CanonicalNameDeriver;
+use super::derivers::canonical_names::filename_component;
+use super::derivers::links::LinkDeriver;
+use super::derivers::tags::TagDeriver;
+use super::link::{extract_links, extract_property_refs};
+use super::page::{parse_frontmatter, write_page_content};
 use super::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -37,22 +42,6 @@ pub struct BuildStats {
     pub pages_skipped: usize,
     pub pages_removed: usize,
     pub warnings: Vec<String>,
-}
-
-// ---------------------------------------------------------------------------
-// ParsedFile — intermediate representation for two-pass indexing
-// ---------------------------------------------------------------------------
-
-/// A file parsed during the first pass of index building, before DB insertion.
-struct ParsedFile {
-    vault_path: VaultPath,
-    abs_path: PathBuf,
-    meta: PageMeta,
-    body: String,
-    content_hash: String,
-    body_links: Vec<Link>,
-    prop_links: Vec<Link>,
-    canonical: CanonicalName,
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 /// An SQLite-backed index of vault pages, links, and canonical names.
 pub struct VaultIndex {
     conn: Connection,
+    derivers: Vec<Box<dyn Deriver>>,
 }
 
 impl VaultIndex {
@@ -135,12 +125,24 @@ impl VaultIndex {
         // 4. Execute schema
         conn.execute_batch(SCHEMA)?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            derivers: vec![
+                Box::new(CanonicalNameDeriver),
+                Box::new(LinkDeriver),
+                Box::new(TagDeriver),
+            ],
+        })
     }
 
     /// Borrow the underlying connection (primarily for test inspection).
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+
+    /// Register an additional deriver to run during index builds.
+    pub fn register_deriver(&mut self, deriver: Box<dyn Deriver>) {
+        self.derivers.push(deriver);
     }
 
     /// Build (or incrementally update) the index from vault contents.
@@ -162,7 +164,7 @@ impl VaultIndex {
         // Pass 1: Walk vault, parse files, collect into Vec<ParsedFile>
         // -----------------------------------------------------------------
 
-        let mut parsed_files: Vec<ParsedFile> = Vec::new();
+        let mut parsed_files: Vec<IndexedPage> = Vec::new();
 
         let tx = self.conn.transaction()?;
 
@@ -235,7 +237,7 @@ impl VaultIndex {
             let canonical = if let Some(ref title) = meta.title {
                 CanonicalName::from_title(title)
             } else {
-                CanonicalName::from_filename(vault_path.filename_component())
+                CanonicalName::from_filename(filename_component(&vault_path))
             };
 
             // Extract body links
@@ -261,7 +263,7 @@ impl VaultIndex {
                 }
             }
 
-            parsed_files.push(ParsedFile {
+            parsed_files.push(IndexedPage {
                 vault_path,
                 abs_path: abs_path.to_path_buf(),
                 meta,
@@ -376,89 +378,9 @@ impl VaultIndex {
                 params![page_id],
             )?;
 
-            // Insert canonical_names
-            // 1. Title-derived (if title is present)
-            if let Some(ref title) = pf.meta.title {
-                let cn = CanonicalName::from_title(title);
-                tx.execute(
-                    "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'title')",
-                    params![cn.as_str(), page_id],
-                )?;
-            }
-
-            // 2. Filename-derived
-            let fn_cn = CanonicalName::from_filename(pf.vault_path.filename_component());
-            tx.execute(
-                "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'filename')",
-                params![fn_cn.as_str(), page_id],
-            )?;
-
-            // 3. Each alias
-            for alias in &pf.meta.aliases {
-                let alias_cn = CanonicalName::from_title(alias);
-                tx.execute(
-                    "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'alias')",
-                    params![alias_cn.as_str(), page_id],
-                )?;
-            }
-
-            // Insert body links into links table
-            for link in &pf.body_links {
-                let (kind_str, source_field) = match &link.kind {
-                    LinkKind::Wiki => ("wiki", None),
-                    LinkKind::Markdown => ("markdown", None),
-                    LinkKind::PropertyRef { source_field } => {
-                        ("property_ref", Some(source_field.clone()))
-                    }
-                };
-                let target_canonical = CanonicalName::new(&link.target_raw);
-                tx.execute(
-                    "INSERT OR IGNORE INTO links (source_id, target_raw, target_canonical, kind, source_field, span_start, span_end)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        page_id,
-                        link.target_raw,
-                        target_canonical.as_str(),
-                        kind_str,
-                        source_field,
-                        link.span.start as i64,
-                        link.span.end as i64,
-                    ],
-                )?;
-            }
-
-            // Insert property ref links (use negative span_start to avoid PK collision)
-            for (i, link) in pf.prop_links.iter().enumerate() {
-                let (kind_str, source_field) = match &link.kind {
-                    LinkKind::Wiki => ("wiki", None),
-                    LinkKind::Markdown => ("markdown", None),
-                    LinkKind::PropertyRef { source_field } => {
-                        ("property_ref", Some(source_field.clone()))
-                    }
-                };
-                let target_canonical = CanonicalName::new(&link.target_raw);
-                let neg_span = -((i as i64) + 1);
-                tx.execute(
-                    "INSERT OR IGNORE INTO links (source_id, target_raw, target_canonical, kind, source_field, span_start, span_end)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        page_id,
-                        link.target_raw,
-                        target_canonical.as_str(),
-                        kind_str,
-                        source_field,
-                        neg_span,
-                        0i64,
-                    ],
-                )?;
-            }
-
-            // Insert tags
-            for tag in &pf.meta.tags {
-                tx.execute(
-                    "INSERT OR IGNORE INTO tags (page_id, tag) VALUES (?1, ?2)",
-                    params![page_id, tag],
-                )?;
+            // Dispatch to derivers
+            for deriver in &self.derivers {
+                deriver.derive(pf, &page_id, &tx)?;
             }
 
             stats.pages_indexed += 1;
@@ -556,21 +478,5 @@ fn yaml_value_to_strings(val: &serde_yaml::Value) -> Vec<String> {
             .filter_map(|v| v.as_str().map(String::from))
             .collect(),
         _ => Vec::new(),
-    }
-}
-
-/// Extension trait on VaultPath for extracting the filename component.
-trait VaultPathExt {
-    fn filename_component(&self) -> &str;
-}
-
-impl VaultPathExt for VaultPath {
-    fn filename_component(&self) -> &str {
-        let s = self.as_str();
-        if let Some(pos) = s.rfind('/') {
-            &s[pos + 1..]
-        } else {
-            s
-        }
     }
 }

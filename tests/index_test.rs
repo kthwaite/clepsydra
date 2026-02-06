@@ -295,6 +295,92 @@ See [[Design]] for details.
 // -----------------------------------------------------------------------
 
 #[test]
+fn build_with_derivers_produces_same_results() {
+    let page_a = r#"---
+id: 00000000-0000-0000-0000-000000000001
+title: Hello
+tags:
+  - greeting
+aliases:
+  - hi
+---
+See [[World]] for details.
+"#;
+
+    let page_b = r#"---
+id: 00000000-0000-0000-0000-000000000002
+title: World
+tags:
+  - place
+---
+Back to [[Hello]].
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("hello.md", page_a), ("world.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    let stats = index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    assert_eq!(stats.pages_indexed, 2);
+
+    // Canonical names: title("hello") + filename("hello") dedup + alias("hi") = 2 for page A
+    //                  title("world") + filename("world") dedup = 1 for page B
+    let cn_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM canonical_names", [], |row| row.get(0))
+        .unwrap();
+    assert!(cn_count >= 3, "expected at least 3 canonical_names, got {cn_count}");
+
+    // Body links: 2 wiki links
+    let link_count: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE kind = 'wiki' AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(link_count, 2);
+
+    // Property ref links: tags + aliases produce property_ref links
+    let prop_count: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE kind = 'property_ref'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    // Page A: tags=["greeting"], aliases=["hi"] -> 2 prop refs
+    // Page B: tags=["place"] -> 1 prop ref
+    assert_eq!(prop_count, 3, "expected 3 property ref links");
+
+    // Tags: 2 tags total
+    let tag_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(tag_count, 2);
+
+    // Link resolution: [[World]] from page A should resolve to page B
+    let target_id: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = '00000000-0000-0000-0000-000000000001' AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(target_id.as_deref(), Some("00000000-0000-0000-0000-000000000002"));
+}
+
+// -----------------------------------------------------------------------
+// Task 15: duplicate UUID detection and resolution
+// -----------------------------------------------------------------------
+
+#[test]
 fn duplicate_uuid_resolved_by_created_at() {
     let shared_uuid = "01936e1a-5c4a-7000-8000-000000000099";
 

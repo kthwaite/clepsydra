@@ -48,7 +48,7 @@ impl Deriver for CanonicalNameDeriver {
 }
 
 /// Extract the filename component from a VaultPath string.
-fn filename_component(vp: &crate::vault::path::VaultPath) -> &str {
+pub(crate) fn filename_component(vp: &crate::vault::path::VaultPath) -> &str {
     let s = vp.as_str();
     if let Some(pos) = s.rfind('/') {
         &s[pos + 1..]
