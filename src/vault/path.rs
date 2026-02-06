@@ -189,7 +189,7 @@ impl VaultPath {
     }
 
     /// The final path component (filename with extension).
-    fn filename(&self) -> &str {
+    pub fn filename(&self) -> &str {
         if let Some(slash_pos) = self.inner.rfind('/') {
             &self.inner[slash_pos + 1..]
         } else {

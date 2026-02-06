@@ -12,7 +12,6 @@ use super::Vault;
 use super::canonical::CanonicalName;
 use super::derivation::{Deriver, IndexedPage};
 use super::derivers::canonical_names::CanonicalNameDeriver;
-use super::derivers::canonical_names::filename_component;
 use super::derivers::links::LinkDeriver;
 use super::derivers::tags::TagDeriver;
 use super::link::{extract_links, extract_property_refs};
@@ -138,7 +137,7 @@ impl VaultIndex {
     /// Open the index database with NO derivers registered.
     ///
     /// Useful for testing or for callers who want to register a custom set
-    /// of derivers via [`register_deriver`].
+    /// of derivers via [`Self::register_deriver`].
     pub fn open_bare(db_path: &Path) -> Result<Self, IndexError> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
@@ -166,7 +165,7 @@ impl VaultIndex {
     /// Build (or incrementally update) the index from vault contents.
     ///
     /// Uses a two-pass approach:
-    /// 1. Walk the vault, parse all changed files into `ParsedFile` structs.
+    /// 1. Walk the vault, parse all changed files into [`IndexedPage`] structs.
     /// 2. Detect duplicate UUIDs and resolve them (older `created_at` keeps the
     ///    UUID; the other file gets a new v7 UUID written back to disk).
     /// 3. Upsert all parsed files into the database.
@@ -179,7 +178,7 @@ impl VaultIndex {
         let linkable_properties = &vault.config().vault.linkable_properties;
 
         // -----------------------------------------------------------------
-        // Pass 1: Walk vault, parse files, collect into Vec<ParsedFile>
+        // Pass 1: Walk vault, parse files, collect into Vec<IndexedPage>
         // -----------------------------------------------------------------
 
         let mut parsed_files: Vec<IndexedPage> = Vec::new();
@@ -255,7 +254,7 @@ impl VaultIndex {
             let canonical = if let Some(ref title) = meta.title {
                 CanonicalName::from_title(title)
             } else {
-                CanonicalName::from_filename(filename_component(&vault_path))
+                CanonicalName::from_filename(vault_path.filename())
             };
 
             // Extract body links

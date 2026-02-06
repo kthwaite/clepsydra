@@ -28,7 +28,7 @@ impl Deriver for CanonicalNameDeriver {
         }
 
         // 2. Filename-derived canonical name
-        let fn_cn = CanonicalName::from_filename(filename_component(&page.vault_path));
+        let fn_cn = CanonicalName::from_filename(page.vault_path.filename());
         tx.execute(
             "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'filename')",
             params![fn_cn.as_str(), page_id],
@@ -44,15 +44,5 @@ impl Deriver for CanonicalNameDeriver {
         }
 
         Ok(())
-    }
-}
-
-/// Extract the filename component from a VaultPath string.
-pub(crate) fn filename_component(vp: &crate::vault::path::VaultPath) -> &str {
-    let s = vp.as_str();
-    if let Some(pos) = s.rfind('/') {
-        &s[pos + 1..]
-    } else {
-        s
     }
 }
