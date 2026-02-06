@@ -1,5 +1,6 @@
 pub mod canonical;
 pub mod config;
+pub mod derivation;
 pub mod hooks;
 pub mod index;
 pub mod init;
