@@ -1,3 +1,4 @@
+pub mod academic;
 pub mod canonical;
 pub mod config;
 pub mod context;

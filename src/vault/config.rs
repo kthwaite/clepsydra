@@ -23,6 +23,8 @@ pub enum DisambiguationStrategy {
 pub struct VaultConfig {
     #[serde(default)]
     pub vault: VaultSection,
+    #[serde(default)]
+    pub academic: AcademicSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -66,6 +68,46 @@ fn default_excluded_patterns() -> Vec<String> {
 
 fn default_linkable_properties() -> Vec<String> {
     vec!["tags".to_string(), "aliases".to_string()]
+}
+
+/// Configuration for the academic library subsystem.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AcademicSection {
+    #[serde(default = "default_library_folder")]
+    pub library_folder: String,
+    #[serde(default = "default_papers_folder")]
+    pub papers_folder: String,
+    #[serde(default = "default_books_folder")]
+    pub books_folder: String,
+    #[serde(default = "default_annotations_folder")]
+    pub annotations_folder: String,
+}
+
+impl Default for AcademicSection {
+    fn default() -> Self {
+        Self {
+            library_folder: default_library_folder(),
+            papers_folder: default_papers_folder(),
+            books_folder: default_books_folder(),
+            annotations_folder: default_annotations_folder(),
+        }
+    }
+}
+
+fn default_library_folder() -> String {
+    "library".to_string()
+}
+
+fn default_papers_folder() -> String {
+    "library/papers".to_string()
+}
+
+fn default_books_folder() -> String {
+    "library/books".to_string()
+}
+
+fn default_annotations_folder() -> String {
+    "library/annotations".to_string()
 }
 
 impl VaultConfig {
