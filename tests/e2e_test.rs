@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
+use tokio::sync::broadcast;
 
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
@@ -23,10 +24,12 @@ fn setup_server() -> (TestServer, TempDir) {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(Mutex::new(index)),
         warnings: Mutex::new(Vec::new()),
+        change_tx,
     });
 
     let app: Router = Router::new()

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
+use tokio::sync::broadcast;
 
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
@@ -23,10 +24,12 @@ fn setup_server() -> (TestServer, TempDir) {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(Mutex::new(index)),
         warnings: Mutex::new(Vec::new()),
+        change_tx,
     });
 
     let app: Router = Router::new()
@@ -640,10 +643,12 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(Mutex::new(index)),
         warnings: Mutex::new(Vec::new()),
+        change_tx,
     });
 
     let app: Router = Router::new()
@@ -864,10 +869,12 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
     let mut index = VaultIndex::open(&db_path).unwrap();
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
+    let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(Mutex::new(index)),
         warnings: Mutex::new(Vec::new()),
+        change_tx,
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1074,4 +1081,22 @@ async fn list_pages_returns_sorted() {
     let pages: Vec<serde_json::Value> = res.json();
     let paths: Vec<&str> = pages.iter().map(|p| p["path"].as_str().unwrap()).collect();
     assert_eq!(paths, vec!["alpha.md", "middle.md", "zebra.md"]);
+}
+
+// ---------------------------------------------------------------------------
+// SyncNotification serialization
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn sync_notification_serializes_to_json() {
+    use clepsydra::api::events::SyncNotification;
+
+    let notif = SyncNotification::IndexChanged {
+        upserted: vec!["notes/foo.md".to_string()],
+        removed: vec!["archive/old.md".to_string()],
+    };
+    let json = serde_json::to_string(&notif).unwrap();
+    assert!(json.contains("index_changed"));
+    assert!(json.contains("notes/foo.md"));
+    assert!(json.contains("archive/old.md"));
 }

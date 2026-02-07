@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod error;
+pub mod events;
 pub mod folders;
 pub mod index_routes;
 pub mod pages;
@@ -7,7 +8,9 @@ pub mod pages;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
+use tokio::sync::broadcast;
 
+use crate::api::events::SyncNotification;
 use crate::vault::Vault;
 use crate::vault::index::VaultIndex;
 
@@ -16,6 +19,7 @@ pub struct AppState {
     pub vault: Vault,
     pub index: Arc<Mutex<VaultIndex>>,
     pub warnings: Mutex<Vec<String>>,
+    pub change_tx: broadcast::Sender<SyncNotification>,
 }
 
 /// Build the API router mounted at `/api/vault`.

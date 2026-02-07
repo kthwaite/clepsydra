@@ -102,11 +102,15 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Wrap index for shared access
     let index = Arc::new(Mutex::new(index));
 
+    // Broadcast channel for SSE notifications
+    let (change_broadcast_tx, _) = tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
+
     // Build shared state
     let state = Arc::new(AppState {
         vault,
         index: Arc::clone(&index),
         warnings: Mutex::new(stats.warnings),
+        change_tx: change_broadcast_tx,
     });
 
     // Spawn file watcher + sync loop
@@ -114,6 +118,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let sync_index = Arc::clone(&state.index);
     let sync_vault = state.vault.clone();
     let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
+    let sync_change_tx = state.change_tx.clone();
 
     let _watcher = VaultWatcher::start(
         vault_root_buf,
@@ -146,6 +151,21 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                             resolved = stats.links_resolved,
                             deps = stats.deps_reresolved,
                             "sync cycle complete"
+                        );
+                    }
+
+                    // Notify connected SSE clients
+                    let mut upserted: Vec<String> = Vec::new();
+                    let mut removed: Vec<String> = Vec::new();
+                    for ev in &batch {
+                        match ev {
+                            ChangeEvent::Upsert(vp) => upserted.push(vp.as_str().to_string()),
+                            ChangeEvent::Remove(vp) => removed.push(vp.as_str().to_string()),
+                        }
+                    }
+                    if !upserted.is_empty() || !removed.is_empty() {
+                        let _ = sync_change_tx.send(
+                            api::events::SyncNotification::IndexChanged { upserted, removed },
                         );
                     }
                 }
