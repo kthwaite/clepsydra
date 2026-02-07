@@ -181,15 +181,15 @@ Content.
         })
         .unwrap();
 
-    // Should have text edits for alpha.md
+    // Should have text edits for alpha.md (per-replacement pairs)
     assert!(!plan.text_edits.is_empty());
-    let edit = &plan.text_edits[0];
-    assert_eq!(edit.path, "alpha.md");
-    // The new content should contain the updated relative path
+    let alpha_edits: Vec<_> = plan.text_edits.iter().filter(|e| e.path == "alpha.md").collect();
+    assert!(!alpha_edits.is_empty());
+    // Should include the relative path replacement: "beta.md" -> "archive/beta.md"
     assert!(
-        edit.new_text.contains("archive/beta.md"),
-        "expected 'archive/beta.md' in new_text, got: {}",
-        edit.new_text
+        alpha_edits.iter().any(|e| e.new_text == "archive/beta.md"),
+        "expected replacement to 'archive/beta.md', got: {:?}",
+        alpha_edits
     );
 }
 
@@ -231,19 +231,19 @@ Content.
 
     // The markdown link should be rewritten; wikilink [[beta]] matches the
     // stem exactly so it stays unchanged (stem == "beta" in both source and dest).
+    // Text edits are per-replacement pairs, so we check the specific replacement.
     assert!(!plan.text_edits.is_empty());
-    let edit = &plan.text_edits[0];
-    // Wikilink [[beta]] should remain because stem is the same
+    let alpha_edits: Vec<_> = plan.text_edits.iter().filter(|e| e.path == "alpha.md").collect();
+    // Should have a relative path replacement: "beta.md" -> "sub/beta.md"
     assert!(
-        edit.new_text.contains("[[beta]]"),
-        "wikilink should be unchanged, got: {}",
-        edit.new_text
+        alpha_edits.iter().any(|e| e.old_text == "beta.md" && e.new_text == "sub/beta.md"),
+        "expected relative path replacement to 'sub/beta.md', got: {:?}",
+        alpha_edits
     );
-    // Markdown link should update to sub/beta.md
+    // No stem replacement should exist (stem is the same: "beta" -> "beta")
     assert!(
-        edit.new_text.contains("sub/beta.md"),
-        "markdown link should update, got: {}",
-        edit.new_text
+        !alpha_edits.iter().any(|e| e.old_text == "beta" && e.new_text != "beta"),
+        "stem should not be rewritten when unchanged"
     );
 }
 

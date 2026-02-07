@@ -253,34 +253,27 @@ impl<'a> MutationPlanner<'a> {
 
             let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
             if new_content != content {
-                // Record text edits (for dry-run preview)
-                plan.text_edits.push(PlannedTextEdit {
-                    path: ref_path_str.clone(),
-                    old_text: content.clone(),
-                    new_text: new_content.clone(),
-                });
+                // Record per-replacement text edits (for dry-run preview)
+                for (old, new) in &replacements {
+                    plan.text_edits.push(PlannedTextEdit {
+                        path: ref_path_str.clone(),
+                        old_text: old.clone(),
+                        new_text: new.clone(),
+                    });
+                }
 
                 // Stage the write (for execution)
                 plan.staged_writes.push((ref_abs, new_content));
-            }
-        }
 
-        // 4. Index events
-        plan.index_events
-            .push(ChangeEvent::Remove(source_vp.clone()));
-        plan.index_events.push(ChangeEvent::Upsert(dest_vp));
-
-        // Upsert events for each modified referencing page
-        for (_, ref_path_str) in &backlink_pages {
-            if plan
-                .staged_writes
-                .iter()
-                .any(|(p, _)| p == &self.vault.resolve(&VaultPath::new(ref_path_str).unwrap()))
-            {
-                let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
+                // Index event for the modified page
                 plan.index_events.push(ChangeEvent::Upsert(ref_vp));
             }
         }
+
+        // 4. Index events for source/destination
+        plan.index_events
+            .push(ChangeEvent::Remove(source_vp.clone()));
+        plan.index_events.push(ChangeEvent::Upsert(dest_vp));
 
         Ok(plan)
     }
