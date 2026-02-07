@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use super::pages::PageSummary;
+use crate::api::events::SyncNotification;
 use crate::vault::mutation::{MutationOp, MutationPlanner};
 use crate::vault::path::VaultPath;
 
@@ -275,6 +276,13 @@ async fn delete_folder(
                 .remove_page(&vp)
                 .map_err(|e| ApiError::internal(e.to_string()))?;
         }
+
+        if !orphaned.is_empty() {
+            let _ = state.change_tx.send(SyncNotification::IndexChanged {
+                upserted: vec![],
+                removed: orphaned,
+            });
+        }
     }
 
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -326,6 +334,11 @@ async fn move_folder(
         plan.execute(&state.vault, &mut index)
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     }
+
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![body.destination.clone()],
+        removed: vec![path.clone()],
+    });
 
     Ok(StatusCode::OK.into_response())
 }

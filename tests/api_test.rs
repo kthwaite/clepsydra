@@ -1157,3 +1157,52 @@ async fn sync_notification_serializes_to_json() {
     assert!(json.contains("notes/foo.md"));
     assert!(json.contains("archive/old.md"));
 }
+
+// ---------------------------------------------------------------------------
+// Mutation handlers emit SyncNotification
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_page_emits_sync_notification() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    clepsydra::vault::init::init_vault(&root).unwrap();
+
+    let vault = clepsydra::vault::Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let (change_tx, _) = broadcast::channel(64);
+    let mut rx = change_tx.subscribe();
+    let state = Arc::new(AppState {
+        vault,
+        index: Arc::new(Mutex::new(index)),
+        warnings: Mutex::new(Vec::new()),
+        change_tx,
+    });
+
+    let app: Router = Router::new()
+        .nest("/api/vault", api_router())
+        .with_state(state);
+
+    let test_server = TestServer::new(app).unwrap();
+
+    test_server
+        .post("/api/vault/pages/test-notify.md")
+        .json(&serde_json::json!({
+            "title": "Notify Test",
+            "body": "content"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Should have received a notification
+    let notification = rx.try_recv().expect("expected sync notification");
+    match notification {
+        clepsydra::api::events::SyncNotification::IndexChanged { upserted, .. } => {
+            assert!(upserted.contains(&"test-notify.md".to_string()));
+        }
+    }
+}

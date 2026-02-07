@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
+use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
@@ -259,6 +260,11 @@ async fn create_page(
             .map_err(|e| ApiError::internal(e.to_string()))?;
     }
 
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![vault_path.as_str().to_string()],
+        removed: vec![],
+    });
+
     let canonical = if let Some(ref title) = meta.title {
         CanonicalName::from_title(title)
     } else {
@@ -343,6 +349,11 @@ async fn update_page(
                 .map_err(|e| ApiError::internal(e.to_string()))?;
         }
     }
+
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![vault_path.as_str().to_string()],
+        removed: vec![],
+    });
 
     let canonical = if let Some(ref title) = meta.title {
         CanonicalName::from_title(title)
@@ -441,6 +452,11 @@ async fn delete_page(
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     }
 
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![],
+        removed: vec![path.clone()],
+    });
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -490,6 +506,11 @@ async fn move_page(
         plan.execute(&state.vault, &mut index)
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     }
+
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![body.destination.clone()],
+        removed: vec![path.clone()],
+    });
 
     // 4. Return the updated PageDetail
     let dest_abs = state.vault.resolve(&dest_vp);

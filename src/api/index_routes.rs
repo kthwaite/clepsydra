@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use super::pages::PageDetail;
+use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
@@ -417,6 +418,12 @@ async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, A
         *warnings = build_stats.warnings.clone();
     }
 
+    // Full rebuild — notify clients to refresh everything
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec!["*".to_string()],
+        removed: vec![],
+    });
+
     Ok((
         StatusCode::OK,
         Json(RebuildResponse {
@@ -525,6 +532,11 @@ async fn create_from_link(
             .resolve_links_for_page(&vault_path)
             .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
     }
+
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![vault_path.as_str().to_string()],
+        removed: vec![],
+    });
 
     let canonical = if let Some(ref title) = meta.title {
         CanonicalName::from_title(title)
