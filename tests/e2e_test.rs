@@ -25,7 +25,7 @@ fn setup_server() -> (TestServer, TempDir) {
 
     let state = Arc::new(AppState {
         vault,
-        index: Mutex::new(index),
+        index: Arc::new(Mutex::new(index)),
         warnings: Mutex::new(Vec::new()),
     });
 
