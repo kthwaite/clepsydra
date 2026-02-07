@@ -201,17 +201,24 @@ impl MutationPlan {
             }
         }
 
-        // 2. Apply staged text edits (backlink rewrites)
-        // Safe: if this fails after file ops, a rebuild recovers correct state
-        if !self.staged_writes.is_empty() {
-            rewriter::apply_staged_writes(&self.staged_writes)?;
+        // 2. Apply staged writes and sync index.
+        // On failure, attempt a full rebuild to restore consistency.
+        let post_result = (|| -> Result<(), IndexError> {
+            if !self.staged_writes.is_empty() {
+                rewriter::apply_staged_writes(&self.staged_writes)?;
+            }
+            use super::sync::SyncEngine;
+            SyncEngine::process_events(&self.index_events, vault, index)?;
+            Ok(())
+        })();
+
+        if post_result.is_err() {
+            // Best-effort recovery: rebuild index from filesystem truth
+            let _ = index.build(vault);
+            let _ = index.resolve_links();
         }
 
-        // 3. Incremental index update
-        use super::sync::SyncEngine;
-        SyncEngine::process_events(&self.index_events, vault, index)?;
-
-        Ok(())
+        post_result
     }
 }
 
