@@ -2,6 +2,19 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+/// Strategy for ranking candidates when a link is ambiguous.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisambiguationStrategy {
+    /// Prefer the page with the shortest vault-relative path.
+    #[default]
+    ShortestPath,
+    /// Prefer the page closest in directory hierarchy to the source page.
+    ClosestDirectory,
+    /// Prefer the most recently updated page.
+    MostRecent,
+}
+
 /// Configuration read from `.clepsydra/config.toml` inside a vault root.
 ///
 /// Every field carries sensible defaults so that a missing or empty config file
@@ -22,6 +35,8 @@ pub struct VaultSection {
     pub default_page_folder: String,
     #[serde(default = "default_linkable_properties")]
     pub linkable_properties: Vec<String>,
+    #[serde(default)]
+    pub disambiguation_strategy: DisambiguationStrategy,
 }
 
 impl Default for VaultSection {
@@ -31,6 +46,7 @@ impl Default for VaultSection {
             excluded_patterns: default_excluded_patterns(),
             default_page_folder: String::new(),
             linkable_properties: default_linkable_properties(),
+            disambiguation_strategy: DisambiguationStrategy::default(),
         }
     }
 }

@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use clepsydra::vault::Vault;
+use clepsydra::vault::config::DisambiguationStrategy;
 use clepsydra::vault::derivation::{Deriver, IndexedPage};
 use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex};
 use clepsydra::vault::init::init_vault;
@@ -941,4 +942,94 @@ Content here.
         backlinks[0].context.contains("links to"),
         "context should contain surrounding words"
     );
+}
+
+// -----------------------------------------------------------------------
+// Disambiguation strategy ranking
+// -----------------------------------------------------------------------
+
+#[test]
+fn candidates_ranked_by_shortest_path() {
+    let alpha = r#"---
+id: 00000000-0000-0000-0000-000000000080
+title: Alpha
+---
+Link to [[Design]].
+"#;
+    let design_root = r#"---
+id: 00000000-0000-0000-0000-000000000081
+title: Design
+---
+Root design.
+"#;
+    let design_nested = r#"---
+id: 00000000-0000-0000-0000-000000000082
+title: Design
+---
+Nested design.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[
+        ("alpha.md", alpha),
+        ("design.md", design_root),
+        ("projects/deep/design.md", design_nested),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let unresolved = index.unresolved_with_candidates().unwrap();
+    let design_link = unresolved.iter().find(|u| u.target_raw == "Design").unwrap();
+
+    let ranked = index.rank_candidates(
+        &design_link.candidates,
+        "alpha.md",
+        DisambiguationStrategy::ShortestPath,
+    );
+
+    assert_eq!(ranked[0].path, "design.md", "shortest path should rank first");
+}
+
+#[test]
+fn candidates_ranked_by_closest_directory() {
+    let alpha = r#"---
+id: 00000000-0000-0000-0000-000000000083
+title: Alpha
+---
+Link to [[Design]].
+"#;
+    let design_root = r#"---
+id: 00000000-0000-0000-0000-000000000084
+title: Design
+---
+Root design.
+"#;
+    let design_same_dir = r#"---
+id: 00000000-0000-0000-0000-000000000085
+title: Design
+---
+Same dir design.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[
+        ("notes/alpha.md", alpha),
+        ("design.md", design_root),
+        ("notes/design.md", design_same_dir),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let unresolved = index.unresolved_with_candidates().unwrap();
+    let design_link = unresolved.iter().find(|u| u.target_raw == "Design").unwrap();
+
+    let ranked = index.rank_candidates(
+        &design_link.candidates,
+        "notes/alpha.md",
+        DisambiguationStrategy::ClosestDirectory,
+    );
+
+    assert_eq!(ranked[0].path, "notes/design.md", "same directory should rank first");
 }

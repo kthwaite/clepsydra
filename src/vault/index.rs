@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 
 use super::Vault;
 use super::canonical::CanonicalName;
+use super::config::DisambiguationStrategy;
 use super::context::extract_context;
 use super::derivation::{Deriver, IndexedPage};
 use super::derivers::canonical_names::CanonicalNameDeriver;
@@ -1089,6 +1090,73 @@ impl VaultIndex {
 
         Ok(results)
     }
+
+    /// Rank a list of candidates according to the given disambiguation strategy.
+    ///
+    /// `source_path` is the vault-relative path of the page containing the
+    /// unresolved link (used by ClosestDirectory strategy).
+    ///
+    /// Returns a new Vec sorted by preference (best match first).
+    pub fn rank_candidates(
+        &self,
+        candidates: &[LinkCandidate],
+        source_path: &str,
+        strategy: DisambiguationStrategy,
+    ) -> Vec<LinkCandidate> {
+        let mut ranked = candidates.to_vec();
+
+        match strategy {
+            DisambiguationStrategy::ShortestPath => {
+                ranked.sort_by_key(|c| c.path.len());
+            }
+            DisambiguationStrategy::ClosestDirectory => {
+                let source_dir = source_path
+                    .rfind('/')
+                    .map(|i| &source_path[..i])
+                    .unwrap_or("");
+                ranked.sort_by(|a, b| {
+                    let a_dir = a.path.rfind('/').map(|i| &a.path[..i]).unwrap_or("");
+                    let b_dir = b.path.rfind('/').map(|i| &b.path[..i]).unwrap_or("");
+                    let a_common = common_prefix_len(source_dir, a_dir);
+                    let b_common = common_prefix_len(source_dir, b_dir);
+                    b_common.cmp(&a_common) // Higher common prefix first
+                });
+            }
+            DisambiguationStrategy::MostRecent => {
+                ranked.sort_by(|a, b| {
+                    let ts_a: Option<String> = self
+                        .conn
+                        .query_row(
+                            "SELECT updated_at FROM pages WHERE id = ?1",
+                            params![a.page_id],
+                            |row| row.get(0),
+                        )
+                        .ok()
+                        .flatten();
+                    let ts_b: Option<String> = self
+                        .conn
+                        .query_row(
+                            "SELECT updated_at FROM pages WHERE id = ?1",
+                            params![b.page_id],
+                            |row| row.get(0),
+                        )
+                        .ok()
+                        .flatten();
+                    ts_b.cmp(&ts_a)
+                });
+            }
+        }
+
+        ranked
+    }
+}
+
+/// Count the number of common path segments between two directory paths.
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.split('/')
+        .zip(b.split('/'))
+        .take_while(|(x, y)| x == y)
+        .count()
 }
 
 /// Find the byte offset where the body starts (after the frontmatter `---` fences).
