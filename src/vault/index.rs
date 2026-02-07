@@ -14,6 +14,7 @@ use super::config::DisambiguationStrategy;
 use super::context::extract_context;
 use super::derivation::{Deriver, IndexedPage};
 use super::derivers::canonical_names::CanonicalNameDeriver;
+use super::derivers::cite_key::CiteKeyDeriver;
 use super::derivers::links::LinkDeriver;
 use super::derivers::tags::TagDeriver;
 use super::link::{extract_links, extract_property_refs};
@@ -175,6 +176,7 @@ impl VaultIndex {
             conn,
             derivers: vec![
                 Box::new(CanonicalNameDeriver),
+                Box::new(CiteKeyDeriver),
                 Box::new(LinkDeriver),
                 Box::new(TagDeriver),
             ],
