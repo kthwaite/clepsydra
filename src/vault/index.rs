@@ -1125,25 +1125,26 @@ impl VaultIndex {
                 });
             }
             DisambiguationStrategy::MostRecent => {
+                // Preload timestamps to avoid O(N log N) DB queries in sort
+                use std::collections::HashMap;
+                let timestamps: HashMap<String, Option<String>> = ranked
+                    .iter()
+                    .map(|c| {
+                        let ts: Option<String> = self
+                            .conn
+                            .query_row(
+                                "SELECT updated_at FROM pages WHERE id = ?1",
+                                params![c.page_id],
+                                |row| row.get(0),
+                            )
+                            .ok()
+                            .flatten();
+                        (c.page_id.clone(), ts)
+                    })
+                    .collect();
                 ranked.sort_by(|a, b| {
-                    let ts_a: Option<String> = self
-                        .conn
-                        .query_row(
-                            "SELECT updated_at FROM pages WHERE id = ?1",
-                            params![a.page_id],
-                            |row| row.get(0),
-                        )
-                        .ok()
-                        .flatten();
-                    let ts_b: Option<String> = self
-                        .conn
-                        .query_row(
-                            "SELECT updated_at FROM pages WHERE id = ?1",
-                            params![b.page_id],
-                            |row| row.get(0),
-                        )
-                        .ok()
-                        .flatten();
+                    let ts_a = timestamps.get(&a.page_id).and_then(|t| t.as_ref());
+                    let ts_b = timestamps.get(&b.page_id).and_then(|t| t.as_ref());
                     ts_b.cmp(&ts_a)
                 });
             }
