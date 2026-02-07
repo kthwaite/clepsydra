@@ -655,6 +655,54 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Preview mutation (dry-run)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn preview_mutation_returns_plan() {
+    let page_a = "\
+---
+id: 00000000-0000-0000-0000-000000000120
+title: Alpha
+---
+Link to [[Beta]].
+";
+    let page_b = "\
+---
+id: 00000000-0000-0000-0000-000000000121
+title: Beta
+---
+Content.
+";
+
+    let (server, _tmp) =
+        setup_server_with_files(&[("alpha.md", page_a), ("beta.md", page_b)]);
+
+    let body = serde_json::json!({
+        "operation": "move_page",
+        "source": "beta.md",
+        "destination": "archive/beta.md"
+    });
+
+    let resp = server
+        .post("/api/vault/index/preview-mutation")
+        .json(&body)
+        .await;
+    resp.assert_status_ok();
+
+    let plan: serde_json::Value = resp.json();
+
+    // Should have file_ops
+    let file_ops = plan["file_ops"].as_array().unwrap();
+    assert!(!file_ops.is_empty());
+    assert_eq!(file_ops[0]["kind"], "rename");
+    assert_eq!(file_ops[0]["path"], "beta.md");
+
+    // Should have text_edits (may be empty if only wikilinks and stem doesn't change)
+    assert!(plan["text_edits"].is_array());
+}
+
+// ---------------------------------------------------------------------------
 // Reference intelligence: enriched unresolved endpoint
 // ---------------------------------------------------------------------------
 

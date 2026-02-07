@@ -14,6 +14,7 @@ use super::error::ApiError;
 use super::pages::PageDetail;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::index::UnresolvedReason;
+use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
@@ -97,6 +98,21 @@ struct VaultStats {
     attachments: i64,
 }
 
+#[derive(Debug, Deserialize)]
+struct PreviewMutationRequest {
+    operation: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    destination: String,
+    #[serde(default = "default_rewrite_mode")]
+    rewrite: String,
+}
+
+fn default_rewrite_mode() -> String {
+    "plain_text".to_string()
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -112,6 +128,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/stats", get(stats))
         .route("/rebuild", post(rebuild_index))
         .route("/create-from-link", post(create_from_link))
+        .route("/preview-mutation", post(preview_mutation))
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +427,48 @@ async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, A
         }),
     )
         .into_response())
+}
+
+async fn preview_mutation(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PreviewMutationRequest>,
+) -> Result<Response, ApiError> {
+    let op = match req.operation.as_str() {
+        "move_page" => MutationOp::MovePage {
+            source: req.source,
+            destination: req.destination,
+        },
+        "delete_page" => {
+            let rewrite = match req.rewrite.as_str() {
+                "unlink" => RewriteMode::Unlink,
+                "none" => RewriteMode::None,
+                _ => RewriteMode::PlainText,
+            };
+            MutationOp::DeletePage {
+                path: req.source,
+                rewrite,
+            }
+        }
+        "move_folder" => MutationOp::MoveFolder {
+            source: req.source,
+            destination: req.destination,
+        },
+        other => {
+            return Err(ApiError::bad_request(format!("unknown operation: {other}")));
+        }
+    };
+
+    let index = state
+        .index
+        .lock()
+        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+
+    let planner = MutationPlanner::new(&state.vault, &index);
+    let plan = planner
+        .plan(&op)
+        .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
+
+    Ok(Json(plan).into_response())
 }
 
 async fn create_from_link(
