@@ -6,6 +6,7 @@ use clepsydra::vault::Vault;
 use clepsydra::vault::derivation::{Deriver, IndexedPage};
 use clepsydra::vault::index::{IndexError, VaultIndex};
 use clepsydra::vault::init::init_vault;
+use clepsydra::vault::path::VaultPath;
 use rusqlite::Transaction;
 use tempfile::TempDir;
 
@@ -542,4 +543,295 @@ See [[Other]].
         .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
         .unwrap();
     assert_eq!(tag_count, 0, "bare index should have no tags");
+}
+
+// -----------------------------------------------------------------------
+// Incremental sync primitives: index_page, remove_page
+// -----------------------------------------------------------------------
+
+#[test]
+fn index_page_indexes_single_file() {
+    let page = r#"---
+id: 00000000-0000-0000-0000-000000000010
+title: Single
+tags:
+  - solo
+---
+Content here.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("single.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    let vp = VaultPath::new("single.md").unwrap();
+    let indexed = index.index_page(&vault, &vp).unwrap();
+    assert!(indexed, "index_page should return true for new page");
+
+    // Verify page in DB
+    let page_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(page_count, 1);
+
+    // Verify tags derived
+    let tag_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(tag_count, 1, "expected 1 tag (solo)");
+
+    // Verify canonical_names derived
+    let cn_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM canonical_names", [], |row| row.get(0))
+        .unwrap();
+    assert!(cn_count >= 1, "expected at least 1 canonical_name, got {cn_count}");
+}
+
+#[test]
+fn remove_page_deletes_from_index() {
+    let page_a = r#"---
+id: 00000000-0000-0000-0000-000000000011
+title: Keeper
+tags:
+  - keep
+---
+Stay.
+"#;
+
+    let page_b = r#"---
+id: 00000000-0000-0000-0000-000000000012
+title: Goner
+tags:
+  - gone
+---
+Bye.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("keeper.md", page_a), ("goner.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let vp = VaultPath::new("goner.md").unwrap();
+    let removed = index.remove_page(&vp).unwrap();
+    assert!(removed, "remove_page should return true for existing page");
+
+    // Page should be gone
+    let page_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(page_count, 1);
+
+    // Tags for goner should be gone (CASCADE)
+    let tag: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT tag FROM tags WHERE tag = 'gone'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert!(tag.is_none(), "tags for removed page should be cascaded away");
+
+    // Removing again should return false
+    let removed_again = index.remove_page(&vp).unwrap();
+    assert!(!removed_again, "remove_page should return false for absent page");
+}
+
+#[test]
+fn index_page_skips_unchanged() {
+    let page = r#"---
+id: 00000000-0000-0000-0000-000000000013
+title: Idempotent
+---
+Same content.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("idem.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    let vp = VaultPath::new("idem.md").unwrap();
+
+    let first = index.index_page(&vault, &vp).unwrap();
+    assert!(first, "first index_page should return true");
+
+    let second = index.index_page(&vault, &vp).unwrap();
+    assert!(!second, "second index_page on unchanged content should return false");
+}
+
+// -----------------------------------------------------------------------
+// Incremental sync primitives: resolve_links_for_page
+// -----------------------------------------------------------------------
+
+#[test]
+fn resolve_links_for_page_resolves_only_affected() {
+    let page_a = r#"---
+id: 00000000-0000-0000-0000-000000000014
+title: Hub
+---
+See [[Spoke]].
+"#;
+
+    let page_b = r#"---
+id: 00000000-0000-0000-0000-000000000015
+title: Spoke
+---
+Back to [[Hub]].
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("hub.md", page_a), ("spoke.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    // Before resolution, links should be unresolved
+    let unresolved: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE target_id IS NULL AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unresolved, 2, "both wiki links should be unresolved before resolution");
+
+    // Resolve for hub.md — should resolve both the outgoing [[Spoke]] link
+    // AND the incoming [[Hub]] link from spoke.md
+    let vp_hub = VaultPath::new("hub.md").unwrap();
+    let count = index.resolve_links_for_page(&vp_hub).unwrap();
+    assert!(count >= 1, "expected at least 1 link resolved, got {count}");
+
+    // The outgoing link from hub -> spoke should be resolved
+    let hub_target: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = '00000000-0000-0000-0000-000000000014' AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        hub_target.as_deref(),
+        Some("00000000-0000-0000-0000-000000000015"),
+        "hub's [[Spoke]] link should be resolved"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Incremental sync primitives: reverse_deps
+// -----------------------------------------------------------------------
+
+#[test]
+fn reverse_deps_returns_pages_linking_to_target() {
+    let hub = r#"---
+id: 00000000-0000-0000-0000-000000000016
+title: Hub
+---
+Central page.
+"#;
+
+    let spoke_one = r#"---
+id: 00000000-0000-0000-0000-000000000017
+title: SpokeOne
+---
+Links to [[Hub]].
+"#;
+
+    let spoke_two = r#"---
+id: 00000000-0000-0000-0000-000000000018
+title: SpokeTwo
+---
+Standalone page.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[
+        ("hub.md", hub),
+        ("spoke-one.md", spoke_one),
+        ("spoke-two.md", spoke_two),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let vp_hub = VaultPath::new("hub.md").unwrap();
+    let deps = index.reverse_deps(&vp_hub).unwrap();
+
+    assert_eq!(deps.len(), 1, "only spoke-one links to hub");
+    assert_eq!(deps[0].as_str(), "spoke-one.md");
+
+    // spoke-two has no incoming links
+    let vp_spoke_two = VaultPath::new("spoke-two.md").unwrap();
+    let deps2 = index.reverse_deps(&vp_spoke_two).unwrap();
+    assert!(deps2.is_empty(), "spoke-two has no reverse deps");
+}
+
+// -----------------------------------------------------------------------
+// Incremental sync primitives: invalidate_links_to
+// -----------------------------------------------------------------------
+
+#[test]
+fn invalidate_links_to_clears_resolved_links() {
+    let page_a = r#"---
+id: 00000000-0000-0000-0000-000000000019
+title: Source
+---
+See [[Target]].
+"#;
+
+    let page_b = r#"---
+id: 00000000-0000-0000-0000-00000000001a
+title: Target
+---
+I am the target.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("source.md", page_a), ("target.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    // Verify link is resolved
+    let target_id: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = '00000000-0000-0000-0000-000000000019' AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        target_id.as_deref(),
+        Some("00000000-0000-0000-0000-00000000001a"),
+        "link should be resolved before invalidation"
+    );
+
+    // Invalidate links to target.md
+    let vp_target = VaultPath::new("target.md").unwrap();
+    let count = index.invalidate_links_to(&vp_target).unwrap();
+    assert_eq!(count, 1, "expected 1 link invalidated");
+
+    // Verify link is now NULL
+    let target_id_after: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = '00000000-0000-0000-0000-000000000019' AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        target_id_after, None,
+        "target_id should be NULL after invalidation"
+    );
+
+    // Invalidating again should return 0
+    let count2 = index.invalidate_links_to(&vp_target).unwrap();
+    assert_eq!(count2, 0, "no links to invalidate the second time");
 }

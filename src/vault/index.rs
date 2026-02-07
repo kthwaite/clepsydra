@@ -483,6 +483,373 @@ impl VaultIndex {
         tx.commit()?;
         Ok(())
     }
+
+    // ------------------------------------------------------------------
+    // Granular index primitives (incremental sync engine)
+    // ------------------------------------------------------------------
+
+    /// Index (or re-index) a single page from the vault.
+    ///
+    /// Reads the file at `vault_path`, parses frontmatter, extracts links,
+    /// and upserts into the database. Returns `true` if the page was indexed,
+    /// `false` if skipped (content unchanged).
+    ///
+    /// This does NOT resolve links — call [`resolve_links`] or
+    /// [`resolve_links_for_page`] after indexing.
+    pub fn index_page(
+        &mut self,
+        vault: &Vault,
+        vault_path: &VaultPath,
+    ) -> Result<bool, IndexError> {
+        let abs_path = vault.resolve(vault_path);
+        let linkable_properties = &vault.config().vault.linkable_properties;
+
+        let content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
+        let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+
+        // Check if hash matches DB -> skip if unchanged
+        let existing_hash: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT content_hash FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if existing_hash.as_deref() == Some(&content_hash) {
+            return Ok(false);
+        }
+
+        let (meta, body) = parse_frontmatter(&content).map_err(|e| {
+            IndexError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            ))
+        })?;
+
+        let canonical = if let Some(ref title) = meta.title {
+            CanonicalName::from_title(title)
+        } else {
+            CanonicalName::from_filename(vault_path.filename())
+        };
+
+        let body_links = extract_links(&body);
+
+        let mut prop_links = Vec::new();
+        for prop in linkable_properties {
+            let values: Vec<String> = match prop.as_str() {
+                "tags" => meta.tags.clone(),
+                "aliases" => meta.aliases.clone(),
+                _ => {
+                    if let Some(val) = meta.extra.get(prop) {
+                        yaml_value_to_strings(val)
+                    } else {
+                        Vec::new()
+                    }
+                }
+            };
+            if !values.is_empty() {
+                prop_links.extend(extract_property_refs(prop, &values));
+            }
+        }
+
+        let page = IndexedPage {
+            vault_path: vault_path.clone(),
+            abs_path: abs_path.clone(),
+            meta,
+            body,
+            content_hash,
+            body_links,
+            prop_links,
+            canonical,
+        };
+
+        let tx = self.conn.transaction()?;
+        let page_id = page.meta.id.to_string();
+        let meta_json =
+            serde_json::to_string(&page.meta).unwrap_or_else(|_| "{}".to_string());
+        let created_at = page.meta.created_at.map(|dt| dt.to_rfc3339());
+        let updated_at = page.meta.updated_at.map(|dt| dt.to_rfc3339());
+
+        tx.execute(
+            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               path = excluded.path,
+               title = excluded.title,
+               canonical_name = excluded.canonical_name,
+               created_at = excluded.created_at,
+               updated_at = excluded.updated_at,
+               meta_json = excluded.meta_json,
+               content_hash = excluded.content_hash",
+            params![
+                page_id,
+                page.vault_path.as_str(),
+                page.meta.title,
+                page.canonical.as_str(),
+                created_at,
+                updated_at,
+                meta_json,
+                page.content_hash,
+            ],
+        )?;
+
+        // Clear old derived data
+        tx.execute(
+            "DELETE FROM links WHERE source_id = ?1",
+            params![page_id],
+        )?;
+        tx.execute(
+            "DELETE FROM tags WHERE page_id = ?1",
+            params![page_id],
+        )?;
+        tx.execute(
+            "DELETE FROM canonical_names WHERE page_id = ?1",
+            params![page_id],
+        )?;
+
+        for deriver in &self.derivers {
+            deriver.derive(&page, &page_id, &tx)?;
+        }
+
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Remove a page from the index by its vault path.
+    ///
+    /// Returns `true` if a page was found and removed, `false` if no page
+    /// existed at that path. Derived data (links, tags, canonical_names) is
+    /// removed via ON DELETE CASCADE.
+    pub fn remove_page(&mut self, vault_path: &VaultPath) -> Result<bool, IndexError> {
+        let changes = self.conn.execute(
+            "DELETE FROM pages WHERE path = ?1",
+            params![vault_path.as_str()],
+        )?;
+        Ok(changes > 0)
+    }
+
+    /// Resolve unresolved links originating from or targeting a specific page.
+    ///
+    /// This resolves:
+    /// 1. Outgoing links from the page (links where source_id = page's id)
+    /// 2. Incoming links to the page (links targeting the page's canonical names)
+    ///
+    /// Returns the number of links resolved.
+    pub fn resolve_links_for_page(
+        &mut self,
+        vault_path: &VaultPath,
+    ) -> Result<usize, IndexError> {
+        let tx = self.conn.transaction()?;
+        let mut resolved_count = 0;
+
+        // Look up page_id
+        let page_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let page_id = match page_id {
+            Some(id) => id,
+            None => {
+                tx.commit()?;
+                return Ok(0);
+            }
+        };
+
+        // 1. Resolve outgoing links from this page
+        let mut stmt = tx.prepare(
+            "SELECT source_id, span_start, target_canonical
+             FROM links
+             WHERE source_id = ?1 AND target_id IS NULL AND target_canonical IS NOT NULL",
+        )?;
+
+        let outgoing: Vec<(String, i64, String)> = stmt
+            .query_map(params![page_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for (source_id, span_start, target_canonical) in &outgoing {
+            let mut lookup = tx.prepare(
+                "SELECT cn.page_id, p.path
+                 FROM canonical_names cn
+                 JOIN pages p ON p.id = cn.page_id
+                 WHERE cn.canonical_name = ?1",
+            )?;
+            let matches: Vec<(String, String)> = lookup
+                .query_map(params![target_canonical], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(lookup);
+
+            if matches.len() == 1 {
+                let (target_id, target_path) = &matches[0];
+                tx.execute(
+                    "UPDATE links SET target_id = ?1, target_path = ?2
+                     WHERE source_id = ?3 AND span_start = ?4",
+                    params![target_id, target_path, source_id, span_start],
+                )?;
+                resolved_count += 1;
+            }
+        }
+
+        // 2. Resolve incoming links targeting this page's canonical names
+        let mut cn_stmt = tx.prepare(
+            "SELECT canonical_name FROM canonical_names WHERE page_id = ?1",
+        )?;
+        let canonical_names: Vec<String> = cn_stmt
+            .query_map(params![page_id], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(cn_stmt);
+
+        for cn in &canonical_names {
+            let mut stmt = tx.prepare(
+                "SELECT source_id, span_start FROM links
+                 WHERE target_canonical = ?1 AND target_id IS NULL",
+            )?;
+            let unresolved: Vec<(String, i64)> = stmt
+                .query_map(params![cn], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(stmt);
+
+            for (source_id, span_start) in &unresolved {
+                let mut count_stmt = tx.prepare(
+                    "SELECT COUNT(*) FROM canonical_names WHERE canonical_name = ?1",
+                )?;
+                let match_count: i64 =
+                    count_stmt.query_row(params![cn], |row| row.get(0))?;
+                drop(count_stmt);
+
+                if match_count == 1 {
+                    let path: String = tx.query_row(
+                        "SELECT path FROM pages WHERE id = ?1",
+                        params![page_id],
+                        |row| row.get(0),
+                    )?;
+                    tx.execute(
+                        "UPDATE links SET target_id = ?1, target_path = ?2
+                         WHERE source_id = ?3 AND span_start = ?4",
+                        params![page_id, path, source_id, span_start],
+                    )?;
+                    resolved_count += 1;
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(resolved_count)
+    }
+
+    /// Find all pages that link to the given page (by resolved target_id or
+    /// target_canonical matching the page's canonical names).
+    ///
+    /// Returns vault paths of the source pages (deduplicated).
+    pub fn reverse_deps(
+        &self,
+        vault_path: &VaultPath,
+    ) -> Result<Vec<VaultPath>, IndexError> {
+        let page_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let mut source_paths: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        if let Some(ref page_id) = page_id {
+            // Pages that resolved to this page
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT p.path FROM links l
+                 JOIN pages p ON l.source_id = p.id
+                 WHERE l.target_id = ?1",
+            )?;
+            let paths: Vec<String> = stmt
+                .query_map(params![page_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            source_paths.extend(paths);
+
+            // Pages with unresolved links matching this page's canonical names
+            let mut cn_stmt = self.conn.prepare(
+                "SELECT canonical_name FROM canonical_names WHERE page_id = ?1",
+            )?;
+            let cns: Vec<String> = cn_stmt
+                .query_map(params![page_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(cn_stmt);
+
+            for cn in &cns {
+                let mut stmt = self.conn.prepare(
+                    "SELECT DISTINCT p.path FROM links l
+                     JOIN pages p ON l.source_id = p.id
+                     WHERE l.target_canonical = ?1 AND l.target_id IS NULL",
+                )?;
+                let paths: Vec<String> = stmt
+                    .query_map(params![cn], |row| row.get(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                source_paths.extend(paths);
+            }
+        }
+
+        // Remove self
+        source_paths.remove(vault_path.as_str());
+
+        let mut result: Vec<VaultPath> = source_paths
+            .into_iter()
+            .filter_map(|p| VaultPath::new(&p).ok())
+            .collect();
+        result.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        Ok(result)
+    }
+
+    /// Null out `target_id` and `target_path` for all links that currently
+    /// resolve to the given page. This makes them "unresolved" again so they
+    /// can be re-resolved against updated index state.
+    ///
+    /// Returns the number of links invalidated.
+    pub fn invalidate_links_to(
+        &mut self,
+        vault_path: &VaultPath,
+    ) -> Result<usize, IndexError> {
+        let page_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let page_id = match page_id {
+            Some(id) => id,
+            None => return Ok(0),
+        };
+
+        let count = self.conn.execute(
+            "UPDATE links SET target_id = NULL, target_path = NULL
+             WHERE target_id = ?1",
+            params![page_id],
+        )?;
+
+        Ok(count)
+    }
 }
 
 /// Extract string values from a serde_yaml::Value (handles both scalar strings
