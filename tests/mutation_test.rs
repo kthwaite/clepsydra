@@ -274,3 +274,93 @@ Content.
     // Should have exactly 2 index events: Remove(source), Upsert(dest)
     assert_eq!(plan.index_events.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Task 3: MutationPlanner page-delete tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_page_delete_with_rewrite() {
+    let page_a = "---\nid: 00000000-0000-0000-0000-000000000103\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_b = "---\nid: 00000000-0000-0000-0000-000000000104\ntitle: Beta\n---\nContent.\n";
+
+    let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner.plan(&MutationOp::DeletePage {
+        path: "beta.md".to_string(),
+        rewrite: RewriteMode::PlainText,
+    }).unwrap();
+
+    // Should have 1 file op (delete beta.md)
+    assert_eq!(plan.file_ops.len(), 1);
+    assert_eq!(plan.file_ops[0].path, "beta.md");
+
+    // Should have text edits for alpha.md
+    assert!(!plan.text_edits.is_empty());
+    let alpha_edits: Vec<_> = plan.text_edits.iter().filter(|e| e.path == "alpha.md").collect();
+    assert!(!alpha_edits.is_empty());
+
+    // Should have staged writes for alpha.md
+    assert!(!plan.staged_writes.is_empty());
+
+    // Should have index events (remove for beta.md, upsert for alpha.md)
+    assert!(plan.index_events.len() >= 2);
+}
+
+#[test]
+fn plan_page_delete_rewrite_none_no_text_edits() {
+    let page_a = "---\nid: 00000000-0000-0000-0000-000000000105\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_b = "---\nid: 00000000-0000-0000-0000-000000000106\ntitle: Beta\n---\nContent.\n";
+
+    let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner.plan(&MutationOp::DeletePage {
+        path: "beta.md".to_string(),
+        rewrite: RewriteMode::None,
+    }).unwrap();
+
+    assert_eq!(plan.file_ops.len(), 1);
+    assert!(plan.text_edits.is_empty());
+    assert!(plan.staged_writes.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Task 4: MutationPlanner folder-move tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_folder_move_rewrites_all_contained_pages() {
+    let page_a = "---\nid: 00000000-0000-0000-0000-000000000107\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_b = "---\nid: 00000000-0000-0000-0000-000000000108\ntitle: Beta\n---\nContent.\n";
+
+    let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("notes/beta.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner.plan(&MutationOp::MoveFolder {
+        source: "notes".to_string(),
+        destination: "archive".to_string(),
+    }).unwrap();
+
+    // Should have a rename file op for the folder
+    assert!(
+        plan.file_ops.iter().any(|op| op.path == "notes" && op.destination.as_deref() == Some("archive")),
+        "should plan folder rename"
+    );
+
+    // Should have index events for the moved file
+    assert!(!plan.index_events.is_empty());
+}
