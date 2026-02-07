@@ -3,6 +3,7 @@ pub mod vault;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::{Router, response::IntoResponse, routing::get};
 use config::{Config, ConfigError, Environment, File};
@@ -16,6 +17,8 @@ use tracing_subscriber::{EnvFilter, fmt};
 use api::{AppState, api_router};
 use vault::Vault;
 use vault::index::VaultIndex;
+use vault::sync::{ChangeEvent, SyncEngine};
+use vault::sync::watcher::VaultWatcher;
 
 #[derive(Debug, Deserialize)]
 struct Settings {
@@ -96,11 +99,62 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     );
     index.resolve_links()?;
 
+    // Wrap index for shared access
+    let index = Arc::new(Mutex::new(index));
+
     // Build shared state
     let state = Arc::new(AppState {
         vault,
-        index: Mutex::new(index),
+        index: Arc::clone(&index),
         warnings: Mutex::new(stats.warnings),
+    });
+
+    // Spawn file watcher + sync loop
+    let vault_root_buf = state.vault.root().to_path_buf();
+    let sync_index = Arc::clone(&state.index);
+    let sync_vault = state.vault.clone();
+    let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
+
+    let _watcher = VaultWatcher::start(
+        vault_root_buf,
+        Duration::from_millis(500),
+        change_tx,
+    )?;
+
+    tokio::spawn(async move {
+        let mut batch: Vec<ChangeEvent> = Vec::new();
+        loop {
+            match change_rx.recv().await {
+                Some(event) => {
+                    batch.push(event);
+                    // Drain any additional buffered events
+                    while let Ok(event) = change_rx.try_recv() {
+                        batch.push(event);
+                    }
+                }
+                None => break,
+            }
+
+            let mut idx = sync_index.lock().unwrap();
+            match SyncEngine::process_events(&batch, &sync_vault, &mut idx) {
+                Ok(stats) => {
+                    if stats.pages_indexed > 0 || stats.pages_removed > 0 {
+                        tracing::info!(
+                            indexed = stats.pages_indexed,
+                            skipped = stats.pages_skipped,
+                            removed = stats.pages_removed,
+                            resolved = stats.links_resolved,
+                            deps = stats.deps_reresolved,
+                            "sync cycle complete"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("sync error: {e}");
+                }
+            }
+            batch.clear();
+        }
     });
 
     let app = Router::new()

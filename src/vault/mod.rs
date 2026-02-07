@@ -20,6 +20,7 @@ use path::VaultPath;
 ///
 /// Holds the canonicalized root path, the parsed vault configuration, and
 /// compiled glob patterns for file exclusion.
+#[derive(Clone)]
 pub struct Vault {
     root: PathBuf,
     config: VaultConfig,

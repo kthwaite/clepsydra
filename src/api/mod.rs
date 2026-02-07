@@ -14,7 +14,7 @@ use crate::vault::index::VaultIndex;
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
     pub vault: Vault,
-    pub index: Mutex<VaultIndex>,
+    pub index: Arc<Mutex<VaultIndex>>,
     pub warnings: Mutex<Vec<String>>,
 }
 
