@@ -31,6 +31,40 @@ pub enum IndexError {
 }
 
 // ---------------------------------------------------------------------------
+// UnresolvedReason / LinkCandidate / UnresolvedLinkDetail
+// ---------------------------------------------------------------------------
+
+/// Reason a link is unresolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnresolvedReason {
+    /// No canonical name matched.
+    NoMatch,
+    /// Two or more pages share the canonical name.
+    Ambiguous,
+}
+
+/// A candidate page for an ambiguous link.
+#[derive(Debug, Clone)]
+pub struct LinkCandidate {
+    pub page_id: String,
+    pub path: String,
+    pub title: Option<String>,
+}
+
+/// An unresolved link with diagnostic info.
+#[derive(Debug, Clone)]
+pub struct UnresolvedLinkDetail {
+    pub source_id: String,
+    pub source_path: String,
+    pub target_raw: String,
+    pub target_canonical: Option<String>,
+    pub kind: String,
+    pub span_start: i64,
+    pub reason: UnresolvedReason,
+    pub candidates: Vec<LinkCandidate>,
+}
+
+// ---------------------------------------------------------------------------
 // BuildStats
 // ---------------------------------------------------------------------------
 
@@ -849,6 +883,83 @@ impl VaultIndex {
         )?;
 
         Ok(count)
+    }
+
+    /// Query all unresolved links, enriched with reason and candidates.
+    ///
+    /// For each link where `target_id IS NULL`:
+    /// - If `target_canonical` has 0 matches in `canonical_names` → `NoMatch`
+    /// - If `target_canonical` has 2+ matches → `Ambiguous` with candidates
+    /// - (1 match should not appear — those get resolved by `resolve_links`)
+    pub fn unresolved_with_candidates(&self) -> Result<Vec<UnresolvedLinkDetail>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT l.source_id, p.path, l.target_raw, l.target_canonical, l.kind, l.span_start
+             FROM links l
+             JOIN pages p ON l.source_id = p.id
+             WHERE l.target_id IS NULL",
+        )?;
+
+        let rows: Vec<(String, String, String, Option<String>, String, i64)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        let mut results = Vec::new();
+
+        for (source_id, source_path, target_raw, target_canonical, kind, span_start) in rows {
+            let (reason, candidates) = if let Some(ref tc) = target_canonical {
+                let mut lookup = self.conn.prepare(
+                    "SELECT cn.page_id, p.path, p.title
+                     FROM canonical_names cn
+                     JOIN pages p ON p.id = cn.page_id
+                     WHERE cn.canonical_name = ?1",
+                )?;
+                let matches: Vec<LinkCandidate> = lookup
+                    .query_map(params![tc], |row| {
+                        Ok(LinkCandidate {
+                            page_id: row.get(0)?,
+                            path: row.get(1)?,
+                            title: row.get(2)?,
+                        })
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                drop(lookup);
+
+                if matches.len() >= 2 {
+                    (UnresolvedReason::Ambiguous, matches)
+                } else {
+                    // 0 matches or 1 match that wasn't resolved (shouldn't normally happen for 1)
+                    (UnresolvedReason::NoMatch, Vec::new())
+                }
+            } else {
+                // No target_canonical at all — no match possible
+                (UnresolvedReason::NoMatch, Vec::new())
+            };
+
+            results.push(UnresolvedLinkDetail {
+                source_id,
+                source_path,
+                target_raw,
+                target_canonical,
+                kind,
+                span_start,
+                reason,
+                candidates,
+            });
+        }
+
+        Ok(results)
     }
 }
 

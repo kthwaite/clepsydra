@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clepsydra::vault::Vault;
 use clepsydra::vault::derivation::{Deriver, IndexedPage};
-use clepsydra::vault::index::{IndexError, VaultIndex};
+use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use rusqlite::Transaction;
@@ -834,4 +834,65 @@ I am the target.
     // Invalidating again should return 0
     let count2 = index.invalidate_links_to(&vp_target).unwrap();
     assert_eq!(count2, 0, "no links to invalidate the second time");
+}
+
+// -----------------------------------------------------------------------
+// Enriched unresolved links
+// -----------------------------------------------------------------------
+
+#[test]
+fn unresolved_with_candidates_distinguishes_no_match_from_ambiguous() {
+    let alpha = r#"---
+id: 00000000-0000-0000-0000-000000000060
+title: Alpha
+---
+See [[Beta]], [[Ghost]], and [[Design]].
+"#;
+    let beta = r#"---
+id: 00000000-0000-0000-0000-000000000061
+title: Beta
+---
+Content.
+"#;
+    let delta = r#"---
+id: 00000000-0000-0000-0000-000000000062
+title: Design
+---
+First design page.
+"#;
+    let epsilon = r#"---
+id: 00000000-0000-0000-0000-000000000063
+title: Design
+aliases: []
+---
+Second design page.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[
+        ("alpha.md", alpha),
+        ("beta.md", beta),
+        ("delta.md", delta),
+        ("subdir/epsilon.md", epsilon),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let unresolved = index.unresolved_with_candidates().unwrap();
+
+    // Should have 2 unresolved links: Ghost (no_match) and Design (ambiguous)
+    assert_eq!(unresolved.len(), 2);
+
+    let ghost_link = unresolved.iter().find(|u| u.target_raw == "Ghost").unwrap();
+    assert_eq!(ghost_link.reason, UnresolvedReason::NoMatch);
+    assert!(ghost_link.candidates.is_empty());
+
+    let design_link = unresolved.iter().find(|u| u.target_raw == "Design").unwrap();
+    assert_eq!(design_link.reason, UnresolvedReason::Ambiguous);
+    assert_eq!(design_link.candidates.len(), 2);
+
+    let candidate_paths: Vec<&str> = design_link.candidates.iter().map(|c| c.path.as_str()).collect();
+    assert!(candidate_paths.contains(&"delta.md"));
+    assert!(candidate_paths.contains(&"subdir/epsilon.md"));
 }
