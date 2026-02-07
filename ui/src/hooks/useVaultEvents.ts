@@ -12,7 +12,7 @@ interface SyncNotification {
 export function useVaultEvents(): ConnectionStatus {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let es: EventSource | null = null;

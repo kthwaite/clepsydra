@@ -1,7 +1,4 @@
-import {
-  useVaultEvents,
-  type ConnectionStatus,
-} from "#/hooks/useVaultEvents";
+import { type ConnectionStatus, useVaultEvents } from "#/hooks/useVaultEvents";
 
 const STATUS_LABELS: Record<ConnectionStatus, string> = {
   connecting: "Connecting\u2026",
