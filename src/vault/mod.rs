@@ -1,5 +1,6 @@
 pub mod canonical;
 pub mod config;
+pub mod context;
 pub mod derivation;
 pub mod derivers;
 pub mod hooks;
