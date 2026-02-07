@@ -268,6 +268,12 @@ impl<'a> MutationPlanner<'a> {
         // 2. Find backlink pages
         let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
 
+        // Filter: don't rewrite the page being moved (it's handled by the rename)
+        let backlink_pages: Vec<_> = backlink_pages
+            .into_iter()
+            .filter(|(_, p)| p != source)
+            .collect();
+
         // 3. For each backlink page, compute replacement pairs and rewrite
         for (_, ref_path_str) in &backlink_pages {
             let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
@@ -382,6 +388,12 @@ impl<'a> MutationPlanner<'a> {
         // 6. Find backlink pages and rewrite them
         let backlink_pages = self.find_backlink_pages(&target_vp, &old_stem)?;
 
+        // Filter: don't rewrite the page being deleted (self-links)
+        let backlink_pages: Vec<_> = backlink_pages
+            .into_iter()
+            .filter(|(_, p)| p != path)
+            .collect();
+
         for (_, ref_path_str) in &backlink_pages {
             let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
             let ref_abs = self.vault.resolve(&ref_vp);
@@ -491,6 +503,14 @@ impl<'a> MutationPlanner<'a> {
 
             // Find backlink pages
             let backlink_pages = self.find_backlink_pages(old_vp, &old_stem)?;
+
+            // Filter: skip pages inside the moved folder — their internal
+            // cross-references don't need rewriting since the whole folder moves.
+            let source_prefix = format!("{}/", source_vp.as_str());
+            let backlink_pages: Vec<_> = backlink_pages
+                .into_iter()
+                .filter(|(_, p)| !p.starts_with(&source_prefix))
+                .collect();
 
             if backlink_pages.is_empty() {
                 continue;

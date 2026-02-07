@@ -4,6 +4,7 @@ use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
+use clepsydra::vault::path::VaultPath;
 
 use tempfile::TempDir;
 
@@ -449,4 +450,90 @@ fn plan_folder_move_rewrites_all_contained_pages() {
 
     // Should have index events for the moved file
     assert!(!plan.index_events.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Self-link and folder-internal backlink collision tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn delete_page_with_self_link_does_not_recreate_file() {
+    let (_tmp, vault) = setup_vault(&[
+        ("selfie.md", "---\nid: 00000000-0000-0000-0000-000000000500\ntitle: Selfie\n---\nSee [[Selfie]] for more."),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::DeletePage {
+            path: "selfie.md".to_string(),
+            rewrite: RewriteMode::PlainText,
+        })
+        .unwrap();
+
+    plan.execute(&vault, &mut index).unwrap();
+
+    let abs_path = vault.resolve(&VaultPath::new("selfie.md").unwrap());
+    assert!(!abs_path.exists(), "deleted file should not be recreated by staged writes");
+}
+
+#[test]
+fn move_page_with_self_link_no_orphan_at_old_path() {
+    let (_tmp, vault) = setup_vault(&[
+        ("original.md", "---\nid: 00000000-0000-0000-0000-000000000501\ntitle: Original\n---\nSee [[Original]]."),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MovePage {
+            source: "original.md".to_string(),
+            destination: "moved.md".to_string(),
+        })
+        .unwrap();
+
+    plan.execute(&vault, &mut index).unwrap();
+
+    let old_path = vault.resolve(&VaultPath::new("original.md").unwrap());
+    let new_path = vault.resolve(&VaultPath::new("moved.md").unwrap());
+    assert!(!old_path.exists(), "old path should not have orphan copy");
+    assert!(new_path.exists(), "new path should exist");
+}
+
+#[test]
+fn folder_move_internal_refs_no_orphan_outside() {
+    let (_tmp, vault) = setup_vault(&[
+        ("notes/a.md", "---\nid: 00000000-0000-0000-0000-000000000502\ntitle: A\n---\nContent of A."),
+        ("notes/b.md", "---\nid: 00000000-0000-0000-0000-000000000503\ntitle: B\n---\nSee [[A]]."),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MoveFolder {
+            source: "notes".to_string(),
+            destination: "archive".to_string(),
+        })
+        .unwrap();
+
+    plan.execute(&vault, &mut index).unwrap();
+
+    // Old paths should not exist
+    let old_b = vault.resolve(&VaultPath::new("notes/b.md").unwrap());
+    assert!(!old_b.exists(), "notes/b.md should not have orphan after folder move");
+
+    // New paths should exist
+    let new_a = vault.resolve(&VaultPath::new("archive/a.md").unwrap());
+    let new_b = vault.resolve(&VaultPath::new("archive/b.md").unwrap());
+    assert!(new_a.exists(), "archive/a.md should exist");
+    assert!(new_b.exists(), "archive/b.md should exist");
 }
