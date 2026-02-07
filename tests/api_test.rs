@@ -1006,3 +1006,72 @@ async fn create_page_resolves_links() {
         backlinks.len()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Contract tests: edge cases
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_page_resolves_links_bidirectionally() {
+    let (server, _tmp) = setup_server();
+
+    // Create source with no links
+    server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({
+            "title": "Source",
+            "body": "No links yet."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Create target
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({
+            "title": "Target",
+            "body": "I am the target."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Update source to add a link to target
+    let res = server
+        .put("/api/vault/pages/source.md")
+        .json(&serde_json::json!({
+            "body": "Now linking to [[Target]]."
+        }))
+        .await;
+    res.assert_status(StatusCode::OK);
+
+    // Verify backlink exists immediately (no rebuild needed)
+    let res = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await;
+    res.assert_status(StatusCode::OK);
+    let backlinks: Vec<serde_json::Value> = res.json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "source.md");
+}
+
+#[tokio::test]
+async fn list_pages_returns_sorted() {
+    let (server, _tmp) = setup_server();
+
+    // Create pages in non-alphabetical order
+    for name in ["zebra.md", "alpha.md", "middle.md"] {
+        server
+            .post(&format!("/api/vault/pages/{name}"))
+            .json(&serde_json::json!({
+                "title": name.trim_end_matches(".md"),
+                "body": "content"
+            }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server.get("/api/vault/pages").await;
+    let pages: Vec<serde_json::Value> = res.json();
+    let paths: Vec<&str> = pages.iter().map(|p| p["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, vec!["alpha.md", "middle.md", "zebra.md"]);
+}
