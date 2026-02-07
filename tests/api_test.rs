@@ -935,6 +935,46 @@ async fn attachment_list_path_round_trips_to_get() {
 }
 
 #[tokio::test]
+async fn delete_folder_cleans_up_index() {
+    let (server, _tmp) = setup_server();
+
+    // Create pages inside a folder
+    server
+        .post("/api/vault/pages/notes/a.md")
+        .json(&serde_json::json!({
+            "title": "Note A",
+            "body": "First note."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/notes/b.md")
+        .json(&serde_json::json!({
+            "title": "Note B",
+            "body": "Second note."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Verify both appear in listing
+    let res = server.get("/api/vault/pages").await;
+    let pages: Vec<serde_json::Value> = res.json();
+    assert_eq!(pages.len(), 2);
+
+    // Delete the folder recursively
+    let res = server
+        .delete("/api/vault/folders/notes?recursive=true")
+        .await;
+    res.assert_status(StatusCode::NO_CONTENT);
+
+    // Verify index is clean — no ghost entries
+    let res = server.get("/api/vault/pages").await;
+    let pages: Vec<serde_json::Value> = res.json();
+    assert_eq!(pages.len(), 0, "deleted folder pages should be gone from index");
+}
+
+#[tokio::test]
 async fn create_page_resolves_links() {
     let (server, _tmp) = setup_server();
     server

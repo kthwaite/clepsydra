@@ -158,8 +158,12 @@ impl MutationPlan {
         }
     }
 
-    /// Execute the mutation plan: apply staged writes, perform file operations,
+    /// Execute the mutation plan: perform file operations, apply staged writes,
     /// and incrementally update the index.
+    ///
+    /// File operations run first so that if they fail, backlink pages remain
+    /// untouched. If staged writes fail after file ops, a full rebuild recovers
+    /// correct state.
     ///
     /// Consumes `self` since each plan should be executed exactly once.
     pub fn execute(
@@ -167,12 +171,7 @@ impl MutationPlan {
         vault: &Vault,
         index: &mut VaultIndex,
     ) -> Result<(), IndexError> {
-        // 1. Apply staged text edits (atomic two-phase write)
-        if !self.staged_writes.is_empty() {
-            rewriter::apply_staged_writes(&self.staged_writes)?;
-        }
-
-        // 2. Perform file operations
+        // 1. Perform file operations FIRST (primary mutation)
         for op in &self.file_ops {
             match op.kind {
                 FileOpKind::Rename => {
@@ -200,6 +199,12 @@ impl MutationPlan {
                     fs::create_dir_all(&abs)?;
                 }
             }
+        }
+
+        // 2. Apply staged text edits (backlink rewrites)
+        // Safe: if this fails after file ops, a rebuild recovers correct state
+        if !self.staged_writes.is_empty() {
+            rewriter::apply_staged_writes(&self.staged_writes)?;
         }
 
         // 3. Incremental index update

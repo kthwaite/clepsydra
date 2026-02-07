@@ -243,6 +243,40 @@ async fn delete_folder(
         })?;
     }
 
+    // Remove orphaned pages from the index
+    {
+        let mut index = state
+            .index
+            .lock()
+            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+
+        // Find pages that were under this folder
+        let folder_prefix = format!("{}/", vault_path.as_str());
+        let orphaned: Vec<String> = {
+            let mut stmt = index
+                .connection()
+                .prepare("SELECT path FROM pages WHERE path LIKE ?1")
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            stmt.query_map(params![format!("{}%", folder_prefix)], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect()
+        };
+
+        for page_path in &orphaned {
+            let vp = VaultPath::new(page_path)
+                .map_err(|e| ApiError::internal(format!("invalid path: {e}")))?;
+            index
+                .invalidate_links_to(&vp)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            index
+                .remove_page(&vp)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+        }
+    }
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
