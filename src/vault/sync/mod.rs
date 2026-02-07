@@ -48,6 +48,12 @@ impl SyncEngine {
                         continue;
                     }
 
+                    // Collect reverse deps and invalidate links BEFORE re-indexing.
+                    // If canonical names change, stale resolved links must become
+                    // unresolved so they can be re-evaluated against the new state.
+                    let pre_deps = index.reverse_deps(vp)?;
+                    index.invalidate_links_to(vp)?;
+
                     match index.index_page(vault, vp)? {
                         true => {
                             stats.pages_indexed += 1;
@@ -56,15 +62,27 @@ impl SyncEngine {
                             let resolved = index.resolve_links_for_page(vp)?;
                             stats.links_resolved += resolved;
 
-                            // Re-resolve reverse dependencies
-                            let deps = index.reverse_deps(vp)?;
-                            for dep_path in &deps {
+                            // Re-resolve reverse dependencies (union of pre- and
+                            // post-index deps covers both old and new canonical names)
+                            let post_deps = index.reverse_deps(vp)?;
+                            let mut all_deps = pre_deps;
+                            for d in post_deps {
+                                if !all_deps.iter().any(|existing| existing.as_str() == d.as_str()) {
+                                    all_deps.push(d);
+                                }
+                            }
+                            for dep_path in &all_deps {
                                 let r = index.resolve_links_for_page(dep_path)?;
                                 stats.deps_reresolved += r;
                             }
                         }
                         false => {
                             stats.pages_skipped += 1;
+                            // Content unchanged — re-resolve any links we invalidated
+                            for dep_path in &pre_deps {
+                                let r = index.resolve_links_for_page(dep_path)?;
+                                stats.deps_reresolved += r;
+                            }
                         }
                     }
                 }
