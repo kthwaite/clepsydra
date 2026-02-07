@@ -1311,3 +1311,62 @@ async fn content_index_returns_page_details() {
             .contains("body content")
     );
 }
+
+// ---------------------------------------------------------------------------
+// delete_folder re-resolves affected links
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn delete_folder_re_resolves_affected_links() {
+    // Use setup_server_with_files so all pages exist when the index is built
+    // in a single pass. This ensures the ambiguity is properly detected
+    // (both "Shared" pages exist when resolve_links() runs).
+    let main_page = "\
+---
+id: 00000000-0000-0000-0000-000000000200
+title: Main
+---
+See [[Shared]].
+";
+    let shared_outside = "\
+---
+id: 00000000-0000-0000-0000-000000000201
+title: Shared
+---
+I am the real Shared.
+";
+    let shared_in_folder = "\
+---
+id: 00000000-0000-0000-0000-000000000202
+title: Shared
+---
+I am the duplicate Shared.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[
+        ("main.md", main_page),
+        ("shared.md", shared_outside),
+        ("dups/shared.md", shared_in_folder),
+    ]);
+
+    // At this point [[Shared]] is ambiguous (2 candidates), so the link is unresolved
+    let res = server.get("/api/vault/index/unresolved").await;
+    let unresolved: Vec<serde_json::Value> = res.json();
+    let shared_unresolved = unresolved.iter().any(|u| u["target_raw"] == "Shared");
+    assert!(shared_unresolved, "[[Shared]] should be unresolved due to ambiguity");
+
+    // Delete the folder with the duplicate
+    server
+        .delete("/api/vault/folders/dups?recursive=true")
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
+
+    // Now [[Shared]] should resolve (only one candidate remains)
+    let res = server.get("/api/vault/index/unresolved").await;
+    let unresolved: Vec<serde_json::Value> = res.json();
+    let shared_still_unresolved = unresolved.iter().any(|u| u["target_raw"] == "Shared");
+    assert!(
+        !shared_still_unresolved,
+        "[[Shared]] should resolve after ambiguity broken by folder delete"
+    );
+}

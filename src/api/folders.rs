@@ -244,7 +244,7 @@ async fn delete_folder(
         })?;
     }
 
-    // Remove orphaned pages from the index
+    // Remove orphaned pages from the index via SyncEngine (handles dependency re-resolution)
     {
         let mut index = state
             .index
@@ -266,18 +266,16 @@ async fn delete_folder(
             .collect()
         };
 
-        for page_path in &orphaned {
-            let vp = VaultPath::new(page_path)
-                .map_err(|e| ApiError::internal(format!("invalid path: {e}")))?;
-            index
-                .invalidate_links_to(&vp)
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-            index
-                .remove_page(&vp)
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-        }
-
         if !orphaned.is_empty() {
+            use crate::vault::sync::{ChangeEvent, SyncEngine};
+            let events: Vec<ChangeEvent> = orphaned
+                .iter()
+                .filter_map(|p| VaultPath::new(p).ok())
+                .map(ChangeEvent::Remove)
+                .collect();
+            SyncEngine::process_events(&events, &state.vault, &mut index)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+
             let _ = state.change_tx.send(SyncNotification::IndexChanged {
                 upserted: vec![],
                 removed: orphaned,
