@@ -1317,6 +1317,43 @@ async fn content_index_returns_page_details() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn delete_blocked_by_unresolved_backlinks() {
+    // Set up pages so that [[Target]] is ambiguous (unresolved)
+    let target_a = "\
+---
+id: 00000000-0000-0000-0000-000000000180
+title: Target
+---
+I am the target.
+";
+    let target_b = "\
+---
+id: 00000000-0000-0000-0000-000000000181
+title: Target
+---
+I am the duplicate.
+";
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000182
+title: Source
+---
+See [[Target]].
+";
+
+    let (server, _tmp) = setup_server_with_files(&[
+        ("target.md", target_a),
+        ("sub/target.md", target_b),
+        ("source.md", source),
+    ]);
+
+    // Try to delete target.md without force — should be blocked
+    // even though the link is unresolved (target_id is NULL due to ambiguity)
+    let res = server.delete("/api/vault/pages/target.md").await;
+    res.assert_status(StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn delete_folder_re_resolves_affected_links() {
     // Use setup_server_with_files so all pages exist when the index is built
     // in a single pass. This ensures the ambiguity is properly detected

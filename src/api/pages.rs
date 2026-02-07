@@ -399,17 +399,22 @@ async fn delete_page(
             .ok();
 
         if let Some(ref pid) = page_id {
+            let canonical = CanonicalName::from_filename(vault_path.filename());
             let mut stmt = index
                 .connection()
                 .prepare(
                     "SELECT DISTINCT p.path FROM links l
                      JOIN pages p ON p.id = l.source_id
-                     WHERE l.target_id = ?1 AND l.source_id != ?1",
+                     WHERE (l.target_id = ?1 OR l.target_path = ?2 OR l.target_canonical = ?3)
+                       AND l.source_id != ?1",
                 )
                 .map_err(|e| ApiError::internal(e.to_string()))?;
 
             let backlinks: Vec<String> = stmt
-                .query_map(params![pid], |row| row.get(0))
+                .query_map(
+                    params![pid, vault_path.as_str(), canonical.as_str()],
+                    |row| row.get(0),
+                )
                 .map_err(|e| ApiError::internal(e.to_string()))?
                 .filter_map(|r| r.ok())
                 .collect();
