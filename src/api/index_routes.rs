@@ -7,12 +7,14 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
-use super::pages::PageSummary;
+use super::pages::PageDetail;
 use crate::vault::canonical::CanonicalName;
+use crate::vault::index::UnresolvedReason;
+use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -43,6 +45,34 @@ struct UnresolvedLink {
     target_raw: String,
     target_canonical: Option<String>,
     kind: String,
+    span_start: i64,
+    reason: String,
+    candidates: Vec<CandidateEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct CandidateEntry {
+    page_id: String,
+    path: String,
+    title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BacklinkEntry {
+    source_id: String,
+    source_path: String,
+    source_title: Option<String>,
+    target_raw: String,
+    kind: String,
+    context: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateFromLinkRequest {
+    target_raw: String,
+    #[serde(default)]
+    folder: String,
+    body: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,6 +111,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/tags", get(tags))
         .route("/stats", get(stats))
         .route("/rebuild", post(rebuild_index))
+        .route("/create-from-link", post(create_from_link))
 }
 
 // ---------------------------------------------------------------------------
@@ -90,44 +121,32 @@ pub fn router() -> Router<Arc<AppState>> {
 async fn backlinks(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
-) -> Result<Json<Vec<PageSummary>>, ApiError> {
+) -> Result<Json<Vec<BacklinkEntry>>, ApiError> {
     let vault_path =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
-
-    let stem = vault_path.stem();
-    let target_canonical = CanonicalName::new(stem);
 
     let index = state
         .index
         .lock()
         .map_err(|_| ApiError::internal("index lock poisoned"))?;
 
-    let mut stmt = index
-        .connection()
-        .prepare(
-            "SELECT DISTINCT p.id, p.path, p.title, p.canonical_name
-             FROM links l JOIN pages p ON l.source_id = p.id
-             WHERE l.target_path = ?1 OR l.target_canonical = ?2",
-        )
+    let backlinks = index
+        .backlinks_with_context(&state.vault, &vault_path, 200)
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let pages: Vec<PageSummary> = stmt
-        .query_map(
-            params![vault_path.as_str(), target_canonical.as_str()],
-            |row| {
-                Ok(PageSummary {
-                    id: row.get(0)?,
-                    path: row.get(1)?,
-                    title: row.get(2)?,
-                    canonical_name: row.get(3)?,
-                })
-            },
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
+    let entries: Vec<BacklinkEntry> = backlinks
+        .into_iter()
+        .map(|bl| BacklinkEntry {
+            source_id: bl.source_id,
+            source_path: bl.source_path,
+            source_title: bl.source_title,
+            target_raw: bl.target_raw,
+            kind: bl.kind,
+            context: bl.context,
+        })
         .collect();
 
-    Ok(Json(pages))
+    Ok(Json(entries))
 }
 
 async fn outlinks(
@@ -185,27 +204,44 @@ async fn unresolved(
         .lock()
         .map_err(|_| ApiError::internal("index lock poisoned"))?;
 
-    let mut stmt = index
-        .connection()
-        .prepare(
-            "SELECT l.source_id, p.path, l.target_raw, l.target_canonical, l.kind
-             FROM links l JOIN pages p ON l.source_id = p.id
-             WHERE l.target_id IS NULL",
-        )
+    let details = index
+        .unresolved_with_candidates()
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let links: Vec<UnresolvedLink> = stmt
-        .query_map([], |row| {
-            Ok(UnresolvedLink {
-                source_id: row.get(0)?,
-                source_path: row.get(1)?,
-                target_raw: row.get(2)?,
-                target_canonical: row.get(3)?,
-                kind: row.get(4)?,
-            })
+    let strategy = state.vault.config().vault.disambiguation_strategy;
+
+    let links: Vec<UnresolvedLink> = details
+        .into_iter()
+        .map(|d| {
+            let ranked_candidates = if d.reason == UnresolvedReason::Ambiguous {
+                index.rank_candidates(&d.candidates, &d.source_path, strategy)
+            } else {
+                d.candidates
+            };
+
+            let reason_str = match d.reason {
+                UnresolvedReason::NoMatch => "no_match",
+                UnresolvedReason::Ambiguous => "ambiguous",
+            };
+
+            UnresolvedLink {
+                source_id: d.source_id,
+                source_path: d.source_path,
+                target_raw: d.target_raw,
+                target_canonical: d.target_canonical,
+                kind: d.kind,
+                span_start: d.span_start,
+                reason: reason_str.to_string(),
+                candidates: ranked_candidates
+                    .into_iter()
+                    .map(|c| CandidateEntry {
+                        page_id: c.page_id,
+                        path: c.path,
+                        title: c.title,
+                    })
+                    .collect(),
+            }
         })
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
         .collect();
 
     Ok(Json(links))
@@ -371,6 +407,79 @@ async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, A
             pages_skipped: build_stats.pages_skipped,
             pages_removed: build_stats.pages_removed,
             warnings: build_stats.warnings,
+        }),
+    )
+        .into_response())
+}
+
+async fn create_from_link(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateFromLinkRequest>,
+) -> Result<Response, ApiError> {
+    // Generate path from title
+    let mut vault_path = VaultPath::from_title(&body.target_raw);
+
+    // Prepend folder if non-empty
+    if !body.folder.is_empty() {
+        let combined = format!("{}/{}", body.folder.trim_end_matches('/'), vault_path.as_str());
+        vault_path = VaultPath::new(&combined)
+            .map_err(|e| ApiError::bad_request(format!("invalid folder path: {e}")))?;
+    }
+
+    let abs_path = state.vault.resolve(&vault_path);
+    if abs_path.exists() {
+        return Err(ApiError::conflict(format!(
+            "page already exists: {}",
+            vault_path.as_str()
+        )));
+    }
+
+    // Create parent directories
+    if let Some(parent) = abs_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+    }
+
+    // Build PageMeta
+    let mut meta = PageMeta::new();
+    meta.title = Some(body.target_raw.clone());
+
+    let page_body = body.body.unwrap_or_default();
+
+    // Write file
+    let content = write_page_content(&meta, &page_body);
+    std::fs::write(&abs_path, &content)
+        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+
+    // Index the new page and resolve links
+    {
+        let mut index = state
+            .index
+            .lock()
+            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+
+        index
+            .index_page(&state.vault, &vault_path)
+            .map_err(|e| ApiError::internal(format!("index failed: {e}")))?;
+
+        index
+            .resolve_links_for_page(&vault_path)
+            .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
+    }
+
+    let canonical = if let Some(ref title) = meta.title {
+        CanonicalName::from_title(title)
+    } else {
+        CanonicalName::from_filename(vault_path.stem())
+    };
+
+    Ok((
+        StatusCode::CREATED,
+        Json(PageDetail {
+            path: vault_path.as_str().to_string(),
+            canonical_name: canonical.as_str().to_string(),
+            meta,
+            body: page_body,
         }),
     )
         .into_response())

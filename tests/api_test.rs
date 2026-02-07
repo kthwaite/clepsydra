@@ -436,7 +436,12 @@ async fn index_backlinks() {
     res.assert_status_ok();
     let body: Vec<serde_json::Value> = res.json();
     assert_eq!(body.len(), 1, "expected 1 backlink, got: {body:?}");
-    assert_eq!(body[0]["path"], "linker.md");
+    assert_eq!(body[0]["source_path"], "linker.md");
+    assert!(
+        body[0]["context"].as_str().unwrap().contains("[[Target]]"),
+        "expected context to contain [[Target]], got: {}",
+        body[0]["context"]
+    );
 }
 
 #[tokio::test]
@@ -607,5 +612,191 @@ async fn move_folder_rewrites_all_contained_pages() {
     assert!(
         !content.contains("[[Design Notes]]"),
         "old link should be rewritten, but found: {content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Helper: set up a test server from pre-written markdown files
+// ---------------------------------------------------------------------------
+
+/// Create a vault with pre-populated markdown files, build the index, and
+/// return a test server. Each entry is `(relative_path, content)`.
+fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+
+    for (path, content) in files {
+        let abs = root.join(path);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&abs, content).unwrap();
+    }
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let state = Arc::new(AppState {
+        vault,
+        index: Arc::new(Mutex::new(index)),
+        warnings: Mutex::new(Vec::new()),
+    });
+
+    let app: Router = Router::new()
+        .nest("/api/vault", api_router())
+        .with_state(state);
+
+    let server = TestServer::new(app).unwrap();
+    (server, tmp)
+}
+
+// ---------------------------------------------------------------------------
+// Reference intelligence: enriched unresolved endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn unresolved_endpoint_includes_candidates() {
+    let linker = "\
+---
+id: 00000000-0000-0000-0000-000000000090
+title: Linker
+---
+See [[Ambig]].
+";
+    let ambig_a = "\
+---
+id: 00000000-0000-0000-0000-000000000091
+title: Ambig
+---
+First.
+";
+    let ambig_b = "\
+---
+id: 00000000-0000-0000-0000-000000000092
+title: Ambig
+---
+Second.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[
+        ("linker.md", linker),
+        ("ambig-a.md", ambig_a),
+        ("subdir/ambig-b.md", ambig_b),
+    ]);
+
+    let resp = server.get("/api/vault/index/unresolved").await;
+    resp.assert_status_ok();
+
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+
+    let ambig_item = items
+        .iter()
+        .find(|item| item["target_raw"].as_str() == Some("Ambig"))
+        .expect("should find unresolved link to Ambig");
+
+    assert_eq!(ambig_item["reason"], "ambiguous");
+    let candidates = ambig_item["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert!(candidates.iter().any(|c| c["path"].as_str() == Some("ambig-a.md")));
+    assert!(
+        candidates
+            .iter()
+            .any(|c| c["path"].as_str() == Some("subdir/ambig-b.md"))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reference intelligence: enriched backlinks endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn backlinks_endpoint_includes_context() {
+    let page_a = "\
+---
+id: 00000000-0000-0000-0000-000000000095
+title: Alpha
+---
+First paragraph here.
+
+This line references [[Beta]] explicitly.
+
+Final paragraph.
+";
+    let page_b = "\
+---
+id: 00000000-0000-0000-0000-000000000096
+title: Beta
+---
+Just content.
+";
+
+    let (server, _tmp) = setup_server_with_files(&[("alpha.md", page_a), ("beta.md", page_b)]);
+
+    let resp = server.get("/api/vault/index/backlinks/beta.md").await;
+    resp.assert_status_ok();
+
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+
+    let item = &items[0];
+    assert_eq!(item["source_path"], "alpha.md");
+    assert!(
+        item["context"].as_str().unwrap().contains("[[Beta]]"),
+        "expected context to contain [[Beta]], got: {}",
+        item["context"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reference intelligence: create page from unresolved link
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_from_link_creates_page_and_resolves() {
+    let page_a = "\
+---
+id: 00000000-0000-0000-0000-000000000097
+title: Alpha
+---
+See [[Nonexistent]].
+";
+
+    let (server, _tmp) = setup_server_with_files(&[("alpha.md", page_a)]);
+
+    // Verify link is unresolved
+    let resp = server.get("/api/vault/index/unresolved").await;
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["target_raw"], "Nonexistent");
+
+    // Create from link
+    let create_body = serde_json::json!({
+        "target_raw": "Nonexistent",
+        "folder": ""
+    });
+    let resp = server
+        .post("/api/vault/index/create-from-link")
+        .json(&create_body)
+        .await;
+    resp.assert_status(StatusCode::CREATED);
+
+    let created: serde_json::Value = resp.json();
+    assert_eq!(created["meta"]["title"], "Nonexistent");
+    assert!(created["path"].as_str().unwrap().ends_with(".md"));
+
+    // Verify link is now resolved
+    let resp = server.get("/api/vault/index/unresolved").await;
+    let body: serde_json::Value = resp.json();
+    let items = body.as_array().unwrap();
+    assert!(
+        items.is_empty() || !items.iter().any(|i| i["target_raw"] == "Nonexistent"),
+        "link should be resolved, but found: {items:?}"
     );
 }

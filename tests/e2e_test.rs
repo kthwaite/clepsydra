@@ -78,7 +78,7 @@ async fn full_vault_lifecycle() {
     res.assert_status_ok();
     let backlinks: Vec<serde_json::Value> = res.json();
     assert_eq!(backlinks.len(), 1, "expected 1 backlink, got: {backlinks:?}");
-    assert_eq!(backlinks[0]["path"], "index.md");
+    assert_eq!(backlinks[0]["source_path"], "index.md");
 
     // 5. GET /index/tags -> verify "architecture" present
     let res = server.get("/api/vault/index/tags").await;
