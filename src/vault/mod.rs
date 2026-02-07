@@ -7,6 +7,7 @@ pub mod hooks;
 pub mod index;
 pub mod init;
 pub mod link;
+pub mod mutation;
 pub mod page;
 pub mod path;
 pub mod rewriter;
