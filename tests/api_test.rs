@@ -1141,6 +1141,65 @@ async fn sse_events_endpoint_returns_stream() {
 }
 
 // ---------------------------------------------------------------------------
+// Graph endpoint test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn graph_returns_nodes_and_edges() {
+    let (server, _tmp) = setup_server();
+
+    // Create two pages that link to each other
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "Link to [[Beta]]"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({
+            "title": "Beta",
+            "body": "Link to [[Alpha]]"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild to ensure links are resolved
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let response = server.get("/api/vault/index/graph").await;
+    response.assert_status_ok();
+
+    let body: serde_json::Value = response.json();
+    let nodes = body["nodes"].as_array().unwrap();
+    let edges = body["edges"].as_array().unwrap();
+    assert!(
+        nodes.len() >= 2,
+        "expected at least 2 nodes, got {}",
+        nodes.len()
+    );
+    assert!(!edges.is_empty(), "expected at least 1 edge");
+
+    // Verify node structure
+    let node = &nodes[0];
+    assert!(node.get("id").is_some());
+    assert!(node.get("path").is_some());
+    assert!(node.get("title").is_some());
+
+    // Verify edge structure
+    let edge = &edges[0];
+    assert!(edge.get("source").is_some());
+    assert!(edge.get("target").is_some());
+    assert!(edge.get("kind").is_some());
+}
+
+// ---------------------------------------------------------------------------
 // SyncNotification serialization
 // ---------------------------------------------------------------------------
 
@@ -1205,4 +1264,50 @@ async fn create_page_emits_sync_notification() {
             assert!(upserted.contains(&"test-notify.md".to_string()));
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Content index endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn content_index_returns_page_details() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/indexed.md")
+        .json(&serde_json::json!({
+            "title": "Indexed Page",
+            "tags": ["rust", "test"],
+            "body": "This is the body content for indexing."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild to ensure tags are indexed
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let response = server.get("/api/vault/index/content-index").await;
+    response.assert_status_ok();
+
+    let body: Vec<serde_json::Value> = response.json();
+    assert!(!body.is_empty(), "expected at least one entry");
+
+    let entry = body
+        .iter()
+        .find(|e| e["path"] == "indexed.md")
+        .expect("expected to find indexed.md in content index");
+    assert_eq!(entry["title"], "Indexed Page");
+    let tags = entry["tags"].as_array().unwrap();
+    assert!(tags.contains(&serde_json::json!("rust")));
+    assert!(tags.contains(&serde_json::json!("test")));
+    assert!(
+        entry["description"]
+            .as_str()
+            .unwrap()
+            .contains("body content")
+    );
 }

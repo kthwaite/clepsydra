@@ -16,7 +16,7 @@ use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
-use crate::vault::page::{PageMeta, write_page_content};
+use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -99,6 +99,26 @@ struct VaultStats {
     attachments: i64,
 }
 
+#[derive(Debug, Serialize)]
+struct GraphResponse {
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphNode {
+    id: String,
+    path: String,
+    title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphEdge {
+    source: String,
+    target: String,
+    kind: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct PreviewMutationRequest {
     operation: String,
@@ -130,6 +150,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/rebuild", post(rebuild_index))
         .route("/create-from-link", post(create_from_link))
         .route("/preview-mutation", post(preview_mutation))
+        .route("/graph", get(graph))
+        .route("/content-index", get(content_index))
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +417,51 @@ async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, A
     }))
 }
 
+async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>, ApiError> {
+    let index = state
+        .index
+        .lock()
+        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+
+    let conn = index.connection();
+
+    // Nodes: all pages
+    let mut node_stmt = conn
+        .prepare("SELECT id, path, title FROM pages")
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let nodes: Vec<GraphNode> = node_stmt
+        .query_map([], |row| {
+            Ok(GraphNode {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                title: row.get(2)?,
+            })
+        })
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Edges: resolved links only (target_id IS NOT NULL)
+    let mut edge_stmt = conn
+        .prepare("SELECT source_id, target_id, kind FROM links WHERE target_id IS NOT NULL")
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let edges: Vec<GraphEdge> = edge_stmt
+        .query_map([], |row| {
+            Ok(GraphEdge {
+                source: row.get(0)?,
+                target: row.get(1)?,
+                kind: row.get(2)?,
+            })
+        })
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(GraphResponse { nodes, edges }))
+}
+
 async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
     let mut index = state
         .index
@@ -554,4 +621,99 @@ async fn create_from_link(
         }),
     )
         .into_response())
+}
+
+// ---------------------------------------------------------------------------
+// Content index (Quartz-style per-page metadata)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct ContentEntry {
+    path: String,
+    title: Option<String>,
+    tags: Vec<String>,
+    links: Vec<String>,
+    created_at: Option<String>,
+    updated_at: Option<String>,
+    description: String,
+}
+
+async fn content_index(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ContentEntry>>, ApiError> {
+    let index = state
+        .index
+        .lock()
+        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+
+    let conn = index.connection();
+
+    // Get all pages
+    let mut page_stmt = conn
+        .prepare("SELECT id, path, title FROM pages")
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let pages: Vec<(String, String, Option<String>)> = page_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut entries = Vec::with_capacity(pages.len());
+
+    for (page_id, path, title) in &pages {
+        // Tags for this page
+        let mut tag_stmt = conn
+            .prepare_cached("SELECT tag FROM tags WHERE page_id = ?1")
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let tags: Vec<String> = tag_stmt
+            .query_map(params![page_id], |row| row.get(0))
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Outgoing link targets for this page (resolved only)
+        let mut link_stmt = conn
+            .prepare_cached(
+                "SELECT DISTINCT target_path FROM links WHERE source_id = ?1 AND target_path IS NOT NULL",
+            )
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let links: Vec<String> = link_stmt
+            .query_map(params![page_id], |row| row.get(0))
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Read page file for dates and description
+        let vault_path = match VaultPath::new(path) {
+            Ok(vp) => vp,
+            Err(_) => continue,
+        };
+        let abs_path = state.vault.resolve(&vault_path);
+        let (created_at, updated_at, description) = if abs_path.exists() {
+            match Page::from_file(&abs_path, vault_path) {
+                Ok(page) => {
+                    let desc = page.body.chars().take(200).collect::<String>();
+                    let created = page.meta.created_at.map(|d| d.to_rfc3339());
+                    let updated = page.meta.updated_at.map(|d| d.to_rfc3339());
+                    (created, updated, desc)
+                }
+                Err(_) => (None, None, String::new()),
+            }
+        } else {
+            (None, None, String::new())
+        };
+
+        entries.push(ContentEntry {
+            path: path.clone(),
+            title: title.clone(),
+            tags,
+            links,
+            created_at,
+            updated_at,
+            description,
+        });
+    }
+
+    Ok(Json(entries))
 }
