@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Json;
@@ -14,10 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use super::pages::PageSummary;
-use crate::vault::canonical::CanonicalName;
-use crate::vault::page::Page;
+use crate::vault::mutation::{MutationOp, MutationPlanner};
 use crate::vault::path::VaultPath;
-use crate::vault::rewriter;
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -258,7 +255,7 @@ async fn move_folder(
     Path(path): Path<String>,
     Json(body): Json<MoveFolderRequest>,
 ) -> Result<Response, ApiError> {
-    // 1. Validate source folder exists
+    // Validate source folder exists
     let source_vp =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
     let source_abs = state.vault.resolve(&source_vp);
@@ -266,7 +263,7 @@ async fn move_folder(
         return Err(ApiError::not_found(format!("folder not found: {path}")));
     }
 
-    // 2. Validate destination doesn't exist
+    // Validate destination doesn't exist
     let dest_vp = VaultPath::new(&body.destination)
         .map_err(|e| ApiError::bad_request(format!("invalid destination: {e}")))?;
     let dest_abs = state.vault.resolve(&dest_vp);
@@ -277,216 +274,24 @@ async fn move_folder(
         )));
     }
 
-    // 3. List all .md files in the source folder
-    let mut md_files: Vec<(VaultPath, VaultPath)> = Vec::new(); // (old_vp, new_vp)
-    for entry in walkdir::WalkDir::new(&source_abs)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-    {
-        let abs = entry.path();
-        let rel = abs
-            .strip_prefix(state.vault.root())
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
-
-        // Compute new path: replace source_vp prefix with dest_vp
-        let suffix = rel_str
-            .strip_prefix(source_vp.as_str())
-            .unwrap_or(&rel_str);
-        let new_rel = format!("{}{suffix}", dest_vp.as_str());
-
-        let old_vp = VaultPath::new(&rel_str)
-            .map_err(|e| ApiError::internal(format!("invalid path: {e}")))?;
-        let new_vp = VaultPath::new(&new_rel)
-            .map_err(|e| ApiError::internal(format!("invalid new path: {e}")))?;
-
-        md_files.push((old_vp, new_vp));
-    }
-
-    // 4. For each file, compute backlinks and build rewrites
-    let mut staged_writes: Vec<(PathBuf, String)> = Vec::new();
-
-    for (old_vp, new_vp) in &md_files {
-        let old_stem = old_vp.stem().to_string();
-        let new_stem = new_vp.stem().to_string();
-
-        // Get backlink pages from the index
-        let backlink_pages = {
-            let index = state
-                .index
-                .lock()
-                .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
-            let target_canonical = CanonicalName::new(&old_stem);
-            let mut stmt = index
-                .connection()
-                .prepare(
-                    "SELECT DISTINCT l.source_id, p.path
-                     FROM links l
-                     JOIN pages p ON p.id = l.source_id
-                     WHERE l.target_path = ?1 OR l.target_canonical = ?2",
-                )
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-
-            let pages: Vec<(String, String)> = stmt
-                .query_map(
-                    params![old_vp.as_str(), target_canonical.as_str()],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .map_err(|e| ApiError::internal(e.to_string()))?
-                .filter_map(|r| r.ok())
-                .collect();
-            pages
-        };
-
-        if backlink_pages.is_empty() {
-            continue;
-        }
-
-        let old_abs = state.vault.resolve(old_vp);
-
-        for (_, ref_path_str) in &backlink_pages {
-            let ref_vp = VaultPath::new(ref_path_str)
-                .map_err(|e| ApiError::internal(format!("invalid ref path: {e}")))?;
-            let ref_abs = state.vault.resolve(&ref_vp);
-
-            let content = fs::read_to_string(&ref_abs)
-                .map_err(|e| ApiError::internal(format!("failed to read {ref_path_str}: {e}")))?;
-
-            let mut replacements: Vec<(String, String)> = Vec::new();
-
-            // The stems are the same if the folder just moved (the filename didn't change)
-            // but if they differ, rewrite
-            if old_stem != new_stem {
-                replacements.push((old_stem.clone(), new_stem.clone()));
-            }
-
-            // Try to get the title of the source page for [[Title]] style links
-            if let Ok(page) = Page::from_file(&old_abs, old_vp.clone())
-                && let Some(ref title) = page.meta.title
-                && title != &old_stem
-                && title != &new_stem
-            {
-                replacements.push((title.clone(), new_stem.clone()));
-            }
-
-            // Markdown links: old relative path -> new relative path
-            let old_rel = compute_relative_path(ref_vp.as_str(), old_vp.as_str());
-            let new_rel = compute_relative_path(ref_vp.as_str(), new_vp.as_str());
-            if old_rel != new_rel {
-                replacements.push((old_rel, new_rel));
-            }
-
-            if replacements.is_empty() {
-                continue;
-            }
-
-            let replacement_refs: Vec<(&str, &str)> = replacements
-                .iter()
-                .map(|(old, new)| (old.as_str(), new.as_str()))
-                .collect();
-
-            let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
-            if new_content != content {
-                // Check if we already have a write staged for this file
-                if let Some(existing) = staged_writes.iter_mut().find(|(p, _)| *p == ref_abs) {
-                    // Re-apply on the already-rewritten content
-                    let re_rewritten =
-                        rewriter::rewrite_links_in_content(&existing.1, &replacement_refs);
-                    existing.1 = re_rewritten;
-                } else {
-                    staged_writes.push((ref_abs, new_content));
-                }
-            }
-        }
-    }
-
-    // 5. Apply staged writes
-    if !staged_writes.is_empty() {
-        rewriter::apply_staged_writes(&staged_writes)
-            .map_err(|e| ApiError::internal(format!("staged write failed: {e}")))?;
-    }
-
-    // 6. Rename the folder
-    if let Some(parent) = dest_abs.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-    fs::rename(&source_abs, &dest_abs)
-        .map_err(|e| ApiError::internal(format!("failed to rename folder: {e}")))?;
-
-    // 7. Rebuild index
+    // Plan and execute
     {
         let mut index = state
             .index
             .lock()
             .map_err(|_| ApiError::internal("index lock poisoned"))?;
-        index
-            .build(&state.vault)
-            .map_err(|e| ApiError::internal(format!("index rebuild failed: {e}")))?;
-        index
-            .resolve_links()
-            .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
+
+        let planner = MutationPlanner::new(&state.vault, &index);
+        let plan = planner
+            .plan(&MutationOp::MoveFolder {
+                source: path.clone(),
+                destination: body.destination.clone(),
+            })
+            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
+
+        plan.execute(&state.vault, &mut index)
+            .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     }
 
     Ok(StatusCode::OK.into_response())
-}
-
-/// Compute a relative path from `from_path` to `to_path`, where both are
-/// vault-relative paths (e.g. `notes/a.md`, `notes/b.md`).
-fn compute_relative_path(from_path: &str, to_path: &str) -> String {
-    let from_dir = if let Some(pos) = from_path.rfind('/') {
-        &from_path[..pos]
-    } else {
-        ""
-    };
-
-    let to_dir = if let Some(pos) = to_path.rfind('/') {
-        &to_path[..pos]
-    } else {
-        ""
-    };
-
-    let to_filename = if let Some(pos) = to_path.rfind('/') {
-        &to_path[pos + 1..]
-    } else {
-        to_path
-    };
-
-    if from_dir == to_dir {
-        return to_filename.to_string();
-    }
-
-    let from_parts: Vec<&str> = if from_dir.is_empty() {
-        Vec::new()
-    } else {
-        from_dir.split('/').collect()
-    };
-
-    let to_parts: Vec<&str> = if to_dir.is_empty() {
-        Vec::new()
-    } else {
-        to_dir.split('/').collect()
-    };
-
-    let common_len = from_parts
-        .iter()
-        .zip(to_parts.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
-
-    let ups = from_parts.len() - common_len;
-    let mut result = String::new();
-    for _ in 0..ups {
-        result.push_str("../");
-    }
-    for part in &to_parts[common_len..] {
-        result.push_str(part);
-        result.push('/');
-    }
-    result.push_str(to_filename);
-
-    result
 }

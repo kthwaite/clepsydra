@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Json;
@@ -18,7 +17,7 @@ use crate::vault::canonical::CanonicalName;
 use crate::vault::link::extract_links;
 use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
-use crate::vault::rewriter::{self, DELETE_PLAIN, DELETE_UNLINK};
+use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 
 // ---------------------------------------------------------------------------
 // Response / request types
@@ -340,19 +339,8 @@ async fn delete_page(
         return Err(ApiError::not_found(format!("page not found: {path}")));
     }
 
-    let old_stem = vault_path.stem().to_string();
-
-    // Read the page to get its title (needed for display text in rewrites)
-    let page = Page::from_file(&abs_path, vault_path.clone())
-        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
-    let display_text = page
-        .meta
-        .title
-        .clone()
-        .unwrap_or_else(|| old_stem.clone());
-
-    // Look up the page id and check backlinks
-    let backlink_pages = {
+    // Check backlinks if not forcing
+    if !query.force {
         let index = state
             .index
             .lock()
@@ -367,10 +355,7 @@ async fn delete_page(
             )
             .ok();
 
-        if !query.force
-            && let Some(ref pid) = page_id
-        {
-            // Check for backlinks
+        if let Some(ref pid) = page_id {
             let mut stmt = index
                 .connection()
                 .prepare(
@@ -396,108 +381,32 @@ async fn delete_page(
                 ));
             }
         }
+        // index lock dropped here
+    }
 
-        // Find backlink pages for rewriting (even when force=true)
-        find_backlink_pages(index.connection(), vault_path.as_str(), &old_stem)?
+    // Plan and execute the delete
+    let rewrite_mode = match query.rewrite.as_str() {
+        "unlink" => RewriteMode::Unlink,
+        "none" => RewriteMode::None,
+        _ => RewriteMode::PlainText,
     };
 
-    // If force=true and rewrite mode is specified, rewrite backlinks
-    if query.force && query.rewrite != "none" && !backlink_pages.is_empty() {
-        let mut staged_writes: Vec<(PathBuf, String)> = Vec::new();
-
-        for (_, ref_path_str) in &backlink_pages {
-            let ref_vp = VaultPath::new(ref_path_str)
-                .map_err(|e| ApiError::internal(format!("invalid ref path: {e}")))?;
-            let ref_abs = state.vault.resolve(&ref_vp);
-
-            let content = fs::read_to_string(&ref_abs)
-                .map_err(|e| ApiError::internal(format!("failed to read {ref_path_str}: {e}")))?;
-
-            let sentinel = match query.rewrite.as_str() {
-                "unlink" => format!("{DELETE_UNLINK}{display_text}"),
-                _ => format!("{DELETE_PLAIN}{display_text}"), // "plain_text" or default
-            };
-
-            // Build replacement pairs: match both stem and title
-            let mut replacements: Vec<(String, String)> = Vec::new();
-            replacements.push((old_stem.clone(), sentinel.clone()));
-            if display_text != old_stem {
-                replacements.push((display_text.clone(), sentinel.clone()));
-            }
-
-            // Also handle markdown links with relative paths
-            let old_rel = compute_relative_path(ref_vp.as_str(), vault_path.as_str());
-            if old_rel != old_stem {
-                replacements.push((old_rel, sentinel.clone()));
-            }
-
-            let replacement_refs: Vec<(&str, &str)> = replacements
-                .iter()
-                .map(|(old, new)| (old.as_str(), new.as_str()))
-                .collect();
-
-            let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
-            if new_content != content {
-                staged_writes.push((ref_abs, new_content));
-            }
-        }
-
-        if !staged_writes.is_empty() {
-            rewriter::apply_staged_writes(&staged_writes)
-                .map_err(|e| ApiError::internal(format!("staged write failed: {e}")))?;
-        }
-    }
-
-    // Remove from index and delete file
     {
-        let index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
-        let page_id: Option<String> = index
-            .connection()
-            .query_row(
-                "SELECT id FROM pages WHERE path = ?1",
-                params![vault_path.as_str()],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if let Some(ref pid) = page_id {
-            // Null out target_id references from other pages' links before
-            // deleting, since the foreign key on target_id lacks CASCADE.
-            index
-                .connection()
-                .execute(
-                    "UPDATE links SET target_id = NULL, target_path = NULL WHERE target_id = ?1",
-                    params![pid],
-                )
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-
-            index
-                .connection()
-                .execute("DELETE FROM pages WHERE id = ?1", params![pid])
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-        }
-    }
-
-    // Delete the file
-    fs::remove_file(&abs_path)
-        .map_err(|e| ApiError::internal(format!("failed to delete file: {e}")))?;
-
-    // Re-index modified pages if we did rewrites
-    if query.force && query.rewrite != "none" && !backlink_pages.is_empty() {
         let mut index = state
             .index
             .lock()
             .map_err(|_| ApiError::internal("index lock poisoned"))?;
-        index
-            .build(&state.vault)
-            .map_err(|e| ApiError::internal(format!("index rebuild failed: {e}")))?;
-        index
-            .resolve_links()
-            .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
+
+        let planner = MutationPlanner::new(&state.vault, &index);
+        let plan = planner
+            .plan(&MutationOp::DeletePage {
+                path: path.clone(),
+                rewrite: rewrite_mode,
+            })
+            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
+
+        plan.execute(&state.vault, &mut index)
+            .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     }
 
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -531,113 +440,27 @@ async fn move_page(
         )));
     }
 
-    // 3. Compute old/new stems for wikilink rewriting
-    let old_stem = source_vp.stem().to_string();
-    let new_stem = dest_vp.stem().to_string();
-
-    // 4. Find all pages that link to the source page
-    let backlink_pages = {
-        let index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
-        find_backlink_pages(index.connection(), source_vp.as_str(), &old_stem)?
-    };
-
-    // 5. For each referencing page, read content and compute replacements
-    let mut staged_writes: Vec<(PathBuf, String)> = Vec::new();
-    for (_, ref_path_str) in &backlink_pages {
-        let ref_vp = VaultPath::new(ref_path_str)
-            .map_err(|e| ApiError::internal(format!("invalid ref path: {e}")))?;
-        let ref_abs = state.vault.resolve(&ref_vp);
-
-        let content = fs::read_to_string(&ref_abs)
-            .map_err(|e| ApiError::internal(format!("failed to read {ref_path_str}: {e}")))?;
-
-        // Build replacement pairs
-        let mut replacements: Vec<(String, String)> = Vec::new();
-
-        // Wikilink: old stem -> new stem (case-insensitive matching is handled by rewriter)
-        // We match the raw target, which for wikilinks is the text inside [[...]]
-        // The rewriter does exact string matching on the target. The link extraction
-        // stores target_raw as-is. For wikilinks like [[Target]], target_raw = "Target".
-        // So we need to match against whatever the user originally wrote.
-        // For simplicity: rewrite both the old stem and any title-based canonical form.
-
-        // We need to check what the actual target_raw values are in the linking pages.
-        // Rather than querying, we'll provide multiple possible old targets:
-        // - The filename stem (without .md)
-        // - The title of the page (if it has one)
-        if old_stem != new_stem {
-            replacements.push((old_stem.clone(), new_stem.clone()));
-        }
-
-        // Also try to get the title of the source page to handle [[Title]] style links
-        let source_page = Page::from_file(&source_abs, source_vp.clone())
-            .map_err(|e| ApiError::internal(format!("failed to read source page: {e}")))?;
-
-        if let Some(ref title) = source_page.meta.title {
-            // If the title differs from the old stem, add it as a replacement target too
-            if title != &old_stem && title != &new_stem {
-                replacements.push((title.clone(), new_stem.clone()));
-            }
-        }
-
-        // Markdown links: old relative path -> new relative path
-        // Compute relative path from the referencing file to the old location
-        let old_rel = compute_relative_path(ref_vp.as_str(), source_vp.as_str());
-        let new_rel = compute_relative_path(ref_vp.as_str(), dest_vp.as_str());
-        if old_rel != new_rel {
-            replacements.push((old_rel, new_rel));
-        }
-
-        if replacements.is_empty() {
-            continue;
-        }
-
-        let replacement_refs: Vec<(&str, &str)> = replacements
-            .iter()
-            .map(|(old, new)| (old.as_str(), new.as_str()))
-            .collect();
-
-        let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
-        if new_content != content {
-            staged_writes.push((ref_abs, new_content));
-        }
-    }
-
-    // 6. Apply staged writes for all referencing-page rewrites
-    if !staged_writes.is_empty() {
-        rewriter::apply_staged_writes(&staged_writes)
-            .map_err(|e| ApiError::internal(format!("staged write failed: {e}")))?;
-    }
-
-    // 7. Create parent directories for destination and rename
-    if let Some(parent) = dest_abs.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-    fs::rename(&source_abs, &dest_abs)
-        .map_err(|e| ApiError::internal(format!("failed to rename file: {e}")))?;
-
-    // 8. Update the index
+    // 3. Plan and execute
     {
         let mut index = state
             .index
             .lock()
             .map_err(|_| ApiError::internal("index lock poisoned"))?;
 
-        // Rebuild the entire index (simplest correct approach)
-        index
-            .build(&state.vault)
-            .map_err(|e| ApiError::internal(format!("index rebuild failed: {e}")))?;
-        index
-            .resolve_links()
-            .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
+        let planner = MutationPlanner::new(&state.vault, &index);
+        let plan = planner
+            .plan(&MutationOp::MovePage {
+                source: path.clone(),
+                destination: body.destination.clone(),
+            })
+            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
+
+        plan.execute(&state.vault, &mut index)
+            .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     }
 
-    // 9. Return the updated PageDetail
+    // 4. Return the updated PageDetail
+    let dest_abs = state.vault.resolve(&dest_vp);
     let page = Page::from_file(&dest_abs, dest_vp.clone())
         .map_err(|e| ApiError::internal(format!("failed to read moved page: {e}")))?;
 
@@ -661,6 +484,7 @@ async fn move_page(
 
 /// Find all pages that link to a given target path or canonical name.
 /// Returns (source_id, path) pairs.
+#[allow(dead_code)]
 fn find_backlink_pages(
     conn: &rusqlite::Connection,
     target_path: &str,
@@ -690,6 +514,7 @@ fn find_backlink_pages(
 
 /// Compute a relative path from `from_path` to `to_path`, where both are
 /// vault-relative paths (e.g. `notes/a.md`, `notes/b.md`).
+#[allow(dead_code)]
 fn compute_relative_path(from_path: &str, to_path: &str) -> String {
     // Get directory of from_path
     let from_dir = if let Some(pos) = from_path.rfind('/') {
