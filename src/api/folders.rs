@@ -120,10 +120,7 @@ async fn list_folder_contents(
     let mut folders = Vec::new();
     let mut pages = Vec::new();
 
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -246,10 +243,7 @@ async fn delete_folder(
 
     // Remove orphaned pages from the index via SyncEngine (handles dependency re-resolution)
     {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        let mut index = state.index.lock();
 
         // Find pages that were under this folder
         let folder_prefix = format!("{}/", vault_path.as_str());
@@ -315,23 +309,21 @@ async fn move_folder(
     }
 
     // Plan and execute
-    {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
+    let plan = {
+        let index = state.index.lock();
         let planner = MutationPlanner::new(&state.vault, &index);
-        let plan = planner
+        planner
             .plan(&MutationOp::MoveFolder {
                 source: path.clone(),
                 destination: body.destination.clone(),
             })
-            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
-
-        plan.execute(&state.vault, &mut index)
+            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
+    }; // lock released
+    {
+        let mut index = state.index.lock();
+        plan.execute(&state.vault, &mut index, &state.hooks)
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
-    }
+    } // lock released
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![body.destination.clone()],

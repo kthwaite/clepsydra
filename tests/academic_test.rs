@@ -72,6 +72,7 @@ fn academic_config_defaults() {
     let config = VaultConfig::default();
     assert_eq!(config.academic.library_folder, "library");
     assert_eq!(config.academic.papers_folder, "library/papers");
+    assert_eq!(config.academic.books_folder, "library/books");
     assert_eq!(config.academic.annotations_folder, "library/annotations");
 }
 
@@ -119,5 +120,75 @@ See [[vaswani2017attention]] for details.
         cite_key_unresolved.is_empty(),
         "cite_key link should be resolved, but found unresolved: {:?}",
         cite_key_unresolved
+    );
+}
+
+#[test]
+fn move_work_updates_annotation_work_path() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+
+    fs::create_dir_all(root.join("library/papers")).unwrap();
+    fs::create_dir_all(root.join("library/annotations")).unwrap();
+    fs::create_dir_all(root.join("archive")).unwrap();
+
+    let work_content = "\
+---
+id: 00000000-0000-0000-0000-000000000300
+kind: work
+work_type: paper
+title: My Paper
+cite_key: mypaper2024
+tags: []
+---
+Paper content.
+";
+    fs::write(root.join("library/papers/my-paper.md"), work_content).unwrap();
+
+    let ann_content = "\
+---
+id: 00000000-0000-0000-0000-000000000301
+kind: annotation
+work_id: 00000000-0000-0000-0000-000000000300
+work_path: library/papers/my-paper.md
+annotation_type: highlight
+tags: []
+---
+A highlight.
+";
+    fs::write(
+        root.join("library/annotations/highlight-1.md"),
+        ann_content,
+    )
+    .unwrap();
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    use clepsydra::vault::academic_hook::AcademicMoveHook;
+    use clepsydra::vault::hooks::PostMoveHook;
+    use clepsydra::vault::mutation::{MutationOp, MutationPlanner};
+
+    let hooks: Vec<Box<dyn PostMoveHook>> = vec![Box::new(AcademicMoveHook)];
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MovePage {
+            source: "library/papers/my-paper.md".to_string(),
+            destination: "archive/my-paper.md".to_string(),
+        })
+        .unwrap();
+    plan.execute(&vault, &mut index, &hooks).unwrap();
+
+    // Verify annotation's work_path was updated
+    let ann_content =
+        fs::read_to_string(root.join("library/annotations/highlight-1.md")).unwrap();
+    assert!(
+        ann_content.contains("work_path: archive/my-paper.md")
+            || ann_content.contains("work_path: \"archive/my-paper.md\""),
+        "expected work_path updated to archive/my-paper.md, got:\n{ann_content}"
     );
 }

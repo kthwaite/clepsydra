@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -27,9 +27,10 @@ fn setup_server() -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(Mutex::new(index)),
-        warnings: Mutex::new(Vec::new()),
+        index: Arc::new(parking_lot::Mutex::new(index)),
+        warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
+        hooks: vec![],
     });
 
     let app: Router = Router::new()

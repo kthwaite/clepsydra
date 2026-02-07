@@ -338,6 +338,7 @@ dependencies = [
  "mime_guess",
  "notify 8.2.0",
  "notify-debouncer-mini",
+ "parking_lot",
  "percent-encoding",
  "pulldown-cmark",
  "regex",

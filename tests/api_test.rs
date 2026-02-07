@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -27,9 +27,10 @@ fn setup_server() -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(Mutex::new(index)),
-        warnings: Mutex::new(Vec::new()),
+        index: Arc::new(parking_lot::Mutex::new(index)),
+        warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
+        hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -646,9 +647,10 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(Mutex::new(index)),
-        warnings: Mutex::new(Vec::new()),
+        index: Arc::new(parking_lot::Mutex::new(index)),
+        warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
+        hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -872,9 +874,10 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(Mutex::new(index)),
-        warnings: Mutex::new(Vec::new()),
+        index: Arc::new(parking_lot::Mutex::new(index)),
+        warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
+        hooks: vec![],
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1107,9 +1110,10 @@ async fn sse_events_endpoint_returns_stream() {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(Mutex::new(index)),
-        warnings: Mutex::new(Vec::new()),
+        index: Arc::new(parking_lot::Mutex::new(index)),
+        warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
+        hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -1237,9 +1241,10 @@ async fn create_page_emits_sync_notification() {
     let mut rx = change_tx.subscribe();
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(Mutex::new(index)),
-        warnings: Mutex::new(Vec::new()),
+        index: Arc::new(parking_lot::Mutex::new(index)),
+        warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
+        hooks: vec![],
     });
 
     let app: Router = Router::new()

@@ -1,3 +1,5 @@
+use crate::vault::Vault;
+use crate::vault::index::VaultIndex;
 use crate::vault::path::VaultPath;
 use uuid::Uuid;
 
@@ -11,5 +13,7 @@ pub trait PostMoveHook: Send + Sync {
         old_path: &VaultPath,
         new_path: &VaultPath,
         page_id: &Uuid,
+        vault: &Vault,
+        index: &VaultIndex,
     ) -> Result<(), Box<dyn std::error::Error>>;
 }

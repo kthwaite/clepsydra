@@ -103,10 +103,7 @@ pub fn move_router() -> Router<Arc<AppState>> {
 async fn list_pages(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<PageSummary>>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let mut stmt = index
         .connection()
@@ -164,10 +161,7 @@ async fn get_page_by_id(
 ) -> Result<Json<PageDetail>, ApiError> {
     // Look up the path from the index
     let page_path = {
-        let index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        let index = state.index.lock();
 
         let path: Option<String> = index
             .connection()
@@ -248,10 +242,7 @@ async fn create_page(
 
     // Re-index the file
     {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        let mut index = state.index.lock();
         index
             .index_page(&state.vault, &vault_path)
             .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -327,10 +318,7 @@ async fn update_page(
 
     // Re-index
     {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        let mut index = state.index.lock();
         index
             .invalidate_links_to(&vault_path)
             .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -384,10 +372,7 @@ async fn delete_page(
 
     // Check backlinks if not forcing
     if !query.force {
-        let index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        let index = state.index.lock();
 
         let page_id: Option<String> = index
             .connection()
@@ -439,23 +424,21 @@ async fn delete_page(
         _ => RewriteMode::PlainText,
     };
 
-    {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
+    let plan = {
+        let index = state.index.lock();
         let planner = MutationPlanner::new(&state.vault, &index);
-        let plan = planner
+        planner
             .plan(&MutationOp::DeletePage {
                 path: path.clone(),
                 rewrite: rewrite_mode,
             })
-            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
-
-        plan.execute(&state.vault, &mut index)
+            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
+    }; // lock released
+    {
+        let mut index = state.index.lock();
+        plan.execute(&state.vault, &mut index, &state.hooks)
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
-    }
+    } // lock released
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![],
@@ -494,23 +477,21 @@ async fn move_page(
     }
 
     // 3. Plan and execute
-    {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
+    let plan = {
+        let index = state.index.lock();
         let planner = MutationPlanner::new(&state.vault, &index);
-        let plan = planner
+        planner
             .plan(&MutationOp::MovePage {
                 source: path.clone(),
                 destination: body.destination.clone(),
             })
-            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
-
-        plan.execute(&state.vault, &mut index)
+            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
+    }; // lock released
+    {
+        let mut index = state.index.lock();
+        plan.execute(&state.vault, &mut index, &state.hooks)
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
-    }
+    } // lock released
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![body.destination.clone()],

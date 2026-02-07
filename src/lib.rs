@@ -2,7 +2,7 @@ pub mod api;
 pub mod vault;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{Router, response::IntoResponse, routing::get};
@@ -100,17 +100,23 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     index.resolve_links()?;
 
     // Wrap index for shared access
-    let index = Arc::new(Mutex::new(index));
+    let index = Arc::new(parking_lot::Mutex::new(index));
 
     // Broadcast channel for SSE notifications
     let (change_broadcast_tx, _) = tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
+
+    // Build post-move hooks
+    let hooks: Vec<Box<dyn vault::hooks::PostMoveHook>> = vec![
+        Box::new(vault::academic_hook::AcademicMoveHook),
+    ];
 
     // Build shared state
     let state = Arc::new(AppState {
         vault,
         index: Arc::clone(&index),
-        warnings: Mutex::new(stats.warnings),
+        warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
+        hooks,
     });
 
     // Spawn file watcher + sync loop
@@ -140,7 +146,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                 None => break,
             }
 
-            let mut idx = sync_index.lock().unwrap();
+            let mut idx = sync_index.lock();
             match SyncEngine::process_events(&batch, &sync_vault, &mut idx) {
                 Ok(stats) => {
                     if stats.pages_indexed > 0 || stats.pages_removed > 0 {

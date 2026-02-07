@@ -1,4 +1,5 @@
 pub mod academic;
+pub mod academic_hook;
 pub mod canonical;
 pub mod config;
 pub mod context;

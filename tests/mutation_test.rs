@@ -358,7 +358,7 @@ fn execute_plan_moves_file_and_rewrites() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index).unwrap();
+    plan.execute(&vault, &mut index, &[]).unwrap();
 
     // Verify file moved
     use clepsydra::vault::path::VaultPath;
@@ -400,7 +400,7 @@ fn execute_plan_deletes_file_and_rewrites() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index).unwrap();
+    plan.execute(&vault, &mut index, &[]).unwrap();
 
     // Verify file deleted
     use clepsydra::vault::path::VaultPath;
@@ -474,7 +474,7 @@ fn delete_page_with_self_link_does_not_recreate_file() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index).unwrap();
+    plan.execute(&vault, &mut index, &[]).unwrap();
 
     let abs_path = vault.resolve(&VaultPath::new("selfie.md").unwrap());
     assert!(!abs_path.exists(), "deleted file should not be recreated by staged writes");
@@ -498,7 +498,7 @@ fn move_page_with_self_link_no_orphan_at_old_path() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index).unwrap();
+    plan.execute(&vault, &mut index, &[]).unwrap();
 
     let old_path = vault.resolve(&VaultPath::new("original.md").unwrap());
     let new_path = vault.resolve(&VaultPath::new("moved.md").unwrap());
@@ -525,7 +525,7 @@ fn folder_move_internal_refs_no_orphan_outside() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index).unwrap();
+    plan.execute(&vault, &mut index, &[]).unwrap();
 
     // Old paths should not exist
     let old_b = vault.resolve(&VaultPath::new("notes/b.md").unwrap());

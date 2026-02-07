@@ -165,10 +165,7 @@ async fn backlinks(
     let vault_path =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let backlinks = index
         .backlinks_with_context(&state.vault, &vault_path, 200)
@@ -196,10 +193,7 @@ async fn outlinks(
     let vault_path =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     // Look up the page's UUID from its path
     let page_id: String = index
@@ -239,10 +233,7 @@ async fn outlinks(
 async fn unresolved(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<UnresolvedLink>>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let details = index
         .unresolved_with_candidates()
@@ -290,10 +281,7 @@ async fn unresolved(
 async fn ambiguous(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AmbiguousName>>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let mut stmt = index
         .connection()
@@ -325,19 +313,13 @@ async fn ambiguous(
 async fn warnings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<String>>, ApiError> {
-    let warnings = state
-        .warnings
-        .lock()
-        .map_err(|_| ApiError::internal("warnings lock poisoned"))?;
+    let warnings = state.warnings.lock();
 
     Ok(Json(warnings.clone()))
 }
 
 async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let mut stmt = index
         .connection()
@@ -359,10 +341,7 @@ async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>,
 }
 
 async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let conn = index.connection();
 
@@ -418,10 +397,7 @@ async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, A
 }
 
 async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let conn = index.connection();
 
@@ -463,10 +439,7 @@ async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>
 }
 
 async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
-    let mut index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let mut index = state.index.lock();
 
     let build_stats = index
         .build(&state.vault)
@@ -478,10 +451,7 @@ async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, A
 
     // Store warnings for the /warnings endpoint
     {
-        let mut warnings = state
-            .warnings
-            .lock()
-            .map_err(|_| ApiError::internal("warnings lock poisoned"))?;
+        let mut warnings = state.warnings.lock();
         *warnings = build_stats.warnings.clone();
     }
 
@@ -532,10 +502,7 @@ async fn preview_mutation(
         }
     };
 
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let planner = MutationPlanner::new(&state.vault, &index);
     let plan = planner
@@ -586,10 +553,7 @@ async fn create_from_link(
 
     // Index the new page and resolve links
     {
-        let mut index = state
-            .index
-            .lock()
-            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        let mut index = state.index.lock();
 
         index
             .index_page(&state.vault, &vault_path)
@@ -641,10 +605,7 @@ struct ContentEntry {
 async fn content_index(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ContentEntry>>, ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
+    let index = state.index.lock();
 
     let conn = index.connection();
 

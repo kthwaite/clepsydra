@@ -5,7 +5,7 @@ pub mod folders;
 pub mod index_routes;
 pub mod pages;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::Router;
 use tokio::sync::broadcast;
@@ -17,9 +17,10 @@ use crate::vault::index::VaultIndex;
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
     pub vault: Vault,
-    pub index: Arc<Mutex<VaultIndex>>,
-    pub warnings: Mutex<Vec<String>>,
+    pub index: Arc<parking_lot::Mutex<VaultIndex>>,
+    pub warnings: parking_lot::Mutex<Vec<String>>,
     pub change_tx: broadcast::Sender<SyncNotification>,
+    pub hooks: Vec<Box<dyn crate::vault::hooks::PostMoveHook>>,
 }
 
 /// Build the API router mounted at `/api/vault`.
