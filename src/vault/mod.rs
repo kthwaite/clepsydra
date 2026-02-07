@@ -9,6 +9,7 @@ pub mod link;
 pub mod page;
 pub mod path;
 pub mod rewriter;
+pub mod sync;
 
 use std::path::{Path, PathBuf};
 
