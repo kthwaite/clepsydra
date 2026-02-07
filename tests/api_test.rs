@@ -848,3 +848,96 @@ See [[Nonexistent]].
         "link should be resolved, but found: {items:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Unified indexing tests
+// ---------------------------------------------------------------------------
+
+/// Set up a test server with a custom config.toml written before Vault::open.
+fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    fs::write(root.join("config.toml"), config_content).unwrap();
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+    let state = Arc::new(AppState {
+        vault,
+        index: Arc::new(Mutex::new(index)),
+        warnings: Mutex::new(Vec::new()),
+    });
+    let app: Router = Router::new()
+        .nest("/api/vault", api_router())
+        .with_state(state);
+    let server = TestServer::new(app).unwrap();
+    (server, tmp)
+}
+
+#[tokio::test]
+async fn create_page_indexes_property_links() {
+    let (server, _tmp) = setup_server_with_config(
+        "[vault]\nlinkable_properties = [\"tags\"]\n",
+    );
+
+    let res = server
+        .post("/api/vault/pages/props.md")
+        .json(&serde_json::json!({
+            "title": "Property Test",
+            "tags": ["concept", "rust"],
+            "body": "Some body text."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // The unresolved endpoint will show property_ref links since "concept"
+    // and "rust" won't resolve to any page
+    let res = server.get("/api/vault/index/unresolved").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let links = body.as_array().unwrap();
+    let property_links: Vec<&serde_json::Value> = links
+        .iter()
+        .filter(|l| l["kind"] == "property_ref")
+        .collect();
+    assert!(
+        property_links.len() >= 2,
+        "expected at least 2 property_ref links for tags, got {}",
+        property_links.len()
+    );
+}
+
+#[tokio::test]
+async fn create_page_resolves_links() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({
+            "title": "Target Page",
+            "body": "I am the target."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({
+            "title": "Source Page",
+            "body": "Link to [[Target Page]]."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/index/backlinks/target.md").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let backlinks = body.as_array().unwrap();
+    assert_eq!(
+        backlinks.len(),
+        1,
+        "expected 1 backlink to target.md, got {}",
+        backlinks.len()
+    );
+}

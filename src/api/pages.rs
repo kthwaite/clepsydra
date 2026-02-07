@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use crate::vault::canonical::CanonicalName;
-use crate::vault::link::extract_links;
 use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
@@ -110,7 +109,7 @@ async fn list_pages(
 
     let mut stmt = index
         .connection()
-        .prepare("SELECT id, path, title, canonical_name FROM pages")
+        .prepare("SELECT id, path, title, canonical_name FROM pages ORDER BY path")
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let pages: Vec<PageSummary> = stmt
@@ -147,7 +146,7 @@ async fn get_page(
     let canonical = if let Some(ref title) = page.meta.title {
         CanonicalName::from_title(title)
     } else {
-        CanonicalName::from_filename(vault_path.stem())
+        CanonicalName::from_filename(vault_path.filename())
     };
 
     Ok(Json(PageDetail {
@@ -197,7 +196,7 @@ async fn get_page_by_id(
     let canonical = if let Some(ref title) = page.meta.title {
         CanonicalName::from_title(title)
     } else {
-        CanonicalName::from_filename(vault_path.stem())
+        CanonicalName::from_filename(vault_path.filename())
     };
 
     Ok(Json(PageDetail {
@@ -247,12 +246,23 @@ async fn create_page(
         .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
 
     // Re-index the file
-    upsert_page_in_index(&state, &vault_path, &meta, &page_body, &content)?;
+    {
+        let mut index = state
+            .index
+            .lock()
+            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        index
+            .index_page(&state.vault, &vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        index
+            .resolve_links_for_page(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    }
 
     let canonical = if let Some(ref title) = meta.title {
         CanonicalName::from_title(title)
     } else {
-        CanonicalName::from_filename(vault_path.stem())
+        CanonicalName::from_filename(vault_path.filename())
     };
 
     Ok((
@@ -310,12 +320,34 @@ async fn update_page(
         .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
 
     // Re-index
-    upsert_page_in_index(&state, &vault_path, &meta, &page_body, &content)?;
+    {
+        let mut index = state
+            .index
+            .lock()
+            .map_err(|_| ApiError::internal("index lock poisoned"))?;
+        index
+            .invalidate_links_to(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        index
+            .index_page(&state.vault, &vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        index
+            .resolve_links_for_page(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let deps = index
+            .reverse_deps(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        for dep_path in &deps {
+            index
+                .resolve_links_for_page(dep_path)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+        }
+    }
 
     let canonical = if let Some(ref title) = meta.title {
         CanonicalName::from_title(title)
     } else {
-        CanonicalName::from_filename(vault_path.stem())
+        CanonicalName::from_filename(vault_path.filename())
     };
 
     Ok(Json(PageDetail {
@@ -467,7 +499,7 @@ async fn move_page(
     let canonical = if let Some(ref title) = page.meta.title {
         CanonicalName::from_title(title)
     } else {
-        CanonicalName::from_filename(dest_vp.stem())
+        CanonicalName::from_filename(dest_vp.filename())
     };
 
     Ok(Json(PageDetail {
@@ -478,127 +510,3 @@ async fn move_page(
     }))
 }
 
-// ---------------------------------------------------------------------------
-// Index helpers
-// ---------------------------------------------------------------------------
-
-/// Upsert a single page into the index after create/update.
-fn upsert_page_in_index(
-    state: &AppState,
-    vault_path: &VaultPath,
-    meta: &PageMeta,
-    body: &str,
-    raw_content: &str,
-) -> Result<(), ApiError> {
-    let index = state
-        .index
-        .lock()
-        .map_err(|_| ApiError::internal("index lock poisoned"))?;
-
-    let page_id = meta.id.to_string();
-    let content_hash = blake3::hash(raw_content.as_bytes()).to_hex().to_string();
-    let meta_json = serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string());
-    let created_at = meta.created_at.map(|dt| dt.to_rfc3339());
-    let updated_at = meta.updated_at.map(|dt| dt.to_rfc3339());
-    let canonical = if let Some(ref title) = meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.stem())
-    };
-
-    let conn = index.connection();
-
-    conn.execute(
-        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT(id) DO UPDATE SET
-           path = excluded.path,
-           title = excluded.title,
-           canonical_name = excluded.canonical_name,
-           created_at = excluded.created_at,
-           updated_at = excluded.updated_at,
-           meta_json = excluded.meta_json,
-           content_hash = excluded.content_hash",
-        params![
-            page_id,
-            vault_path.as_str(),
-            meta.title,
-            canonical.as_str(),
-            created_at,
-            updated_at,
-            meta_json,
-            content_hash,
-        ],
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    // Clear old links/tags/canonical_names
-    conn.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    conn.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    conn.execute(
-        "DELETE FROM canonical_names WHERE page_id = ?1",
-        params![page_id],
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    // Insert canonical names
-    if let Some(ref title) = meta.title {
-        let cn = CanonicalName::from_title(title);
-        conn.execute(
-            "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'title')",
-            params![cn.as_str(), page_id],
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let fn_cn = CanonicalName::from_filename(vault_path.stem());
-    conn.execute(
-        "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'filename')",
-        params![fn_cn.as_str(), page_id],
-    )
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    for alias in &meta.aliases {
-        let alias_cn = CanonicalName::from_title(alias);
-        conn.execute(
-            "INSERT OR IGNORE INTO canonical_names (canonical_name, page_id, source) VALUES (?1, ?2, 'alias')",
-            params![alias_cn.as_str(), page_id],
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    // Insert body links
-    let links = extract_links(body);
-    for link in &links {
-        let kind_str = match &link.kind {
-            crate::vault::link::LinkKind::Wiki => "wiki",
-            crate::vault::link::LinkKind::Markdown => "markdown",
-            crate::vault::link::LinkKind::PropertyRef { .. } => "property_ref",
-        };
-        let target_canonical = CanonicalName::new(&link.target_raw);
-        let _ = conn.execute(
-            "INSERT OR IGNORE INTO links (source_id, target_raw, target_canonical, kind, source_field, span_start, span_end)
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
-            params![
-                page_id,
-                link.target_raw,
-                target_canonical.as_str(),
-                kind_str,
-                link.span.start as i64,
-                link.span.end as i64,
-            ],
-        );
-    }
-
-    // Insert tags
-    for tag in &meta.tags {
-        let _ = conn.execute(
-            "INSERT OR IGNORE INTO tags (page_id, tag) VALUES (?1, ?2)",
-            params![page_id, tag],
-        );
-    }
-
-    Ok(())
-}
