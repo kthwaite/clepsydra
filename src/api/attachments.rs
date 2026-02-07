@@ -61,6 +61,13 @@ async fn list_attachments(
             .strip_prefix(state.vault.root())
             .unwrap_or(abs_path);
         let rel_str = rel.to_string_lossy().replace('\\', "/");
+        // Strip the attachment folder prefix so paths are relative to the
+        // attachment folder — get/delete handlers prepend it back.
+        let rel_str = rel_str
+            .strip_prefix(attachment_folder)
+            .unwrap_or(&rel_str)
+            .trim_start_matches('/')
+            .to_string();
         let name = entry.file_name().to_string_lossy().to_string();
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
 

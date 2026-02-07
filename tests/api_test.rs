@@ -910,6 +910,31 @@ async fn create_page_indexes_property_links() {
 }
 
 #[tokio::test]
+async fn attachment_list_path_round_trips_to_get() {
+    let (server, tmp) = setup_server();
+
+    // Create an attachment file directly on disk
+    let att_dir = tmp.path().join("vault/_attachments");
+    fs::create_dir_all(&att_dir).unwrap();
+    fs::write(att_dir.join("photo.png"), b"fake png data").unwrap();
+
+    // List attachments
+    let res = server.get("/api/vault/attachments").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let attachments = body.as_array().unwrap();
+    assert_eq!(attachments.len(), 1);
+
+    let listed_path = attachments[0]["path"].as_str().unwrap();
+
+    // Use the listed path to GET the attachment
+    let get_url = format!("/api/vault/attachments/{listed_path}");
+    let res = server.get(&get_url).await;
+    res.assert_status(StatusCode::OK);
+    assert_eq!(res.as_bytes().as_ref(), b"fake png data");
+}
+
+#[tokio::test]
 async fn create_page_resolves_links() {
     let (server, _tmp) = setup_server();
     server
