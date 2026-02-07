@@ -25,6 +25,7 @@ pub struct AppState {
 /// Build the API router mounted at `/api/vault`.
 pub fn api_router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/events", axum::routing::get(events::event_stream))
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())
         .nest("/folders", folders::router())

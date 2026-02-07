@@ -1084,6 +1084,63 @@ async fn list_pages_returns_sorted() {
 }
 
 // ---------------------------------------------------------------------------
+// SSE events endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn sse_events_endpoint_returns_stream() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use std::time::Duration;
+    use tower::ServiceExt;
+
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    clepsydra::vault::init::init_vault(&root).unwrap();
+
+    let vault = clepsydra::vault::Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let (change_tx, _) = broadcast::channel(64);
+    let state = Arc::new(AppState {
+        vault,
+        index: Arc::new(Mutex::new(index)),
+        warnings: Mutex::new(Vec::new()),
+        change_tx,
+    });
+
+    let app: Router = Router::new()
+        .nest("/api/vault", api_router())
+        .with_state(state);
+
+    let request = Request::builder()
+        .uri("/api/vault/events")
+        .body(Body::empty())
+        .unwrap();
+
+    // SSE streams never complete, so use a timeout for the initial response
+    let response = tokio::time::timeout(Duration::from_secs(2), app.oneshot(request))
+        .await
+        .expect("SSE response timed out")
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .expect("missing content-type header")
+        .to_str()
+        .unwrap();
+    assert!(
+        content_type.contains("text/event-stream"),
+        "expected text/event-stream, got: {content_type}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // SyncNotification serialization
 // ---------------------------------------------------------------------------
 
