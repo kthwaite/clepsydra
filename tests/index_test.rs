@@ -896,3 +896,49 @@ Second design page.
     assert!(candidate_paths.contains(&"delta.md"));
     assert!(candidate_paths.contains(&"subdir/epsilon.md"));
 }
+
+// -----------------------------------------------------------------------
+// Backlinks with context
+// -----------------------------------------------------------------------
+
+#[test]
+fn backlinks_with_context_returns_snippets() {
+    let page_a = r#"---
+id: 00000000-0000-0000-0000-000000000070
+title: Alpha
+---
+First paragraph.
+
+This paragraph links to [[Beta]] in context.
+
+Last paragraph.
+"#;
+    let page_b = r#"---
+id: 00000000-0000-0000-0000-000000000071
+title: Beta
+---
+Content here.
+"#;
+
+    let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let backlinks = index
+        .backlinks_with_context(&vault, &VaultPath::new("beta.md").unwrap(), 200)
+        .unwrap();
+
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0].source_path, "alpha.md");
+    assert!(
+        backlinks[0].context.contains("[[Beta]]"),
+        "context should contain the link text, got: {}",
+        backlinks[0].context
+    );
+    assert!(
+        backlinks[0].context.contains("links to"),
+        "context should contain surrounding words"
+    );
+}

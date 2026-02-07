@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 
 use super::Vault;
 use super::canonical::CanonicalName;
+use super::context::extract_context;
 use super::derivation::{Deriver, IndexedPage};
 use super::derivers::canonical_names::CanonicalNameDeriver;
 use super::derivers::links::LinkDeriver;
@@ -62,6 +63,17 @@ pub struct UnresolvedLinkDetail {
     pub span_start: i64,
     pub reason: UnresolvedReason,
     pub candidates: Vec<LinkCandidate>,
+}
+
+/// A backlink entry with surrounding text context.
+#[derive(Debug, Clone)]
+pub struct BacklinkWithContext {
+    pub source_id: String,
+    pub source_path: String,
+    pub source_title: Option<String>,
+    pub target_raw: String,
+    pub kind: String,
+    pub context: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -960,6 +972,139 @@ impl VaultIndex {
         }
 
         Ok(results)
+    }
+
+    /// Find all pages that link to `vault_path`, returning each link with a
+    /// text snippet showing the surrounding context.
+    ///
+    /// `max_context_chars` controls the maximum length of each snippet.
+    /// Only body links (wiki, markdown) get context extracted from the source file;
+    /// property_ref links get the source field name as context instead.
+    pub fn backlinks_with_context(
+        &self,
+        vault: &Vault,
+        vault_path: &VaultPath,
+        max_context_chars: usize,
+    ) -> Result<Vec<BacklinkWithContext>, IndexError> {
+        // 1. Look up the page_id for vault_path
+        let page_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let page_id = match page_id {
+            Some(id) => id,
+            None => return Ok(Vec::new()),
+        };
+
+        // 2. Compute target_canonical from the vault path stem
+        let target_canonical = CanonicalName::from_filename(vault_path.stem());
+
+        // 3. Query links where target_path = vault_path OR target_canonical = canonical OR target_id = page_id
+        let mut stmt = self.conn.prepare(
+            "SELECT l.source_id, p.path, p.title, l.target_raw, l.kind, l.span_start, l.span_end, l.source_field
+             FROM links l
+             JOIN pages p ON l.source_id = p.id
+             WHERE l.target_id = ?1
+                OR l.target_path = ?2
+                OR l.target_canonical = ?3",
+        )?;
+
+        struct BacklinkRow {
+            source_id: String,
+            source_path: String,
+            source_title: Option<String>,
+            target_raw: String,
+            kind: String,
+            span_start: i64,
+            span_end: i64,
+            source_field: Option<String>,
+        }
+
+        let rows: Vec<BacklinkRow> = stmt
+            .query_map(
+                params![page_id, vault_path.as_str(), target_canonical.as_str()],
+                |row| {
+                    Ok(BacklinkRow {
+                        source_id: row.get(0)?,
+                        source_path: row.get(1)?,
+                        source_title: row.get(2)?,
+                        target_raw: row.get(3)?,
+                        kind: row.get(4)?,
+                        span_start: row.get(5)?,
+                        span_end: row.get(6)?,
+                        source_field: row.get(7)?,
+                    })
+                },
+            )?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        // 4. For each link, extract context
+        let mut results = Vec::new();
+        for BacklinkRow { source_id, source_path, source_title, target_raw, kind, span_start, span_end, source_field } in rows {
+            let context = if kind == "property_ref" {
+                // Property ref links: use field name as context
+                let field = source_field.as_deref().unwrap_or("unknown");
+                format!("frontmatter field: {field}")
+            } else if span_start >= 0 {
+                // Body link: read the source file, extract context from body
+                VaultPath::new(&source_path)
+                    .ok()
+                    .and_then(|source_vp| {
+                        let abs_path = vault.resolve(&source_vp);
+                        fs::read_to_string(&abs_path).ok()
+                    })
+                    .and_then(|content| {
+                        let body_start = find_body_start(&content);
+                        let body = &content[body_start..];
+                        let start = span_start as usize;
+                        let end = span_end as usize;
+                        if start <= body.len() && end <= body.len() && start <= end {
+                            Some(extract_context(body, start..end, max_context_chars))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| target_raw.clone())
+            } else {
+                // Fallback
+                target_raw.clone()
+            };
+
+            results.push(BacklinkWithContext {
+                source_id,
+                source_path,
+                source_title,
+                target_raw,
+                kind,
+                context,
+            });
+        }
+
+        Ok(results)
+    }
+}
+
+/// Find the byte offset where the body starts (after the frontmatter `---` fences).
+fn find_body_start(content: &str) -> usize {
+    if !content.starts_with("---") {
+        return 0;
+    }
+    if let Some(end_fence) = content[3..].find("\n---") {
+        let fence_end = 3 + end_fence + 4; // skip past "\n---"
+        if fence_end < content.len() && content.as_bytes()[fence_end] == b'\n' {
+            fence_end + 1
+        } else {
+            fence_end
+        }
+    } else {
+        0
     }
 }
 
