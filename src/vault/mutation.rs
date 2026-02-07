@@ -157,6 +157,57 @@ impl MutationPlan {
             staged_writes: Vec::new(),
         }
     }
+
+    /// Execute the mutation plan: apply staged writes, perform file operations,
+    /// and incrementally update the index.
+    ///
+    /// Consumes `self` since each plan should be executed exactly once.
+    pub fn execute(
+        self,
+        vault: &Vault,
+        index: &mut VaultIndex,
+    ) -> Result<(), IndexError> {
+        // 1. Apply staged text edits (atomic two-phase write)
+        if !self.staged_writes.is_empty() {
+            rewriter::apply_staged_writes(&self.staged_writes)?;
+        }
+
+        // 2. Perform file operations
+        for op in &self.file_ops {
+            match op.kind {
+                FileOpKind::Rename => {
+                    if let Some(ref dest) = op.destination {
+                        let source_vp = VaultPath::new(&op.path).map_err(vp_err)?;
+                        let dest_vp = VaultPath::new(dest).map_err(vp_err)?;
+                        let source_abs = vault.resolve(&source_vp);
+                        let dest_abs = vault.resolve(&dest_vp);
+                        if let Some(parent) = dest_abs.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        fs::rename(&source_abs, &dest_abs)?;
+                    }
+                }
+                FileOpKind::Delete => {
+                    let vp = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let abs = vault.resolve(&vp);
+                    if abs.exists() {
+                        fs::remove_file(&abs)?;
+                    }
+                }
+                FileOpKind::CreateDir => {
+                    let vp = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let abs = vault.resolve(&vp);
+                    fs::create_dir_all(&abs)?;
+                }
+            }
+        }
+
+        // 3. Incremental index update
+        use super::sync::SyncEngine;
+        SyncEngine::process_events(&self.index_events, vault, index)?;
+
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

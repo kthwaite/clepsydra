@@ -335,6 +335,92 @@ fn plan_page_delete_rewrite_none_no_text_edits() {
 }
 
 // ---------------------------------------------------------------------------
+// Task 5: MutationPlan::execute() tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn execute_plan_moves_file_and_rewrites() {
+    let page_a = "---\nid: 00000000-0000-0000-0000-000000000110\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_b = "---\nid: 00000000-0000-0000-0000-000000000111\ntitle: Beta\n---\nContent.\n";
+
+    let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MovePage {
+            source: "beta.md".to_string(),
+            destination: "archive/beta.md".to_string(),
+        })
+        .unwrap();
+
+    plan.execute(&vault, &mut index).unwrap();
+
+    // Verify file moved
+    use clepsydra::vault::path::VaultPath;
+    assert!(!vault
+        .resolve(&VaultPath::new("beta.md").unwrap())
+        .exists());
+    assert!(vault
+        .resolve(&VaultPath::new("archive/beta.md").unwrap())
+        .exists());
+
+    // Verify index updated — archive/beta.md should be in the index
+    let page_path: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT path FROM pages WHERE id = '00000000-0000-0000-0000-000000000111'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert_eq!(page_path.as_deref(), Some("archive/beta.md"));
+}
+
+#[test]
+fn execute_plan_deletes_file_and_rewrites() {
+    let page_a = "---\nid: 00000000-0000-0000-0000-000000000112\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_b = "---\nid: 00000000-0000-0000-0000-000000000113\ntitle: Beta\n---\nContent.\n";
+
+    let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::DeletePage {
+            path: "beta.md".to_string(),
+            rewrite: RewriteMode::PlainText,
+        })
+        .unwrap();
+
+    plan.execute(&vault, &mut index).unwrap();
+
+    // Verify file deleted
+    use clepsydra::vault::path::VaultPath;
+    assert!(!vault
+        .resolve(&VaultPath::new("beta.md").unwrap())
+        .exists());
+
+    // Verify alpha.md was rewritten — [[Beta]] should be plain text now
+    let alpha_content =
+        fs::read_to_string(vault.resolve(&VaultPath::new("alpha.md").unwrap())).unwrap();
+    assert!(
+        !alpha_content.contains("[[Beta]]"),
+        "link should have been rewritten"
+    );
+    assert!(
+        alpha_content.contains("Beta"),
+        "plain text should remain"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Task 4: MutationPlanner folder-move tests
 // ---------------------------------------------------------------------------
 
