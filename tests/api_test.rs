@@ -1899,3 +1899,90 @@ async fn academic_lifecycle_integration() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Import lifecycle: BibTeX dedup and verification
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn import_lifecycle_bibtex_dedup_and_verify() {
+    let (server, _tmp) = setup_server();
+
+    // 1. Import two entries via BibTeX
+    let bibtex = r#"
+@article{alpha2020first,
+  title = {First Paper},
+  author = {Alpha, Ann},
+  year = {2020},
+  journal = {Journal A},
+  doi = {10.1234/first}
+}
+@book{beta2021second,
+  title = {Second Book},
+  author = {Beta, Bob},
+  year = {2021},
+  publisher = {Publisher B},
+  isbn = {978-1-234-56789-0}
+}
+"#;
+
+    let r = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r.assert_status(StatusCode::OK);
+    let body: serde_json::Value = r.json();
+    assert_eq!(body["results"][0]["status"], "created");
+    assert_eq!(body["results"][1]["status"], "created");
+
+    // 2. Re-import same BibTeX — both should be skipped (cite_key dedup)
+    let r2 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r2.assert_status(StatusCode::OK);
+    let body2: serde_json::Value = r2.json();
+    assert_eq!(body2["results"][0]["status"], "skipped");
+    assert_eq!(body2["results"][1]["status"], "skipped");
+
+    // 3. Import different entry with same DOI — should be skipped (DOI dedup)
+    let bibtex_dup_doi = r#"
+@article{different_key,
+  title = {Different Title},
+  author = {Gamma, Charlie},
+  year = {2020},
+  doi = {10.1234/first}
+}
+"#;
+    let r3 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex_dup_doi)
+        .await;
+    r3.assert_status(StatusCode::OK);
+    let body3: serde_json::Value = r3.json();
+    assert_eq!(
+        body3["results"][0]["status"], "skipped",
+        "DOI dedup should skip entry with matching DOI regardless of cite_key"
+    );
+
+    // 4. Verify works list shows exactly 2
+    let list = server.get("/api/vault/academic/works").await;
+    let works: Vec<serde_json::Value> = list.json();
+    assert_eq!(works.len(), 2, "expected exactly 2 works after dedup");
+
+    // 5. Verify metadata on the paper
+    let paper = works
+        .iter()
+        .find(|w| w["cite_key"] == "alpha2020first")
+        .unwrap();
+    assert_eq!(paper["work_type"], "paper");
+    assert_eq!(paper["year"], 2020);
+
+    // 6. Verify metadata on the book
+    let book = works
+        .iter()
+        .find(|w| w["cite_key"] == "beta2021second")
+        .unwrap();
+    assert_eq!(book["work_type"], "book");
+    assert_eq!(book["year"], 2021);
+}
+
