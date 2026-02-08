@@ -4,15 +4,11 @@ import {
   syncDataLoaderFeature,
 } from "@headless-tree/core";
 import { useTree } from "@headless-tree/react";
-import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight, File, Folder } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useFolderTreePaths, usePages } from "#/api/pages";
-import {
-  ROOT_ID,
-  buildPageTree,
-  type TreeNode,
-} from "#/lib/buildPageTree";
+import { useOpenTab } from "#/hooks/useOpenTab";
+import { buildPageTree, ROOT_ID, type TreeNode } from "#/lib/buildPageTree";
 
 export function FileTree() {
   const {
@@ -27,7 +23,7 @@ export function FileTree() {
   } = useFolderTreePaths();
 
   const pages = pagesData?.items;
-  const navigate = useNavigate();
+  const openTab = useOpenTab();
 
   const treeData = useMemo(() => {
     if (!pages) {
@@ -53,9 +49,23 @@ export function FileTree() {
       getItem: (id) => treeData.get(id)!,
       getChildren: (id) => treeData.get(id)?.children ?? [],
     },
+    onPrimaryAction: (item) => {
+      const node = item.getItemData();
+      if (node.isFolder || !node.page) {
+        return;
+      }
+
+      openTab("page", node.page.path, node.page.title || node.page.path);
+    },
     indent: 16,
     features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
   });
+
+  // syncDataLoaderFeature caches its initial read. When treeData changes
+  // (query resolution, SSE invalidation), tell headless-tree to re-read.
+  useEffect(() => {
+    tree.rebuildTree();
+  }, [tree, treeData]);
 
   if (isLoadingPages || isLoadingFolders) {
     return (
@@ -69,7 +79,7 @@ export function FileTree() {
     );
   }
 
-  const hasItems = Boolean(pages && pages.length > 0) || Boolean(folderPaths?.length);
+  const hasItems = (treeData.get(ROOT_ID)?.children.length ?? 0) > 0;
   if (!hasItems) {
     return <p className="px-2 py-1 text-xs text-muted-foreground">No pages</p>;
   }
@@ -88,17 +98,6 @@ export function FileTree() {
             type="button"
             className="flex w-full items-center gap-1 truncate py-0.5 pr-2 text-left text-foreground hover:bg-accent"
             style={{ paddingLeft: `${item.getItemMeta().level * 16}px` }}
-            onClick={(e) => {
-              itemProps.onClick?.(e);
-              if (node.isFolder) {
-                item.isExpanded() ? item.collapse() : item.expand();
-              } else if (node.page) {
-                navigate({
-                  to: "/pages/$",
-                  params: { _splat: node.page.path },
-                });
-              }
-            }}
           >
             {node.isFolder ? (
               <>

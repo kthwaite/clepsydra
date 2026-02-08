@@ -12,20 +12,59 @@ export interface TreeNode {
 
 export type TreeData = Map<string, TreeNode>;
 
+function ensureChild(data: TreeData, parentId: string, childId: string) {
+  const parent = data.get(parentId);
+  if (!parent) return;
+
+  if (!parent.children.includes(childId)) {
+    parent.children.push(childId);
+  }
+}
+
+function ensureFolderNode(data: TreeData, folderPath: string): string {
+  const parts = folderPath.split("/").filter(Boolean);
+  let parentId = ROOT_ID;
+
+  for (let i = 0; i < parts.length; i++) {
+    const folderId = parts.slice(0, i + 1).join("/");
+
+    if (!data.has(folderId)) {
+      data.set(folderId, {
+        id: folderId,
+        name: parts[i],
+        isFolder: true,
+        children: [],
+        page: null,
+      });
+    }
+
+    ensureChild(data, parentId, folderId);
+    parentId = folderId;
+  }
+
+  return parentId;
+}
+
+function isHiddenInPagesTree(path: string): boolean {
+  const normalized = path.replace(/^\/+|\/+$/g, "");
+  if (!normalized) {
+    return false;
+  }
+
+  const rootSegment = normalized.split("/")[0];
+  return rootSegment === "_attachments";
+}
+
 /**
- * Build a virtual folder tree from a flat page list.
+ * Build a virtual folder tree from flat pages plus explicit folders.
  *
- * Each page path like "library/papers/foo.md" produces:
- * - folder ROOT_ID with child "library"
- * - folder "library" with child "library/papers"
- * - folder "library/papers" with child "library/papers/foo.md"
- * - leaf "library/papers/foo.md" pointing to the page
- *
- * Uses a Map to avoid prototype-key collisions (e.g. "constructor").
- * The synthetic root uses "\0" as its ID to avoid colliding with a
- * real "root/" folder.
+ * - Folders provided by `folderPaths` are rendered even when empty.
+ * - Page paths still create required intermediate folder nodes.
  */
-export function buildPageTree(pages: PageSummary[]): TreeData {
+export function buildPageTree(
+  pages: PageSummary[],
+  folderPaths: string[] = [],
+): TreeData {
   const data: TreeData = new Map<string, TreeNode>();
   data.set(ROOT_ID, {
     id: ROOT_ID,
@@ -35,27 +74,25 @@ export function buildPageTree(pages: PageSummary[]): TreeData {
     page: null,
   });
 
-  for (const page of pages) {
-    const parts = page.path.split("/");
-    let parentId = ROOT_ID;
-
-    // Create intermediate folder nodes
-    for (let i = 0; i < parts.length - 1; i++) {
-      const folderId = parts.slice(0, i + 1).join("/");
-      if (!data.has(folderId)) {
-        data.set(folderId, {
-          id: folderId,
-          name: parts[i],
-          isFolder: true,
-          children: [],
-          page: null,
-        });
-        data.get(parentId)!.children.push(folderId);
-      }
-      parentId = folderId;
+  // First add explicit folder paths so empty folders are visible.
+  for (const folderPath of folderPaths) {
+    if (isHiddenInPagesTree(folderPath)) {
+      continue;
     }
 
-    // Create leaf node for the page
+    ensureFolderNode(data, folderPath);
+  }
+
+  // Then add pages.
+  for (const page of pages) {
+    if (isHiddenInPagesTree(page.path)) {
+      continue;
+    }
+
+    const parts = page.path.split("/");
+    const parentPath = parts.slice(0, -1).join("/");
+    const parentId = parentPath ? ensureFolderNode(data, parentPath) : ROOT_ID;
+
     const leafId = page.path;
     data.set(leafId, {
       id: leafId,
@@ -65,13 +102,10 @@ export function buildPageTree(pages: PageSummary[]): TreeData {
       page,
     });
 
-    const parent = data.get(parentId)!;
-    if (!parent.children.includes(leafId)) {
-      parent.children.push(leafId);
-    }
+    ensureChild(data, parentId, leafId);
   }
 
-  // Sort children: folders first, then alphabetically
+  // Sort children: folders first, then alphabetically.
   for (const node of data.values()) {
     node.children.sort((a, b) => {
       const aNode = data.get(a);
