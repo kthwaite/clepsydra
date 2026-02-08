@@ -157,8 +157,9 @@ async fn list_pages() {
 
     let res = server.get("/api/vault/pages").await;
     res.assert_status_ok();
-    let body: Vec<serde_json::Value> = res.json();
-    assert_eq!(body.len(), 2);
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
 }
 
 #[tokio::test]
@@ -433,7 +434,10 @@ async fn index_backlinks() {
         .assert_status(StatusCode::CREATED);
 
     // Rebuild to register links
-    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
 
     // Query backlinks for target.md
     let res = server.get("/api/vault/index/backlinks/target.md").await;
@@ -465,7 +469,10 @@ async fn index_tags() {
         .assert_status(StatusCode::CREATED);
 
     // Rebuild index so tags are fresh
-    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
 
     let res = server.get("/api/vault/index/tags").await;
     res.assert_status_ok();
@@ -497,7 +504,10 @@ async fn index_stats() {
         .await
         .assert_status(StatusCode::CREATED);
 
-    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
 
     let res = server.get("/api/vault/index/stats").await;
     res.assert_status_ok();
@@ -682,8 +692,7 @@ title: Beta
 Content.
 ";
 
-    let (server, _tmp) =
-        setup_server_with_files(&[("alpha.md", page_a), ("beta.md", page_b)]);
+    let (server, _tmp) = setup_server_with_files(&[("alpha.md", page_a), ("beta.md", page_b)]);
 
     let body = serde_json::json!({
         "operation": "move_page",
@@ -757,7 +766,11 @@ Second.
     assert_eq!(ambig_item["reason"], "ambiguous");
     let candidates = ambig_item["candidates"].as_array().unwrap();
     assert_eq!(candidates.len(), 2);
-    assert!(candidates.iter().any(|c| c["path"].as_str() == Some("ambig-a.md")));
+    assert!(
+        candidates
+            .iter()
+            .any(|c| c["path"].as_str() == Some("ambig-a.md"))
+    );
     assert!(
         candidates
             .iter()
@@ -888,9 +901,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
 
 #[tokio::test]
 async fn create_page_indexes_property_links() {
-    let (server, _tmp) = setup_server_with_config(
-        "[vault]\nlinkable_properties = [\"tags\"]\n",
-    );
+    let (server, _tmp) = setup_server_with_config("[vault]\nlinkable_properties = [\"tags\"]\n");
 
     let res = server
         .post("/api/vault/pages/props.md")
@@ -969,7 +980,8 @@ async fn delete_folder_cleans_up_index() {
 
     // Verify both appear in listing
     let res = server.get("/api/vault/pages").await;
-    let pages: Vec<serde_json::Value> = res.json();
+    let body: serde_json::Value = res.json();
+    let pages = body["items"].as_array().unwrap();
     assert_eq!(pages.len(), 2);
 
     // Delete the folder recursively
@@ -980,8 +992,13 @@ async fn delete_folder_cleans_up_index() {
 
     // Verify index is clean — no ghost entries
     let res = server.get("/api/vault/pages").await;
-    let pages: Vec<serde_json::Value> = res.json();
-    assert_eq!(pages.len(), 0, "deleted folder pages should be gone from index");
+    let body: serde_json::Value = res.json();
+    let pages = body["items"].as_array().unwrap();
+    assert_eq!(
+        pages.len(),
+        0,
+        "deleted folder pages should be gone from index"
+    );
 }
 
 #[tokio::test]
@@ -1055,9 +1072,7 @@ async fn update_page_resolves_links_bidirectionally() {
     res.assert_status(StatusCode::OK);
 
     // Verify backlink exists immediately (no rebuild needed)
-    let res = server
-        .get("/api/vault/index/backlinks/target.md")
-        .await;
+    let res = server.get("/api/vault/index/backlinks/target.md").await;
     res.assert_status(StatusCode::OK);
     let backlinks: Vec<serde_json::Value> = res.json();
     assert_eq!(backlinks.len(), 1);
@@ -1081,9 +1096,53 @@ async fn list_pages_returns_sorted() {
     }
 
     let res = server.get("/api/vault/pages").await;
-    let pages: Vec<serde_json::Value> = res.json();
+    let body: serde_json::Value = res.json();
+    let pages = body["items"].as_array().unwrap();
     let paths: Vec<&str> = pages.iter().map(|p| p["path"].as_str().unwrap()).collect();
     assert_eq!(paths, vec!["alpha.md", "middle.md", "zebra.md"]);
+}
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_pages_pagination() {
+    let (server, _tmp) = setup_server();
+
+    for i in 0..5 {
+        server
+            .post(&format!("/api/vault/pages/page-{i}.md"))
+            .json(&serde_json::json!({ "title": format!("Page {i}") }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    // Default returns all
+    let res = server.get("/api/vault/pages").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 5);
+
+    // With limit=2, offset=0
+    let res = server.get("/api/vault/pages?limit=2&offset=0").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+    assert_eq!(body["limit"], 2);
+    assert_eq!(body["offset"], 0);
+
+    // With limit=2, offset=3
+    let res = server.get("/api/vault/pages?limit=2&offset=3").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+
+    // With offset past end
+    let res = server.get("/api/vault/pages?limit=2&offset=10").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,7 +1454,10 @@ I am the duplicate Shared.
     let res = server.get("/api/vault/index/unresolved").await;
     let unresolved: Vec<serde_json::Value> = res.json();
     let shared_unresolved = unresolved.iter().any(|u| u["target_raw"] == "Shared");
-    assert!(shared_unresolved, "[[Shared]] should be unresolved due to ambiguity");
+    assert!(
+        shared_unresolved,
+        "[[Shared]] should be unresolved due to ambiguity"
+    );
 
     // Delete the folder with the duplicate
     server
@@ -1528,7 +1590,10 @@ async fn create_work_page() {
     assert!(body["path"].as_str().unwrap().ends_with(".md"));
     // Should be in the papers folder
     assert!(
-        body["path"].as_str().unwrap().starts_with("library/papers/"),
+        body["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("library/papers/"),
         "expected path in library/papers/, got: {}",
         body["path"]
     );
@@ -1643,16 +1708,12 @@ async fn list_works_with_filters() {
     assert_eq!(body[0]["title"], "ML Paper");
 
     // Filter by year=2020
-    let res = server
-        .get("/api/vault/academic/works?year=2020")
-        .await;
+    let res = server.get("/api/vault/academic/works?year=2020").await;
     let body: Vec<serde_json::Value> = res.json();
     assert_eq!(body.len(), 1);
 
     // Filter by status=done
-    let res = server
-        .get("/api/vault/academic/works?status=done")
-        .await;
+    let res = server.get("/api/vault/academic/works?status=done").await;
     let body: Vec<serde_json::Value> = res.json();
     assert_eq!(body.len(), 1);
     assert_eq!(body[0]["title"], "ML Book");
@@ -1816,7 +1877,9 @@ async fn academic_lifecycle_integration() {
     res.assert_status_ok();
     let backlinks: Vec<serde_json::Value> = res.json();
     assert!(
-        backlinks.iter().any(|b| b["source_path"] == "notes/ml-notes.md"),
+        backlinks
+            .iter()
+            .any(|b| b["source_path"] == "notes/ml-notes.md"),
         "expected backlink from ml-notes.md via cite_key, got: {backlinks:?}"
     );
 
@@ -1838,7 +1901,9 @@ async fn academic_lifecycle_integration() {
 
     // 6. List annotations for the work — verify 1 result
     let res = server
-        .get(&format!("/api/vault/academic/works/by-id/{work_id}/annotations"))
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_id}/annotations"
+        ))
         .await;
     res.assert_status_ok();
     let annotations: Vec<serde_json::Value> = res.json();
@@ -1894,7 +1959,9 @@ async fn academic_lifecycle_integration() {
     res.assert_status_ok();
     let backlinks: Vec<serde_json::Value> = res.json();
     assert!(
-        backlinks.iter().any(|b| b["source_path"] == "notes/ml-notes.md"),
+        backlinks
+            .iter()
+            .any(|b| b["source_path"] == "notes/ml-notes.md"),
         "cite_key should still resolve after update, backlinks: {backlinks:?}"
     );
 }
@@ -1986,3 +2053,57 @@ async fn import_lifecycle_bibtex_dedup_and_verify() {
     assert_eq!(book["year"], 2021);
 }
 
+// ---------------------------------------------------------------------------
+// Attachment upload tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn upload_and_retrieve_attachment() {
+    let (server, _tmp) = setup_server();
+
+    let boundary = "----testboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world\r\n--{boundary}--\r\n"
+    );
+
+    let res = server
+        .post("/api/vault/attachments/test.txt")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await;
+
+    res.assert_status(StatusCode::CREATED);
+    let info: serde_json::Value = res.json();
+    assert_eq!(info["name"], "test.txt");
+    assert_eq!(info["path"], "test.txt");
+
+    // Retrieve it
+    let res = server.get("/api/vault/attachments/test.txt").await;
+    res.assert_status(StatusCode::OK);
+    assert_eq!(res.text(), "hello world");
+}
+
+#[tokio::test]
+async fn upload_attachment_conflict() {
+    let (server, _tmp) = setup_server();
+
+    let boundary = "----testboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dup.txt\"\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--{boundary}--\r\n"
+    );
+    let ct = format!("multipart/form-data; boundary={boundary}");
+
+    server
+        .post("/api/vault/attachments/dup.txt")
+        .content_type(&ct)
+        .bytes(body.clone().into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/attachments/dup.txt")
+        .content_type(&ct)
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CONFLICT);
+}

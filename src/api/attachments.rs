@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Multipart, Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -32,7 +32,12 @@ pub struct AttachmentInfo {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_attachments))
-        .route("/{*path}", get(get_attachment).delete(delete_attachment))
+        .route(
+            "/{*path}",
+            get(get_attachment)
+                .post(upload_attachment)
+                .delete(delete_attachment),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +85,57 @@ async fn list_attachments(
 
     attachments.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Json(attachments))
+}
+
+async fn upload_attachment(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Response, ApiError> {
+    let attachment_folder = &state.vault.config().vault.attachment_folder;
+    let rel_path = format!("{attachment_folder}/{path}");
+
+    let vault_path = VaultPath::new(&rel_path)
+        .map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+
+    let abs_path = state.vault.resolve(&vault_path);
+
+    if abs_path.exists() {
+        return Err(ApiError::conflict(format!(
+            "attachment already exists: {path}"
+        )));
+    }
+
+    if let Some(parent) = abs_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+    }
+
+    let field = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("invalid multipart: {e}")))?
+        .ok_or_else(|| ApiError::bad_request("no file field in multipart body".to_string()))?;
+
+    let bytes = field
+        .bytes()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("failed to read file: {e}")))?;
+
+    fs::write(&abs_path, &bytes)
+        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+
+    let size = bytes.len() as u64;
+    let name = abs_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AttachmentInfo { name, path, size }),
+    )
+        .into_response())
 }
 
 async fn get_attachment(

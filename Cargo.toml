@@ -8,7 +8,7 @@ name = "clepsydra"
 path = "src/bin/cli.rs"
 
 [dependencies]
-axum = "0.8.8"
+axum = { version = "0.8.8", features = ["multipart"] }
 biblatex = "0.11"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
