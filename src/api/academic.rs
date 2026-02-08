@@ -195,12 +195,26 @@ fn slugify(title: &str) -> String {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn create_work(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateWorkRequest>,
-) -> Result<Response, ApiError> {
+/// Internal work creation logic shared by the create_work endpoint and importers.
+pub(crate) fn create_work_internal(
+    state: &AppState,
+    title: String,
+    work_type: WorkType,
+    authors: Vec<String>,
+    year: Option<i32>,
+    venue: Option<String>,
+    publisher: Option<String>,
+    status: Option<ReadingStatus>,
+    rating: Option<u8>,
+    external_ids: Option<ExternalIds>,
+    urls: Option<WorkUrls>,
+    cite_key: Option<String>,
+    tags: Vec<String>,
+    aliases: Vec<String>,
+    body: Option<String>,
+) -> Result<WorkDetail, ApiError> {
     // 1. Validate rating
-    if let Some(rating) = req.rating
+    if let Some(rating) = rating
         && !(1..=5).contains(&rating)
     {
         return Err(ApiError {
@@ -212,7 +226,7 @@ async fn create_work(
     }
 
     // 2. Check cite_key uniqueness
-    if let Some(ref cite_key) = req.cite_key {
+    if let Some(ref cite_key) = cite_key {
         let cn = CanonicalName::new(cite_key);
         let index = state.index.lock();
         let exists: bool = index
@@ -233,7 +247,7 @@ async fn create_work(
 
     // 3. Determine target folder
     let config = state.vault.config();
-    let folder = match req.work_type {
+    let folder = match work_type {
         WorkType::Book => &config.academic.books_folder,
         WorkType::Paper | WorkType::Thesis | WorkType::Report | WorkType::Other => {
             &config.academic.papers_folder
@@ -241,7 +255,7 @@ async fn create_work(
     };
 
     // 4. Generate path
-    let slug = slugify(&req.title);
+    let slug = slugify(&title);
     let vault_path_str = if folder.is_empty() {
         slug
     } else {
@@ -259,27 +273,27 @@ async fn create_work(
 
     // 5. Build PageMeta
     let mut meta = PageMeta::new();
-    meta.title = Some(req.title.clone());
-    meta.tags = req.tags.clone();
-    meta.aliases = req.aliases.clone();
+    meta.title = Some(title.clone());
+    meta.tags = tags.clone();
+    meta.aliases = aliases;
 
     let work_meta = WorkMeta {
-        work_type: req.work_type.clone(),
-        authors: req.authors.clone(),
-        year: req.year,
-        venue: req.venue.clone(),
-        publisher: req.publisher.clone(),
-        status: req.status.clone(),
-        rating: req.rating,
-        external_ids: req.external_ids.clone(),
-        urls: req.urls.clone(),
+        work_type: work_type.clone(),
+        authors: authors.clone(),
+        year,
+        venue: venue.clone(),
+        publisher: publisher.clone(),
+        status: status.clone(),
+        rating,
+        external_ids: external_ids.clone(),
+        urls: urls.clone(),
         assets: Vec::new(),
-        cite_key: req.cite_key.clone(),
+        cite_key: cite_key.clone(),
         extra: HashMap::new(),
     };
     meta.extra = work_meta_to_extra(&work_meta);
 
-    let page_body = req.body.unwrap_or_default();
+    let page_body = body.unwrap_or_default();
 
     // 6. Create parent directories and write file
     if let Some(parent) = abs_path.parent() {
@@ -311,28 +325,48 @@ async fn create_work(
     // 9. Build response — reconstruct WorkMeta from the extra we just set
     let wm = extra_to_work_meta(&meta.extra);
 
-    Ok((
-        StatusCode::CREATED,
-        Json(WorkDetail {
-            id: meta.id.to_string(),
-            path: vault_path.as_str().to_string(),
-            title: req.title,
-            work_type: wm.as_ref().map(|w| w.work_type.clone()).unwrap_or(req.work_type),
-            authors: wm.as_ref().map(|w| w.authors.clone()).unwrap_or_default(),
-            year: wm.as_ref().and_then(|w| w.year),
-            venue: wm.as_ref().and_then(|w| w.venue.clone()),
-            publisher: wm.as_ref().and_then(|w| w.publisher.clone()),
-            status: wm.as_ref().and_then(|w| w.status.clone()),
-            rating: wm.as_ref().and_then(|w| w.rating),
-            external_ids: wm.as_ref().and_then(|w| w.external_ids.clone()),
-            urls: wm.as_ref().and_then(|w| w.urls.clone()),
-            assets: wm.as_ref().map(|w| w.assets.clone()).unwrap_or_default(),
-            cite_key: wm.as_ref().and_then(|w| w.cite_key.clone()),
-            tags: meta.tags,
-            body: page_body,
-        }),
-    )
-        .into_response())
+    Ok(WorkDetail {
+        id: meta.id.to_string(),
+        path: vault_path.as_str().to_string(),
+        title,
+        work_type: wm.as_ref().map(|w| w.work_type.clone()).unwrap_or(work_type),
+        authors: wm.as_ref().map(|w| w.authors.clone()).unwrap_or_default(),
+        year: wm.as_ref().and_then(|w| w.year),
+        venue: wm.as_ref().and_then(|w| w.venue.clone()),
+        publisher: wm.as_ref().and_then(|w| w.publisher.clone()),
+        status: wm.as_ref().and_then(|w| w.status.clone()),
+        rating: wm.as_ref().and_then(|w| w.rating),
+        external_ids: wm.as_ref().and_then(|w| w.external_ids.clone()),
+        urls: wm.as_ref().and_then(|w| w.urls.clone()),
+        assets: wm.as_ref().map(|w| w.assets.clone()).unwrap_or_default(),
+        cite_key: wm.as_ref().and_then(|w| w.cite_key.clone()),
+        tags: meta.tags,
+        body: page_body,
+    })
+}
+
+async fn create_work(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateWorkRequest>,
+) -> Result<Response, ApiError> {
+    let detail = create_work_internal(
+        &state,
+        req.title,
+        req.work_type,
+        req.authors,
+        req.year,
+        req.venue,
+        req.publisher,
+        req.status,
+        req.rating,
+        req.external_ids,
+        req.urls,
+        req.cite_key,
+        req.tags,
+        req.aliases,
+        req.body,
+    )?;
+    Ok((StatusCode::CREATED, Json(detail)).into_response())
 }
 
 // ---------------------------------------------------------------------------
