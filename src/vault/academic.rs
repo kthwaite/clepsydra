@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -8,7 +9,7 @@ use uuid::Uuid;
 // ---------------------------------------------------------------------------
 
 /// The type of academic work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkType {
     Paper,
@@ -19,7 +20,7 @@ pub enum WorkType {
 }
 
 /// Reading progress status for an academic work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadingStatus {
     Unread,
@@ -28,7 +29,7 @@ pub enum ReadingStatus {
 }
 
 /// The kind of annotation attached to a work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AnnotationType {
     Highlight,
@@ -40,7 +41,7 @@ pub enum AnnotationType {
 // ---------------------------------------------------------------------------
 
 /// External identifiers for an academic work (DOI, ISBN, arXiv).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ExternalIds {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doi: Option<String>,
@@ -51,7 +52,7 @@ pub struct ExternalIds {
 }
 
 /// URLs associated with an academic work.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WorkUrls {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub landing: Option<String>,
@@ -60,7 +61,7 @@ pub struct WorkUrls {
 }
 
 /// Location within a source document (page, quote, bounding rect).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SourceLocation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,

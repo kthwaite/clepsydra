@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use utoipa::IntoParams;
 
 /// Query parameters for paginated list endpoints.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PaginationParams {
     pub limit: Option<u32>,
     pub offset: Option<u32>,

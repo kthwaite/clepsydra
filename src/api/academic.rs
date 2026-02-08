@@ -11,6 +11,7 @@ use axum::routing::{get, post};
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -29,7 +30,7 @@ use crate::vault::path::VaultPath;
 // Request / response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateWorkRequest {
     pub work_type: WorkType,
     pub title: String,
@@ -50,7 +51,7 @@ pub struct CreateWorkRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateWorkRequest {
     pub title: Option<String>,
     pub authors: Option<Vec<String>>,
@@ -67,7 +68,8 @@ pub struct UpdateWorkRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListWorksQuery {
     pub work_type: Option<String>,
     pub status: Option<String>,
@@ -78,7 +80,7 @@ pub struct ListWorksQuery {
     pub offset: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateAnnotationRequest {
     pub work_id: String,
     pub annotation_type: Option<AnnotationType>,
@@ -89,7 +91,7 @@ pub struct CreateAnnotationRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct WorkDetail {
     pub id: String,
     pub path: String,
@@ -112,7 +114,7 @@ pub struct WorkDetail {
     pub body: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct WorkSummary {
     pub id: String,
     pub path: String,
@@ -127,7 +129,15 @@ pub struct WorkSummary {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WorkSummaryListResponse {
+    pub items: Vec<WorkSummary>,
+    pub total: u32,
+    pub limit: Option<u32>,
+    pub offset: u32,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AnnotationDetail {
     pub id: String,
     pub path: String,
@@ -141,7 +151,7 @@ pub struct AnnotationDetail {
     pub body: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ImportResult {
     pub cite_key: String,
     pub status: String, // "created" | "skipped" | "error"
@@ -151,17 +161,17 @@ pub struct ImportResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ImportResponse {
     pub results: Vec<ImportResult>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ImportDoiRequest {
     pub doi: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ImportIsbnRequest {
     pub isbn: String,
 }
@@ -376,7 +386,19 @@ pub(crate) fn create_work_internal(
     })
 }
 
-async fn import_bibtex(
+#[utoipa::path(
+    post,
+    path = "/academic/import/bibtex",
+    context_path = "/api/vault",
+    tag = "Academic",
+    request_body(content = String, content_type = "text/plain"),
+    responses(
+        (status = 200, description = "BibTeX import results", body = ImportResponse),
+        (status = 400, description = "Invalid BibTeX", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn import_bibtex(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> Result<Json<ImportResponse>, ApiError> {
@@ -454,7 +476,20 @@ async fn import_bibtex(
     Ok(Json(ImportResponse { results }))
 }
 
-async fn import_doi(
+#[utoipa::path(
+    post,
+    path = "/academic/import/doi",
+    context_path = "/api/vault",
+    tag = "Academic",
+    request_body = ImportDoiRequest,
+    responses(
+        (status = 200, description = "Work already exists", body = ImportResult),
+        (status = 201, description = "Work imported", body = ImportResult),
+        (status = 400, description = "Invalid DOI request", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn import_doi(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImportDoiRequest>,
 ) -> Result<Response, ApiError> {
@@ -523,7 +558,20 @@ async fn import_doi(
         .into_response())
 }
 
-async fn import_isbn_handler(
+#[utoipa::path(
+    post,
+    path = "/academic/import/isbn",
+    context_path = "/api/vault",
+    tag = "Academic",
+    request_body = ImportIsbnRequest,
+    responses(
+        (status = 200, description = "Work already exists", body = ImportResult),
+        (status = 201, description = "Work imported", body = ImportResult),
+        (status = 400, description = "Invalid ISBN request", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn import_isbn_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImportIsbnRequest>,
 ) -> Result<Response, ApiError> {
@@ -596,7 +644,21 @@ async fn import_isbn_handler(
         .into_response())
 }
 
-async fn create_work(
+#[utoipa::path(
+    post,
+    path = "/academic/works",
+    context_path = "/api/vault",
+    tag = "Academic",
+    request_body = CreateWorkRequest,
+    responses(
+        (status = 201, description = "Work created", body = WorkDetail),
+        (status = 400, description = "Invalid request", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn create_work(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateWorkRequest>,
 ) -> Result<Response, ApiError> {
@@ -624,7 +686,19 @@ async fn create_work(
 // GET /works/by-id/{uuid}
 // ---------------------------------------------------------------------------
 
-async fn get_work(
+#[utoipa::path(
+    get,
+    path = "/academic/works/by-id/{uuid}",
+    context_path = "/api/vault",
+    tag = "Academic",
+    params(("uuid" = String, Path, description = "Work UUID")),
+    responses(
+        (status = 200, description = "Work detail", body = WorkDetail),
+        (status = 404, description = "Work not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_work(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<WorkDetail>, ApiError> {
@@ -683,7 +757,18 @@ async fn get_work(
 // GET /works
 // ---------------------------------------------------------------------------
 
-async fn list_works(
+#[utoipa::path(
+    get,
+    path = "/academic/works",
+    context_path = "/api/vault",
+    tag = "Academic",
+    params(ListWorksQuery),
+    responses(
+        (status = 200, description = "List works", body = WorkSummaryListResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_works(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListWorksQuery>,
 ) -> Result<Json<PaginatedResponse<WorkSummary>>, ApiError> {
@@ -811,7 +896,21 @@ async fn list_works(
 // PUT /works/by-id/{uuid}
 // ---------------------------------------------------------------------------
 
-async fn update_work(
+#[utoipa::path(
+    put,
+    path = "/academic/works/by-id/{uuid}",
+    context_path = "/api/vault",
+    tag = "Academic",
+    params(("uuid" = String, Path, description = "Work UUID")),
+    request_body = UpdateWorkRequest,
+    responses(
+        (status = 200, description = "Updated work", body = WorkDetail),
+        (status = 404, description = "Work not found", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn update_work(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
     Json(req): Json<UpdateWorkRequest>,
@@ -966,7 +1065,21 @@ async fn update_work(
 // POST /annotations
 // ---------------------------------------------------------------------------
 
-async fn create_annotation(
+#[utoipa::path(
+    post,
+    path = "/academic/annotations",
+    context_path = "/api/vault",
+    tag = "Academic",
+    request_body = CreateAnnotationRequest,
+    responses(
+        (status = 201, description = "Annotation created", body = AnnotationDetail),
+        (status = 400, description = "Invalid request", body = ApiError),
+        (status = 404, description = "Work not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn create_annotation(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateAnnotationRequest>,
 ) -> Result<Response, ApiError> {
@@ -1081,7 +1194,19 @@ async fn create_annotation(
 // GET /works/by-id/{uuid}/annotations
 // ---------------------------------------------------------------------------
 
-async fn list_annotations(
+#[utoipa::path(
+    get,
+    path = "/academic/works/by-id/{uuid}/annotations",
+    context_path = "/api/vault",
+    tag = "Academic",
+    params(("uuid" = String, Path, description = "Work UUID")),
+    responses(
+        (status = 200, description = "List annotations for work", body = [AnnotationDetail]),
+        (status = 404, description = "Work not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_annotations(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<Vec<AnnotationDetail>>, ApiError> {

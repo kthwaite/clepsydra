@@ -4,13 +4,14 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use serde::Serialize;
+use utoipa::ToSchema;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
 use super::AppState;
 
 /// A notification emitted after the vault index changes.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncNotification {
     /// Pages were created, modified, or removed.
@@ -24,6 +25,15 @@ pub enum SyncNotification {
 ///
 /// Lagged messages (when a client falls behind the broadcast buffer) are
 /// silently dropped.
+#[utoipa::path(
+    get,
+    path = "/events",
+    context_path = "/api/vault",
+    tag = "Events",
+    responses(
+        (status = 200, description = "Server-sent events stream", body = String, content_type = "text/event-stream")
+    )
+)]
 pub async fn event_stream(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {

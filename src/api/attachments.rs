@@ -9,6 +9,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
@@ -18,7 +19,7 @@ use crate::vault::path::VaultPath;
 // Response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AttachmentInfo {
     pub name: String,
     pub path: String,
@@ -30,21 +31,29 @@ pub struct AttachmentInfo {
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/", get(list_attachments))
-        .route(
-            "/{*path}",
-            get(get_attachment)
-                .post(upload_attachment)
-                .delete(delete_attachment),
-        )
+    Router::new().route("/", get(list_attachments)).route(
+        "/{*path}",
+        get(get_attachment)
+            .post(upload_attachment)
+            .delete(delete_attachment),
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn list_attachments(
+#[utoipa::path(
+    get,
+    path = "/attachments",
+    context_path = "/api/vault",
+    tag = "Attachments",
+    responses(
+        (status = 200, description = "List attachments", body = [AttachmentInfo]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_attachments(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AttachmentInfo>>, ApiError> {
     let attachment_folder = &state.vault.config().vault.attachment_folder;
@@ -87,7 +96,21 @@ async fn list_attachments(
     Ok(Json(attachments))
 }
 
-async fn upload_attachment(
+#[utoipa::path(
+    post,
+    path = "/attachments/{path}",
+    context_path = "/api/vault",
+    tag = "Attachments",
+    params(("path" = String, Path, description = "Attachment path relative to attachment folder")),
+    request_body(content = String, content_type = "multipart/form-data"),
+    responses(
+        (status = 201, description = "Attachment uploaded", body = AttachmentInfo),
+        (status = 400, description = "Invalid request", body = ApiError),
+        (status = 409, description = "Attachment already exists", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn upload_attachment(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     mut multipart: Multipart,
@@ -138,7 +161,20 @@ async fn upload_attachment(
         .into_response())
 }
 
-async fn get_attachment(
+#[utoipa::path(
+    get,
+    path = "/attachments/{path}",
+    context_path = "/api/vault",
+    tag = "Attachments",
+    params(("path" = String, Path, description = "Attachment path relative to attachment folder")),
+    responses(
+        (status = 200, description = "Attachment bytes", body = String, content_type = "application/octet-stream"),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 404, description = "Attachment not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_attachment(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Response, ApiError> {
@@ -169,7 +205,20 @@ async fn get_attachment(
         .into_response())
 }
 
-async fn delete_attachment(
+#[utoipa::path(
+    delete,
+    path = "/attachments/{path}",
+    context_path = "/api/vault",
+    tag = "Attachments",
+    params(("path" = String, Path, description = "Attachment path relative to attachment folder")),
+    responses(
+        (status = 204, description = "Attachment deleted"),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 404, description = "Attachment not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn delete_attachment(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Response, ApiError> {

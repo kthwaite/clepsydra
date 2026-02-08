@@ -10,6 +10,7 @@ use axum::routing::{get, post};
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
@@ -24,7 +25,7 @@ use crate::vault::path::VaultPath;
 // Response / request types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PageSummary {
     pub id: String,
     pub path: String,
@@ -40,7 +41,41 @@ pub struct PageDetail {
     pub body: String,
 }
 
-#[derive(Debug, Deserialize)]
+/// OpenAPI schema for page metadata exposed in `PageDetail`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PageMetaResponse {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aliases: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// OpenAPI schema for page detail responses.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PageDetailResponse {
+    pub path: String,
+    pub canonical_name: String,
+    pub meta: PageMetaResponse,
+    pub body: String,
+}
+
+/// OpenAPI schema for paginated page listing.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PageSummaryListResponse {
+    pub items: Vec<PageSummary>,
+    pub total: u32,
+    pub limit: Option<u32>,
+    pub offset: u32,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreatePageRequest {
     pub title: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -48,7 +83,7 @@ pub struct CreatePageRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdatePageRequest {
     pub title: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -68,7 +103,7 @@ fn default_rewrite() -> String {
     "plain_text".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct MovePageRequest {
     pub destination: String,
 }
@@ -101,7 +136,21 @@ pub fn move_router() -> Router<Arc<AppState>> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn list_pages(
+#[utoipa::path(
+    get,
+    path = "/pages",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(
+        ("limit" = Option<u32>, Query, description = "Maximum number of pages to return"),
+        ("offset" = Option<u32>, Query, description = "Page offset for pagination")
+    ),
+    responses(
+        (status = 200, description = "List pages", body = PageSummaryListResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_pages(
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<PageSummary>>, ApiError> {
@@ -128,7 +177,20 @@ async fn list_pages(
     Ok(Json(PaginatedResponse::from_vec(pages, &pagination)))
 }
 
-async fn get_page(
+#[utoipa::path(
+    get,
+    path = "/pages/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    responses(
+        (status = 200, description = "Page detail", body = PageDetailResponse),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
@@ -157,7 +219,19 @@ async fn get_page(
     }))
 }
 
-async fn get_page_by_id(
+#[utoipa::path(
+    get,
+    path = "/pages/by-id/{uuid}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("uuid" = String, Path, description = "Page UUID")),
+    responses(
+        (status = 200, description = "Page detail", body = PageDetailResponse),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_page_by_id(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
@@ -204,7 +278,21 @@ async fn get_page_by_id(
     }))
 }
 
-async fn create_page(
+#[utoipa::path(
+    post,
+    path = "/pages/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    request_body = CreatePageRequest,
+    responses(
+        (status = 201, description = "Page created", body = PageDetailResponse),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 409, description = "Page already exists", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn create_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     Json(body): Json<CreatePageRequest>,
@@ -276,7 +364,21 @@ async fn create_page(
         .into_response())
 }
 
-async fn update_page(
+#[utoipa::path(
+    put,
+    path = "/pages/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    request_body = UpdatePageRequest,
+    responses(
+        (status = 200, description = "Updated page", body = PageDetailResponse),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn update_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     Json(body): Json<UpdatePageRequest>,
@@ -359,7 +461,25 @@ async fn update_page(
     }))
 }
 
-async fn delete_page(
+#[utoipa::path(
+    delete,
+    path = "/pages/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(
+        ("path" = String, Path, description = "Vault-relative page path"),
+        ("force" = Option<bool>, Query, description = "Force delete despite backlinks"),
+        ("rewrite" = Option<String>, Query, description = "Rewrite mode: plain_text, unlink, or none")
+    ),
+    responses(
+        (status = 204, description = "Page deleted"),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Conflict (backlinks exist)", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn delete_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     Query(query): Query<DeleteQuery>,
@@ -454,7 +574,22 @@ async fn delete_page(
 // Move handler
 // ---------------------------------------------------------------------------
 
-async fn move_page(
+#[utoipa::path(
+    post,
+    path = "/pages-move/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("path" = String, Path, description = "Source page path")),
+    request_body = MovePageRequest,
+    responses(
+        (status = 200, description = "Moved page", body = PageDetailResponse),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Destination conflict", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn move_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     Json(body): Json<MovePageRequest>,

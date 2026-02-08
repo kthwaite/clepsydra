@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -24,16 +25,16 @@ use crate::vault::path::VaultPath;
 // Response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-struct RebuildResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RebuildResponse {
     pages_indexed: usize,
     pages_skipped: usize,
     pages_removed: usize,
     warnings: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct OutlinkEntry {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OutlinkEntry {
     target_raw: String,
     target_path: Option<String>,
     target_id: Option<String>,
@@ -41,8 +42,8 @@ struct OutlinkEntry {
     source_field: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct UnresolvedLink {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UnresolvedLink {
     source_id: String,
     source_path: String,
     target_raw: String,
@@ -53,15 +54,15 @@ struct UnresolvedLink {
     candidates: Vec<CandidateEntry>,
 }
 
-#[derive(Debug, Serialize)]
-struct CandidateEntry {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CandidateEntry {
     page_id: String,
     path: String,
     title: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct BacklinkEntry {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BacklinkEntry {
     source_id: String,
     source_path: String,
     source_title: Option<String>,
@@ -70,28 +71,28 @@ struct BacklinkEntry {
     context: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct CreateFromLinkRequest {
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateFromLinkRequest {
     target_raw: String,
     #[serde(default)]
     folder: String,
     body: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct AmbiguousName {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AmbiguousName {
     canonical_name: String,
     page_ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct TagCount {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TagCount {
     tag: String,
     count: i64,
 }
 
-#[derive(Debug, Serialize)]
-struct VaultStats {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VaultStats {
     pages: i64,
     links_total: i64,
     links_resolved: i64,
@@ -100,28 +101,36 @@ struct VaultStats {
     attachments: i64,
 }
 
-#[derive(Debug, Serialize)]
-struct GraphResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GraphResponse {
     nodes: Vec<GraphNode>,
     edges: Vec<GraphEdge>,
 }
 
-#[derive(Debug, Serialize)]
-struct GraphNode {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GraphNode {
     id: String,
     path: String,
     title: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct GraphEdge {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GraphEdge {
     source: String,
     target: String,
     kind: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct PreviewMutationRequest {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ContentIndexResponse {
+    pub items: Vec<ContentEntry>,
+    pub total: u32,
+    pub limit: Option<u32>,
+    pub offset: u32,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PreviewMutationRequest {
     operation: String,
     #[serde(default)]
     source: String,
@@ -131,13 +140,14 @@ struct PreviewMutationRequest {
     rewrite: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SearchQuery {
     pub q: Option<String>,
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SearchResultEntry {
     pub page_id: String,
     pub path: String,
@@ -174,7 +184,19 @@ pub fn router() -> Router<Arc<AppState>> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn backlinks(
+#[utoipa::path(
+    get,
+    path = "/index/backlinks/{path}",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    responses(
+        (status = 200, description = "Backlinks", body = [BacklinkEntry]),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn backlinks(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<Vec<BacklinkEntry>>, ApiError> {
@@ -202,7 +224,20 @@ async fn backlinks(
     Ok(Json(entries))
 }
 
-async fn outlinks(
+#[utoipa::path(
+    get,
+    path = "/index/outlinks/{path}",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    responses(
+        (status = 200, description = "Outlinks", body = [OutlinkEntry]),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn outlinks(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<Vec<OutlinkEntry>>, ApiError> {
@@ -246,7 +281,17 @@ async fn outlinks(
     Ok(Json(links))
 }
 
-async fn unresolved(
+#[utoipa::path(
+    get,
+    path = "/index/unresolved",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Unresolved links", body = [UnresolvedLink]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn unresolved(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<UnresolvedLink>>, ApiError> {
     let index = state.index.lock();
@@ -294,7 +339,17 @@ async fn unresolved(
     Ok(Json(links))
 }
 
-async fn ambiguous(
+#[utoipa::path(
+    get,
+    path = "/index/ambiguous",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Ambiguous canonical names", body = [AmbiguousName]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn ambiguous(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AmbiguousName>>, ApiError> {
     let index = state.index.lock();
@@ -326,13 +381,33 @@ async fn ambiguous(
     Ok(Json(names))
 }
 
-async fn warnings(State(state): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/index/warnings",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Index warnings", body = [String]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn warnings(State(state): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
     let warnings = state.warnings.lock();
 
     Ok(Json(warnings.clone()))
 }
 
-async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/index/tags",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Tag counts", body = [TagCount]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>, ApiError> {
     let index = state.index.lock();
 
     let mut stmt = index
@@ -354,7 +429,17 @@ async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>,
     Ok(Json(tag_counts))
 }
 
-async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/index/stats",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Vault statistics", body = VaultStats),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, ApiError> {
     let index = state.index.lock();
 
     let conn = index.connection();
@@ -410,7 +495,17 @@ async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, A
     }))
 }
 
-async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/index/graph",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Resolved link graph", body = GraphResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>, ApiError> {
     let index = state.index.lock();
 
     let conn = index.connection();
@@ -452,7 +547,17 @@ async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>
     Ok(Json(GraphResponse { nodes, edges }))
 }
 
-async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
+#[utoipa::path(
+    post,
+    path = "/index/rebuild",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Index rebuilt", body = RebuildResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
     let mut index = state.index.lock();
 
     let build_stats = index
@@ -487,7 +592,19 @@ async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, A
         .into_response())
 }
 
-async fn preview_mutation(
+#[utoipa::path(
+    post,
+    path = "/index/preview-mutation",
+    context_path = "/api/vault",
+    tag = "Index",
+    request_body = PreviewMutationRequest,
+    responses(
+        (status = 200, description = "Mutation preview", body = serde_json::Value),
+        (status = 400, description = "Invalid operation", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn preview_mutation(
     State(state): State<Arc<AppState>>,
     Json(req): Json<PreviewMutationRequest>,
 ) -> Result<Response, ApiError> {
@@ -526,7 +643,20 @@ async fn preview_mutation(
     Ok(Json(plan).into_response())
 }
 
-async fn create_from_link(
+#[utoipa::path(
+    post,
+    path = "/index/create-from-link",
+    context_path = "/api/vault",
+    tag = "Index",
+    request_body = CreateFromLinkRequest,
+    responses(
+        (status = 201, description = "Page created from unresolved link", body = crate::api::pages::PageDetailResponse),
+        (status = 400, description = "Invalid request", body = ApiError),
+        (status = 409, description = "Page already exists", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn create_from_link(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateFromLinkRequest>,
 ) -> Result<Response, ApiError> {
@@ -609,8 +739,8 @@ async fn create_from_link(
 // Content index (Quartz-style per-page metadata)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-struct ContentEntry {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ContentEntry {
     path: String,
     title: Option<String>,
     tags: Vec<String>,
@@ -620,7 +750,21 @@ struct ContentEntry {
     description: String,
 }
 
-async fn content_index(
+#[utoipa::path(
+    get,
+    path = "/index/content-index",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(
+        ("limit" = Option<u32>, Query, description = "Maximum number of entries"),
+        ("offset" = Option<u32>, Query, description = "Entry offset")
+    ),
+    responses(
+        (status = 200, description = "Content index", body = ContentIndexResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn content_index(
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<ContentEntry>>, ApiError> {
@@ -702,7 +846,22 @@ async fn content_index(
 // Full-text search
 // ---------------------------------------------------------------------------
 
-async fn search(
+#[utoipa::path(
+    get,
+    path = "/index/search",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(
+        ("q" = Option<String>, Query, description = "Search query"),
+        ("limit" = Option<u32>, Query, description = "Maximum number of search results")
+    ),
+    responses(
+        (status = 200, description = "Search results", body = [SearchResultEntry]),
+        (status = 400, description = "Invalid query", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn search(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<Vec<SearchResultEntry>>, ApiError> {

@@ -142,12 +142,12 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let index = Arc::new(parking_lot::Mutex::new(index));
 
     // Broadcast channel for SSE notifications
-    let (change_broadcast_tx, _) = tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
+    let (change_broadcast_tx, _) =
+        tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
 
     // Build post-move hooks
-    let hooks: Vec<Box<dyn vault::hooks::PostMoveHook>> = vec![
-        Box::new(vault::academic_hook::AcademicMoveHook),
-    ];
+    let hooks: Vec<Box<dyn vault::hooks::PostMoveHook>> =
+        vec![Box::new(vault::academic_hook::AcademicMoveHook)];
 
     // Build shared state
     let state = Arc::new(AppState {
@@ -165,11 +165,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
     let sync_change_tx = state.change_tx.clone();
 
-    let _watcher = VaultWatcher::start(
-        vault_root_buf,
-        Duration::from_millis(500),
-        change_tx,
-    )?;
+    let _watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
 
     tokio::spawn(async move {
         let mut batch: Vec<ChangeEvent> = Vec::new();
@@ -209,9 +205,10 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     if !upserted.is_empty() || !removed.is_empty() {
-                        let _ = sync_change_tx.send(
-                            api::events::SyncNotification::IndexChanged { upserted, removed },
-                        );
+                        let _ = sync_change_tx.send(api::events::SyncNotification::IndexChanged {
+                            upserted,
+                            removed,
+                        });
                     }
                 }
                 Err(e) => {
@@ -225,13 +222,14 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/", get(root))
         .nest("/api/vault", api_router())
+        .merge(api::openapi::router())
         .with_state(state)
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
 
     let listener = TcpListener::bind(&addr).await?;
-    info!(%addr, ?settings.server, vault_root = %settings.vault.root, "listening");
+    info!(%addr, ?settings.server, vault_root = %vault_root.display(), "listening");
 
     axum::serve(listener, app).await?;
     Ok(())
