@@ -204,22 +204,22 @@ impl MutationPlan {
 
         // Call post-move hooks for each Rename operation
         for op in &self.file_ops {
-            if let FileOpKind::Rename = op.kind {
-                if let Some(ref dest) = op.destination {
-                    let old_vp = VaultPath::new(&op.path).map_err(vp_err)?;
-                    let new_vp = VaultPath::new(dest).map_err(vp_err)?;
-                    // Look up page UUID from the index (page path still uses old path in DB at this point)
-                    if let Ok(page_id_str) = index.connection().query_row(
-                        "SELECT id FROM pages WHERE path = ?1",
-                        rusqlite::params![op.path],
-                        |row| row.get::<_, String>(0),
-                    ) {
-                        if let Ok(page_id) = page_id_str.parse::<uuid::Uuid>() {
-                            for hook in hooks {
-                                hook.on_page_moved(&old_vp, &new_vp, &page_id, vault, index)
-                                    .map_err(|e| IndexError::Other(e.to_string()))?;
-                            }
-                        }
+            if let FileOpKind::Rename = op.kind
+                && let Some(ref dest) = op.destination
+            {
+                let old_vp = VaultPath::new(&op.path).map_err(vp_err)?;
+                let new_vp = VaultPath::new(dest).map_err(vp_err)?;
+                // Look up page UUID from the index (page path still uses old path in DB at this point)
+                if let Ok(page_id_str) = index.connection().query_row(
+                    "SELECT id FROM pages WHERE path = ?1",
+                    rusqlite::params![op.path],
+                    |row| row.get::<_, String>(0),
+                )
+                    && let Ok(page_id) = page_id_str.parse::<uuid::Uuid>()
+                {
+                    for hook in hooks {
+                        hook.on_page_moved(&old_vp, &new_vp, &page_id, vault, index)
+                            .map_err(|e| IndexError::Other(e.to_string()))?;
                     }
                 }
             }
