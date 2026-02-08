@@ -7,7 +7,7 @@ import { useTree } from "@headless-tree/react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight, File, Folder } from "lucide-react";
 import { useMemo } from "react";
-import { usePages } from "#/api/pages";
+import { useFolderTreePaths, usePages } from "#/api/pages";
 import {
   ROOT_ID,
   buildPageTree,
@@ -15,8 +15,18 @@ import {
 } from "#/lib/buildPageTree";
 
 export function FileTree() {
-  const { data, isLoading, error } = usePages();
-  const pages = data?.items;
+  const {
+    data: pagesData,
+    isLoading: isLoadingPages,
+    error: pagesError,
+  } = usePages();
+  const {
+    data: folderPaths,
+    isLoading: isLoadingFolders,
+    error: foldersError,
+  } = useFolderTreePaths();
+
+  const pages = pagesData?.items;
   const navigate = useNavigate();
 
   const treeData = useMemo(() => {
@@ -31,8 +41,9 @@ export function FileTree() {
       });
       return empty;
     }
-    return buildPageTree(pages);
-  }, [pages]);
+
+    return buildPageTree(pages, folderPaths ?? []);
+  }, [pages, folderPaths]);
 
   const tree = useTree<TreeNode>({
     rootItemId: ROOT_ID,
@@ -46,17 +57,20 @@ export function FileTree() {
     features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
   });
 
-  if (isLoading) {
+  if (isLoadingPages || isLoadingFolders) {
     return (
       <p className="px-2 py-1 text-xs text-muted-foreground">Loading...</p>
     );
   }
-  if (error) {
+
+  if (pagesError || foldersError) {
     return (
       <p className="px-2 py-1 text-xs text-destructive">Failed to load pages</p>
     );
   }
-  if (!pages || pages.length === 0) {
+
+  const hasItems = Boolean(pages && pages.length > 0) || Boolean(folderPaths?.length);
+  if (!hasItems) {
     return <p className="px-2 py-1 text-xs text-muted-foreground">No pages</p>;
   }
 
@@ -65,14 +79,17 @@ export function FileTree() {
       {tree.getItems().map((item) => {
         const node = item.getItemData();
 
+        const itemProps = item.getProps();
+
         return (
           <button
             key={item.getKey()}
-            {...item.getProps()}
+            {...itemProps}
             type="button"
             className="flex w-full items-center gap-1 truncate py-0.5 pr-2 text-left text-foreground hover:bg-accent"
             style={{ paddingLeft: `${item.getItemMeta().level * 16}px` }}
-            onClick={() => {
+            onClick={(e) => {
+              itemProps.onClick?.(e);
               if (node.isFolder) {
                 item.isExpanded() ? item.collapse() : item.expand();
               } else if (node.page) {
