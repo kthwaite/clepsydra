@@ -158,6 +158,11 @@ pub struct ImportDoiRequest {
     pub doi: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ImportIsbnRequest {
+    pub isbn: String,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -173,6 +178,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/annotations", post(create_annotation))
         .route("/import/bibtex", post(import_bibtex))
         .route("/import/doi", post(import_doi))
+        .route("/import/isbn", post(import_isbn_handler))
 }
 
 // ---------------------------------------------------------------------------
@@ -505,6 +511,79 @@ async fn import_doi(
         vec![],
         vec![],
         None,
+    )?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ImportResult {
+            cite_key: entry.cite_key,
+            status: "created".to_string(),
+            page_path: Some(detail.path),
+            error: None,
+        }),
+    )
+        .into_response())
+}
+
+async fn import_isbn_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ImportIsbnRequest>,
+) -> Result<Response, ApiError> {
+    // 1. Check dedup by ISBN
+    {
+        let index = state.index.lock();
+        if let Some(path) = crate::vault::import::find_existing_work(
+            index.connection(),
+            None,
+            Some(&req.isbn),
+            None,
+        ) {
+            return Ok((
+                StatusCode::OK,
+                Json(ImportResult {
+                    cite_key: String::new(),
+                    status: "skipped".to_string(),
+                    page_path: Some(path),
+                    error: None,
+                }),
+            )
+                .into_response());
+        }
+    }
+
+    // 2. Fetch from Open Library
+    let (edition_json, author_names) = crate::vault::import_isbn::fetch_isbn(&req.isbn)
+        .await
+        .map_err(|e| ApiError::bad_request(format!("ISBN lookup failed: {e}")))?;
+
+    let entry = crate::vault::import_isbn::parse_openlibrary_response(
+        &edition_json,
+        &author_names,
+        &req.isbn,
+    )
+    .map_err(|e| ApiError::bad_request(format!("Failed to parse Open Library data: {e}")))?;
+
+    // 3. Create work
+    let detail = create_work_internal(
+        &state,
+        entry.title,
+        entry.work_type,
+        entry.authors,
+        entry.year,
+        entry.venue,
+        entry.publisher,
+        None, // status
+        None, // rating
+        Some(ExternalIds {
+            doi: None,
+            isbn: entry.isbn,
+            arxiv: None,
+        }),
+        None, // urls
+        Some(entry.cite_key.clone()),
+        vec![], // tags
+        vec![], // aliases
+        None,   // body
     )?;
 
     Ok((

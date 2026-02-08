@@ -8,6 +8,7 @@ pub mod derivers;
 pub mod hooks;
 pub mod import;
 pub mod import_doi;
+pub mod import_isbn;
 pub mod index;
 pub mod init;
 pub mod link;

@@ -1,5 +1,6 @@
 use clepsydra::vault::import::{find_existing_work, parse_bibtex};
 use clepsydra::vault::import_doi::parse_crossref_response;
+use clepsydra::vault::import_isbn::parse_openlibrary_response;
 use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
@@ -227,4 +228,29 @@ fn parse_crossref_json_into_import_entry() {
         clepsydra::vault::academic::WorkType::Paper
     ));
     assert_eq!(entry.cite_key, "kucsko2013nanometrescale");
+}
+
+#[test]
+fn parse_openlibrary_json_into_import_entry() {
+    let json = serde_json::json!({
+        "title": "Pattern Recognition and Machine Learning",
+        "authors": [{"key": "/authors/OL1394865A"}],
+        "publish_date": "2006",
+        "publishers": ["Springer"],
+        "isbn_13": ["9780387310732"],
+        "isbn_10": ["0387310738"],
+        "key": "/books/OL7941839M"
+    });
+
+    let authors = vec!["Christopher M. Bishop".to_string()];
+    let entry = parse_openlibrary_response(&json, &authors, "978-0-387-31073-2").unwrap();
+    assert_eq!(entry.title, "Pattern Recognition and Machine Learning");
+    assert_eq!(entry.authors, vec!["Christopher M. Bishop"]);
+    assert_eq!(entry.year, Some(2006));
+    assert_eq!(entry.publisher, Some("Springer".to_string()));
+    assert!(matches!(
+        entry.work_type,
+        clepsydra::vault::academic::WorkType::Book
+    ));
+    assert_eq!(entry.isbn, Some("978-0-387-31073-2".to_string()));
 }
