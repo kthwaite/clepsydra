@@ -1129,3 +1129,69 @@ Same dir design.
         "same directory should rank first"
     );
 }
+
+// -----------------------------------------------------------------------
+// FTS5 full-text search
+// -----------------------------------------------------------------------
+
+#[test]
+fn fts_search_returns_matching_pages() {
+    let (_tmp, vault) = setup_vault(&[
+        (
+            "quantum.md",
+            "---\ntitle: Quantum Mechanics\n---\nThe study of subatomic particles and wave functions.",
+        ),
+        (
+            "cooking.md",
+            "---\ntitle: Cooking Basics\n---\nHow to make a perfect sourdough bread.",
+        ),
+        (
+            "physics.md",
+            "---\ntitle: Classical Physics\n---\nNewton's laws and wave mechanics.",
+        ),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    index.build(&vault).unwrap();
+
+    let results = index.search("wave", 10).unwrap();
+    assert_eq!(results.len(), 2);
+    let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
+    assert!(paths.contains(&"quantum.md"));
+    assert!(paths.contains(&"physics.md"));
+    assert!(!paths.contains(&"cooking.md"));
+}
+
+#[test]
+fn fts_search_matches_title() {
+    let (_tmp, vault) = setup_vault(&[(
+        "note.md",
+        "---\ntitle: Zettelkasten Method\n---\nA note-taking approach.",
+    )]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    index.build(&vault).unwrap();
+
+    let results = index.search("zettelkasten", 10).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].path, "note.md");
+}
+
+#[test]
+fn fts_search_removed_page_not_returned() {
+    let (_tmp, vault) = setup_vault(&[(
+        "ephemeral.md",
+        "---\ntitle: Ephemeral\n---\nTemporary content.",
+    )]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    index.build(&vault).unwrap();
+    assert_eq!(index.search("ephemeral", 10).unwrap().len(), 1);
+
+    fs::remove_file(vault.root().join("ephemeral.md")).unwrap();
+    index.build(&vault).unwrap();
+    assert_eq!(index.search("ephemeral", 10).unwrap().len(), 0);
+}

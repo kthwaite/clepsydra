@@ -80,6 +80,16 @@ pub struct BacklinkWithContext {
     pub context: String,
 }
 
+/// A single full-text search result.
+#[derive(Debug)]
+pub struct SearchResult {
+    pub page_id: String,
+    pub path: String,
+    pub title: Option<String>,
+    pub snippet: String,
+    pub rank: f64,
+}
+
 // ---------------------------------------------------------------------------
 // BuildStats
 // ---------------------------------------------------------------------------
@@ -142,6 +152,14 @@ CREATE INDEX IF NOT EXISTS idx_links_target_id ON links(target_id);
 CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
 CREATE INDEX IF NOT EXISTS idx_links_target_canonical ON links(target_canonical);
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+    page_id UNINDEXED,
+    path UNINDEXED,
+    title,
+    body,
+    tokenize='porter unicode61'
+);
 "#;
 
 // ---------------------------------------------------------------------------
@@ -445,6 +463,21 @@ impl VaultIndex {
                 ],
             )?;
 
+            // Update FTS index
+            tx.execute(
+                "DELETE FROM pages_fts WHERE page_id = ?1",
+                params![page_id],
+            )?;
+            tx.execute(
+                "INSERT INTO pages_fts (page_id, path, title, body) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    page_id,
+                    pf.vault_path.as_str(),
+                    pf.meta.title.as_deref().unwrap_or(""),
+                    &pf.body,
+                ],
+            )?;
+
             // Clear old links/tags/canonical_names for this page
             tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
             tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
@@ -474,6 +507,7 @@ impl VaultIndex {
         drop(stmt);
 
         for id in &stale {
+            tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![id])?;
             tx.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
             stats.pages_removed += 1;
         }
@@ -652,6 +686,21 @@ impl VaultIndex {
             ],
         )?;
 
+        // Update FTS index
+        tx.execute(
+            "DELETE FROM pages_fts WHERE page_id = ?1",
+            params![page_id],
+        )?;
+        tx.execute(
+            "INSERT INTO pages_fts (page_id, path, title, body) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                page_id,
+                page.vault_path.as_str(),
+                page.meta.title.as_deref().unwrap_or(""),
+                &page.body,
+            ],
+        )?;
+
         // Clear old derived data
         tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
@@ -674,6 +723,20 @@ impl VaultIndex {
     /// existed at that path. Derived data (links, tags, canonical_names) is
     /// removed via ON DELETE CASCADE.
     pub fn remove_page(&mut self, vault_path: &VaultPath) -> Result<bool, IndexError> {
+        // Remove from FTS before deleting the page
+        let page_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(ref pid) = page_id {
+            self.conn
+                .execute("DELETE FROM pages_fts WHERE page_id = ?1", params![pid])?;
+        }
+
         let changes = self.conn.execute(
             "DELETE FROM pages WHERE path = ?1",
             params![vault_path.as_str()],
@@ -1150,6 +1213,35 @@ impl VaultIndex {
         }
 
         ranked
+    }
+
+    /// Full-text search across page titles and bodies.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT f.page_id, f.path, p.title,
+                    snippet(pages_fts, 3, '<mark>', '</mark>', '\u{2026}', 32),
+                    rank
+             FROM pages_fts f
+             JOIN pages p ON p.id = f.page_id
+             WHERE pages_fts MATCH ?1
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+
+        let results = stmt
+            .query_map(params![query, limit as u32], |row| {
+                Ok(SearchResult {
+                    page_id: row.get(0)?,
+                    path: row.get(1)?,
+                    title: row.get(2)?,
+                    snippet: row.get(3)?,
+                    rank: row.get(4)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(results)
     }
 }
 
