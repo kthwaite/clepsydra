@@ -1,4 +1,5 @@
 use clepsydra::vault::import::{find_existing_work, parse_bibtex};
+use clepsydra::vault::import_doi::parse_crossref_response;
 use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
@@ -194,4 +195,36 @@ Content.
         Some("another2024"),
     );
     assert!(found.is_some(), "should find existing work by cite_key");
+}
+
+#[test]
+fn parse_crossref_json_into_import_entry() {
+    let json = serde_json::json!({
+        "status": "ok",
+        "message": {
+            "type": "journal-article",
+            "title": ["Nanometre-scale thermometry in a living cell"],
+            "author": [
+                {"given": "G.", "family": "Kucsko", "sequence": "first"},
+                {"given": "P. C.", "family": "Maurer", "sequence": "additional"}
+            ],
+            "published-print": {"date-parts": [[2013, 8]]},
+            "container-title": ["Nature"],
+            "publisher": "Springer Science and Business Media LLC",
+            "DOI": "10.1038/nature12373",
+            "ISBN": null
+        }
+    });
+
+    let entry = parse_crossref_response(&json).unwrap();
+    assert_eq!(entry.title, "Nanometre-scale thermometry in a living cell");
+    assert_eq!(entry.authors, vec!["G. Kucsko", "P. C. Maurer"]);
+    assert_eq!(entry.year, Some(2013));
+    assert_eq!(entry.venue, Some("Nature".to_string()));
+    assert_eq!(entry.doi, Some("10.1038/nature12373".to_string()));
+    assert!(matches!(
+        entry.work_type,
+        clepsydra::vault::academic::WorkType::Paper
+    ));
+    assert_eq!(entry.cite_key, "kucsko2013nanometrescale");
 }

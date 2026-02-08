@@ -153,6 +153,11 @@ pub struct ImportResponse {
     pub results: Vec<ImportResult>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ImportDoiRequest {
+    pub doi: String,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -167,6 +172,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/annotations", post(create_annotation))
         .route("/import/bibtex", post(import_bibtex))
+        .route("/import/doi", post(import_doi))
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +443,80 @@ async fn import_bibtex(
     }
 
     Ok(Json(ImportResponse { results }))
+}
+
+async fn import_doi(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ImportDoiRequest>,
+) -> Result<Response, ApiError> {
+    // 1. Check dedup by DOI
+    {
+        let index = state.index.lock();
+        if let Some(path) = crate::vault::import::find_existing_work(
+            index.connection(),
+            Some(&req.doi),
+            None,
+            None,
+        ) {
+            return Ok((
+                StatusCode::OK,
+                Json(ImportResult {
+                    cite_key: String::new(),
+                    status: "skipped".to_string(),
+                    page_path: Some(path),
+                    error: None,
+                }),
+            )
+                .into_response());
+        }
+    }
+
+    // 2. Fetch from Crossref
+    let json = crate::vault::import_doi::fetch_doi(&req.doi)
+        .await
+        .map_err(|e| ApiError::bad_request(format!("DOI lookup failed: {e}")))?;
+
+    let entry = crate::vault::import_doi::parse_crossref_response(&json)
+        .map_err(|e| ApiError::bad_request(format!("Failed to parse Crossref data: {e}")))?;
+
+    // 3. Create work
+    let detail = create_work_internal(
+        &state,
+        entry.title,
+        entry.work_type,
+        entry.authors,
+        entry.year,
+        entry.venue,
+        entry.publisher,
+        None,
+        None,
+        Some(ExternalIds {
+            doi: entry.doi.clone(),
+            isbn: entry.isbn,
+            arxiv: entry.arxiv,
+        }),
+        entry
+            .url
+            .map(|u| WorkUrls {
+                landing: Some(u),
+                pdf: None,
+            }),
+        Some(entry.cite_key.clone()),
+        vec![],
+        vec![],
+        None,
+    )?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ImportResult {
+            cite_key: entry.cite_key,
+            status: "created".to_string(),
+            page_path: Some(detail.path),
+            error: None,
+        }),
+    )
+        .into_response())
 }
 
 async fn create_work(
