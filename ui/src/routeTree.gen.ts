@@ -8,70 +8,88 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as IndexRouteImport } from "./routes/index";
-import { Route as PagesSplatRouteImport } from "./routes/pages/$";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as GraphRouteImport } from './routes/graph'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as PagesSplatRouteImport } from './routes/pages/$'
 
+const GraphRoute = GraphRouteImport.update({
+  id: '/graph',
+  path: '/graph',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const PagesSplatRoute = PagesSplatRouteImport.update({
-  id: "/pages/$",
-  path: "/pages/$",
+  id: '/pages/$',
+  path: '/pages/$',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/pages/$": typeof PagesSplatRoute;
+  '/': typeof IndexRoute
+  '/graph': typeof GraphRoute
+  '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/pages/$": typeof PagesSplatRoute;
+  '/': typeof IndexRoute
+  '/graph': typeof GraphRoute
+  '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/pages/$": typeof PagesSplatRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/graph': typeof GraphRoute
+  '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/pages/$";
-  fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/pages/$";
-  id: "__root__" | "/" | "/pages/$";
-  fileRoutesById: FileRoutesById;
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths: '/' | '/graph' | '/pages/$'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/graph' | '/pages/$'
+  id: '__root__' | '/' | '/graph' | '/pages/$'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  PagesSplatRoute: typeof PagesSplatRoute;
+  IndexRoute: typeof IndexRoute
+  GraphRoute: typeof GraphRoute
+  PagesSplatRoute: typeof PagesSplatRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/pages/$": {
-      id: "/pages/$";
-      path: "/pages/$";
-      fullPath: "/pages/$";
-      preLoaderRoute: typeof PagesSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/graph': {
+      id: '/graph'
+      path: '/graph'
+      fullPath: '/graph'
+      preLoaderRoute: typeof GraphRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pages/$': {
+      id: '/pages/$'
+      path: '/pages/$'
+      fullPath: '/pages/$'
+      preLoaderRoute: typeof PagesSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  GraphRoute: GraphRoute,
   PagesSplatRoute: PagesSplatRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()

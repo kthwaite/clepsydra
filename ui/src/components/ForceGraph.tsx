@@ -1,0 +1,149 @@
+import { useCallback, useEffect, useRef } from "react";
+import {
+  type Simulation,
+  type SimulationNodeDatum,
+  forceCenter,
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+} from "d3-force";
+import { drag } from "d3-drag";
+import { zoom, zoomIdentity } from "d3-zoom";
+import { select } from "d3-selection";
+import type { GraphEdge, GraphNode } from "#/api/types";
+
+interface SimNode extends SimulationNodeDatum, GraphNode {}
+
+interface ForceGraphProps {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  onNodeClick?: (node: GraphNode) => void;
+}
+
+export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const gRef = useRef<SVGGElement>(null);
+  const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
+
+  const initGraph = useCallback(() => {
+    const svg = svgRef.current;
+    const g = gRef.current;
+    if (!svg || !g) return undefined;
+
+    const width = svg.clientWidth;
+    const height = svg.clientHeight;
+
+    // Build simulation data (copies to avoid mutating props)
+    const simNodes: SimNode[] = nodes.map((n) => ({ ...n }));
+    const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
+    const simLinks = edges
+      .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
+      .map((e) => ({
+        source: nodeMap.get(e.source)!,
+        target: nodeMap.get(e.target)!,
+        kind: e.kind,
+      }));
+
+    // Stop any prior simulation
+    simRef.current?.stop();
+
+    const sim = forceSimulation(simNodes)
+      .force(
+        "link",
+        forceLink(simLinks)
+          .id((d) => (d as SimNode).id)
+          .distance(80),
+      )
+      .force("charge", forceManyBody().strength(-200))
+      .force("center", forceCenter(width / 2, height / 2))
+      .force("collide", forceCollide(20));
+
+    simRef.current = sim;
+
+    const svgSel = select(svg);
+    const gSel = select(g);
+
+    // Zoom
+    const zoomBehavior = zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.1, 4])
+      .on("zoom", (event) => {
+        gSel.attr("transform", event.transform);
+      });
+    svgSel.call(zoomBehavior).call(zoomBehavior.transform, zoomIdentity);
+
+    // Clear existing elements
+    gSel.selectAll("*").remove();
+
+    // Links
+    const linkSel = gSel
+      .selectAll("line")
+      .data(simLinks)
+      .join("line")
+      .attr("class", "stroke-border")
+      .attr("stroke-width", 1);
+
+    // Nodes
+    const nodeSel = gSel
+      .selectAll<SVGCircleElement, SimNode>("circle")
+      .data(simNodes)
+      .join("circle")
+      .attr("r", 6)
+      .attr("class", "fill-foreground cursor-pointer")
+      .on("click", (_event, d) => onNodeClick?.(d));
+
+    // Labels
+    const labelSel = gSel
+      .selectAll<SVGTextElement, SimNode>("text")
+      .data(simNodes)
+      .join("text")
+      .text((d) => d.title || d.path)
+      .attr("class", "fill-muted-foreground text-[10px]")
+      .attr("dx", 10)
+      .attr("dy", 4);
+
+    // Drag
+    const dragBehavior = drag<SVGCircleElement, SimNode>()
+      .on("start", (event, d) => {
+        if (!event.active) sim.alphaTarget(0.3).restart();
+        d.fx = event.x as number | null;
+        d.fy = event.y as number | null;
+      })
+      .on("drag", (event, d) => {
+        d.fx = event.x as number | null;
+        d.fy = event.y as number | null;
+      })
+      .on("end", (event, d) => {
+        if (!event.active) sim.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      });
+    nodeSel.call(dragBehavior);
+
+    sim.on("tick", () => {
+      linkSel
+        .attr("x1", (d) => (d.source as SimNode).x!)
+        .attr("y1", (d) => (d.source as SimNode).y!)
+        .attr("x2", (d) => (d.target as SimNode).x!)
+        .attr("y2", (d) => (d.target as SimNode).y!);
+
+      nodeSel.attr("cx", (d) => d.x!).attr("cy", (d) => d.y!);
+
+      labelSel.attr("x", (d) => d.x!).attr("y", (d) => d.y!);
+    });
+
+    return () => {
+      sim.stop();
+    };
+  }, [nodes, edges, onNodeClick]);
+
+  useEffect(() => {
+    return initGraph();
+  }, [initGraph]);
+
+  return (
+    <svg ref={svgRef} className="h-full w-full bg-background">
+      <g ref={gRef} />
+    </svg>
+  );
+}
