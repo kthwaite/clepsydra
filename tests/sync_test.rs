@@ -3,6 +3,7 @@ use std::fs;
 use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
+use clepsydra::vault::page::Page;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::sync::{ChangeEvent, SyncEngine};
 use tempfile::TempDir;
@@ -205,4 +206,36 @@ Content.
 
     assert_eq!(inc_pages, ref_pages, "pages mismatch after delete");
     assert_eq!(inc_links, ref_links, "links mismatch after delete");
+}
+
+#[test]
+fn upsert_repairs_missing_or_incomplete_frontmatter() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    // Start from a clean index.
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    // New file created externally with incomplete frontmatter (missing id/timestamps).
+    let raw = "---\ntitle: Draft\n---\nBody without metadata.\n";
+    let abs = vault.root().join("draft.md");
+    fs::write(&abs, raw).unwrap();
+
+    let events = vec![ChangeEvent::Upsert(VaultPath::new("draft.md").unwrap())];
+    let stats = SyncEngine::process_events(&events, &vault, &mut index).unwrap();
+    assert_eq!(stats.pages_indexed, 1);
+
+    // File should now contain valid/populated frontmatter.
+    let rewritten = fs::read_to_string(&abs).unwrap();
+    assert!(rewritten.starts_with("---\n"));
+
+    let vp = VaultPath::new("draft.md").unwrap();
+    let page = Page::from_file(&abs, vp).unwrap();
+    assert_eq!(page.meta.title.as_deref(), Some("Draft"));
+    assert!(!page.meta.id.is_nil());
+    assert!(page.meta.created_at.is_some());
+    assert!(page.meta.updated_at.is_some());
+    assert_eq!(page.body, "Body without metadata.\n");
 }
