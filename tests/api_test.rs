@@ -1629,3 +1629,48 @@ async fn update_work_changes_status() {
     assert_eq!(body["title"], "Update Test");
 }
 
+// ---------------------------------------------------------------------------
+// Academic API: annotations
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_and_list_annotations() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Annotated Paper"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let work: serde_json::Value = res.json();
+    let work_id = work["id"].as_str().unwrap();
+
+    let res = server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_id,
+            "annotation_type": "highlight",
+            "source_location": {"page": 4, "quote": "Important finding"},
+            "tags": ["key-result"],
+            "body": "This is the core contribution."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let ann: serde_json::Value = res.json();
+    assert_eq!(ann["work_id"], work_id);
+    assert_eq!(ann["annotation_type"], "highlight");
+
+    let res = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_id}/annotations"
+        ))
+        .await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1);
+    assert_eq!(body[0]["annotation_type"], "highlight");
+}
+

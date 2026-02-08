@@ -7,7 +7,7 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,8 @@ use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::academic::{
-    ExternalIds, ReadingStatus, WorkMeta, WorkType, WorkUrls, extra_to_work_meta,
+    AnnotationMeta, AnnotationType, ExternalIds, ReadingStatus, SourceLocation, WorkMeta,
+    WorkType, WorkUrls, annotation_meta_to_extra, extra_to_annotation_meta, extra_to_work_meta,
     work_meta_to_extra,
 };
 use crate::vault::canonical::CanonicalName;
@@ -74,6 +75,17 @@ pub struct ListWorksQuery {
     pub tag: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateAnnotationRequest {
+    pub work_id: String,
+    pub annotation_type: Option<AnnotationType>,
+    pub source_asset: Option<String>,
+    pub source_location: Option<SourceLocation>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub body: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct WorkDetail {
     pub id: String,
@@ -112,6 +124,20 @@ pub struct WorkSummary {
     pub tags: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct AnnotationDetail {
+    pub id: String,
+    pub path: String,
+    pub work_id: String,
+    pub work_path: Option<String>,
+    pub annotation_type: Option<AnnotationType>,
+    pub source_asset: Option<String>,
+    pub source_location: Option<SourceLocation>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    pub body: String,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -120,6 +146,11 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/works", get(list_works).post(create_work))
         .route("/works/by-id/{uuid}", get(get_work).put(update_work))
+        .route(
+            "/works/by-id/{uuid}/annotations",
+            get(list_annotations),
+        )
+        .route("/annotations", post(create_annotation))
 }
 
 // ---------------------------------------------------------------------------
@@ -643,4 +674,206 @@ async fn update_work(
         tags: meta.tags,
         body: page_body,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /annotations
+// ---------------------------------------------------------------------------
+
+async fn create_annotation(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateAnnotationRequest>,
+) -> Result<Response, ApiError> {
+    // 1. Validate work_id exists and is a work
+    let work_path = {
+        let index = state.index.lock();
+        let row: Option<String> = index
+            .connection()
+            .query_row(
+                "SELECT path FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
+                params![req.work_id],
+                |row| row.get(0),
+            )
+            .ok();
+        row.ok_or_else(|| {
+            ApiError::not_found(format!("work not found: {}", req.work_id))
+        })?
+    };
+
+    // 2. Generate filename
+    let type_prefix = match &req.annotation_type {
+        Some(AnnotationType::Highlight) => "highlight",
+        Some(AnnotationType::Note) => "note",
+        None => "annotation",
+    };
+    let timestamp = Utc::now().timestamp();
+    let filename = format!("{type_prefix}-{timestamp}.md");
+
+    // 3. Determine target folder
+    let config = state.vault.config();
+    let folder = &config.academic.annotations_folder;
+    let vault_path_str = if folder.is_empty() {
+        filename
+    } else {
+        format!("{folder}/{filename}")
+    };
+    let vault_path = VaultPath::new(&vault_path_str)
+        .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
+
+    let abs_path = state.vault.resolve(&vault_path);
+    if abs_path.exists() {
+        return Err(ApiError::conflict(format!(
+            "annotation file already exists: {vault_path_str}"
+        )));
+    }
+
+    // 4. Build PageMeta
+    let work_id_uuid: uuid::Uuid = req
+        .work_id
+        .parse()
+        .map_err(|e| ApiError::bad_request(format!("invalid work_id UUID: {e}")))?;
+
+    let ann_meta = AnnotationMeta {
+        work_id: work_id_uuid,
+        work_path: Some(work_path.clone()),
+        source_asset: req.source_asset.clone(),
+        source_location: req.source_location.clone(),
+        annotation_type: req.annotation_type.clone(),
+        extra: HashMap::new(),
+    };
+
+    let mut meta = PageMeta::new();
+    meta.tags = req.tags.clone();
+    meta.extra = annotation_meta_to_extra(&ann_meta);
+
+    let page_body = req.body.unwrap_or_default();
+
+    // 5. Create parent directories and write file
+    if let Some(parent) = abs_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+    }
+
+    let content = write_page_content(&meta, &page_body);
+    fs::write(&abs_path, &content)
+        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+
+    // 6. Index + resolve
+    {
+        let mut index = state.index.lock();
+        index
+            .index_page(&state.vault, &vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        index
+            .resolve_links_for_page(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    }
+
+    // 7. Send SyncNotification
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![vault_path.as_str().to_string()],
+        removed: vec![],
+    });
+
+    // 8. Return 201
+    Ok((
+        StatusCode::CREATED,
+        Json(AnnotationDetail {
+            id: meta.id.to_string(),
+            path: vault_path.as_str().to_string(),
+            work_id: req.work_id,
+            work_path: Some(work_path),
+            annotation_type: req.annotation_type,
+            source_asset: req.source_asset,
+            source_location: req.source_location,
+            tags: req.tags,
+            body: page_body,
+        }),
+    )
+        .into_response())
+}
+
+// ---------------------------------------------------------------------------
+// GET /works/by-id/{uuid}/annotations
+// ---------------------------------------------------------------------------
+
+async fn list_annotations(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+) -> Result<Json<Vec<AnnotationDetail>>, ApiError> {
+    // Verify the work exists
+    {
+        let index = state.index.lock();
+        let exists: bool = index
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
+                params![uuid],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !exists {
+            return Err(ApiError::not_found(format!("work not found: {uuid}")));
+        }
+    }
+
+    // Query annotation pages linked to this work
+    let rows: Vec<(String, String, String)> = {
+        let index = state.index.lock();
+        let mut stmt = index
+            .connection()
+            .prepare(
+                "SELECT id, path, meta_json FROM pages
+                 WHERE json_extract(meta_json, '$.kind') = 'annotation'
+                   AND json_extract(meta_json, '$.work_id') = ?1
+                 ORDER BY path",
+            )
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        stmt.query_map(params![uuid], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    // For each annotation, read the file to get the body
+    let mut results = Vec::with_capacity(rows.len());
+    for (id, path, mj) in &rows {
+        let vault_path = VaultPath::new(path)
+            .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+        let abs_path = state.vault.resolve(&vault_path);
+        let page = Page::from_file(&abs_path, vault_path)
+            .map_err(|e| ApiError::internal(format!("failed to read annotation: {e}")))?;
+
+        let ann = extra_to_annotation_meta(&page.meta.extra);
+
+        let meta_value: serde_json::Value =
+            serde_json::from_str(mj).unwrap_or_default();
+
+        results.push(AnnotationDetail {
+            id: id.clone(),
+            path: path.clone(),
+            work_id: ann
+                .as_ref()
+                .map(|a| a.work_id.to_string())
+                .unwrap_or_else(|| {
+                    meta_value
+                        .get("work_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                }),
+            work_path: ann.as_ref().and_then(|a| a.work_path.clone()),
+            annotation_type: ann.as_ref().and_then(|a| a.annotation_type.clone()),
+            source_asset: ann.as_ref().and_then(|a| a.source_asset.clone()),
+            source_location: ann.as_ref().and_then(|a| a.source_location.clone()),
+            tags: page.meta.tags,
+            body: page.body,
+        });
+    }
+
+    Ok(Json(results))
 }
