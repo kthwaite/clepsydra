@@ -1,4 +1,9 @@
-use clepsydra::vault::import::parse_bibtex;
+use clepsydra::vault::import::{find_existing_work, parse_bibtex};
+use clepsydra::vault::Vault;
+use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::init::init_vault;
+use std::fs;
+use tempfile::TempDir;
 
 #[test]
 fn parse_single_article() {
@@ -108,4 +113,85 @@ fn parse_empty_input_returns_empty_vec() {
     let bib = "this is not valid bibtex at all";
     let entries = parse_bibtex(bib).unwrap();
     assert!(entries.is_empty());
+}
+
+#[test]
+fn dedup_by_doi_finds_existing() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    fs::create_dir_all(root.join("library/papers")).unwrap();
+
+    let work_content = "\
+---
+id: 00000000-0000-0000-0000-000000000500
+kind: work
+work_type: paper
+title: Existing Paper
+cite_key: existing2024
+tags: []
+external_ids:
+  doi: \"10.1234/existing\"
+---
+Content.
+";
+    fs::write(root.join("library/papers/existing.md"), work_content).unwrap();
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    // Should find by DOI
+    let found = find_existing_work(
+        index.connection(),
+        Some("10.1234/existing"),
+        None,
+        None,
+    );
+    assert!(found.is_some(), "should find existing work by DOI");
+
+    // Should NOT find with different DOI
+    let not_found = find_existing_work(
+        index.connection(),
+        Some("10.1234/different"),
+        None,
+        None,
+    );
+    assert!(not_found.is_none());
+}
+
+#[test]
+fn dedup_by_cite_key_finds_existing() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    fs::create_dir_all(root.join("library/papers")).unwrap();
+
+    let work_content = "\
+---
+id: 00000000-0000-0000-0000-000000000501
+kind: work
+work_type: paper
+title: Another Paper
+cite_key: another2024
+tags: []
+---
+Content.
+";
+    fs::write(root.join("library/papers/another.md"), work_content).unwrap();
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    // Should find by cite_key (via canonical_names table, populated by CiteKeyDeriver)
+    let found = find_existing_work(
+        index.connection(),
+        None,
+        None,
+        Some("another2024"),
+    );
+    assert!(found.is_some(), "should find existing work by cite_key");
 }

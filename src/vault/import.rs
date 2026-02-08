@@ -1,4 +1,5 @@
 use biblatex::{Bibliography, ChunksExt, DateValue, EntryType, PermissiveType};
+use rusqlite::{Connection, params};
 
 use crate::vault::academic::WorkType;
 
@@ -118,4 +119,63 @@ fn extract_year(entry: &biblatex::Entry) -> Option<i32> {
     entry
         .get("year")
         .and_then(|chunks| chunks.format_verbatim().trim().parse::<i32>().ok())
+}
+
+/// Check if a work already exists by DOI → ISBN → cite_key (priority order).
+/// Returns Some(page_path) if found, None otherwise.
+pub fn find_existing_work(
+    conn: &Connection,
+    doi: Option<&str>,
+    isbn: Option<&str>,
+    cite_key: Option<&str>,
+) -> Option<String> {
+    // 1. Check by DOI via json_extract on meta_json
+    if let Some(doi) = doi {
+        let path: Option<String> = conn
+            .query_row(
+                "SELECT path FROM pages WHERE json_extract(meta_json, '$.kind') = 'work'
+                 AND json_extract(meta_json, '$.external_ids.doi') = ?1",
+                params![doi],
+                |row| row.get(0),
+            )
+            .ok();
+        if path.is_some() {
+            return path;
+        }
+    }
+
+    // 2. Check by ISBN via json_extract on meta_json
+    if let Some(isbn) = isbn {
+        let path: Option<String> = conn
+            .query_row(
+                "SELECT path FROM pages WHERE json_extract(meta_json, '$.kind') = 'work'
+                 AND json_extract(meta_json, '$.external_ids.isbn') = ?1",
+                params![isbn],
+                |row| row.get(0),
+            )
+            .ok();
+        if path.is_some() {
+            return path;
+        }
+    }
+
+    // 3. Check by cite_key via canonical_names table
+    if let Some(cite_key) = cite_key {
+        use crate::vault::canonical::CanonicalName;
+        let cn = CanonicalName::new(cite_key);
+        let path: Option<String> = conn
+            .query_row(
+                "SELECT p.path FROM canonical_names cn
+                 JOIN pages p ON p.id = cn.page_id
+                 WHERE cn.canonical_name = ?1 AND cn.source = 'cite_key'",
+                params![cn.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+        if path.is_some() {
+            return path;
+        }
+    }
+
+    None
 }
