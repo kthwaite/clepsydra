@@ -13,11 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
+use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
+use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
-use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 
 // ---------------------------------------------------------------------------
 // Response / request types
@@ -102,7 +103,8 @@ pub fn move_router() -> Router<Arc<AppState>> {
 
 async fn list_pages(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<PageSummary>>, ApiError> {
+    Query(pagination): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<PageSummary>>, ApiError> {
     let index = state.index.lock();
 
     let mut stmt = index
@@ -123,7 +125,7 @@ async fn list_pages(
         .filter_map(|r| r.ok())
         .collect();
 
-    Ok(Json(pages))
+    Ok(Json(PaginatedResponse::from_vec(pages, &pagination)))
 }
 
 async fn get_page(
@@ -516,4 +518,3 @@ async fn move_page(
         body: page.body,
     }))
 }
-

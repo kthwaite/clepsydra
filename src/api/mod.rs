@@ -5,6 +5,7 @@ pub mod events;
 pub mod folders;
 pub mod index_routes;
 pub mod pages;
+pub mod pagination;
 
 use std::sync::Arc;
 
