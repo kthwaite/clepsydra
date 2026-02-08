@@ -18,7 +18,7 @@ use super::derivers::cite_key::CiteKeyDeriver;
 use super::derivers::links::LinkDeriver;
 use super::derivers::tags::TagDeriver;
 use super::link::{extract_links, extract_property_refs};
-use super::page::{parse_frontmatter, write_page_content};
+use super::page::{parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS links (
     source_id       TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     target_raw      TEXT NOT NULL,
     target_canonical TEXT,
-    target_id       TEXT REFERENCES pages(id),
+    target_id       TEXT REFERENCES pages(id) ON DELETE SET NULL,
     target_path     TEXT,
     kind            TEXT NOT NULL,
     source_field    TEXT,
@@ -174,6 +174,9 @@ impl VaultIndex {
         // 4. Execute schema
         conn.execute_batch(SCHEMA)?;
 
+        // 5. Migration: ensure links.target_id has ON DELETE SET NULL
+        migrate_links_fk(&conn)?;
+
         Ok(Self {
             conn,
             derivers: vec![
@@ -196,6 +199,9 @@ impl VaultIndex {
         let conn = Connection::open(db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(SCHEMA)?;
+
+        // Migration: ensure links.target_id has ON DELETE SET NULL
+        migrate_links_fk(&conn)?;
 
         Ok(Self {
             conn,
@@ -266,14 +272,26 @@ impl VaultIndex {
 
             seen_paths.insert(vault_path.as_str().to_string());
 
-            // Read content, compute blake3 hash
-            let content = match fs::read_to_string(abs_path) {
+            // Read content (and normalize frontmatter if needed).
+            let mut content = match fs::read_to_string(abs_path) {
                 Ok(c) => c,
                 Err(e) => {
                     stats.warnings.push(format!("cannot read {rel_str}: {e}"));
                     continue;
                 }
             };
+
+            let (meta, body, rewrote_frontmatter) = parse_or_repair_frontmatter(&content);
+            if rewrote_frontmatter {
+                content = write_page_content(&meta, &body);
+                if let Err(e) = fs::write(abs_path, &content) {
+                    stats
+                        .warnings
+                        .push(format!("cannot rewrite frontmatter in {rel_str}: {e}"));
+                    continue;
+                }
+            }
+
             let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
 
             // Check if hash matches DB -> skip if unchanged
@@ -289,17 +307,6 @@ impl VaultIndex {
                 stats.pages_skipped += 1;
                 continue;
             }
-
-            // Parse frontmatter -> get PageMeta + body
-            let (meta, body) = match parse_frontmatter(&content) {
-                Ok((m, b)) => (m, b),
-                Err(e) => {
-                    stats
-                        .warnings
-                        .push(format!("frontmatter error in {rel_str}: {e}"));
-                    continue;
-                }
-            };
 
             // Derive CanonicalName
             let canonical = if let Some(ref title) = meta.title {
@@ -555,7 +562,14 @@ impl VaultIndex {
         let abs_path = vault.resolve(vault_path);
         let linkable_properties = &vault.config().vault.linkable_properties;
 
-        let content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
+        let mut content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
+        let (meta, body, rewrote_frontmatter) = parse_or_repair_frontmatter(&content);
+
+        if rewrote_frontmatter {
+            content = write_page_content(&meta, &body);
+            std::fs::write(&abs_path, &content).map_err(IndexError::Io)?;
+        }
+
         let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
 
         // Check if hash matches DB -> skip if unchanged
@@ -571,13 +585,6 @@ impl VaultIndex {
         if existing_hash.as_deref() == Some(&content_hash) {
             return Ok(false);
         }
-
-        let (meta, body) = parse_frontmatter(&content).map_err(|e| {
-            IndexError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                e.to_string(),
-            ))
-        })?;
 
         let canonical = if let Some(ref title) = meta.title {
             CanonicalName::from_title(title)
@@ -618,8 +625,7 @@ impl VaultIndex {
 
         let tx = self.conn.transaction()?;
         let page_id = page.meta.id.to_string();
-        let meta_json =
-            serde_json::to_string(&page.meta).unwrap_or_else(|_| "{}".to_string());
+        let meta_json = serde_json::to_string(&page.meta).unwrap_or_else(|_| "{}".to_string());
         let created_at = page.meta.created_at.map(|dt| dt.to_rfc3339());
         let updated_at = page.meta.updated_at.map(|dt| dt.to_rfc3339());
 
@@ -647,14 +653,8 @@ impl VaultIndex {
         )?;
 
         // Clear old derived data
-        tx.execute(
-            "DELETE FROM links WHERE source_id = ?1",
-            params![page_id],
-        )?;
-        tx.execute(
-            "DELETE FROM tags WHERE page_id = ?1",
-            params![page_id],
-        )?;
+        tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
+        tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
         tx.execute(
             "DELETE FROM canonical_names WHERE page_id = ?1",
             params![page_id],
@@ -688,10 +688,7 @@ impl VaultIndex {
     /// 2. Incoming links to the page (links targeting the page's canonical names)
     ///
     /// Returns the number of links resolved.
-    pub fn resolve_links_for_page(
-        &mut self,
-        vault_path: &VaultPath,
-    ) -> Result<usize, IndexError> {
+    pub fn resolve_links_for_page(&mut self, vault_path: &VaultPath) -> Result<usize, IndexError> {
         let tx = self.conn.transaction()?;
         let mut resolved_count = 0;
 
@@ -754,9 +751,8 @@ impl VaultIndex {
         }
 
         // 2. Resolve incoming links targeting this page's canonical names
-        let mut cn_stmt = tx.prepare(
-            "SELECT canonical_name FROM canonical_names WHERE page_id = ?1",
-        )?;
+        let mut cn_stmt =
+            tx.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
         let canonical_names: Vec<String> = cn_stmt
             .query_map(params![page_id], |row| row.get(0))?
             .filter_map(|r| r.ok())
@@ -775,11 +771,9 @@ impl VaultIndex {
             drop(stmt);
 
             for (source_id, span_start) in &unresolved {
-                let mut count_stmt = tx.prepare(
-                    "SELECT COUNT(*) FROM canonical_names WHERE canonical_name = ?1",
-                )?;
-                let match_count: i64 =
-                    count_stmt.query_row(params![cn], |row| row.get(0))?;
+                let mut count_stmt =
+                    tx.prepare("SELECT COUNT(*) FROM canonical_names WHERE canonical_name = ?1")?;
+                let match_count: i64 = count_stmt.query_row(params![cn], |row| row.get(0))?;
                 drop(count_stmt);
 
                 if match_count == 1 {
@@ -806,10 +800,7 @@ impl VaultIndex {
     /// target_canonical matching the page's canonical names).
     ///
     /// Returns vault paths of the source pages (deduplicated).
-    pub fn reverse_deps(
-        &self,
-        vault_path: &VaultPath,
-    ) -> Result<Vec<VaultPath>, IndexError> {
+    pub fn reverse_deps(&self, vault_path: &VaultPath) -> Result<Vec<VaultPath>, IndexError> {
         let page_id: Option<String> = self
             .conn
             .query_row(
@@ -819,8 +810,7 @@ impl VaultIndex {
             )
             .ok();
 
-        let mut source_paths: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut source_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         if let Some(ref page_id) = page_id {
             // Pages that resolved to this page
@@ -836,9 +826,9 @@ impl VaultIndex {
             source_paths.extend(paths);
 
             // Pages with unresolved links matching this page's canonical names
-            let mut cn_stmt = self.conn.prepare(
-                "SELECT canonical_name FROM canonical_names WHERE page_id = ?1",
-            )?;
+            let mut cn_stmt = self
+                .conn
+                .prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
             let cns: Vec<String> = cn_stmt
                 .query_map(params![page_id], |row| row.get(0))?
                 .filter_map(|r| r.ok())
@@ -875,10 +865,7 @@ impl VaultIndex {
     /// can be re-resolved against updated index state.
     ///
     /// Returns the number of links invalidated.
-    pub fn invalidate_links_to(
-        &mut self,
-        vault_path: &VaultPath,
-    ) -> Result<usize, IndexError> {
+    pub fn invalidate_links_to(&mut self, vault_path: &VaultPath) -> Result<usize, IndexError> {
         let page_id: Option<String> = self
             .conn
             .query_row(
@@ -1052,7 +1039,17 @@ impl VaultIndex {
 
         // 4. For each link, extract context
         let mut results = Vec::new();
-        for BacklinkRow { source_id, source_path, source_title, target_raw, kind, span_start, span_end, source_field } in rows {
+        for BacklinkRow {
+            source_id,
+            source_path,
+            source_title,
+            target_raw,
+            kind,
+            span_start,
+            span_end,
+            source_field,
+        } in rows
+        {
             let context = if kind == "property_ref" {
                 // Property ref links: use field name as context
                 let field = source_field.as_deref().unwrap_or("unknown");
@@ -1179,6 +1176,51 @@ fn find_body_start(content: &str) -> usize {
     } else {
         0
     }
+}
+
+/// Migrate the `links` table so that `target_id` carries `ON DELETE SET NULL`.
+///
+/// SQLite cannot alter FK constraints in-place, so we check the existing
+/// constraint via `PRAGMA foreign_key_list` and, if needed, recreate the table.
+fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
+    let needs_migration: bool = {
+        let mut stmt = conn.prepare("PRAGMA foreign_key_list(links)")?;
+        let fks: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(3)?, row.get::<_, String>(6)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        fks.iter()
+            .any(|(col, on_delete)| col == "target_id" && on_delete != "SET NULL")
+    };
+
+    if needs_migration {
+        conn.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+            CREATE TABLE IF NOT EXISTS links_new (
+                source_id       TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                target_raw      TEXT NOT NULL,
+                target_canonical TEXT,
+                target_id       TEXT REFERENCES pages(id) ON DELETE SET NULL,
+                target_path     TEXT,
+                kind            TEXT NOT NULL,
+                source_field    TEXT,
+                span_start      INTEGER NOT NULL,
+                span_end        INTEGER NOT NULL,
+                PRIMARY KEY (source_id, span_start)
+            );
+            INSERT INTO links_new SELECT * FROM links;
+            DROP TABLE links;
+            ALTER TABLE links_new RENAME TO links;
+            CREATE INDEX IF NOT EXISTS idx_links_target_id ON links(target_id);
+            CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
+            CREATE INDEX IF NOT EXISTS idx_links_target_canonical ON links(target_canonical);
+            PRAGMA foreign_keys=ON;"
+        )?;
+    }
+
+    Ok(())
 }
 
 /// Extract string values from a serde_yaml::Value (handles both scalar strings

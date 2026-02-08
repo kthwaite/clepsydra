@@ -1,6 +1,6 @@
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use clepsydra::vault::Vault;
 use clepsydra::vault::config::DisambiguationStrategy;
@@ -337,7 +337,10 @@ Back to [[Hello]].
         .connection()
         .query_row("SELECT COUNT(*) FROM canonical_names", [], |row| row.get(0))
         .unwrap();
-    assert!(cn_count >= 3, "expected at least 3 canonical_names, got {cn_count}");
+    assert!(
+        cn_count >= 3,
+        "expected at least 3 canonical_names, got {cn_count}"
+    );
 
     // Body links: 2 wiki links
     let link_count: i64 = index
@@ -379,7 +382,10 @@ Back to [[Hello]].
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(target_id.as_deref(), Some("00000000-0000-0000-0000-000000000002"));
+    assert_eq!(
+        target_id.as_deref(),
+        Some("00000000-0000-0000-0000-000000000002")
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -494,7 +500,11 @@ Content.
 
     index.build(&vault).unwrap();
 
-    assert_eq!(call_count.load(Ordering::Relaxed), 1, "custom deriver should be called once per page");
+    assert_eq!(
+        call_count.load(Ordering::Relaxed),
+        1,
+        "custom deriver should be called once per page"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -588,7 +598,10 @@ Content here.
         .connection()
         .query_row("SELECT COUNT(*) FROM canonical_names", [], |row| row.get(0))
         .unwrap();
-    assert!(cn_count >= 1, "expected at least 1 canonical_name, got {cn_count}");
+    assert!(
+        cn_count >= 1,
+        "expected at least 1 canonical_name, got {cn_count}"
+    );
 }
 
 #[test]
@@ -630,17 +643,21 @@ Bye.
     // Tags for goner should be gone (CASCADE)
     let tag: Option<String> = index
         .connection()
-        .query_row(
-            "SELECT tag FROM tags WHERE tag = 'gone'",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT tag FROM tags WHERE tag = 'gone'", [], |row| {
+            row.get(0)
+        })
         .ok();
-    assert!(tag.is_none(), "tags for removed page should be cascaded away");
+    assert!(
+        tag.is_none(),
+        "tags for removed page should be cascaded away"
+    );
 
     // Removing again should return false
     let removed_again = index.remove_page(&vp).unwrap();
-    assert!(!removed_again, "remove_page should return false for absent page");
+    assert!(
+        !removed_again,
+        "remove_page should return false for absent page"
+    );
 }
 
 #[test]
@@ -662,7 +679,10 @@ Same content.
     assert!(first, "first index_page should return true");
 
     let second = index.index_page(&vault, &vp).unwrap();
-    assert!(!second, "second index_page on unchanged content should return false");
+    assert!(
+        !second,
+        "second index_page on unchanged content should return false"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -699,7 +719,10 @@ Back to [[Hub]].
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(unresolved, 2, "both wiki links should be unresolved before resolution");
+    assert_eq!(
+        unresolved, 2,
+        "both wiki links should be unresolved before resolution"
+    );
 
     // Resolve for hub.md — should resolve both the outgoing [[Spoke]] link
     // AND the incoming [[Hub]] link from spoke.md
@@ -889,11 +912,18 @@ Second design page.
     assert_eq!(ghost_link.reason, UnresolvedReason::NoMatch);
     assert!(ghost_link.candidates.is_empty());
 
-    let design_link = unresolved.iter().find(|u| u.target_raw == "Design").unwrap();
+    let design_link = unresolved
+        .iter()
+        .find(|u| u.target_raw == "Design")
+        .unwrap();
     assert_eq!(design_link.reason, UnresolvedReason::Ambiguous);
     assert_eq!(design_link.candidates.len(), 2);
 
-    let candidate_paths: Vec<&str> = design_link.candidates.iter().map(|c| c.path.as_str()).collect();
+    let candidate_paths: Vec<&str> = design_link
+        .candidates
+        .iter()
+        .map(|c| c.path.as_str())
+        .collect();
     assert!(candidate_paths.contains(&"delta.md"));
     assert!(candidate_paths.contains(&"subdir/epsilon.md"));
 }
@@ -980,7 +1010,10 @@ Nested design.
     index.resolve_links().unwrap();
 
     let unresolved = index.unresolved_with_candidates().unwrap();
-    let design_link = unresolved.iter().find(|u| u.target_raw == "Design").unwrap();
+    let design_link = unresolved
+        .iter()
+        .find(|u| u.target_raw == "Design")
+        .unwrap();
 
     let ranked = index.rank_candidates(
         &design_link.candidates,
@@ -988,7 +1021,64 @@ Nested design.
         DisambiguationStrategy::ShortestPath,
     );
 
-    assert_eq!(ranked[0].path, "design.md", "shortest path should rank first");
+    assert_eq!(
+        ranked[0].path, "design.md",
+        "shortest path should rank first"
+    );
+}
+
+#[test]
+fn delete_target_page_nulls_link_target_id() {
+    let (_tmp, vault) = setup_vault(&[
+        (
+            "source.md",
+            "---\ntitle: Source\n---\nSee [[target]].",
+        ),
+        (
+            "target.md",
+            "---\ntitle: Target\n---\nContent.",
+        ),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    // Verify link is resolved
+    let target_id: String = index
+        .connection()
+        .query_row(
+            "SELECT id FROM pages WHERE path = 'target.md'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    let link_target: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = (SELECT id FROM pages WHERE path = 'source.md') AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(link_target, Some(target_id.clone()));
+
+    // Delete target page from disk and rebuild
+    fs::remove_file(vault.root().join("target.md")).unwrap();
+    index.build(&vault).unwrap();
+
+    // The link's target_id should now be NULL (via ON DELETE SET NULL)
+    let link_target_after: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = (SELECT id FROM pages WHERE path = 'source.md') AND span_start >= 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(link_target_after, None);
 }
 
 #[test]
@@ -1023,7 +1113,10 @@ Same dir design.
     index.resolve_links().unwrap();
 
     let unresolved = index.unresolved_with_candidates().unwrap();
-    let design_link = unresolved.iter().find(|u| u.target_raw == "Design").unwrap();
+    let design_link = unresolved
+        .iter()
+        .find(|u| u.target_raw == "Design")
+        .unwrap();
 
     let ranked = index.rank_candidates(
         &design_link.candidates,
@@ -1031,5 +1124,8 @@ Same dir design.
         DisambiguationStrategy::ClosestDirectory,
     );
 
-    assert_eq!(ranked[0].path, "notes/design.md", "same directory should rank first");
+    assert_eq!(
+        ranked[0].path, "notes/design.md",
+        "same directory should rank first"
+    );
 }
