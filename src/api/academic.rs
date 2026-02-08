@@ -14,10 +14,11 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
+use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::academic::{
-    AnnotationMeta, AnnotationType, ExternalIds, ReadingStatus, SourceLocation, WorkMeta,
-    WorkType, WorkUrls, annotation_meta_to_extra, extra_to_annotation_meta, extra_to_work_meta,
+    AnnotationMeta, AnnotationType, ExternalIds, ReadingStatus, SourceLocation, WorkMeta, WorkType,
+    WorkUrls, annotation_meta_to_extra, extra_to_annotation_meta, extra_to_work_meta,
     work_meta_to_extra,
 };
 use crate::vault::canonical::CanonicalName;
@@ -73,6 +74,8 @@ pub struct ListWorksQuery {
     pub year: Option<i32>,
     pub author: Option<String>,
     pub tag: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,10 +174,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/works", get(list_works).post(create_work))
         .route("/works/by-id/{uuid}", get(get_work).put(update_work))
-        .route(
-            "/works/by-id/{uuid}/annotations",
-            get(list_annotations),
-        )
+        .route("/works/by-id/{uuid}/annotations", get(list_annotations))
         .route("/annotations", post(create_annotation))
         .route("/import/bibtex", post(import_bibtex))
         .route("/import/doi", post(import_doi))
@@ -357,7 +357,10 @@ pub(crate) fn create_work_internal(
         id: meta.id.to_string(),
         path: vault_path.as_str().to_string(),
         title,
-        work_type: wm.as_ref().map(|w| w.work_type.clone()).unwrap_or(work_type),
+        work_type: wm
+            .as_ref()
+            .map(|w| w.work_type.clone())
+            .unwrap_or(work_type),
         authors: wm.as_ref().map(|w| w.authors.clone()).unwrap_or_default(),
         year: wm.as_ref().and_then(|w| w.year),
         venue: wm.as_ref().and_then(|w| w.venue.clone()),
@@ -458,12 +461,9 @@ async fn import_doi(
     // 1. Check dedup by DOI
     {
         let index = state.index.lock();
-        if let Some(path) = crate::vault::import::find_existing_work(
-            index.connection(),
-            Some(&req.doi),
-            None,
-            None,
-        ) {
+        if let Some(path) =
+            crate::vault::import::find_existing_work(index.connection(), Some(&req.doi), None, None)
+        {
             return Ok((
                 StatusCode::OK,
                 Json(ImportResult {
@@ -501,12 +501,10 @@ async fn import_doi(
             isbn: entry.isbn,
             arxiv: entry.arxiv,
         }),
-        entry
-            .url
-            .map(|u| WorkUrls {
-                landing: Some(u),
-                pdf: None,
-            }),
+        entry.url.map(|u| WorkUrls {
+            landing: Some(u),
+            pdf: None,
+        }),
         Some(entry.cite_key.clone()),
         vec![],
         vec![],
@@ -645,8 +643,7 @@ async fn get_work(
     };
 
     // 2. Check that it's a work
-    let meta_value: serde_json::Value =
-        serde_json::from_str(&meta_json).unwrap_or_default();
+    let meta_value: serde_json::Value = serde_json::from_str(&meta_json).unwrap_or_default();
     if meta_value.get("kind").and_then(|k| k.as_str()) != Some("work") {
         return Err(ApiError::not_found(format!("not a work: {uuid}")));
     }
@@ -689,7 +686,7 @@ async fn get_work(
 async fn list_works(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListWorksQuery>,
-) -> Result<Json<Vec<WorkSummary>>, ApiError> {
+) -> Result<Json<PaginatedResponse<WorkSummary>>, ApiError> {
     let index = state.index.lock();
 
     let mut sql = String::from(
@@ -763,8 +760,7 @@ async fn list_works(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .filter_map(|r| r.ok())
         .map(|(id, path, title, mj)| {
-            let meta: serde_json::Value =
-                serde_json::from_str(&mj).unwrap_or_default();
+            let meta: serde_json::Value = serde_json::from_str(&mj).unwrap_or_default();
             WorkSummary {
                 id,
                 path,
@@ -804,7 +800,11 @@ async fn list_works(
         })
         .collect();
 
-    Ok(Json(works))
+    let pagination = PaginationParams {
+        limit: query.limit,
+        offset: query.offset,
+    };
+    Ok(Json(PaginatedResponse::from_vec(works, &pagination)))
 }
 
 // ---------------------------------------------------------------------------
@@ -841,8 +841,7 @@ async fn update_work(
             .ok();
         let (path, mj) =
             row.ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?;
-        let meta_value: serde_json::Value =
-            serde_json::from_str(&mj).unwrap_or_default();
+        let meta_value: serde_json::Value = serde_json::from_str(&mj).unwrap_or_default();
         if meta_value.get("kind").and_then(|k| k.as_str()) != Some("work") {
             return Err(ApiError::not_found(format!("not a work: {uuid}")));
         }
@@ -982,9 +981,7 @@ async fn create_annotation(
                 |row| row.get(0),
             )
             .ok();
-        row.ok_or_else(|| {
-            ApiError::not_found(format!("work not found: {}", req.work_id))
-        })?
+        row.ok_or_else(|| ApiError::not_found(format!("work not found: {}", req.work_id)))?
     };
 
     // 2. Generate filename
@@ -1137,8 +1134,7 @@ async fn list_annotations(
 
         let ann = extra_to_annotation_meta(&page.meta.extra);
 
-        let meta_value: serde_json::Value =
-            serde_json::from_str(mj).unwrap_or_default();
+        let meta_value: serde_json::Value = serde_json::from_str(mj).unwrap_or_default();
 
         results.push(AnnotationDetail {
             id: id.clone(),

@@ -1357,10 +1357,11 @@ async fn content_index_returns_page_details() {
     let response = server.get("/api/vault/index/content-index").await;
     response.assert_status_ok();
 
-    let body: Vec<serde_json::Value> = response.json();
-    assert!(!body.is_empty(), "expected at least one entry");
+    let body: serde_json::Value = response.json();
+    let items = body["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "expected at least one entry");
 
-    let entry = body
+    let entry = items
         .iter()
         .find(|e| e["path"] == "indexed.md")
         .expect("expected to find indexed.md in content index");
@@ -1516,7 +1517,8 @@ async fn import_bibtex_creates_works() {
 
     // Verify works exist via list endpoint
     let list = server.get("/api/vault/academic/works").await;
-    let works: Vec<serde_json::Value> = list.json();
+    let body: serde_json::Value = list.json();
+    let works = body["items"].as_array().unwrap();
     assert_eq!(works.len(), 2);
 }
 
@@ -1696,27 +1698,31 @@ async fn list_works_with_filters() {
     // List all works
     let res = server.get("/api/vault/academic/works").await;
     res.assert_status_ok();
-    let body: Vec<serde_json::Value> = res.json();
-    assert_eq!(body.len(), 2);
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
 
     // Filter by work_type=paper
     let res = server
         .get("/api/vault/academic/works?work_type=paper")
         .await;
-    let body: Vec<serde_json::Value> = res.json();
-    assert_eq!(body.len(), 1);
-    assert_eq!(body[0]["title"], "ML Paper");
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title"], "ML Paper");
 
     // Filter by year=2020
     let res = server.get("/api/vault/academic/works?year=2020").await;
-    let body: Vec<serde_json::Value> = res.json();
-    assert_eq!(body.len(), 1);
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
 
     // Filter by status=done
     let res = server.get("/api/vault/academic/works?status=done").await;
-    let body: Vec<serde_json::Value> = res.json();
-    assert_eq!(body.len(), 1);
-    assert_eq!(body[0]["title"], "ML Book");
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title"], "ML Book");
 }
 
 #[tokio::test]
@@ -1943,7 +1949,8 @@ async fn academic_lifecycle_integration() {
     // 9. List all works — verify 1 work
     let res = server.get("/api/vault/academic/works").await;
     res.assert_status_ok();
-    let works: Vec<serde_json::Value> = res.json();
+    let works_body: serde_json::Value = res.json();
+    let works = works_body["items"].as_array().unwrap();
     assert_eq!(works.len(), 1);
     assert_eq!(works[0]["title"], "Attention Is All You Need");
 
@@ -2033,7 +2040,8 @@ async fn import_lifecycle_bibtex_dedup_and_verify() {
 
     // 4. Verify works list shows exactly 2
     let list = server.get("/api/vault/academic/works").await;
-    let works: Vec<serde_json::Value> = list.json();
+    let list_body: serde_json::Value = list.json();
+    let works = list_body["items"].as_array().unwrap();
     assert_eq!(works.len(), 2, "expected exactly 2 works after dedup");
 
     // 5. Verify metadata on the paper
@@ -2106,4 +2114,53 @@ async fn upload_attachment_conflict() {
         .bytes(body.into_bytes().into())
         .await
         .assert_status(StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// Pagination: works and content-index
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_works_pagination() {
+    let (server, _tmp) = setup_server();
+
+    for i in 0..3 {
+        server
+            .post("/api/vault/academic/works")
+            .json(&serde_json::json!({
+                "title": format!("Work {i}"),
+                "work_type": "paper",
+                "authors": [format!("Author {i}")],
+            }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server.get("/api/vault/academic/works").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 3);
+
+    let res = server.get("/api/vault/academic/works?limit=1").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn content_index_pagination() {
+    let (server, _tmp) = setup_server();
+
+    for i in 0..3 {
+        server
+            .post(&format!("/api/vault/pages/p{i}.md"))
+            .json(&serde_json::json!({ "title": format!("P{i}") }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server.get("/api/vault/index/content-index?limit=2").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 3);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
 }

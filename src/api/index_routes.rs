@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use super::pages::PageDetail;
+use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::index::UnresolvedReason;
@@ -310,9 +311,7 @@ async fn ambiguous(
     Ok(Json(names))
 }
 
-async fn warnings(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<String>>, ApiError> {
+async fn warnings(State(state): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
     let warnings = state.warnings.lock();
 
     Ok(Json(warnings.clone()))
@@ -521,7 +520,11 @@ async fn create_from_link(
 
     // Prepend folder if non-empty
     if !body.folder.is_empty() {
-        let combined = format!("{}/{}", body.folder.trim_end_matches('/'), vault_path.as_str());
+        let combined = format!(
+            "{}/{}",
+            body.folder.trim_end_matches('/'),
+            vault_path.as_str()
+        );
         vault_path = VaultPath::new(&combined)
             .map_err(|e| ApiError::bad_request(format!("invalid folder path: {e}")))?;
     }
@@ -604,7 +607,8 @@ struct ContentEntry {
 
 async fn content_index(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<ContentEntry>>, ApiError> {
+    Query(pagination): Query<PaginationParams>,
+) -> Result<Json<PaginatedResponse<ContentEntry>>, ApiError> {
     let index = state.index.lock();
 
     let conn = index.connection();
@@ -676,5 +680,5 @@ async fn content_index(
         });
     }
 
-    Ok(Json(entries))
+    Ok(Json(PaginatedResponse::from_vec(entries, &pagination)))
 }
