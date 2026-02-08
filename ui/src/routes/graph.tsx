@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useGraph } from "#/api/index";
-import { ForceGraph } from "#/components/ForceGraph";
 import type { GraphNode } from "#/api/types";
+import { ForceGraph } from "#/components/ForceGraph";
 
 export const Route = createFileRoute("/graph")({
   component: GraphView,

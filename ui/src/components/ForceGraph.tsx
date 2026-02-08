@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useRef } from "react";
+import { drag } from "d3-drag";
 import {
-  type Simulation,
-  type SimulationNodeDatum,
   forceCenter,
   forceCollide,
   forceLink,
   forceManyBody,
   forceSimulation,
+  type Simulation,
+  type SimulationNodeDatum,
 } from "d3-force";
-import { drag } from "d3-drag";
-import { zoom, zoomIdentity } from "d3-zoom";
 import { select } from "d3-selection";
+import { zoom, zoomIdentity } from "d3-zoom";
+import { useCallback, useEffect, useRef } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
 
 interface SimNode extends SimulationNodeDatum, GraphNode {}

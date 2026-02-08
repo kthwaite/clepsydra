@@ -21,7 +21,13 @@ export type TreeData = Record<string, TreeNode>;
  */
 export function buildPageTree(pages: PageSummary[]): TreeData {
   const data: TreeData = {
-    root: { id: "root", name: "root", isFolder: true, children: [], page: null },
+    root: {
+      id: "root",
+      name: "root",
+      isFolder: true,
+      children: [],
+      page: null,
+    },
   };
 
   for (const page of pages) {

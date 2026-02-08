@@ -8,7 +8,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight, File, Folder } from "lucide-react";
 import { useMemo } from "react";
 import { usePages } from "#/api/pages";
-import { buildPageTree, type TreeData, type TreeNode } from "#/lib/buildPageTree";
+import {
+  buildPageTree,
+  type TreeData,
+  type TreeNode,
+} from "#/lib/buildPageTree";
 
 export function FileTree() {
   const { data, isLoading, error } = usePages();
@@ -16,7 +20,16 @@ export function FileTree() {
   const navigate = useNavigate();
 
   const treeData: TreeData = useMemo(() => {
-    if (!pages) return { root: { id: "root", name: "root", isFolder: true, children: [], page: null } };
+    if (!pages)
+      return {
+        root: {
+          id: "root",
+          name: "root",
+          isFolder: true,
+          children: [],
+          page: null,
+        },
+      };
     return buildPageTree(pages);
   }, [pages]);
 
@@ -33,10 +46,14 @@ export function FileTree() {
   });
 
   if (isLoading) {
-    return <p className="px-2 py-1 text-xs text-muted-foreground">Loading...</p>;
+    return (
+      <p className="px-2 py-1 text-xs text-muted-foreground">Loading...</p>
+    );
   }
   if (error) {
-    return <p className="px-2 py-1 text-xs text-destructive">Failed to load pages</p>;
+    return (
+      <p className="px-2 py-1 text-xs text-destructive">Failed to load pages</p>
+    );
   }
   if (!pages || pages.length === 0) {
     return <p className="px-2 py-1 text-xs text-muted-foreground">No pages</p>;
@@ -58,7 +75,10 @@ export function FileTree() {
               if (node.isFolder) {
                 item.isExpanded() ? item.collapse() : item.expand();
               } else if (node.page) {
-                navigate({ to: "/pages/$", params: { _splat: node.page.path } });
+                navigate({
+                  to: "/pages/$",
+                  params: { _splat: node.page.path },
+                });
               }
             }}
           >

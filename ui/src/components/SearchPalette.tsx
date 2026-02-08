@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useSearch } from "#/api/index";
 import { useDebounce } from "#/hooks/useDebounce";
 
