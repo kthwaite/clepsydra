@@ -184,7 +184,11 @@ Content.
 
     // Should have text edits for alpha.md (per-replacement pairs)
     assert!(!plan.text_edits.is_empty());
-    let alpha_edits: Vec<_> = plan.text_edits.iter().filter(|e| e.path == "alpha.md").collect();
+    let alpha_edits: Vec<_> = plan
+        .text_edits
+        .iter()
+        .filter(|e| e.path == "alpha.md")
+        .collect();
     assert!(!alpha_edits.is_empty());
     // Should include the relative path replacement: "beta.md" -> "archive/beta.md"
     assert!(
@@ -234,16 +238,24 @@ Content.
     // stem exactly so it stays unchanged (stem == "beta" in both source and dest).
     // Text edits are per-replacement pairs, so we check the specific replacement.
     assert!(!plan.text_edits.is_empty());
-    let alpha_edits: Vec<_> = plan.text_edits.iter().filter(|e| e.path == "alpha.md").collect();
+    let alpha_edits: Vec<_> = plan
+        .text_edits
+        .iter()
+        .filter(|e| e.path == "alpha.md")
+        .collect();
     // Should have a relative path replacement: "beta.md" -> "sub/beta.md"
     assert!(
-        alpha_edits.iter().any(|e| e.old_text == "beta.md" && e.new_text == "sub/beta.md"),
+        alpha_edits
+            .iter()
+            .any(|e| e.old_text == "beta.md" && e.new_text == "sub/beta.md"),
         "expected relative path replacement to 'sub/beta.md', got: {:?}",
         alpha_edits
     );
     // No stem replacement should exist (stem is the same: "beta" -> "beta")
     assert!(
-        !alpha_edits.iter().any(|e| e.old_text == "beta" && e.new_text != "beta"),
+        !alpha_edits
+            .iter()
+            .any(|e| e.old_text == "beta" && e.new_text != "beta"),
         "stem should not be rewritten when unchanged"
     );
 }
@@ -282,7 +294,8 @@ Content.
 
 #[test]
 fn plan_page_delete_with_rewrite() {
-    let page_a = "---\nid: 00000000-0000-0000-0000-000000000103\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_a =
+        "---\nid: 00000000-0000-0000-0000-000000000103\ntitle: Alpha\n---\nLink to [[Beta]].\n";
     let page_b = "---\nid: 00000000-0000-0000-0000-000000000104\ntitle: Beta\n---\nContent.\n";
 
     let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
@@ -292,10 +305,12 @@ fn plan_page_delete_with_rewrite() {
     index.resolve_links().unwrap();
 
     let planner = MutationPlanner::new(&vault, &index);
-    let plan = planner.plan(&MutationOp::DeletePage {
-        path: "beta.md".to_string(),
-        rewrite: RewriteMode::PlainText,
-    }).unwrap();
+    let plan = planner
+        .plan(&MutationOp::DeletePage {
+            path: "beta.md".to_string(),
+            rewrite: RewriteMode::PlainText,
+        })
+        .unwrap();
 
     // Should have 1 file op (delete beta.md)
     assert_eq!(plan.file_ops.len(), 1);
@@ -303,7 +318,11 @@ fn plan_page_delete_with_rewrite() {
 
     // Should have text edits for alpha.md
     assert!(!plan.text_edits.is_empty());
-    let alpha_edits: Vec<_> = plan.text_edits.iter().filter(|e| e.path == "alpha.md").collect();
+    let alpha_edits: Vec<_> = plan
+        .text_edits
+        .iter()
+        .filter(|e| e.path == "alpha.md")
+        .collect();
     assert!(!alpha_edits.is_empty());
 
     // Should have staged writes for alpha.md
@@ -315,7 +334,8 @@ fn plan_page_delete_with_rewrite() {
 
 #[test]
 fn plan_page_delete_rewrite_none_no_text_edits() {
-    let page_a = "---\nid: 00000000-0000-0000-0000-000000000105\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_a =
+        "---\nid: 00000000-0000-0000-0000-000000000105\ntitle: Alpha\n---\nLink to [[Beta]].\n";
     let page_b = "---\nid: 00000000-0000-0000-0000-000000000106\ntitle: Beta\n---\nContent.\n";
 
     let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
@@ -325,10 +345,12 @@ fn plan_page_delete_rewrite_none_no_text_edits() {
     index.resolve_links().unwrap();
 
     let planner = MutationPlanner::new(&vault, &index);
-    let plan = planner.plan(&MutationOp::DeletePage {
-        path: "beta.md".to_string(),
-        rewrite: RewriteMode::None,
-    }).unwrap();
+    let plan = planner
+        .plan(&MutationOp::DeletePage {
+            path: "beta.md".to_string(),
+            rewrite: RewriteMode::None,
+        })
+        .unwrap();
 
     assert_eq!(plan.file_ops.len(), 1);
     assert!(plan.text_edits.is_empty());
@@ -341,7 +363,8 @@ fn plan_page_delete_rewrite_none_no_text_edits() {
 
 #[test]
 fn execute_plan_moves_file_and_rewrites() {
-    let page_a = "---\nid: 00000000-0000-0000-0000-000000000110\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_a =
+        "---\nid: 00000000-0000-0000-0000-000000000110\ntitle: Alpha\n---\nLink to [[Beta]].\n";
     let page_b = "---\nid: 00000000-0000-0000-0000-000000000111\ntitle: Beta\n---\nContent.\n";
 
     let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
@@ -362,12 +385,12 @@ fn execute_plan_moves_file_and_rewrites() {
 
     // Verify file moved
     use clepsydra::vault::path::VaultPath;
-    assert!(!vault
-        .resolve(&VaultPath::new("beta.md").unwrap())
-        .exists());
-    assert!(vault
-        .resolve(&VaultPath::new("archive/beta.md").unwrap())
-        .exists());
+    assert!(!vault.resolve(&VaultPath::new("beta.md").unwrap()).exists());
+    assert!(
+        vault
+            .resolve(&VaultPath::new("archive/beta.md").unwrap())
+            .exists()
+    );
 
     // Verify index updated — archive/beta.md should be in the index
     let page_path: Option<String> = index
@@ -383,7 +406,8 @@ fn execute_plan_moves_file_and_rewrites() {
 
 #[test]
 fn execute_plan_deletes_file_and_rewrites() {
-    let page_a = "---\nid: 00000000-0000-0000-0000-000000000112\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_a =
+        "---\nid: 00000000-0000-0000-0000-000000000112\ntitle: Alpha\n---\nLink to [[Beta]].\n";
     let page_b = "---\nid: 00000000-0000-0000-0000-000000000113\ntitle: Beta\n---\nContent.\n";
 
     let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("beta.md", page_b)]);
@@ -404,9 +428,7 @@ fn execute_plan_deletes_file_and_rewrites() {
 
     // Verify file deleted
     use clepsydra::vault::path::VaultPath;
-    assert!(!vault
-        .resolve(&VaultPath::new("beta.md").unwrap())
-        .exists());
+    assert!(!vault.resolve(&VaultPath::new("beta.md").unwrap()).exists());
 
     // Verify alpha.md was rewritten — [[Beta]] should be plain text now
     let alpha_content =
@@ -415,10 +437,7 @@ fn execute_plan_deletes_file_and_rewrites() {
         !alpha_content.contains("[[Beta]]"),
         "link should have been rewritten"
     );
-    assert!(
-        alpha_content.contains("Beta"),
-        "plain text should remain"
-    );
+    assert!(alpha_content.contains("Beta"), "plain text should remain");
 }
 
 // ---------------------------------------------------------------------------
@@ -427,7 +446,8 @@ fn execute_plan_deletes_file_and_rewrites() {
 
 #[test]
 fn plan_folder_move_rewrites_all_contained_pages() {
-    let page_a = "---\nid: 00000000-0000-0000-0000-000000000107\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let page_a =
+        "---\nid: 00000000-0000-0000-0000-000000000107\ntitle: Alpha\n---\nLink to [[Beta]].\n";
     let page_b = "---\nid: 00000000-0000-0000-0000-000000000108\ntitle: Beta\n---\nContent.\n";
 
     let (_tmp, vault) = setup_vault(&[("alpha.md", page_a), ("notes/beta.md", page_b)]);
@@ -437,14 +457,18 @@ fn plan_folder_move_rewrites_all_contained_pages() {
     index.resolve_links().unwrap();
 
     let planner = MutationPlanner::new(&vault, &index);
-    let plan = planner.plan(&MutationOp::MoveFolder {
-        source: "notes".to_string(),
-        destination: "archive".to_string(),
-    }).unwrap();
+    let plan = planner
+        .plan(&MutationOp::MoveFolder {
+            source: "notes".to_string(),
+            destination: "archive".to_string(),
+        })
+        .unwrap();
 
     // Should have a rename file op for the folder
     assert!(
-        plan.file_ops.iter().any(|op| op.path == "notes" && op.destination.as_deref() == Some("archive")),
+        plan.file_ops
+            .iter()
+            .any(|op| op.path == "notes" && op.destination.as_deref() == Some("archive")),
         "should plan folder rename"
     );
 
@@ -458,9 +482,10 @@ fn plan_folder_move_rewrites_all_contained_pages() {
 
 #[test]
 fn delete_page_with_self_link_does_not_recreate_file() {
-    let (_tmp, vault) = setup_vault(&[
-        ("selfie.md", "---\nid: 00000000-0000-0000-0000-000000000500\ntitle: Selfie\n---\nSee [[Selfie]] for more."),
-    ]);
+    let (_tmp, vault) = setup_vault(&[(
+        "selfie.md",
+        "---\nid: 00000000-0000-0000-0000-000000000500\ntitle: Selfie\n---\nSee [[Selfie]] for more.",
+    )]);
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
     index.build(&vault).unwrap();
@@ -477,14 +502,18 @@ fn delete_page_with_self_link_does_not_recreate_file() {
     plan.execute(&vault, &mut index, &[]).unwrap();
 
     let abs_path = vault.resolve(&VaultPath::new("selfie.md").unwrap());
-    assert!(!abs_path.exists(), "deleted file should not be recreated by staged writes");
+    assert!(
+        !abs_path.exists(),
+        "deleted file should not be recreated by staged writes"
+    );
 }
 
 #[test]
 fn move_page_with_self_link_no_orphan_at_old_path() {
-    let (_tmp, vault) = setup_vault(&[
-        ("original.md", "---\nid: 00000000-0000-0000-0000-000000000501\ntitle: Original\n---\nSee [[Original]]."),
-    ]);
+    let (_tmp, vault) = setup_vault(&[(
+        "original.md",
+        "---\nid: 00000000-0000-0000-0000-000000000501\ntitle: Original\n---\nSee [[Original]].",
+    )]);
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
     index.build(&vault).unwrap();
@@ -509,8 +538,14 @@ fn move_page_with_self_link_no_orphan_at_old_path() {
 #[test]
 fn folder_move_internal_refs_no_orphan_outside() {
     let (_tmp, vault) = setup_vault(&[
-        ("notes/a.md", "---\nid: 00000000-0000-0000-0000-000000000502\ntitle: A\n---\nContent of A."),
-        ("notes/b.md", "---\nid: 00000000-0000-0000-0000-000000000503\ntitle: B\n---\nSee [[A]]."),
+        (
+            "notes/a.md",
+            "---\nid: 00000000-0000-0000-0000-000000000502\ntitle: A\n---\nContent of A.",
+        ),
+        (
+            "notes/b.md",
+            "---\nid: 00000000-0000-0000-0000-000000000503\ntitle: B\n---\nSee [[A]].",
+        ),
     ]);
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
@@ -529,7 +564,10 @@ fn folder_move_internal_refs_no_orphan_outside() {
 
     // Old paths should not exist
     let old_b = vault.resolve(&VaultPath::new("notes/b.md").unwrap());
-    assert!(!old_b.exists(), "notes/b.md should not have orphan after folder move");
+    assert!(
+        !old_b.exists(),
+        "notes/b.md should not have orphan after folder move"
+    );
 
     // New paths should exist
     let new_a = vault.resolve(&VaultPath::new("archive/a.md").unwrap());

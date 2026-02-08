@@ -37,9 +37,7 @@ pub fn parse_bibtex(input: &str) -> Result<Vec<BibImportEntry>, String> {
 
         let work_type = match entry.entry_type {
             EntryType::Book | EntryType::MvBook => WorkType::Book,
-            EntryType::Thesis | EntryType::PhdThesis | EntryType::MastersThesis => {
-                WorkType::Thesis
-            }
+            EntryType::Thesis | EntryType::PhdThesis | EntryType::MastersThesis => WorkType::Thesis,
             EntryType::Report | EntryType::TechReport => WorkType::Report,
             _ => WorkType::Paper,
         };
@@ -53,10 +51,7 @@ pub fn parse_bibtex(input: &str) -> Result<Vec<BibImportEntry>, String> {
 
         let year = extract_year(entry);
 
-        let venue = entry
-            .journal()
-            .ok()
-            .map(|chunks| chunks.format_verbatim());
+        let venue = entry.journal().ok().map(|chunks| chunks.format_verbatim());
 
         let publisher = entry
             .publisher()
@@ -99,9 +94,7 @@ fn extract_year(entry: &biblatex::Entry) -> Option<i32> {
         match date {
             PermissiveType::Typed(d) => {
                 let year = match d.value {
-                    DateValue::At(dt)
-                    | DateValue::After(dt)
-                    | DateValue::Before(dt) => dt.year,
+                    DateValue::At(dt) | DateValue::After(dt) | DateValue::Before(dt) => dt.year,
                     DateValue::Between(dt, _) => dt.year,
                 };
                 return Some(year);

@@ -91,18 +91,9 @@ pub fn compute_relative_path(from_path: &str, to_path: &str) -> String {
 /// A mutation operation to be planned.
 #[derive(Debug, Clone)]
 pub enum MutationOp {
-    MovePage {
-        source: String,
-        destination: String,
-    },
-    DeletePage {
-        path: String,
-        rewrite: RewriteMode,
-    },
-    MoveFolder {
-        source: String,
-        destination: String,
-    },
+    MovePage { source: String, destination: String },
+    DeletePage { path: String, rewrite: RewriteMode },
+    MoveFolder { source: String, destination: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,8 +205,7 @@ impl MutationPlan {
                     "SELECT id FROM pages WHERE path = ?1",
                     rusqlite::params![op.path],
                     |row| row.get::<_, String>(0),
-                )
-                    && let Ok(page_id) = page_id_str.parse::<uuid::Uuid>()
+                ) && let Ok(page_id) = page_id_str.parse::<uuid::Uuid>()
                 {
                     for hook in hooks {
                         hook.on_page_moved(&old_vp, &new_vp, &page_id, vault, index)
@@ -274,11 +264,7 @@ impl<'a> MutationPlanner<'a> {
         }
     }
 
-    fn plan_page_move(
-        &self,
-        source: &str,
-        destination: &str,
-    ) -> Result<MutationPlan, IndexError> {
+    fn plan_page_move(&self, source: &str, destination: &str) -> Result<MutationPlan, IndexError> {
         let source_vp = VaultPath::new(source).map_err(vp_err)?;
         let dest_vp = VaultPath::new(destination).map_err(vp_err)?;
 
@@ -400,10 +386,7 @@ impl<'a> MutationPlanner<'a> {
 
         // 4. Read the target page to get its title for display text
         let display_text = if let Ok(page) = Page::from_file(&target_abs, target_vp.clone()) {
-            page.meta
-                .title
-                .clone()
-                .unwrap_or_else(|| old_stem.clone())
+            page.meta.title.clone().unwrap_or_else(|| old_stem.clone())
         } else {
             old_stem.clone()
         };
@@ -501,15 +484,11 @@ impl<'a> MutationPlanner<'a> {
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
         {
             let abs = entry.path();
-            let rel = abs
-                .strip_prefix(self.vault.root())
-                .map_err(vp_err)?;
+            let rel = abs.strip_prefix(self.vault.root()).map_err(vp_err)?;
             let rel_str = rel.to_string_lossy().replace('\\', "/");
 
             // Compute new path: replace source prefix with destination prefix
-            let suffix = rel_str
-                .strip_prefix(source_vp.as_str())
-                .unwrap_or(&rel_str);
+            let suffix = rel_str.strip_prefix(source_vp.as_str()).unwrap_or(&rel_str);
             let new_rel = format!("{}{suffix}", dest_vp.as_str());
 
             let old_vp = VaultPath::new(&rel_str).map_err(vp_err)?;
@@ -527,10 +506,8 @@ impl<'a> MutationPlanner<'a> {
             let old_abs = self.vault.resolve(old_vp);
 
             // Index events for the moved file
-            plan.index_events
-                .push(ChangeEvent::Remove(old_vp.clone()));
-            plan.index_events
-                .push(ChangeEvent::Upsert(new_vp.clone()));
+            plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
+            plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
 
             // Find backlink pages
             let backlink_pages = self.find_backlink_pages(old_vp, &old_stem)?;

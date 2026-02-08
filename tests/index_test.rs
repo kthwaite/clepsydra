@@ -1030,14 +1030,8 @@ Nested design.
 #[test]
 fn delete_target_page_nulls_link_target_id() {
     let (_tmp, vault) = setup_vault(&[
-        (
-            "source.md",
-            "---\ntitle: Source\n---\nSee [[target]].",
-        ),
-        (
-            "target.md",
-            "---\ntitle: Target\n---\nContent.",
-        ),
+        ("source.md", "---\ntitle: Source\n---\nSee [[target]]."),
+        ("target.md", "---\ntitle: Target\n---\nContent."),
     ]);
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
@@ -1048,11 +1042,9 @@ fn delete_target_page_nulls_link_target_id() {
     // Verify link is resolved
     let target_id: String = index
         .connection()
-        .query_row(
-            "SELECT id FROM pages WHERE path = 'target.md'",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT id FROM pages WHERE path = 'target.md'", [], |row| {
+            row.get(0)
+        })
         .unwrap();
 
     let link_target: Option<String> = index

@@ -1,7 +1,7 @@
+use clepsydra::vault::Vault;
 use clepsydra::vault::import::{find_existing_work, parse_bibtex};
 use clepsydra::vault::import_doi::parse_crossref_response;
 use clepsydra::vault::import_isbn::parse_openlibrary_response;
-use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use std::fs;
@@ -145,21 +145,11 @@ Content.
     index.build(&vault).unwrap();
 
     // Should find by DOI
-    let found = find_existing_work(
-        index.connection(),
-        Some("10.1234/existing"),
-        None,
-        None,
-    );
+    let found = find_existing_work(index.connection(), Some("10.1234/existing"), None, None);
     assert!(found.is_some(), "should find existing work by DOI");
 
     // Should NOT find with different DOI
-    let not_found = find_existing_work(
-        index.connection(),
-        Some("10.1234/different"),
-        None,
-        None,
-    );
+    let not_found = find_existing_work(index.connection(), Some("10.1234/different"), None, None);
     assert!(not_found.is_none());
 }
 
@@ -189,12 +179,7 @@ Content.
     index.build(&vault).unwrap();
 
     // Should find by cite_key (via canonical_names table, populated by CiteKeyDeriver)
-    let found = find_existing_work(
-        index.connection(),
-        None,
-        None,
-        Some("another2024"),
-    );
+    let found = find_existing_work(index.connection(), None, None, Some("another2024"));
     assert!(found.is_some(), "should find existing work by cite_key");
 }
 

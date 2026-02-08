@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
 
-use clepsydra::vault::academic::{
-    AnnotationMeta, AnnotationType, ReadingStatus, WorkMeta, WorkType,
-    annotation_meta_to_extra, extra_to_annotation_meta, extra_to_work_meta, work_meta_to_extra,
-};
 use clepsydra::vault::Vault;
+use clepsydra::vault::academic::{
+    AnnotationMeta, AnnotationType, ReadingStatus, WorkMeta, WorkType, annotation_meta_to_extra,
+    extra_to_annotation_meta, extra_to_work_meta, work_meta_to_extra,
+};
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
@@ -157,11 +157,7 @@ tags: []
 ---
 A highlight.
 ";
-    fs::write(
-        root.join("library/annotations/highlight-1.md"),
-        ann_content,
-    )
-    .unwrap();
+    fs::write(root.join("library/annotations/highlight-1.md"), ann_content).unwrap();
 
     let vault = Vault::open(&root).unwrap();
     let db_path = vault.root().join(".clepsydra/cache.db");
@@ -184,8 +180,7 @@ A highlight.
     plan.execute(&vault, &mut index, &hooks).unwrap();
 
     // Verify annotation's work_path was updated
-    let ann_content =
-        fs::read_to_string(root.join("library/annotations/highlight-1.md")).unwrap();
+    let ann_content = fs::read_to_string(root.join("library/annotations/highlight-1.md")).unwrap();
     assert!(
         ann_content.contains("work_path: archive/my-paper.md")
             || ann_content.contains("work_path: \"archive/my-paper.md\""),

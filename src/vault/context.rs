@@ -9,10 +9,7 @@ use std::ops::Range;
 ///    to word boundaries and adding `…` at truncation points.
 pub fn extract_context(body: &str, span: Range<usize>, max_chars: usize) -> String {
     // Find paragraph boundaries
-    let para_start = body[..span.start]
-        .rfind("\n\n")
-        .map(|i| i + 2)
-        .unwrap_or(0);
+    let para_start = body[..span.start].rfind("\n\n").map(|i| i + 2).unwrap_or(0);
 
     let para_end = body[span.end..]
         .find("\n\n")
@@ -49,9 +46,7 @@ pub fn extract_context(body: &str, span: Range<usize>, max_chars: usize) -> Stri
     };
 
     let snapped_end = if window_end < paragraph.len() {
-        paragraph[..window_end]
-            .rfind(' ')
-            .unwrap_or(window_end)
+        paragraph[..window_end].rfind(' ').unwrap_or(window_end)
     } else {
         paragraph.len()
     };

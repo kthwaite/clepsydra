@@ -62,9 +62,7 @@ fn collect_edits(content: &str, replacements: &[(&str, &str)]) -> Vec<Edit> {
             Event::End(TagEnd::HtmlBlock) => in_html_block = false,
 
             // --- standard markdown links [text](url) ---
-            Event::Start(Tag::Link { dest_url, .. })
-                if !in_code_block && !in_html_block =>
-            {
+            Event::Start(Tag::Link { dest_url, .. }) if !in_code_block && !in_html_block => {
                 let url = dest_url.as_ref();
                 if let Some((_old, new)) = replacements.iter().find(|(old, _)| *old == url) {
                     // The range covers the entire `[text](url)` syntax.
@@ -89,9 +87,7 @@ fn collect_edits(content: &str, replacements: &[(&str, &str)]) -> Vec<Edit> {
                         None => (inner, None),
                     };
 
-                    if let Some((_old, new)) =
-                        replacements.iter().find(|(old, _)| *old == target)
-                    {
+                    if let Some((_old, new)) = replacements.iter().find(|(old, _)| *old == target) {
                         let abs_start = range.start + m.start();
                         let abs_end = range.start + m.end();
 
@@ -114,7 +110,11 @@ fn collect_edits(content: &str, replacements: &[(&str, &str)]) -> Vec<Edit> {
 }
 
 /// Build the replacement string for a wikilink.
-fn build_wikilink_replacement(new_target: &str, _old_target: &str, display: Option<&str>) -> String {
+fn build_wikilink_replacement(
+    new_target: &str,
+    _old_target: &str,
+    display: Option<&str>,
+) -> String {
     // Delete-rewrite: plain text
     if let Some(text) = new_target.strip_prefix(DELETE_PLAIN) {
         return text.to_string();

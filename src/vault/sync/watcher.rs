@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use notify_debouncer_mini::notify::RecommendedWatcher;
 use notify_debouncer_mini::{
-    Debouncer, DebouncedEvent, DebouncedEventKind, new_debouncer,
+    DebouncedEvent, DebouncedEventKind, Debouncer, new_debouncer,
     notify::{self, RecursiveMode},
 };
 use tokio::sync::mpsc;

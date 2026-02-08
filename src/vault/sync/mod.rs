@@ -67,7 +67,10 @@ impl SyncEngine {
                             let post_deps = index.reverse_deps(vp)?;
                             let mut all_deps = pre_deps;
                             for d in post_deps {
-                                if !all_deps.iter().any(|existing| existing.as_str() == d.as_str()) {
+                                if !all_deps
+                                    .iter()
+                                    .any(|existing| existing.as_str() == d.as_str())
+                                {
                                     all_deps.push(d);
                                 }
                             }
