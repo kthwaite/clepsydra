@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
@@ -21,17 +22,22 @@ use crate::vault::path::VaultPath;
 // Response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct FolderInfo {
     pub name: String,
     pub path: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct FolderListing {
     pub path: String,
     pub folders: Vec<FolderInfo>,
     pub pages: Vec<PageSummary>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FolderTreeResponse {
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,7 +46,7 @@ pub struct DeleteFolderQuery {
     pub recursive: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct MoveFolderRequest {
     pub destination: String,
 }
@@ -50,12 +56,15 @@ pub struct MoveFolderRequest {
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/", get(list_folders)).route(
-        "/{*path}",
-        get(list_folder_contents)
-            .post(create_folder)
-            .delete(delete_folder),
-    )
+    Router::new()
+        .route("/", get(list_folders))
+        .route("/tree", get(list_folder_tree))
+        .route(
+            "/{*path}",
+            get(list_folder_contents)
+                .post(create_folder)
+                .delete(delete_folder),
+        )
 }
 
 /// Separate router for folder move operations, nested at `/folders-move`.
@@ -67,7 +76,17 @@ pub fn move_router() -> Router<Arc<AppState>> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn list_folders(
+#[utoipa::path(
+    get,
+    path = "/folders",
+    context_path = "/api/vault",
+    tag = "Folders",
+    responses(
+        (status = 200, description = "List top-level folders", body = [FolderInfo]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_folders(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<FolderInfo>>, ApiError> {
     let root = state.vault.root();
@@ -103,7 +122,74 @@ async fn list_folders(
     Ok(Json(folders))
 }
 
-async fn list_folder_contents(
+#[utoipa::path(
+    get,
+    path = "/folders/tree",
+    context_path = "/api/vault",
+    tag = "Folders",
+    responses(
+        (status = 200, description = "All non-hidden folder paths", body = FolderTreeResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_folder_tree(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<FolderTreeResponse>, ApiError> {
+    let root = state.vault.root();
+    let mut paths = Vec::new();
+
+    for entry in walkdir::WalkDir::new(root)
+        .min_depth(1)
+        .sort_by_file_name()
+    {
+        let entry = entry.map_err(|e| ApiError::internal(e.to_string()))?;
+        if !entry.file_type().is_dir() {
+            continue;
+        }
+
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .unwrap_or(entry.path())
+            .to_string_lossy()
+            .to_string();
+
+        // Skip hidden directories (any segment starting with '.')
+        if rel.split('/').any(|seg| seg.starts_with('.')) {
+            continue;
+        }
+
+        // Skip _attachments and other excluded paths
+        if rel.split('/').next() == Some("_attachments") {
+            continue;
+        }
+
+        if let Ok(vp) = VaultPath::new(&rel)
+            && state.vault.is_excluded(&vp)
+        {
+            continue;
+        }
+
+        paths.push(rel);
+    }
+
+    Ok(Json(FolderTreeResponse { paths }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/folders/{path}",
+    context_path = "/api/vault",
+    tag = "Folders",
+    params(("path" = String, Path, description = "Vault-relative folder path")),
+    responses(
+        (status = 200, description = "Folder contents", body = FolderListing),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 404, description = "Folder not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_folder_contents(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<FolderListing>, ApiError> {
@@ -184,7 +270,19 @@ async fn list_folder_contents(
     }))
 }
 
-async fn create_folder(
+#[utoipa::path(
+    post,
+    path = "/folders/{path}",
+    context_path = "/api/vault",
+    tag = "Folders",
+    params(("path" = String, Path, description = "Vault-relative folder path")),
+    responses(
+        (status = 201, description = "Folder created", body = FolderInfo),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn create_folder(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Response, ApiError> {
@@ -211,7 +309,24 @@ async fn create_folder(
         .into_response())
 }
 
-async fn delete_folder(
+#[utoipa::path(
+    delete,
+    path = "/folders/{path}",
+    context_path = "/api/vault",
+    tag = "Folders",
+    params(
+        ("path" = String, Path, description = "Vault-relative folder path"),
+        ("recursive" = Option<bool>, Query, description = "Delete non-empty folders recursively")
+    ),
+    responses(
+        (status = 204, description = "Folder deleted"),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 404, description = "Folder not found", body = ApiError),
+        (status = 409, description = "Folder not empty", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn delete_folder(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     Query(query): Query<DeleteFolderQuery>,
@@ -284,7 +399,22 @@ async fn delete_folder(
 // Move folder handler
 // ---------------------------------------------------------------------------
 
-async fn move_folder(
+#[utoipa::path(
+    post,
+    path = "/folders-move/{path}",
+    context_path = "/api/vault",
+    tag = "Folders",
+    params(("path" = String, Path, description = "Source folder path")),
+    request_body = MoveFolderRequest,
+    responses(
+        (status = 200, description = "Folder moved"),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 404, description = "Folder not found", body = ApiError),
+        (status = 409, description = "Destination conflict", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn move_folder(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
     Json(body): Json<MoveFolderRequest>,

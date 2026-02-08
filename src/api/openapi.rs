@@ -1,0 +1,151 @@
+use axum::Router;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
+/// OpenAPI document for the clepsydra vault API used by the UI.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Clepsydra API",
+        version = "0.0.0",
+        description = "Filesystem-backed personal knowledge management API"
+    ),
+    tags(
+        (name = "Pages", description = "Page CRUD endpoints"),
+        (name = "Folders", description = "Folder operations"),
+        (name = "Attachments", description = "Attachment upload and retrieval"),
+        (name = "Index", description = "Index, graph, tags and search"),
+        (name = "Academic", description = "Academic works, annotations and importers"),
+        (name = "Events", description = "Server-sent events stream")
+    ),
+    paths(
+        // Pages
+        crate::api::pages::list_pages,
+        crate::api::pages::get_page,
+        crate::api::pages::get_page_by_id,
+        crate::api::pages::create_page,
+        crate::api::pages::update_page,
+        crate::api::pages::delete_page,
+        crate::api::pages::move_page,
+        // Folders
+        crate::api::folders::list_folders,
+        crate::api::folders::list_folder_tree,
+        crate::api::folders::list_folder_contents,
+        crate::api::folders::create_folder,
+        crate::api::folders::delete_folder,
+        crate::api::folders::move_folder,
+        // Attachments
+        crate::api::attachments::list_attachments,
+        crate::api::attachments::upload_attachment,
+        crate::api::attachments::get_attachment,
+        crate::api::attachments::delete_attachment,
+        // Events
+        crate::api::events::event_stream,
+        // Index
+        crate::api::index_routes::backlinks,
+        crate::api::index_routes::outlinks,
+        crate::api::index_routes::unresolved,
+        crate::api::index_routes::ambiguous,
+        crate::api::index_routes::warnings,
+        crate::api::index_routes::tags,
+        crate::api::index_routes::stats,
+        crate::api::index_routes::rebuild_index,
+        crate::api::index_routes::create_from_link,
+        crate::api::index_routes::preview_mutation,
+        crate::api::index_routes::graph,
+        crate::api::index_routes::content_index,
+        crate::api::index_routes::search,
+        // Academic
+        crate::api::academic::list_works,
+        crate::api::academic::create_work,
+        crate::api::academic::get_work,
+        crate::api::academic::update_work,
+        crate::api::academic::list_annotations,
+        crate::api::academic::create_annotation,
+        crate::api::academic::import_bibtex,
+        crate::api::academic::import_doi,
+        crate::api::academic::import_isbn_handler
+    ),
+    components(
+        schemas(
+            // Shared
+            crate::api::error::ApiError,
+            // Pages
+            crate::api::pages::PageSummary,
+            crate::api::pages::PageMetaResponse,
+            crate::api::pages::PageDetailResponse,
+            crate::api::pages::PageSummaryListResponse,
+            crate::api::pages::CreatePageRequest,
+            crate::api::pages::UpdatePageRequest,
+            crate::api::pages::MovePageRequest,
+            // Folders
+            crate::api::folders::FolderInfo,
+            crate::api::folders::FolderListing,
+            crate::api::folders::FolderTreeResponse,
+            crate::api::folders::MoveFolderRequest,
+            // Attachments
+            crate::api::attachments::AttachmentInfo,
+            // Events
+            crate::api::events::SyncNotification,
+            // Index
+            crate::api::index_routes::RebuildResponse,
+            crate::api::index_routes::OutlinkEntry,
+            crate::api::index_routes::UnresolvedLink,
+            crate::api::index_routes::CandidateEntry,
+            crate::api::index_routes::BacklinkEntry,
+            crate::api::index_routes::CreateFromLinkRequest,
+            crate::api::index_routes::AmbiguousName,
+            crate::api::index_routes::TagCount,
+            crate::api::index_routes::VaultStats,
+            crate::api::index_routes::GraphResponse,
+            crate::api::index_routes::GraphNode,
+            crate::api::index_routes::GraphEdge,
+            crate::api::index_routes::PreviewMutationRequest,
+            crate::api::index_routes::ContentEntry,
+            crate::api::index_routes::ContentIndexResponse,
+            crate::api::index_routes::SearchResultEntry,
+            // Academic
+            crate::api::academic::CreateWorkRequest,
+            crate::api::academic::UpdateWorkRequest,
+            crate::api::academic::CreateAnnotationRequest,
+            crate::api::academic::WorkDetail,
+            crate::api::academic::WorkSummary,
+            crate::api::academic::WorkSummaryListResponse,
+            crate::api::academic::AnnotationDetail,
+            crate::api::academic::ImportResult,
+            crate::api::academic::ImportResponse,
+            crate::api::academic::ImportDoiRequest,
+            crate::api::academic::ImportIsbnRequest,
+            crate::vault::academic::WorkType,
+            crate::vault::academic::ReadingStatus,
+            crate::vault::academic::AnnotationType,
+            crate::vault::academic::ExternalIds,
+            crate::vault::academic::WorkUrls,
+            crate::vault::academic::SourceLocation
+        )
+    )
+)]
+pub struct ApiDoc;
+
+/// Routes that expose OpenAPI JSON and Swagger UI.
+pub fn router<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new().merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openapi_includes_core_paths() {
+        let spec = ApiDoc::openapi();
+        assert!(spec.paths.paths.contains_key("/api/vault/pages"));
+        assert!(spec.paths.paths.contains_key("/api/vault/folders/{path}"));
+        assert!(spec.paths.paths.contains_key("/api/vault/index/search"));
+        assert!(spec.paths.paths.contains_key("/api/vault/academic/works"));
+        assert!(spec.paths.paths.contains_key("/api/vault/attachments/{path}"));
+    }
+}

@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use clepsydra::vault::page::{
-    FrontmatterError, Page, PageMeta, parse_frontmatter, write_page_content,
+    FrontmatterError, Page, PageMeta, parse_frontmatter, parse_or_repair_frontmatter,
+    write_page_content,
 };
 use clepsydra::vault::path::VaultPath;
 
@@ -153,6 +154,52 @@ fn write_page_content_round_trip() {
     assert_eq!(parsed_meta.title, meta.title);
     assert_eq!(parsed_meta.tags, meta.tags);
     assert_eq!(parsed_body, body);
+}
+
+#[test]
+fn parse_or_repair_frontmatter_adds_metadata_when_missing() {
+    let content = "# Heading\n\nBody text.\n";
+    let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+
+    assert!(rewrote, "missing frontmatter should trigger rewrite");
+    assert!(warning.is_none());
+    assert!(!meta.id.is_nil());
+    assert!(meta.created_at.is_some());
+    assert!(meta.updated_at.is_some());
+    assert_eq!(body, content);
+}
+
+#[test]
+fn parse_or_repair_frontmatter_salvages_existing_fields() {
+    let content = "---\ntitle: Draft\ntags:\n  - inbox\n---\nHello\n";
+
+    let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+
+    assert!(rewrote, "incomplete frontmatter should be repaired");
+    assert!(warning.is_none());
+    assert_eq!(meta.title.as_deref(), Some("Draft"));
+    assert_eq!(meta.tags, vec!["inbox"]);
+    assert!(!meta.id.is_nil(), "repair should add a UUID");
+    assert!(meta.created_at.is_some());
+    assert!(meta.updated_at.is_some());
+    assert_eq!(body, "Hello\n");
+}
+
+#[test]
+fn parse_or_repair_unparseable_yaml_preserves_file() {
+    let content = "---\n: :\nbad yaml {{{\n---\nBody text";
+
+    let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+
+    assert!(!rewrote, "unparseable YAML should NOT trigger rewrite");
+    assert!(warning.is_some(), "should emit a warning");
+    assert!(
+        warning.unwrap().contains("unparseable"),
+        "warning should mention unparseable"
+    );
+    assert_eq!(body, "Body text");
+    // Meta should be default (new)
+    assert!(!meta.id.is_nil(), "default meta should have a v7 UUID");
 }
 
 // ---------------------------------------------------------------------------

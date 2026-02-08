@@ -1,77 +1,71 @@
-export interface PageSummary {
-  id: string;
-  path: string;
-  title: string | null;
-  canonical_name: string;
-}
+import type { components, operations } from "./schema";
 
-export interface PageDetail {
-  path: string;
-  canonical_name: string;
-  meta: PageMeta;
-  body: string;
+type JsonResponse<T> = T extends {
+  content: { "application/json": infer Response };
 }
+  ? Response
+  : never;
 
-export interface PageMeta {
-  id: string;
-  title: string | null;
-  tags: string[];
-  aliases: string[];
-  created_at: string | null;
-  updated_at: string | null;
-  [key: string]: unknown;
-}
+type JsonRequestBody<TOperation extends keyof operations> =
+  operations[TOperation] extends {
+    requestBody?: { content: { "application/json": infer Body } };
+  }
+    ? Body
+    : never;
 
-export interface BacklinkEntry {
-  source_id: string;
-  source_path: string;
-  source_title: string | null;
-  target_raw: string;
-  kind: string;
-  context: string;
-}
+export type ApiError = components["schemas"]["ApiError"];
 
-export interface GraphResponse {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+export type PageSummary = components["schemas"]["PageSummary"];
+export type PageMeta = components["schemas"]["PageMetaResponse"];
+export type PageDetail = JsonResponse<operations["get_page"]["responses"][200]>;
+export type PageListResponse = JsonResponse<
+  operations["list_pages"]["responses"][200]
+>;
+export type ListPagesQuery = operations["list_pages"]["parameters"]["query"];
+export type PagePathParams = operations["get_page"]["parameters"]["path"];
+export type CreatePagePathParams =
+  operations["create_page"]["parameters"]["path"];
+export type CreatePageRequest = JsonRequestBody<"create_page">;
+export type CreatePageResponse = JsonResponse<
+  operations["create_page"]["responses"][201]
+>;
 
-export interface GraphNode {
-  id: string;
-  path: string;
-  title: string | null;
-}
+export type FolderInfo = components["schemas"]["FolderInfo"];
+export type FolderListing = JsonResponse<
+  operations["list_folder_contents"]["responses"][200]
+>;
+export type ListFoldersResponse = JsonResponse<
+  operations["list_folders"]["responses"][200]
+>;
+export type FolderPathParams =
+  operations["list_folder_contents"]["parameters"]["path"];
+export type CreateFolderPathParams =
+  operations["create_folder"]["parameters"]["path"];
+export type CreateFolderResponse = JsonResponse<
+  operations["create_folder"]["responses"][201]
+>;
+export type FolderTreeResponse = JsonResponse<
+  operations["list_folder_tree"]["responses"][200]
+>;
 
-export interface GraphEdge {
-  source: string;
-  target: string;
-  kind: string;
-}
+export type BacklinkEntry = components["schemas"]["BacklinkEntry"];
+export type BacklinksResponse = JsonResponse<
+  operations["backlinks"]["responses"][200]
+>;
+export type BacklinksPathParams = operations["backlinks"]["parameters"]["path"];
 
-export interface TagCount {
-  tag: string;
-  count: number;
-}
+export type GraphResponse = JsonResponse<operations["graph"]["responses"][200]>;
+export type GraphNode = components["schemas"]["GraphNode"];
+export type GraphEdge = components["schemas"]["GraphEdge"];
 
-export interface VaultStats {
-  pages: number;
-  links_total: number;
-  links_resolved: number;
-  links_unresolved: number;
-  tags: number;
-  attachments: number;
-}
+export type TagCount = components["schemas"]["TagCount"];
+export type TagCountsResponse = JsonResponse<
+  operations["tags"]["responses"][200]
+>;
+export type VaultStats = JsonResponse<operations["stats"]["responses"][200]>;
 
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  limit: number | null;
-  offset: number;
-}
-
-export interface SearchResult {
-  page_id: string;
-  path: string;
-  title: string | null;
-  snippet: string;
-}
+export type SearchResult = components["schemas"]["SearchResultEntry"];
+export type SearchResponse = JsonResponse<
+  operations["search"]["responses"][200]
+>;
+export type SearchQueryParams = operations["search"]["parameters"]["query"];

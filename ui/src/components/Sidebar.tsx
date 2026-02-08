@@ -1,5 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { FilePlus, FolderPlus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
@@ -7,6 +6,7 @@ import { useTags } from "#/api/index";
 import { useCreateFolder, useCreatePage } from "#/api/pages";
 import { FileTree } from "#/components/FileTree";
 import { ModalDialog } from "#/components/ModalDialog";
+import { useOpenTab } from "#/hooks/useOpenTab";
 
 type CreateTarget = "note" | "folder";
 
@@ -21,11 +21,12 @@ export function Sidebar() {
   const { data: tags } = useTags();
   const createPage = useCreatePage();
   const createFolder = useCreateFolder();
-  const navigate = useNavigate();
+  const openTab = useOpenTab();
   const location = useLocation();
-  const queryClient = useQueryClient();
   const pagesActive =
-    location.pathname === "/" || location.pathname.startsWith("/pages/");
+    location.pathname === "/" ||
+    location.pathname.startsWith("/pages/") ||
+    location.pathname === "/workspace";
 
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
   const [pathInput, setPathInput] = useState("");
@@ -71,29 +72,31 @@ export function Sidebar() {
     setDialogError(null);
 
     if (createTarget === "note") {
-      createPage.mutate(path, {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["pages"] });
-          queryClient.invalidateQueries({ queryKey: ["folders", "tree"] });
-          setCreateTarget(null);
-          setPathInput("");
-          navigate({ to: "/pages/$", params: { _splat: path } });
+      createPage.mutate(
+        { params: { path: { path } }, body: {} },
+        {
+          onSuccess: () => {
+            setCreateTarget(null);
+            setPathInput("");
+            openTab("page", path);
+          },
+          onError: (error) => setDialogError(formatMutationError(error)),
         },
-        onError: (error) => setDialogError(formatMutationError(error)),
-      });
+      );
       return;
     }
 
     if (createTarget === "folder") {
-      createFolder.mutate(path, {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["pages"] });
-          queryClient.invalidateQueries({ queryKey: ["folders", "tree"] });
-          setCreateTarget(null);
-          setPathInput("");
+      createFolder.mutate(
+        { params: { path: { path } } },
+        {
+          onSuccess: () => {
+            setCreateTarget(null);
+            setPathInput("");
+          },
+          onError: (error) => setDialogError(formatMutationError(error)),
         },
-        onError: (error) => setDialogError(formatMutationError(error)),
-      });
+      );
     }
   }
 
@@ -168,13 +171,13 @@ export function Sidebar() {
         >
           Pages
         </Link>
-        <Link
-          to="/graph"
+        <button
+          type="button"
+          onClick={() => openTab("graph")}
           className="flex-1 border-l border-border px-3 py-1.5 text-center text-xs uppercase tracking-wider hover:bg-accent"
-          activeProps={{ className: "bg-accent font-bold" }}
         >
           Graph
-        </Link>
+        </button>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 py-2">
         <FileTree />

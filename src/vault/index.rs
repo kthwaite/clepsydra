@@ -299,7 +299,11 @@ impl VaultIndex {
                 }
             };
 
-            let (meta, body, rewrote_frontmatter) = parse_or_repair_frontmatter(&content);
+            let (meta, body, rewrote_frontmatter, fm_warning) =
+                parse_or_repair_frontmatter(&content);
+            if let Some(w) = fm_warning {
+                stats.warnings.push(format!("{rel_str}: {w}"));
+            }
             if rewrote_frontmatter {
                 content = write_page_content(&meta, &body);
                 if let Err(e) = fs::write(abs_path, &content) {
@@ -464,10 +468,7 @@ impl VaultIndex {
             )?;
 
             // Update FTS index
-            tx.execute(
-                "DELETE FROM pages_fts WHERE page_id = ?1",
-                params![page_id],
-            )?;
+            tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![page_id])?;
             tx.execute(
                 "INSERT INTO pages_fts (page_id, path, title, body) VALUES (?1, ?2, ?3, ?4)",
                 params![
@@ -597,7 +598,11 @@ impl VaultIndex {
         let linkable_properties = &vault.config().vault.linkable_properties;
 
         let mut content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
-        let (meta, body, rewrote_frontmatter) = parse_or_repair_frontmatter(&content);
+        let (meta, body, rewrote_frontmatter, fm_warning) =
+            parse_or_repair_frontmatter(&content);
+        if let Some(w) = &fm_warning {
+            tracing::warn!("{}: {}", vault_path.as_str(), w);
+        }
 
         if rewrote_frontmatter {
             content = write_page_content(&meta, &body);
@@ -687,10 +692,7 @@ impl VaultIndex {
         )?;
 
         // Update FTS index
-        tx.execute(
-            "DELETE FROM pages_fts WHERE page_id = ?1",
-            params![page_id],
-        )?;
+        tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![page_id])?;
         tx.execute(
             "INSERT INTO pages_fts (page_id, path, title, body) VALUES (?1, ?2, ?3, ?4)",
             params![
@@ -1308,7 +1310,7 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
             CREATE INDEX IF NOT EXISTS idx_links_target_id ON links(target_id);
             CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
             CREATE INDEX IF NOT EXISTS idx_links_target_canonical ON links(target_canonical);
-            PRAGMA foreign_keys=ON;"
+            PRAGMA foreign_keys=ON;",
         )?;
     }
 

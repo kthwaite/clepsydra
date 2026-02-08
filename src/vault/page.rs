@@ -74,12 +74,8 @@ pub enum FrontmatterError {
 // Frontmatter parsing / writing
 // ---------------------------------------------------------------------------
 
-/// Parse YAML frontmatter from a markdown document.
-///
-/// Expects the content to begin with `---\n`, followed by YAML, followed by
-/// `---\n`. Returns the deserialized [`PageMeta`] and the body text after the
-/// closing fence.
-pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), FrontmatterError> {
+/// Split markdown content into `(yaml_frontmatter, body)`.
+fn split_frontmatter(content: &str) -> Result<(&str, &str), FrontmatterError> {
     // Must start with `---`
     if !content.starts_with("---") {
         return Err(FrontmatterError::NotFound);
@@ -97,7 +93,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
         .find("\n---")
         .map(|pos| after_open + pos + 1) // position of the `---` in the original string
         .or_else(|| {
-            // Handle case where yaml is immediately followed by `---` at start of rest
+            // Handle case where YAML is immediately followed by `---` at start of rest
             if rest.starts_with("---") {
                 Some(after_open)
             } else {
@@ -107,23 +103,116 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
         .ok_or(FrontmatterError::Unterminated)?;
 
     let yaml_str = &content[after_open..closing];
-    let meta: PageMeta = serde_yaml::from_str(yaml_str)?;
 
     // Body starts after the closing `---` line
     let after_closing = closing + 3; // skip `---`
-    let body = if after_closing < content.len() {
-        // Skip the newline immediately after `---`
-        let body_start = if content[after_closing..].starts_with('\n') {
-            after_closing + 1
-        } else {
-            after_closing
-        };
-        content[body_start..].to_string()
+    let body_start = if after_closing < content.len() && content[after_closing..].starts_with('\n')
+    {
+        after_closing + 1
     } else {
-        String::new()
+        after_closing
+    };
+    let body = if body_start <= content.len() {
+        &content[body_start..]
+    } else {
+        ""
     };
 
-    Ok((meta, body))
+    Ok((yaml_str, body))
+}
+
+#[derive(Debug, Deserialize)]
+struct LoosePageMeta {
+    #[serde(default)]
+    id: Option<Uuid>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    updated_at: Option<DateTime<Utc>>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_yaml::Value>,
+}
+
+/// Ensure required metadata fields are populated.
+///
+/// Returns `true` if any fields were filled in.
+fn ensure_populated_meta(meta: &mut PageMeta) -> bool {
+    let mut changed = false;
+
+    if meta.created_at.is_none() {
+        let now = Utc::now();
+        meta.created_at = Some(now);
+        changed = true;
+    }
+
+    if meta.updated_at.is_none() {
+        meta.updated_at = meta.created_at.or_else(|| Some(Utc::now()));
+        changed = true;
+    }
+
+    changed
+}
+
+/// Parse YAML frontmatter from a markdown document.
+///
+/// Expects the content to begin with `---\n`, followed by YAML, followed by
+/// `---\n`. Returns the deserialized [`PageMeta`] and the body text after the
+/// closing fence.
+pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), FrontmatterError> {
+    let (yaml_str, body) = split_frontmatter(content)?;
+    let meta: PageMeta = serde_yaml::from_str(yaml_str)?;
+    Ok((meta, body.to_string()))
+}
+
+/// Parse frontmatter, repairing it when missing/malformed/incomplete.
+///
+/// Returns `(meta, body, rewrote, warning)` where `rewrote = true` means callers
+/// should persist `write_page_content(meta, body)` back to disk. When `warning`
+/// is `Some`, the frontmatter YAML was unparseable and the file was left
+/// unmodified (indexed with default metadata only).
+pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Option<String>) {
+    if let Ok((mut meta, body)) = parse_frontmatter(content) {
+        let rewrote = ensure_populated_meta(&mut meta);
+        return (meta, body, rewrote, None);
+    }
+
+    // Frontmatter fence exists but strict model failed (e.g. missing id).
+    // Try to salvage user-authored fields with a loose model.
+    if let Ok((yaml_str, body)) = split_frontmatter(content) {
+        if let Ok(loose) = serde_yaml::from_str::<LoosePageMeta>(yaml_str) {
+            let mut meta = PageMeta {
+                id: loose.id.unwrap_or_else(Uuid::now_v7),
+                title: loose.title,
+                tags: loose.tags,
+                aliases: loose.aliases,
+                created_at: loose.created_at,
+                updated_at: loose.updated_at,
+                extra: loose.extra,
+            };
+            let _ = ensure_populated_meta(&mut meta);
+            return (meta, body.to_string(), true, None);
+        }
+
+        // Could not parse YAML at all; keep body, do NOT rewrite the file.
+        return (
+            PageMeta::new(),
+            body.to_string(),
+            false,
+            Some(
+                "frontmatter YAML is unparseable; indexing with default metadata (file not modified)"
+                    .into(),
+            ),
+        );
+    }
+
+    // No recognizable frontmatter fences; treat whole file as body.
+    (PageMeta::new(), content.to_string(), true, None)
 }
 
 /// Serialize a [`PageMeta`] and body into a complete markdown document with

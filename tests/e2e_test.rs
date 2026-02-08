@@ -73,15 +73,19 @@ async fn full_vault_lifecycle() {
     let rebuild: serde_json::Value = res.json();
     // Pages were already indexed during create; rebuild may report them as
     // skipped (hash unchanged) or indexed. Either way it should succeed.
-    let total = rebuild["pages_indexed"].as_i64().unwrap()
-        + rebuild["pages_skipped"].as_i64().unwrap();
+    let total =
+        rebuild["pages_indexed"].as_i64().unwrap() + rebuild["pages_skipped"].as_i64().unwrap();
     assert_eq!(total, 2, "expected 2 total pages, got rebuild: {rebuild}");
 
     // 4. GET /index/backlinks/design.md -> verify index.md is listed
     let res = server.get("/api/vault/index/backlinks/design.md").await;
     res.assert_status_ok();
     let backlinks: Vec<serde_json::Value> = res.json();
-    assert_eq!(backlinks.len(), 1, "expected 1 backlink, got: {backlinks:?}");
+    assert_eq!(
+        backlinks.len(),
+        1,
+        "expected 1 backlink, got: {backlinks:?}"
+    );
     assert_eq!(backlinks[0]["source_path"], "index.md");
 
     // 5. GET /index/tags -> verify "architecture" present
@@ -156,4 +160,50 @@ async fn full_vault_lifecycle() {
     res.assert_status_ok();
     let stats: serde_json::Value = res.json();
     assert_eq!(stats["pages"], 1);
+}
+
+#[tokio::test]
+async fn folder_tree_returns_all_non_hidden_folders() {
+    let (server, tmp) = setup_server();
+    let vault_root = tmp.path().join("vault");
+
+    // Create a nested folder structure
+    fs::create_dir_all(vault_root.join("notes/sub")).unwrap();
+    fs::create_dir_all(vault_root.join("projects/active")).unwrap();
+    fs::create_dir_all(vault_root.join(".hidden")).unwrap();
+
+    let res = server.get("/api/vault/folders/tree").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let paths: Vec<&str> = body["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+
+    assert!(
+        paths.contains(&"notes"),
+        "expected 'notes' in {paths:?}"
+    );
+    assert!(
+        paths.contains(&"notes/sub"),
+        "expected 'notes/sub' in {paths:?}"
+    );
+    assert!(
+        paths.contains(&"projects"),
+        "expected 'projects' in {paths:?}"
+    );
+    assert!(
+        paths.contains(&"projects/active"),
+        "expected 'projects/active' in {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p.starts_with('.')),
+        "hidden directories should be excluded: {paths:?}"
+    );
+    // Paths should be sorted
+    let mut sorted = paths.clone();
+    sorted.sort();
+    assert_eq!(paths, sorted, "paths should be sorted alphabetically");
 }

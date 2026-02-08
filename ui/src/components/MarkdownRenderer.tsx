@@ -1,8 +1,8 @@
-import { useNavigate } from "@tanstack/react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
+import { useOpenTab } from "#/hooks/useOpenTab";
 
 interface MarkdownRendererProps {
   content: string;
@@ -20,7 +20,7 @@ const remarkPlugins: PluggableList = [
 ];
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
-  const navigate = useNavigate();
+  const openTab = useOpenTab();
 
   return (
     <Markdown
@@ -28,12 +28,13 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       components={{
         a: ({ href, children, ...props }) => {
           if (href?.startsWith("/pages/")) {
+            const pagePath = decodeURIComponent(href.replace(/^\/pages\//, ""));
             return (
               <a
                 href={href}
                 onClick={(e) => {
                   e.preventDefault();
-                  navigate({ to: href });
+                  openTab("page", pagePath);
                 }}
                 className="underline decoration-1 underline-offset-2 hover:decoration-2"
                 {...props}
