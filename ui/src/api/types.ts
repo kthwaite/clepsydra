@@ -61,3 +61,17 @@ export interface VaultStats {
   tags: number;
   attachments: number;
 }
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number | null;
+  offset: number;
+}
+
+export interface SearchResult {
+  page_id: string;
+  path: string;
+  title: string | null;
+  snippet: string;
+}

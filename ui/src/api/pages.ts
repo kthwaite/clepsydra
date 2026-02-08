@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import type { PageDetail, PageSummary } from "./types";
+import type { PageDetail, PageSummary, PaginatedResponse } from "./types";
 
-async function fetchPages(): Promise<PageSummary[]> {
+async function fetchPages(): Promise<PaginatedResponse<PageSummary>> {
   const res = await fetch("/api/vault/pages");
   if (!res.ok) throw new Error(`Failed to fetch pages: ${res.status}`);
   return res.json();

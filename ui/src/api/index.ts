@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   BacklinkEntry,
   GraphResponse,
+  SearchResult,
   TagCount,
   VaultStats,
 } from "./types";
@@ -56,5 +57,24 @@ export function useGraph() {
   return useQuery({
     queryKey: ["index", "graph"],
     queryFn: fetchGraph,
+  });
+}
+
+async function fetchSearch(
+  query: string,
+  limit?: number,
+): Promise<SearchResult[]> {
+  const params = new URLSearchParams({ q: query });
+  if (limit) params.set("limit", String(limit));
+  const res = await fetch(`/api/vault/index/search?${params}`);
+  if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+  return res.json();
+}
+
+export function useSearch(query: string, limit?: number) {
+  return useQuery({
+    queryKey: ["index", "search", query, limit],
+    queryFn: () => fetchSearch(query, limit),
+    enabled: query.length > 0,
   });
 }

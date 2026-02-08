@@ -11,7 +11,8 @@ export const Route = createFileRoute("/")({
 function Dashboard() {
   const { data: stats } = useStats();
   const { data: tags } = useTags();
-  const { data: pages } = usePages();
+  const { data: pagesData } = usePages();
+  const pages = pagesData?.items;
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-6">
@@ -46,7 +47,7 @@ function Dashboard() {
       {pages && pages.length > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            All Pages ({pages.length})
+            All Pages ({pagesData.total})
           </h2>
           <ul className="space-y-px">
             {pages.slice(0, 20).map((p) => (

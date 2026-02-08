@@ -2,7 +2,8 @@ import { Link } from "@tanstack/react-router";
 import { usePages } from "#/api/pages";
 
 export function PageList() {
-  const { data: pages, isLoading, error } = usePages();
+  const { data, isLoading, error } = usePages();
+  const pages = data?.items;
 
   if (isLoading) {
     return (
