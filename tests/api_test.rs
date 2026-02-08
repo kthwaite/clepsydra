@@ -1598,3 +1598,34 @@ async fn get_work_by_uuid() {
     assert_eq!(body["year"], 2021);
 }
 
+// ---------------------------------------------------------------------------
+// Academic API: update work
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_work_changes_status() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Update Test",
+            "status": "unread"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+    let uuid = created["id"].as_str().unwrap();
+
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{uuid}"))
+        .json(&serde_json::json!({ "status": "reading", "rating": 4 }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["status"], "reading");
+    assert_eq!(body["rating"], 4);
+    assert_eq!(body["title"], "Update Test");
+}
+

@@ -7,7 +7,8 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
+use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +45,23 @@ pub struct CreateWorkRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkRequest {
+    pub title: Option<String>,
+    pub authors: Option<Vec<String>>,
+    pub year: Option<i32>,
+    pub venue: Option<String>,
+    pub publisher: Option<String>,
+    pub status: Option<ReadingStatus>,
+    pub rating: Option<u8>,
+    pub external_ids: Option<ExternalIds>,
+    pub urls: Option<WorkUrls>,
+    pub cite_key: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub aliases: Option<Vec<String>>,
     pub body: Option<String>,
 }
 
@@ -101,7 +119,7 @@ pub struct WorkSummary {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/works", get(list_works).post(create_work))
-        .route("/works/by-id/{uuid}", get(get_work))
+        .route("/works/by-id/{uuid}", get(get_work).put(update_work))
 }
 
 // ---------------------------------------------------------------------------
@@ -469,4 +487,160 @@ async fn list_works(
         .collect();
 
     Ok(Json(works))
+}
+
+// ---------------------------------------------------------------------------
+// PUT /works/by-id/{uuid}
+// ---------------------------------------------------------------------------
+
+async fn update_work(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+    Json(req): Json<UpdateWorkRequest>,
+) -> Result<Json<WorkDetail>, ApiError> {
+    // 1. Validate rating if provided
+    if let Some(rating) = req.rating
+        && !(1..=5).contains(&rating)
+    {
+        return Err(ApiError {
+            status: 422,
+            error: "rating must be between 1 and 5".to_string(),
+            detail: None,
+            hint: None,
+        });
+    }
+
+    // 2. Look up page by UUID, verify it's a work
+    let page_path = {
+        let index = state.index.lock();
+        let row: Option<(String, String)> = index
+            .connection()
+            .query_row(
+                "SELECT path, meta_json FROM pages WHERE id = ?1",
+                params![uuid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        let (path, mj) =
+            row.ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?;
+        let meta_value: serde_json::Value =
+            serde_json::from_str(&mj).unwrap_or_default();
+        if meta_value.get("kind").and_then(|k| k.as_str()) != Some("work") {
+            return Err(ApiError::not_found(format!("not a work: {uuid}")));
+        }
+        path
+    };
+
+    let vault_path = VaultPath::new(&page_path)
+        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let abs_path = state.vault.resolve(&vault_path);
+
+    // 3. Read existing file
+    let page = Page::from_file(&abs_path, vault_path.clone())
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+
+    let mut meta = page.meta;
+    let mut page_body = page.body;
+
+    // 4. Extract current WorkMeta
+    let mut wm = extra_to_work_meta(&meta.extra)
+        .ok_or_else(|| ApiError::internal("failed to extract work metadata"))?;
+
+    // 5. Merge fields
+    if let Some(title) = req.title {
+        meta.title = Some(title);
+    }
+    if let Some(tags) = req.tags {
+        meta.tags = tags;
+    }
+    if let Some(aliases) = req.aliases {
+        meta.aliases = aliases;
+    }
+    if let Some(body) = req.body {
+        page_body = body;
+    }
+
+    if let Some(authors) = req.authors {
+        wm.authors = authors;
+    }
+    if let Some(year) = req.year {
+        wm.year = Some(year);
+    }
+    if let Some(venue) = req.venue {
+        wm.venue = Some(venue);
+    }
+    if let Some(publisher) = req.publisher {
+        wm.publisher = Some(publisher);
+    }
+    if let Some(status) = req.status {
+        wm.status = Some(status);
+    }
+    if let Some(rating) = req.rating {
+        wm.rating = Some(rating);
+    }
+    if let Some(external_ids) = req.external_ids {
+        wm.external_ids = Some(external_ids);
+    }
+    if let Some(urls) = req.urls {
+        wm.urls = Some(urls);
+    }
+    if let Some(cite_key) = req.cite_key {
+        wm.cite_key = Some(cite_key);
+    }
+
+    // 6. Write back extra and update timestamp
+    meta.extra = work_meta_to_extra(&wm);
+    meta.updated_at = Some(Utc::now());
+
+    let content = write_page_content(&meta, &page_body);
+    fs::write(&abs_path, &content)
+        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+
+    // 7. Re-index
+    {
+        let mut index = state.index.lock();
+        index
+            .invalidate_links_to(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        index
+            .index_page(&state.vault, &vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        index
+            .resolve_links_for_page(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let deps = index
+            .reverse_deps(&vault_path)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        for dep_path in &deps {
+            index
+                .resolve_links_for_page(dep_path)
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+        }
+    }
+
+    // 8. Send SyncNotification
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![vault_path.as_str().to_string()],
+        removed: vec![],
+    });
+
+    // 9. Return updated WorkDetail
+    Ok(Json(WorkDetail {
+        id: meta.id.to_string(),
+        path: vault_path.as_str().to_string(),
+        title: meta.title.unwrap_or_default(),
+        work_type: wm.work_type,
+        authors: wm.authors,
+        year: wm.year,
+        venue: wm.venue,
+        publisher: wm.publisher,
+        status: wm.status,
+        rating: wm.rating,
+        external_ids: wm.external_ids,
+        urls: wm.urls,
+        assets: wm.assets,
+        cite_key: wm.cite_key,
+        tags: meta.tags,
+        body: page_body,
+    }))
 }
