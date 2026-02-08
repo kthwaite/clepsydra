@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ use crate::vault::academic::{
     work_meta_to_extra,
 };
 use crate::vault::canonical::CanonicalName;
-use crate::vault::page::{PageMeta, write_page_content};
+use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,15 @@ pub struct CreateWorkRequest {
     pub body: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListWorksQuery {
+    pub work_type: Option<String>,
+    pub status: Option<String>,
+    pub year: Option<i32>,
+    pub author: Option<String>,
+    pub tag: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct WorkDetail {
     pub id: String,
@@ -70,12 +79,29 @@ pub struct WorkDetail {
     pub body: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct WorkSummary {
+    pub id: String,
+    pub path: String,
+    pub title: Option<String>,
+    pub work_type: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub authors: Vec<String>,
+    pub year: Option<i32>,
+    pub status: Option<String>,
+    pub cite_key: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/works", post(create_work))
+    Router::new()
+        .route("/works", get(list_works).post(create_work))
+        .route("/works/by-id/{uuid}", get(get_work))
 }
 
 // ---------------------------------------------------------------------------
@@ -258,4 +284,189 @@ async fn create_work(
         }),
     )
         .into_response())
+}
+
+// ---------------------------------------------------------------------------
+// GET /works/by-id/{uuid}
+// ---------------------------------------------------------------------------
+
+async fn get_work(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+) -> Result<Json<WorkDetail>, ApiError> {
+    // 1. Look up page by UUID in index
+    let (page_path, meta_json) = {
+        let index = state.index.lock();
+        let row: Option<(String, String)> = index
+            .connection()
+            .query_row(
+                "SELECT path, meta_json FROM pages WHERE id = ?1",
+                params![uuid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        row.ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?
+    };
+
+    // 2. Check that it's a work
+    let meta_value: serde_json::Value =
+        serde_json::from_str(&meta_json).unwrap_or_default();
+    if meta_value.get("kind").and_then(|k| k.as_str()) != Some("work") {
+        return Err(ApiError::not_found(format!("not a work: {uuid}")));
+    }
+
+    // 3. Read the file
+    let vault_path = VaultPath::new(&page_path)
+        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let abs_path = state.vault.resolve(&vault_path);
+    let page = Page::from_file(&abs_path, vault_path.clone())
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+
+    // 4. Extract WorkMeta and build response
+    let wm = extra_to_work_meta(&page.meta.extra)
+        .ok_or_else(|| ApiError::internal("failed to extract work metadata"))?;
+
+    Ok(Json(WorkDetail {
+        id: page.meta.id.to_string(),
+        path: vault_path.as_str().to_string(),
+        title: page.meta.title.unwrap_or_default(),
+        work_type: wm.work_type,
+        authors: wm.authors,
+        year: wm.year,
+        venue: wm.venue,
+        publisher: wm.publisher,
+        status: wm.status,
+        rating: wm.rating,
+        external_ids: wm.external_ids,
+        urls: wm.urls,
+        assets: wm.assets,
+        cite_key: wm.cite_key,
+        tags: page.meta.tags,
+        body: page.body,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /works
+// ---------------------------------------------------------------------------
+
+async fn list_works(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListWorksQuery>,
+) -> Result<Json<Vec<WorkSummary>>, ApiError> {
+    let index = state.index.lock();
+
+    let mut sql = String::from(
+        "SELECT p.id, p.path, p.title, p.meta_json FROM pages p
+         WHERE json_extract(p.meta_json, '$.kind') = 'work'",
+    );
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx = 1u32;
+
+    if let Some(ref wt) = query.work_type {
+        sql.push_str(&format!(
+            " AND json_extract(p.meta_json, '$.work_type') = ?{param_idx}"
+        ));
+        param_values.push(Box::new(wt.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref status) = query.status {
+        sql.push_str(&format!(
+            " AND json_extract(p.meta_json, '$.status') = ?{param_idx}"
+        ));
+        param_values.push(Box::new(status.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(year) = query.year {
+        sql.push_str(&format!(
+            " AND CAST(json_extract(p.meta_json, '$.year') AS INTEGER) = ?{param_idx}"
+        ));
+        param_values.push(Box::new(year));
+        param_idx += 1;
+    }
+
+    if let Some(ref author) = query.author {
+        sql.push_str(&format!(
+            " AND json_extract(p.meta_json, '$.authors') LIKE '%' || ?{param_idx} || '%'"
+        ));
+        param_values.push(Box::new(author.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref tag) = query.tag {
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM tags WHERE tags.page_id = p.id AND tags.tag = ?{param_idx})"
+        ));
+        param_values.push(Box::new(tag.clone()));
+        param_idx += 1;
+    }
+
+    // Suppress unused variable warning
+    let _ = param_idx;
+
+    sql.push_str(" ORDER BY p.path");
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = index
+        .connection()
+        .prepare(&sql)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let works: Vec<WorkSummary> = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            let id: String = row.get(0)?;
+            let path: String = row.get(1)?;
+            let title: Option<String> = row.get(2)?;
+            let mj: String = row.get(3)?;
+            Ok((id, path, title, mj))
+        })
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .map(|(id, path, title, mj)| {
+            let meta: serde_json::Value =
+                serde_json::from_str(&mj).unwrap_or_default();
+            WorkSummary {
+                id,
+                path,
+                title,
+                work_type: meta
+                    .get("work_type")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                authors: meta
+                    .get("authors")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                year: meta.get("year").and_then(|v| v.as_i64()).map(|n| n as i32),
+                status: meta
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                cite_key: meta
+                    .get("cite_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                tags: meta
+                    .get("tags")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        })
+        .collect();
+
+    Ok(Json(works))
 }

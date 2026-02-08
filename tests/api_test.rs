@@ -1509,3 +1509,92 @@ async fn create_work_duplicate_cite_key_returns_409() {
 
     res.assert_status(StatusCode::CONFLICT);
 }
+
+// ---------------------------------------------------------------------------
+// Academic API: list and get works
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_works_with_filters() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "ML Paper",
+            "year": 2020,
+            "status": "unread",
+            "tags": ["ml"]
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "book",
+            "title": "ML Book",
+            "year": 2019,
+            "status": "done"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // List all works
+    let res = server.get("/api/vault/academic/works").await;
+    res.assert_status_ok();
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 2);
+
+    // Filter by work_type=paper
+    let res = server
+        .get("/api/vault/academic/works?work_type=paper")
+        .await;
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1);
+    assert_eq!(body[0]["title"], "ML Paper");
+
+    // Filter by year=2020
+    let res = server
+        .get("/api/vault/academic/works?year=2020")
+        .await;
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1);
+
+    // Filter by status=done
+    let res = server
+        .get("/api/vault/academic/works?status=done")
+        .await;
+    let body: Vec<serde_json::Value> = res.json();
+    assert_eq!(body.len(), 1);
+    assert_eq!(body[0]["title"], "ML Book");
+}
+
+#[tokio::test]
+async fn get_work_by_uuid() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Get Test Paper",
+            "authors": ["Alice"],
+            "year": 2021
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+    let uuid = created["id"].as_str().unwrap();
+
+    let res = server
+        .get(&format!("/api/vault/academic/works/by-id/{uuid}"))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["title"], "Get Test Paper");
+    assert_eq!(body["work_type"], "paper");
+    assert_eq!(body["year"], 2021);
+}
+
