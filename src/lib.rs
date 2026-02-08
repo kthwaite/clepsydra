@@ -1,12 +1,13 @@
 pub mod api;
+pub mod app_config;
 pub mod vault;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{Router, response::IntoResponse, routing::get};
-use config::{Config, ConfigError, Environment, File};
+use config::{Config, Environment, File};
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -15,10 +16,11 @@ use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt};
 
 use api::{AppState, api_router};
+use app_config::{config_candidates, find_config_path};
 use vault::Vault;
 use vault::index::VaultIndex;
-use vault::sync::{ChangeEvent, SyncEngine};
 use vault::sync::watcher::VaultWatcher;
+use vault::sync::{ChangeEvent, SyncEngine};
 
 #[derive(Debug, Deserialize)]
 struct Settings {
@@ -52,18 +54,54 @@ impl Default for VaultSettings {
 }
 
 impl Settings {
-    fn load() -> Result<Self, ConfigError> {
-        // Precedence (later wins): defaults < config.toml < env vars
-        // Env vars use: CLEPSYDRA__SERVER__HOST / CLEPSYDRA__SERVER__PORT
-        Config::builder()
+    fn load(base_dir: &Path) -> Result<(Self, PathBuf), Box<dyn std::error::Error>> {
+        let candidates = config_candidates(base_dir);
+        let checked = candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let config_path = find_config_path(base_dir).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no config.toml found (checked: {checked})"),
+            )
+        })?;
+
+        // Precedence (later wins): defaults < config file < env vars
+        let settings = Config::builder()
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.port", 3000)?
             .set_default("vault.root", "./vault")?
-            .add_source(File::with_name("config").required(false))
+            .add_source(File::from(config_path.clone()))
             .add_source(Environment::with_prefix("CLEPSYDRA").separator("__"))
             .build()?
-            .try_deserialize()
+            .try_deserialize()?;
+
+        Ok((settings, config_path))
     }
+}
+
+fn resolve_vault_root(root: &str, config_path: &Path, cwd: &Path) -> PathBuf {
+    let root_path = PathBuf::from(root);
+
+    if root_path.is_absolute() {
+        return root_path;
+    }
+
+    // If vault root is supplied via env, keep it relative to the process CWD.
+    if std::env::var_os("CLEPSYDRA__VAULT__ROOT").is_some() {
+        return cwd.join(root_path);
+    }
+
+    // Otherwise, resolve relative roots against the config file directory
+    // (important for XDG config usage).
+    if let Some(parent) = config_path.parent() {
+        return parent.join(root_path);
+    }
+
+    cwd.join(root_path)
 }
 
 pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
@@ -76,10 +114,11 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let settings = Settings::load()?;
+    let cwd = std::env::current_dir()?;
+    let (settings, config_path) = Settings::load(&cwd)?;
 
     // Resolve vault root path
-    let vault_root = PathBuf::from(&settings.vault.root);
+    let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
 
     // Open vault
     let vault = Vault::open(&vault_root)?;
