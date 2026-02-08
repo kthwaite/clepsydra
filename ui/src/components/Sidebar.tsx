@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useTags } from "#/api/index";
-import { PageList } from "#/components/PageList";
+import { FileTree } from "#/components/FileTree";
 
 export function Sidebar() {
   const { data: tags } = useTags();
@@ -15,8 +15,25 @@ export function Sidebar() {
           clepsydra
         </Link>
       </div>
+      <div className="flex border-b border-border">
+        <Link
+          to="/"
+          className="flex-1 px-3 py-1.5 text-center text-xs uppercase tracking-wider hover:bg-accent"
+          activeProps={{ className: "bg-accent font-bold" }}
+          activeOptions={{ exact: true }}
+        >
+          Pages
+        </Link>
+        <Link
+          to="/graph"
+          className="flex-1 border-l border-border px-3 py-1.5 text-center text-xs uppercase tracking-wider hover:bg-accent"
+          activeProps={{ className: "bg-accent font-bold" }}
+        >
+          Graph
+        </Link>
+      </div>
       <nav className="flex-1 overflow-y-auto px-2 py-2">
-        <PageList />
+        <FileTree />
       </nav>
       <div className="border-t border-border px-2 py-2">
         {tags && tags.length > 0 && (
