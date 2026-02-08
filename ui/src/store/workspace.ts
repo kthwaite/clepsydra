@@ -1,0 +1,143 @@
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+export type NavigationMode = "replace" | "new" | "smart";
+export type TabType = "page" | "graph";
+
+export interface TabDescriptor {
+  id: string;
+  type: TabType;
+  path?: string;
+  label: string;
+}
+
+interface WorkspaceState {
+  tabs: TabDescriptor[];
+  activeTabId: string | null;
+  navigationMode: NavigationMode;
+}
+
+interface WorkspaceActions {
+  openTab: (type: TabType, path?: string, label?: string) => void;
+  addTab: (tab: TabDescriptor) => void;
+  closeTab: (tabId: string) => void;
+  closeOtherTabs: (tabId: string) => void;
+  activateTab: (tabId: string) => void;
+  moveTab: (fromIndex: number, toIndex: number) => void;
+  updateTabLabel: (tabId: string, label: string) => void;
+  setNavigationMode: (mode: NavigationMode) => void;
+}
+
+function tabKey(type: TabType, path?: string): string {
+  return type === "graph" ? "graph" : `page:${path}`;
+}
+
+export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
+  persist(
+    (set, get) => ({
+      tabs: [],
+      activeTabId: null,
+      navigationMode: "smart",
+
+      openTab(type, path, label) {
+        const state = get();
+        const key = tabKey(type, path);
+
+        // Check for existing tab with same content
+        const existing = state.tabs.find((t) => tabKey(t.type, t.path) === key);
+
+        if (existing) {
+          // Always focus existing tab regardless of mode
+          set({ activeTabId: existing.id });
+          return;
+        }
+
+        const newTab: TabDescriptor = {
+          id: crypto.randomUUID(),
+          type,
+          path: type === "page" ? path : undefined,
+          label: label ?? path ?? "Graph",
+        };
+
+        if (state.navigationMode === "replace" && state.activeTabId) {
+          // Replace the active tab's content
+          set({
+            tabs: state.tabs.map((t) =>
+              t.id === state.activeTabId ? { ...newTab, id: t.id } : t,
+            ),
+          });
+        } else {
+          // "new" or "smart" — add new tab
+          set({
+            tabs: [...state.tabs, newTab],
+            activeTabId: newTab.id,
+          });
+        }
+      },
+
+      addTab(tab) {
+        set((state) => ({
+          tabs: [...state.tabs, tab],
+          activeTabId: tab.id,
+        }));
+      },
+
+      closeTab(tabId) {
+        const state = get();
+        const idx = state.tabs.findIndex((t) => t.id === tabId);
+        if (idx === -1) return;
+
+        const nextTabs = state.tabs.filter((t) => t.id !== tabId);
+        let nextActive = state.activeTabId;
+
+        if (state.activeTabId === tabId) {
+          if (nextTabs.length === 0) {
+            nextActive = null;
+          } else if (idx < nextTabs.length) {
+            // activate right neighbor
+            nextActive = nextTabs[idx].id;
+          } else {
+            // was rightmost, activate new rightmost
+            nextActive = nextTabs[nextTabs.length - 1].id;
+          }
+        }
+
+        set({ tabs: nextTabs, activeTabId: nextActive });
+      },
+
+      closeOtherTabs(tabId) {
+        set((state) => ({
+          tabs: state.tabs.filter((t) => t.id === tabId),
+          activeTabId: tabId,
+        }));
+      },
+
+      activateTab(tabId) {
+        set({ activeTabId: tabId });
+      },
+
+      moveTab(fromIndex, toIndex) {
+        set((state) => {
+          const tabs = [...state.tabs];
+          const [moved] = tabs.splice(fromIndex, 1);
+          tabs.splice(toIndex, 0, moved);
+          return { tabs };
+        });
+      },
+
+      updateTabLabel(tabId, label) {
+        set((state) => ({
+          tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, label } : t)),
+        }));
+      },
+
+      setNavigationMode(mode) {
+        set({ navigationMode: mode });
+      },
+    }),
+    {
+      name: "clepsydra.workspace",
+      version: 1,
+    },
+  ),
+);

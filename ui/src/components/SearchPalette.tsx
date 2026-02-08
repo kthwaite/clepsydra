@@ -1,15 +1,15 @@
-import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearch } from "#/api/index";
 import { useDebounce } from "#/hooks/useDebounce";
+import { useOpenTab } from "#/hooks/useOpenTab";
 
 export function SearchPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(open ? query : "", 200);
   const { data: results } = useSearch(open ? debouncedQuery : "", 10);
-  const navigate = useNavigate();
+  const openTab = useOpenTab();
   const inputRef = useRef<HTMLInputElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -42,9 +42,9 @@ export function SearchPalette() {
     setSelectedIndex(0);
   }, [results]);
 
-  function selectResult(path: string) {
+  function selectResult(path: string, label?: string) {
     setOpen(false);
-    navigate({ to: "/pages/$", params: { _splat: path } });
+    openTab("page", path, label);
   }
 
   function onInputKeyDown(e: React.KeyboardEvent) {
@@ -57,7 +57,8 @@ export function SearchPalette() {
       setSelectedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      selectResult(results[selectedIndex].path);
+      const r = results[selectedIndex];
+      selectResult(r.path, r.title || r.path);
     }
   }
 
@@ -97,7 +98,7 @@ export function SearchPalette() {
                   className={`block w-full px-4 py-2 text-left text-sm ${
                     i === selectedIndex ? "bg-accent" : "hover:bg-accent"
                   }`}
-                  onClick={() => selectResult(r.path)}
+                  onClick={() => selectResult(r.path, r.title || r.path)}
                   onMouseEnter={() => setSelectedIndex(i)}
                 >
                   <span className="font-medium">{r.title || r.path}</span>

@@ -1,35 +1,22 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useBacklinks } from "#/api/index";
-import { usePage } from "#/api/pages";
-import { BacklinksPanel } from "#/components/BacklinksPanel";
-import { MarkdownRenderer } from "#/components/MarkdownRenderer";
-import { PageHeader } from "#/components/PageHeader";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { useWorkspaceStore } from "#/store/workspace";
 
 export const Route = createFileRoute("/pages/$")({
-  component: PageViewer,
+  component: PageRedirect,
 });
 
-function PageViewer() {
+function PageRedirect() {
   const { _splat: path } = Route.useParams();
-  const { data: page, isLoading, error } = usePage(path ?? "");
-  const { data: backlinks } = useBacklinks(path ?? "");
+  const openTab = useWorkspaceStore((s) => s.openTab);
+  const navigate = useNavigate();
 
-  if (isLoading) {
-    return <div className="p-8 text-muted-foreground">Loading...</div>;
-  }
-  if (error || !page) {
-    return <div className="p-8 text-destructive">Page not found</div>;
-  }
+  useEffect(() => {
+    if (path) {
+      openTab("page", path);
+      navigate({ to: "/workspace", replace: true });
+    }
+  }, [path, openTab, navigate]);
 
-  return (
-    <div className="mx-auto max-w-3xl px-8 py-6">
-      <PageHeader title={page.meta.title} path={page.path} meta={page.meta} />
-      <article className="mt-6">
-        <MarkdownRenderer content={page.body} />
-      </article>
-      {backlinks && backlinks.length > 0 && (
-        <BacklinksPanel backlinks={backlinks} />
-      )}
-    </div>
-  );
+  return <div className="p-8 text-muted-foreground">Redirecting...</div>;
 }

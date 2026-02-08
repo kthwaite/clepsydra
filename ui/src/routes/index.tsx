@@ -1,8 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useStats, useTags } from "#/api/index";
 import { usePages } from "#/api/pages";
 import { StatCard } from "#/components/StatCard";
 import { TagCloud } from "#/components/TagCloud";
+import { useOpenTab } from "#/hooks/useOpenTab";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -13,6 +14,7 @@ function Dashboard() {
   const { data: tags } = useTags();
   const { data: pagesData } = usePages();
   const pages = pagesData?.items;
+  const openTab = useOpenTab();
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-6">
@@ -52,10 +54,10 @@ function Dashboard() {
           <ul className="space-y-px">
             {pages.slice(0, 20).map((p) => (
               <li key={p.id}>
-                <Link
-                  to="/pages/$"
-                  params={{ _splat: p.path }}
-                  className="block border-b border-border px-2 py-2 text-sm hover:bg-accent"
+                <button
+                  type="button"
+                  onClick={() => openTab("page", p.path, p.title || p.path)}
+                  className="block w-full border-b border-border px-2 py-2 text-left text-sm hover:bg-accent"
                 >
                   <span className="font-medium">{p.title || p.path}</span>
                   {p.title && (
@@ -63,7 +65,7 @@ function Dashboard() {
                       {p.path}
                     </span>
                   )}
-                </Link>
+                </button>
               </li>
             ))}
           </ul>

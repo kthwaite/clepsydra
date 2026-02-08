@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PagesSplatRouteImport } from './routes/pages/$'
 
+const WorkspaceRoute = WorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GraphRoute = GraphRouteImport.update({
   id: '/graph',
   path: '/graph',
@@ -32,35 +38,46 @@ const PagesSplatRoute = PagesSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/graph': typeof GraphRoute
+  '/workspace': typeof WorkspaceRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/graph': typeof GraphRoute
+  '/workspace': typeof WorkspaceRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/graph': typeof GraphRoute
+  '/workspace': typeof WorkspaceRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/graph' | '/pages/$'
+  fullPaths: '/' | '/graph' | '/workspace' | '/pages/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/graph' | '/pages/$'
-  id: '__root__' | '/' | '/graph' | '/pages/$'
+  to: '/' | '/graph' | '/workspace' | '/pages/$'
+  id: '__root__' | '/' | '/graph' | '/workspace' | '/pages/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   GraphRoute: typeof GraphRoute
+  WorkspaceRoute: typeof WorkspaceRoute
   PagesSplatRoute: typeof PagesSplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/workspace': {
+      id: '/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/graph': {
       id: '/graph'
       path: '/graph'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   GraphRoute: GraphRoute,
+  WorkspaceRoute: WorkspaceRoute,
   PagesSplatRoute: PagesSplatRoute,
 }
 export const routeTree = rootRouteImport

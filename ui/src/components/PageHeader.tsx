@@ -1,7 +1,7 @@
 import type { PageMeta } from "#/api/types";
 
 interface PageHeaderProps {
-  title: string | null;
+  title: string | null | undefined;
   path: string;
   meta: PageMeta;
 }

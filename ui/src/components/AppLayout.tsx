@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
 import type { ReactNode } from "react";
+import { NavigationModeSelector } from "#/components/NavigationModeSelector";
 import { SearchPalette } from "#/components/SearchPalette";
 import { Sidebar } from "#/components/Sidebar";
 import { SyncIndicator } from "#/components/SyncIndicator";
@@ -27,6 +28,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               ⌘K
             </kbd>
           </button>
+          <NavigationModeSelector />
           <SyncIndicator />
           <ThemeToggle className="inline-flex h-8 w-8 items-center justify-center border border-border bg-background text-foreground" />
         </header>
