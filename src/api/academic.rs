@@ -138,6 +138,21 @@ pub struct AnnotationDetail {
     pub body: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ImportResult {
+    pub cite_key: String,
+    pub status: String, // "created" | "skipped" | "error"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportResponse {
+    pub results: Vec<ImportResult>,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -151,6 +166,7 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_annotations),
         )
         .route("/annotations", post(create_annotation))
+        .route("/import/bibtex", post(import_bibtex))
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +359,84 @@ pub(crate) fn create_work_internal(
         tags: meta.tags,
         body: page_body,
     })
+}
+
+async fn import_bibtex(
+    State(state): State<Arc<AppState>>,
+    body: String,
+) -> Result<Json<ImportResponse>, ApiError> {
+    let entries =
+        crate::vault::import::parse_bibtex(&body).map_err(|e| ApiError::bad_request(e))?;
+
+    let mut results = Vec::with_capacity(entries.len());
+
+    for entry in &entries {
+        // Check dedup
+        let existing = {
+            let index = state.index.lock();
+            crate::vault::import::find_existing_work(
+                index.connection(),
+                entry.doi.as_deref(),
+                entry.isbn.as_deref(),
+                Some(&entry.cite_key),
+            )
+        };
+
+        if let Some(path) = existing {
+            results.push(ImportResult {
+                cite_key: entry.cite_key.clone(),
+                status: "skipped".to_string(),
+                page_path: Some(path),
+                error: None,
+            });
+            continue;
+        }
+
+        // Create work via shared logic
+        match create_work_internal(
+            &state,
+            entry.title.clone(),
+            entry.work_type.clone(),
+            entry.authors.clone(),
+            entry.year,
+            entry.venue.clone(),
+            entry.publisher.clone(),
+            None, // status
+            None, // rating
+            Some(ExternalIds {
+                doi: entry.doi.clone(),
+                isbn: entry.isbn.clone(),
+                arxiv: entry.arxiv.clone(),
+            }),
+            entry.url.as_ref().map(|u| WorkUrls {
+                landing: Some(u.clone()),
+                pdf: None,
+            }),
+            Some(entry.cite_key.clone()),
+            vec![], // tags
+            vec![], // aliases
+            None,   // body
+        ) {
+            Ok(detail) => {
+                results.push(ImportResult {
+                    cite_key: entry.cite_key.clone(),
+                    status: "created".to_string(),
+                    page_path: Some(detail.path),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(ImportResult {
+                    cite_key: entry.cite_key.clone(),
+                    status: "error".to_string(),
+                    page_path: None,
+                    error: Some(e.error),
+                });
+            }
+        }
+    }
+
+    Ok(Json(ImportResponse { results }))
 }
 
 async fn create_work(

@@ -1414,6 +1414,93 @@ I am the duplicate Shared.
 }
 
 // ---------------------------------------------------------------------------
+// Academic API: BibTeX import
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn import_bibtex_creates_works() {
+    let (server, _tmp) = setup_server();
+
+    let bibtex = r#"
+@article{vaswani2017attention,
+  title = {Attention Is All You Need},
+  author = {Vaswani, Ashish and Shazeer, Noam},
+  journal = {NeurIPS},
+  year = {2017},
+  doi = {10.48550/arXiv.1706.03762}
+}
+@book{bishop2006pattern,
+  title = {Pattern Recognition and Machine Learning},
+  author = {Bishop, Christopher M.},
+  year = {2006},
+  publisher = {Springer},
+  isbn = {978-0-387-31073-2}
+}
+"#;
+
+    let response = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    response.assert_status(StatusCode::OK);
+
+    let body: serde_json::Value = response.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["status"], "created");
+    assert_eq!(results[0]["cite_key"], "vaswani2017attention");
+    assert_eq!(results[1]["status"], "created");
+    assert_eq!(results[1]["cite_key"], "bishop2006pattern");
+
+    // Verify works exist via list endpoint
+    let list = server.get("/api/vault/academic/works").await;
+    let works: Vec<serde_json::Value> = list.json();
+    assert_eq!(works.len(), 2);
+}
+
+#[tokio::test]
+async fn import_bibtex_skips_duplicates() {
+    let (server, _tmp) = setup_server();
+
+    let bibtex = r#"
+@article{test2024,
+  title = {Test Paper},
+  author = {Test, Author},
+  year = {2024}
+}
+"#;
+
+    // First import
+    let r1 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r1.assert_status(StatusCode::OK);
+    let body1: serde_json::Value = r1.json();
+    assert_eq!(body1["results"][0]["status"], "created");
+
+    // Second import — same cite_key -> skipped
+    let r2 = server
+        .post("/api/vault/academic/import/bibtex")
+        .text(bibtex)
+        .await;
+    r2.assert_status(StatusCode::OK);
+    let body2: serde_json::Value = r2.json();
+    assert_eq!(body2["results"][0]["status"], "skipped");
+}
+
+#[tokio::test]
+async fn import_bibtex_invalid_returns_400() {
+    let (server, _tmp) = setup_server();
+
+    let response = server
+        .post("/api/vault/academic/import/bibtex")
+        .text("@article{broken, title = {missing closing")
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
 // Academic API: create work
 // ---------------------------------------------------------------------------
 
