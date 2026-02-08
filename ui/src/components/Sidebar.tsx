@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { PageList } from "#/components/PageList";
 
 export function Sidebar() {
   return (
@@ -12,9 +13,7 @@ export function Sidebar() {
         </Link>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 py-2">
-        <p className="px-2 py-1 text-xs text-muted-foreground">
-          Loading pages...
-        </p>
+        <PageList />
       </nav>
       <div className="border-t border-border px-2 py-2">
         {/* Tags section will go here */}
