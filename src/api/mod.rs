@@ -1,3 +1,4 @@
+pub mod academic;
 pub mod attachments;
 pub mod error;
 pub mod events;
@@ -32,5 +33,6 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .nest("/folders", folders::router())
         .nest("/folders-move", folders::move_router())
         .nest("/attachments", attachments::router())
+        .nest("/academic", academic::router())
         .nest("/index", index_routes::router())
 }

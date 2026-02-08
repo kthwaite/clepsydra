@@ -1412,3 +1412,100 @@ I am the duplicate Shared.
         "[[Shared]] should resolve after ambiguity broken by folder delete"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Academic API: create work
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_work_page() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Attention Is All You Need",
+            "authors": ["Ashish Vaswani", "Noam Shazeer"],
+            "year": 2017,
+            "venue": "NeurIPS",
+            "cite_key": "vaswani2017attention"
+        }))
+        .await;
+
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["title"], "Attention Is All You Need");
+    assert_eq!(body["work_type"], "paper");
+    assert_eq!(body["cite_key"], "vaswani2017attention");
+    assert!(body["path"].as_str().unwrap().ends_with(".md"));
+    // Should be in the papers folder
+    assert!(
+        body["path"].as_str().unwrap().starts_with("library/papers/"),
+        "expected path in library/papers/, got: {}",
+        body["path"]
+    );
+}
+
+#[tokio::test]
+async fn create_work_book_goes_to_books_folder() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "book",
+            "title": "The Art of Computer Programming"
+        }))
+        .await;
+
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["path"].as_str().unwrap().starts_with("library/books/"),
+        "expected path in library/books/, got: {}",
+        body["path"]
+    );
+}
+
+#[tokio::test]
+async fn create_work_invalid_rating_returns_422() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Bad Rating",
+            "rating": 6
+        }))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn create_work_duplicate_cite_key_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper A",
+            "cite_key": "samekey"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper B",
+            "cite_key": "samekey"
+        }))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+}
