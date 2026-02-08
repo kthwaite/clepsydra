@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useBacklinks } from "#/api/index";
 import { usePage } from "#/api/pages";
+import { BacklinksPanel } from "#/components/BacklinksPanel";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { PageHeader } from "#/components/PageHeader";
 
@@ -10,6 +12,7 @@ export const Route = createFileRoute("/pages/$")({
 function PageViewer() {
   const { _splat: path } = Route.useParams();
   const { data: page, isLoading, error } = usePage(path ?? "");
+  const { data: backlinks } = useBacklinks(path ?? "");
 
   if (isLoading) {
     return <div className="p-8 text-muted-foreground">Loading...</div>;
@@ -24,6 +27,9 @@ function PageViewer() {
       <article className="mt-6">
         <MarkdownRenderer content={page.body} />
       </article>
+      {backlinks && backlinks.length > 0 && (
+        <BacklinksPanel backlinks={backlinks} />
+      )}
     </div>
   );
 }
