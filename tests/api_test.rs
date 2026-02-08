@@ -1674,3 +1674,141 @@ async fn create_and_list_annotations() {
     assert_eq!(body[0]["annotation_type"], "highlight");
 }
 
+// ---------------------------------------------------------------------------
+// Academic library: full lifecycle integration test
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn academic_lifecycle_integration() {
+    let (server, _tmp) = setup_server();
+
+    // 1. Create a paper with cite_key
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Attention Is All You Need",
+            "authors": ["Vaswani", "Shazeer", "Parmar"],
+            "year": 2017,
+            "venue": "NeurIPS",
+            "cite_key": "vaswani2017attention",
+            "status": "unread",
+            "tags": ["transformers", "nlp"],
+            "body": "The dominant sequence transduction models..."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let work: serde_json::Value = res.json();
+    let work_id = work["id"].as_str().unwrap().to_string();
+    let work_path = work["path"].as_str().unwrap().to_string();
+    assert_eq!(work["title"], "Attention Is All You Need");
+    assert_eq!(work["work_type"], "paper");
+    assert_eq!(work["cite_key"], "vaswani2017attention");
+    assert!(work_path.starts_with("library/papers/"));
+
+    // 2. Create a regular page that references the work via [[cite_key]]
+    server
+        .post("/api/vault/pages/notes/ml-notes.md")
+        .json(&serde_json::json!({
+            "title": "ML Notes",
+            "body": "Key paper: [[vaswani2017attention]]"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // 3. Rebuild index to ensure all links are resolved
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // 4. Verify cite_key resolves — check backlinks for the work
+    let res = server
+        .get(&format!("/api/vault/index/backlinks/{work_path}"))
+        .await;
+    res.assert_status_ok();
+    let backlinks: Vec<serde_json::Value> = res.json();
+    assert!(
+        backlinks.iter().any(|b| b["source_path"] == "notes/ml-notes.md"),
+        "expected backlink from ml-notes.md via cite_key, got: {backlinks:?}"
+    );
+
+    // 5. Create an annotation on the paper
+    let res = server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_id,
+            "annotation_type": "highlight",
+            "source_location": {"page": 4, "quote": "self-attention mechanism"},
+            "tags": ["key-concept"],
+            "body": "The self-attention mechanism is the core innovation."
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let ann: serde_json::Value = res.json();
+    assert_eq!(ann["work_id"], work_id);
+    assert_eq!(ann["annotation_type"], "highlight");
+
+    // 6. List annotations for the work — verify 1 result
+    let res = server
+        .get(&format!("/api/vault/academic/works/by-id/{work_id}/annotations"))
+        .await;
+    res.assert_status_ok();
+    let annotations: Vec<serde_json::Value> = res.json();
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0]["annotation_type"], "highlight");
+
+    // 7. Update work status to "reading" and add a rating
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{work_id}"))
+        .json(&serde_json::json!({
+            "status": "reading",
+            "rating": 5
+        }))
+        .await;
+    res.assert_status_ok();
+    let updated: serde_json::Value = res.json();
+    assert_eq!(updated["status"], "reading");
+    assert_eq!(updated["rating"], 5);
+    // Title and cite_key should be unchanged
+    assert_eq!(updated["title"], "Attention Is All You Need");
+    assert_eq!(updated["cite_key"], "vaswani2017attention");
+
+    // 8. Get work by UUID — verify all fields
+    let res = server
+        .get(&format!("/api/vault/academic/works/by-id/{work_id}"))
+        .await;
+    res.assert_status_ok();
+    let fetched: serde_json::Value = res.json();
+    assert_eq!(fetched["title"], "Attention Is All You Need");
+    assert_eq!(fetched["work_type"], "paper");
+    assert_eq!(fetched["status"], "reading");
+    assert_eq!(fetched["rating"], 5);
+    assert_eq!(fetched["year"], 2017);
+    assert_eq!(fetched["venue"], "NeurIPS");
+    assert_eq!(fetched["cite_key"], "vaswani2017attention");
+
+    // 9. List all works — verify 1 work
+    let res = server.get("/api/vault/academic/works").await;
+    res.assert_status_ok();
+    let works: Vec<serde_json::Value> = res.json();
+    assert_eq!(works.len(), 1);
+    assert_eq!(works[0]["title"], "Attention Is All You Need");
+
+    // 10. Verify cite_key still resolves after update
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server
+        .get(&format!("/api/vault/index/backlinks/{work_path}"))
+        .await;
+    res.assert_status_ok();
+    let backlinks: Vec<serde_json::Value> = res.json();
+    assert!(
+        backlinks.iter().any(|b| b["source_path"] == "notes/ml-notes.md"),
+        "cite_key should still resolve after update, backlinks: {backlinks:?}"
+    );
+}
+
