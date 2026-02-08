@@ -59,9 +59,13 @@ fn default_attachment_folder() -> String {
 
 fn default_excluded_patterns() -> Vec<String> {
     vec![
+        ".clepsydra".to_string(),
         ".clepsydra/**".to_string(),
+        "_attachments".to_string(),
         "_attachments/**".to_string(),
+        ".git".to_string(),
         ".git/**".to_string(),
+        "node_modules".to_string(),
         "node_modules/**".to_string(),
     ]
 }
