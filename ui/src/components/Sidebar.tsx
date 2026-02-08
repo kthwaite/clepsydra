@@ -1,9 +1,29 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { FilePlus, FolderPlus } from "lucide-react";
 import { useTags } from "#/api/index";
+import { useCreateFolder, useCreatePage } from "#/api/pages";
 import { FileTree } from "#/components/FileTree";
 
 export function Sidebar() {
   const { data: tags } = useTags();
+  const createPage = useCreatePage();
+  const createFolder = useCreateFolder();
+  const navigate = useNavigate();
+
+  function handleNewNote() {
+    const name = window.prompt("Page path (e.g. notes/new-page.md):");
+    if (!name?.trim()) return;
+    createPage.mutate(name.trim(), {
+      onSuccess: () =>
+        navigate({ to: "/pages/$", params: { _splat: name.trim() } }),
+    });
+  }
+
+  function handleNewFolder() {
+    const name = window.prompt("Folder path (e.g. notes/subfolder):");
+    if (!name?.trim()) return;
+    createFolder.mutate(name.trim());
+  }
 
   return (
     <aside className="flex w-64 flex-col border-r border-border bg-card">
@@ -54,6 +74,24 @@ export function Sidebar() {
             </ul>
           </>
         )}
+      </div>
+      <div className="flex border-t border-border">
+        <button
+          type="button"
+          onClick={handleNewNote}
+          className="flex flex-1 items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <FilePlus className="h-3.5 w-3.5" />
+          New Note
+        </button>
+        <button
+          type="button"
+          onClick={handleNewFolder}
+          className="flex flex-1 items-center justify-center gap-1.5 border-l border-border py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
+          New Folder
+        </button>
       </div>
     </aside>
   );

@@ -7,8 +7,8 @@ import { useDebounce } from "#/hooks/useDebounce";
 export function SearchPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const debouncedQuery = useDebounce(query, 200);
-  const { data: results } = useSearch(debouncedQuery, 10);
+  const debouncedQuery = useDebounce(open ? query : "", 200);
+  const { data: results } = useSearch(open ? debouncedQuery : "", 10);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -88,7 +88,7 @@ export function SearchPalette() {
           </kbd>
         </div>
 
-        {debouncedQuery && results && results.length > 0 && (
+        {query && results && results.length > 0 && (
           <ul className="max-h-80 overflow-y-auto">
             {results.map((r, i) => (
               <li key={r.page_id}>
@@ -117,9 +117,9 @@ export function SearchPalette() {
           </ul>
         )}
 
-        {debouncedQuery && results && results.length === 0 && (
+        {query && debouncedQuery && results && results.length === 0 && (
           <p className="px-4 py-3 text-sm text-muted-foreground">
-            No results for &ldquo;{debouncedQuery}&rdquo;
+            No results for &ldquo;{query}&rdquo;
           </p>
         )}
       </div>

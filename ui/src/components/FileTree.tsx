@@ -9,8 +9,8 @@ import { ChevronRight, File, Folder } from "lucide-react";
 import { useMemo } from "react";
 import { usePages } from "#/api/pages";
 import {
+  ROOT_ID,
   buildPageTree,
-  type TreeData,
   type TreeNode,
 } from "#/lib/buildPageTree";
 
@@ -19,27 +19,28 @@ export function FileTree() {
   const pages = data?.items;
   const navigate = useNavigate();
 
-  const treeData: TreeData = useMemo(() => {
-    if (!pages)
-      return {
-        root: {
-          id: "root",
-          name: "root",
-          isFolder: true,
-          children: [],
-          page: null,
-        },
-      };
+  const treeData = useMemo(() => {
+    if (!pages) {
+      const empty = new Map<string, TreeNode>();
+      empty.set(ROOT_ID, {
+        id: ROOT_ID,
+        name: "",
+        isFolder: true,
+        children: [],
+        page: null,
+      });
+      return empty;
+    }
     return buildPageTree(pages);
   }, [pages]);
 
   const tree = useTree<TreeNode>({
-    rootItemId: "root",
+    rootItemId: ROOT_ID,
     getItemName: (item) => item.getItemData().name,
     isItemFolder: (item) => item.getItemData().isFolder,
     dataLoader: {
-      getItem: (id) => treeData[id],
-      getChildren: (id) => treeData[id]?.children ?? [],
+      getItem: (id) => treeData.get(id)!,
+      getChildren: (id) => treeData.get(id)?.children ?? [],
     },
     indent: 16,
     features: [syncDataLoaderFeature, selectionFeature, hotkeysCoreFeature],
