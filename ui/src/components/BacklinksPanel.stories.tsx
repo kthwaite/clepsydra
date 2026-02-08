@@ -1,11 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import {
-  Outlet,
-  RouterProvider,
   createMemoryHistory,
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
+  RouterProvider,
 } from "@tanstack/react-router";
 import type { BacklinkEntry } from "#/api/types";
 import { BacklinksPanel } from "./BacklinksPanel";

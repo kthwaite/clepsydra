@@ -11,15 +11,11 @@ export function PageList() {
   }
   if (error) {
     return (
-      <p className="px-2 py-1 text-xs text-destructive">
-        Failed to load pages
-      </p>
+      <p className="px-2 py-1 text-xs text-destructive">Failed to load pages</p>
     );
   }
   if (!pages || pages.length === 0) {
-    return (
-      <p className="px-2 py-1 text-xs text-muted-foreground">No pages</p>
-    );
+    return <p className="px-2 py-1 text-xs text-muted-foreground">No pages</p>;
   }
 
   return (
