@@ -131,6 +131,20 @@ struct PreviewMutationRequest {
     rewrite: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    pub q: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchResultEntry {
+    pub page_id: String,
+    pub path: String,
+    pub title: Option<String>,
+    pub snippet: String,
+}
+
 fn default_rewrite_mode() -> String {
     "plain_text".to_string()
 }
@@ -153,6 +167,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/preview-mutation", post(preview_mutation))
         .route("/graph", get(graph))
         .route("/content-index", get(content_index))
+        .route("/search", get(search))
 }
 
 // ---------------------------------------------------------------------------
@@ -681,4 +696,37 @@ async fn content_index(
     }
 
     Ok(Json(PaginatedResponse::from_vec(entries, &pagination)))
+}
+
+// ---------------------------------------------------------------------------
+// Full-text search
+// ---------------------------------------------------------------------------
+
+async fn search(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Vec<SearchResultEntry>>, ApiError> {
+    let q = query
+        .q
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| ApiError::bad_request("missing 'q' query parameter".to_string()))?;
+
+    let limit = query.limit.unwrap_or(20) as usize;
+
+    let index = state.index.lock();
+    let results = index
+        .search(&q, limit)
+        .map_err(|e| ApiError::internal(format!("search failed: {e}")))?;
+
+    let entries: Vec<SearchResultEntry> = results
+        .into_iter()
+        .map(|r| SearchResultEntry {
+            page_id: r.page_id,
+            path: r.path,
+            title: r.title,
+            snippet: r.snippet,
+        })
+        .collect();
+
+    Ok(Json(entries))
 }

@@ -2117,6 +2117,63 @@ async fn upload_attachment_conflict() {
 }
 
 // ---------------------------------------------------------------------------
+// Full-text search
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn search_pages() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/rust.md")
+        .json(&serde_json::json!({
+            "title": "Rust Programming",
+            "body": "Rust is a systems programming language focused on safety."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/python.md")
+        .json(&serde_json::json!({
+            "title": "Python Programming",
+            "body": "Python is a dynamic scripting language."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    // Rebuild index to populate FTS
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    // Search for "safety"
+    let res = server.get("/api/vault/index/search?q=safety").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    let results = body.as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["path"], "rust.md");
+
+    // Search for "programming" matches both
+    let res = server.get("/api/vault/index/search?q=programming").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body.as_array().unwrap().len(), 2);
+
+    // Search with limit
+    let res = server
+        .get("/api/vault/index/search?q=programming&limit=1")
+        .await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body.as_array().unwrap().len(), 1);
+
+    // Missing query param returns 400
+    let res = server.get("/api/vault/index/search").await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
 // Pagination: works and content-index
 // ---------------------------------------------------------------------------
 
