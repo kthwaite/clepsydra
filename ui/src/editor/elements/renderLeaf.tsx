@@ -1,0 +1,14 @@
+import type { RenderLeafProps } from "slate-react";
+
+export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
+  if (leaf.code) {
+    children = <code className="bg-muted px-1 py-0.5 text-sm">{children}</code>;
+  }
+  if (leaf.bold) {
+    children = <strong>{children}</strong>;
+  }
+  if (leaf.italic) {
+    children = <em>{children}</em>;
+  }
+  return <span {...attributes}>{children}</span>;
+}
