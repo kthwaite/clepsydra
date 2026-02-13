@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-
-interface PageSummary {
-  id: string;
-  path: string;
-  canonical_name: string;
-  title?: string | null;
-}
+import type { PageSummary } from "#/api/types";
 
 interface WikilinkComboboxProps {
   pages: PageSummary[];

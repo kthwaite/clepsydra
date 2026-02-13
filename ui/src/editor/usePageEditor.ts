@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Descendant } from "slate";
+import type { Descendant, Editor } from "slate";
 import { usePage, useUpdatePage } from "#/api/pages";
 import { markdownToSlate, slateToMarkdown } from "./convert";
 
@@ -19,7 +19,7 @@ interface PageEditorState {
   setAliases: (a: string[]) => void;
   saveStatus: SaveStatus;
   saveError: string | null;
-  onSlateChange: (value: Descendant[]) => void;
+  onSlateChange: (value: Descendant[], editor: Editor) => void;
   saveNow: () => void;
 }
 
@@ -32,6 +32,22 @@ export function usePageEditor(path: string): PageEditorState {
   const [title, setTitleState] = useState("");
   const [tags, setTagsState] = useState<string[]>([]);
   const [aliases, setAliasesState] = useState<string[]>([]);
+
+  // Use refs for metadata so doSave captures latest values without
+  // recreating its closure on every keystroke (avoids cascade of
+  // callback identity changes through scheduleSave → onChange etc.)
+  const titleRef = useRef(title);
+  const tagsRef = useRef(tags);
+  const aliasesRef = useRef(aliases);
+  useEffect(() => {
+    titleRef.current = title;
+  }, [title]);
+  useEffect(() => {
+    tagsRef.current = tags;
+  }, [tags]);
+  useEffect(() => {
+    aliasesRef.current = aliases;
+  }, [aliases]);
 
   const savedRef = useRef({
     title: "",
@@ -71,9 +87,9 @@ export function usePageEditor(path: string): PageEditorState {
     }
 
     const body = slateToMarkdown(editorValueRef.current);
-    const currentTitle = title;
-    const currentTags = tags;
-    const currentAliases = aliases;
+    const currentTitle = titleRef.current;
+    const currentTags = tagsRef.current;
+    const currentAliases = aliasesRef.current;
 
     const bodyChanged = body !== savedRef.current.body;
     const titleChanged = currentTitle !== savedRef.current.title;
@@ -117,7 +133,7 @@ export function usePageEditor(path: string): PageEditorState {
         },
       },
     );
-  }, [path, title, tags, aliases, updatePage]);
+  }, [path, updatePage]);
 
   const scheduleSave = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -126,9 +142,16 @@ export function usePageEditor(path: string): PageEditorState {
   }, [doSave]);
 
   const onSlateChange = useCallback(
-    (value: Descendant[]) => {
+    (value: Descendant[], editor: Editor) => {
       editorValueRef.current = value;
-      scheduleSave();
+      // Only schedule a save if there are actual content changes,
+      // not just selection/cursor movements
+      const isAstChange = editor.operations.some(
+        (op) => op.type !== "set_selection",
+      );
+      if (isAstChange) {
+        scheduleSave();
+      }
     },
     [scheduleSave],
   );

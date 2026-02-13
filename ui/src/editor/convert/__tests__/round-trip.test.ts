@@ -27,7 +27,7 @@ describe("round-trip: markdown → slate → markdown", () => {
   });
 
   it("preserves code blocks with language", () => {
-    const input = '```typescript\nconst x: number = 1;\nconsole.log(x);\n```';
+    const input = "```typescript\nconst x: number = 1;\nconsole.log(x);\n```";
     expect(normalize(roundTrip(input))).toBe(normalize(input));
   });
 

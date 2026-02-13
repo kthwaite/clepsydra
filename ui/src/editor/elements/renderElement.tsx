@@ -64,11 +64,12 @@ export function renderElement(props: RenderElementProps) {
     case "wikilink":
       return <WikilinkElement {...props} element={element} />;
 
-    case "link":
+    case "link": {
+      const isSafeUrl = /^https?:|^mailto:/i.test(element.url);
       return (
         <a
           {...attributes}
-          href={element.url}
+          href={isSafeUrl ? element.url : undefined}
           className="underline decoration-1 underline-offset-2 hover:decoration-2"
           onClick={(e) => {
             if (!e.metaKey && !e.ctrlKey) {
@@ -79,6 +80,7 @@ export function renderElement(props: RenderElementProps) {
           {children}
         </a>
       );
+    }
 
     case "paragraph":
     default:

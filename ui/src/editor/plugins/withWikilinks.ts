@@ -10,9 +10,12 @@ export function withWikilinks(editor: Editor): Editor {
   };
 
   editor.isVoid = (element) => {
-    return SlateElement.isElement(element) && element.type === "wikilink"
-      ? true
-      : isVoid(element);
+    if (SlateElement.isElement(element)) {
+      if (element.type === "wikilink" || element.type === "thematic-break") {
+        return true;
+      }
+    }
+    return isVoid(element);
   };
 
   return editor;
