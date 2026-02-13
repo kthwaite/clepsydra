@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { useBacklinks } from "#/api/index";
-import { usePage } from "#/api/pages";
 import { BacklinksPanel } from "#/components/BacklinksPanel";
-import { MarkdownRenderer } from "#/components/MarkdownRenderer";
-import { PageHeader } from "#/components/PageHeader";
+import { PageEditorHeader } from "#/editor/PageEditorHeader";
+import { SaveIndicator } from "#/editor/SaveIndicator";
+import { SlateEditor } from "#/editor/SlateEditor";
+import { usePageEditor } from "#/editor/usePageEditor";
 import { useWorkspaceStore } from "#/store/workspace";
 
 interface PageTabContentProps {
@@ -12,29 +13,47 @@ interface PageTabContentProps {
 }
 
 export function PageTabContent({ tabId, path }: PageTabContentProps) {
-  const { data: page, isLoading, error } = usePage(path);
+  const editor = usePageEditor(path);
   const { data: backlinks } = useBacklinks(path);
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
 
   useEffect(() => {
-    if (page?.meta.title) {
-      updateTabLabel(tabId, page.meta.title);
+    if (editor.title) {
+      updateTabLabel(tabId, editor.title);
     }
-  }, [tabId, page?.meta.title, updateTabLabel]);
+  }, [tabId, editor.title, updateTabLabel]);
 
-  if (isLoading) {
+  if (editor.isLoading) {
     return <div className="p-8 text-muted-foreground">Loading...</div>;
   }
-  if (error || !page) {
+  if (editor.error) {
     return <div className="p-8 text-destructive">Page not found</div>;
   }
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-6">
-      <PageHeader title={page.meta.title} path={page.path} meta={page.meta} />
+      <div className="mb-2 flex items-center justify-end">
+        <SaveIndicator status={editor.saveStatus} error={editor.saveError} />
+      </div>
+
+      <PageEditorHeader
+        path={path}
+        title={editor.title}
+        onTitleChange={editor.setTitle}
+        tags={editor.tags}
+        onTagsChange={editor.setTags}
+        aliases={editor.aliases}
+        onAliasesChange={editor.setAliases}
+      />
+
       <article className="mt-6">
-        <MarkdownRenderer content={page.body} />
+        <SlateEditor
+          initialValue={editor.initialValue}
+          onChange={editor.onSlateChange}
+          onSaveNow={editor.saveNow}
+        />
       </article>
+
       {backlinks && backlinks.length > 0 && (
         <BacklinksPanel backlinks={backlinks} />
       )}
