@@ -39,3 +39,13 @@ export function useCreateFolder() {
     },
   });
 }
+
+export function useUpdatePage() {
+  const qc = useQueryClient();
+  return $api.useMutation("put", "/api/vault/pages/{path}", {
+    onSuccess: () => {
+      invalidateByPathPrefix(qc, "/api/vault/pages");
+      invalidateByPathPrefix(qc, "/api/vault/index");
+    },
+  });
+}
