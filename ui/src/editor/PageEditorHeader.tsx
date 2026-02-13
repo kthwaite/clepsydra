@@ -27,7 +27,7 @@ export function PageEditorHeader({
         value={title}
         onChange={(e) => onTitleChange(e.target.value)}
         placeholder="Untitled"
-        className="w-full bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground"
+        className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground"
       />
 
       {/* Path (read-only) */}

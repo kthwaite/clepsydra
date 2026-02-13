@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
 
 /* =============================================================================
    Style Tokens System
@@ -10,6 +12,13 @@
    ============================================================================= */
 
 @theme {
+  /* --------------------------------------------------------------------------
+     Typography
+     -------------------------------------------------------------------------- */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code",
+    "Source Code Pro", monospace;
+  --font-heading: "JetBrains Mono Variable", ui-monospace, monospace;
   /* --------------------------------------------------------------------------
      Light Mode (Default)
      -------------------------------------------------------------------------- */
@@ -113,5 +122,5 @@
 }
 
 body {
-  @apply bg-background text-foreground;
+  @apply bg-background font-sans text-foreground antialiased;
 }

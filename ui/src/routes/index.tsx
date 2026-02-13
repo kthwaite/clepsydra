@@ -18,7 +18,7 @@ function Dashboard() {
 
   return (
     <div className="mx-auto max-w-3xl px-8 py-6">
-      <h1 className="mb-6 text-2xl font-bold">Vault</h1>
+      <h1 className="mb-6 font-heading text-2xl font-bold">Vault</h1>
 
       {stats && (
         <div className="mb-8 grid grid-cols-3 gap-4">

@@ -78,7 +78,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         ),
         pre: ({ children, ...props }) => (
           <pre
-            className="overflow-x-auto border border-border bg-muted p-4 text-sm"
+            className="overflow-x-auto border border-border bg-muted p-4 font-mono text-sm"
             {...props}
           >
             {children}
@@ -93,23 +93,26 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
             );
           }
           return (
-            <code className="bg-muted px-1 py-0.5 text-sm" {...props}>
+            <code className="bg-muted px-1 py-0.5 font-mono text-sm" {...props}>
               {children}
             </code>
           );
         },
         h1: ({ children, ...props }) => (
-          <h1 className="mb-4 mt-8 text-2xl font-bold" {...props}>
+          <h1 className="mb-4 mt-8 font-heading text-2xl font-bold" {...props}>
             {children}
           </h1>
         ),
         h2: ({ children, ...props }) => (
-          <h2 className="mb-3 mt-6 text-xl font-bold" {...props}>
+          <h2 className="mb-3 mt-6 font-heading text-xl font-bold" {...props}>
             {children}
           </h2>
         ),
         h3: ({ children, ...props }) => (
-          <h3 className="mb-2 mt-4 text-lg font-bold" {...props}>
+          <h3
+            className="mb-2 mt-4 font-heading text-lg font-semibold"
+            {...props}
+          >
             {children}
           </h3>
         ),

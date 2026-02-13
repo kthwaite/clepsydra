@@ -9,12 +9,12 @@ export function renderElement(props: RenderElementProps) {
     case "heading": {
       const Tag = `h${element.level}` as const;
       const sizeClasses: Record<number, string> = {
-        1: "mb-4 mt-8 text-2xl font-bold",
-        2: "mb-3 mt-6 text-xl font-bold",
-        3: "mb-2 mt-4 text-lg font-bold",
-        4: "mb-2 mt-4 text-base font-bold",
-        5: "mb-1 mt-3 text-sm font-bold",
-        6: "mb-1 mt-3 text-xs font-bold",
+        1: "mb-4 mt-8 font-heading text-2xl font-bold",
+        2: "mb-3 mt-6 font-heading text-xl font-bold",
+        3: "mb-2 mt-4 font-heading text-lg font-semibold",
+        4: "mb-2 mt-4 font-heading text-base font-semibold",
+        5: "mb-1 mt-3 font-heading text-sm font-semibold",
+        6: "mb-1 mt-3 font-heading text-xs font-semibold",
       };
       return (
         <Tag {...attributes} className={sizeClasses[element.level]}>

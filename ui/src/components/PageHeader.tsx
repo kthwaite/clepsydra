@@ -11,7 +11,7 @@ export function PageHeader({ title, path, meta }: PageHeaderProps) {
 
   return (
     <div className="border-b border-border pb-4">
-      <h1 className="text-2xl font-bold">{title || path}</h1>
+      <h1 className="font-heading text-2xl font-bold">{title || path}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{path}</p>
       {tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">

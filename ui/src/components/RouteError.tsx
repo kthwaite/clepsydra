@@ -151,7 +151,9 @@ export function RouteError({
         <p className="text-xs font-bold uppercase tracking-widest text-destructive">
           Application error
         </p>
-        <h1 className="mt-2 text-2xl font-bold">Something went wrong</h1>
+        <h1 className="mt-2 font-heading text-2xl font-bold">
+          Something went wrong
+        </h1>
 
         {errorName && (
           <p className="mt-3 text-sm text-muted-foreground">
