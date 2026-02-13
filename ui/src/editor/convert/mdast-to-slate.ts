@@ -4,7 +4,12 @@ import remarkParse from "remark-parse";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { Descendant } from "slate";
 import { unified } from "unified";
-import type { CustomText, LinkElement, WikilinkElement } from "#/editor/types";
+import type {
+  CustomText,
+  LinkElement,
+  ListItemElement,
+  WikilinkElement,
+} from "#/editor/types";
 
 // Re-export for the barrel
 export type { Descendant };
@@ -137,7 +142,7 @@ function convertBlockNode(node: RootContent): Descendant | null {
 function convertListItem(node: {
   type: "listItem";
   children: RootContent[];
-}): Descendant {
+}): ListItemElement {
   return {
     type: "list-item",
     children: convertChildren(node.children as RootContent[]),

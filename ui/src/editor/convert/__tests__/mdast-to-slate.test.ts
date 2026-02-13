@@ -1,4 +1,3 @@
-import type { Descendant } from "slate";
 import { describe, expect, it } from "vitest";
 import { markdownToSlate } from "../index";
 
