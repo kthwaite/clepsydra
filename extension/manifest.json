@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Clepsydra Web Archive",
+  "version": "0.1.0",
+  "description": "Capture web pages into your Clepsydra knowledge vault",
+  "permissions": ["activeTab", "storage", "notifications", "scripting"],
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "commands": {
+    "capture-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Capture current page to Clepsydra"
+    }
+  },
+  "options_page": "options/options.html"
+}
