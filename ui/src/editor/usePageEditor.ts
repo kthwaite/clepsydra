@@ -65,6 +65,12 @@ export function usePageEditor(path: string): PageEditorState {
   const savedBodyGenRef = useRef(0);
   const savedMetaGenRef = useRef(0);
 
+  // Monotonic counter incremented each time doSave fires a mutation.
+  // onSuccess/onError callbacks capture the value at fire time and no-op
+  // if a newer save has been initiated, preventing stale responses from
+  // regressing savedRef or status.
+  const saveSeqRef = useRef(0);
+
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -139,6 +145,8 @@ export function usePageEditor(path: string): PageEditorState {
     }
 
     setSaveStatus("saving");
+    saveSeqRef.current += 1;
+    const thisSaveSeq = saveSeqRef.current;
 
     updatePage.mutate(
       {
@@ -152,6 +160,10 @@ export function usePageEditor(path: string): PageEditorState {
       },
       {
         onSuccess: () => {
+          // Stale response guard: if a newer save was initiated, this
+          // response is outdated — skip to avoid regressing savedRef.
+          if (thisSaveSeq !== saveSeqRef.current) return;
+
           savedRef.current = {
             title: currentTitle,
             tags: currentTags,
@@ -167,6 +179,7 @@ export function usePageEditor(path: string): PageEditorState {
           setSaveError(null);
         },
         onError: (err) => {
+          if (thisSaveSeq !== saveSeqRef.current) return;
           setSaveStatus("error");
           setSaveError(err instanceof Error ? err.message : "Save failed");
         },
