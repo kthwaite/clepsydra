@@ -47,11 +47,25 @@ impl ContentStore {
         format!("sha256:{:x}", digest)
     }
 
-    /// Resolve a hash to its filesystem path (two-level fan-out).
-    fn blob_path(&self, hash: &str) -> PathBuf {
-        let hex = hash.strip_prefix("sha256:").unwrap_or(hash);
+    /// Validate that a hash has the expected format: "sha256:" followed by exactly
+    /// 64 lowercase hex characters. Returns the hex portion on success.
+    fn validate_hash(hash: &str) -> Result<&str, Box<dyn std::error::Error>> {
+        let hex = hash
+            .strip_prefix("sha256:")
+            .ok_or("hash must start with 'sha256:'")?;
+        if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(
+                format!("invalid hash format: expected 64 hex chars, got '{}'", hex).into(),
+            );
+        }
+        Ok(hex)
+    }
+
+    /// Resolve a validated hash to its filesystem path (two-level fan-out).
+    fn blob_path(&self, hash: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let hex = Self::validate_hash(hash)?;
         let prefix = &hex[..2];
-        self.root.join(prefix).join(hex)
+        Ok(self.root.join(prefix).join(hex))
     }
 
     /// Store a blob. Returns the hash and whether it already existed.
@@ -71,7 +85,7 @@ impl ContentStore {
             });
         }
 
-        let path = self.blob_path(&hash);
+        let path = self.blob_path(&hash)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -91,18 +105,20 @@ impl ContentStore {
 
     /// Retrieve a blob's data and content type.
     pub fn retrieve(&self, hash: &str) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
         let content_type: String = self.db.query_row(
             "SELECT content_type FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
         )?;
-        let path = self.blob_path(hash);
+        let path = self.blob_path(hash)?;
         let data = fs::read(&path)?;
         Ok((data, content_type))
     }
 
     /// Check whether a blob exists in the store.
     pub fn exists(&self, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
         let count: i64 = self.db.query_row(
             "SELECT COUNT(*) FROM blobs WHERE hash = ?1",
             params![hash],
@@ -113,6 +129,7 @@ impl ContentStore {
 
     /// Increment the reference count for a blob.
     pub fn increment_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
         self.db.execute(
             "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
             params![hash],
@@ -122,6 +139,7 @@ impl ContentStore {
 
     /// Decrement the reference count for a blob.
     pub fn decrement_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
         self.db.execute(
             "UPDATE blobs SET ref_count = ref_count - 1 WHERE hash = ?1",
             params![hash],
@@ -142,7 +160,7 @@ impl ContentStore {
 
         let mut pruned = 0u32;
         for hash in &hashes {
-            let path = self.blob_path(hash);
+            let path = self.blob_path(hash)?;
             if path.exists() {
                 fs::remove_file(&path)?;
             }
@@ -197,5 +215,24 @@ mod tests {
         let (retrieved, content_type) = store.retrieve(&result.hash).unwrap();
         assert_eq!(retrieved, data);
         assert_eq!(content_type, "text/plain");
+    }
+
+    #[test]
+    fn invalid_hash_returns_error() {
+        let (store, _tmp) = test_store();
+        // Path traversal attempt
+        assert!(store.retrieve("sha256:../../etc/passwd").is_err());
+        // Too short
+        assert!(store.retrieve("sha256:ab").is_err());
+        // Non-hex characters
+        assert!(store
+            .retrieve("sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+            .is_err());
+        // Missing prefix
+        assert!(store.retrieve("abcdef").is_err());
+        // Valid format but doesn't exist — different error (not found, not validation)
+        assert!(store
+            .retrieve("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+            .is_err());
     }
 }
