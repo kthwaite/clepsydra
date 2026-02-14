@@ -56,6 +56,15 @@ export function usePageEditor(path: string): PageEditorState {
     body: "",
   });
 
+  // Tracks whether the user has made actual body edits (AST changes).
+  // Used to:
+  // 1. Skip overwriting editor state on refetches triggered by our own saves
+  // 2. Avoid serializing the lossy Slate tree when only metadata changed,
+  //    which would silently drop unsupported markdown nodes (tables, HTML, etc.)
+  const bodyDirtyRef = useRef(false);
+  // Tracks whether metadata (title/tags/aliases) has local unsaved changes
+  const metaDirtyRef = useRef(false);
+
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -67,8 +76,13 @@ export function usePageEditor(path: string): PageEditorState {
     return markdownToSlate(page.body);
   }, [page]);
 
+  // Sync server data → local state on initial load and genuine external changes.
+  // Skip when we have unsaved local edits (dirty), to prevent refetches
+  // triggered by our own saves from overwriting in-flight user work.
   useEffect(() => {
     if (!page) return;
+    if (bodyDirtyRef.current || metaDirtyRef.current) return;
+
     const t = page.meta.title ?? "";
     const tg = page.meta.tags ?? [];
     const al = page.meta.aliases ?? [];
@@ -86,12 +100,19 @@ export function usePageEditor(path: string): PageEditorState {
       timerRef.current = null;
     }
 
-    const body = slateToMarkdown(editorValueRef.current);
     const currentTitle = titleRef.current;
     const currentTags = tagsRef.current;
     const currentAliases = aliasesRef.current;
 
-    const bodyChanged = body !== savedRef.current.body;
+    // Only serialize the Slate tree when the user actually edited body content.
+    // This prevents the lossy mdast→slate→mdast round-trip from silently
+    // dropping unsupported markdown nodes (tables, HTML blocks, footnotes, etc.)
+    // when only metadata was changed.
+    const body = bodyDirtyRef.current
+      ? slateToMarkdown(editorValueRef.current)
+      : savedRef.current.body;
+    const bodyChanged = bodyDirtyRef.current && body !== savedRef.current.body;
+
     const titleChanged = currentTitle !== savedRef.current.title;
     const tagsChanged =
       JSON.stringify(currentTags) !== JSON.stringify(savedRef.current.tags);
@@ -124,6 +145,8 @@ export function usePageEditor(path: string): PageEditorState {
             aliases: currentAliases,
             body,
           };
+          bodyDirtyRef.current = false;
+          metaDirtyRef.current = false;
           setSaveStatus("saved");
           setSaveError(null);
         },
@@ -150,6 +173,7 @@ export function usePageEditor(path: string): PageEditorState {
         (op) => op.type !== "set_selection",
       );
       if (isAstChange) {
+        bodyDirtyRef.current = true;
         scheduleSave();
       }
     },
@@ -159,6 +183,7 @@ export function usePageEditor(path: string): PageEditorState {
   const setTitle = useCallback(
     (t: string) => {
       setTitleState(t);
+      metaDirtyRef.current = true;
       scheduleSave();
     },
     [scheduleSave],
@@ -167,6 +192,7 @@ export function usePageEditor(path: string): PageEditorState {
   const setTags = useCallback(
     (t: string[]) => {
       setTagsState(t);
+      metaDirtyRef.current = true;
       scheduleSave();
     },
     [scheduleSave],
@@ -175,6 +201,7 @@ export function usePageEditor(path: string): PageEditorState {
   const setAliases = useCallback(
     (a: string[]) => {
       setAliasesState(a);
+      metaDirtyRef.current = true;
       scheduleSave();
     },
     [scheduleSave],

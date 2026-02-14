@@ -25,7 +25,13 @@ export function TabContent() {
   }
 
   if (activeTab.type === "page" && activeTab.path) {
-    return <PageTabContent tabId={activeTab.id} path={activeTab.path} />;
+    return (
+      <PageTabContent
+        key={activeTab.path}
+        tabId={activeTab.id}
+        path={activeTab.path}
+      />
+    );
   }
 
   return null;
