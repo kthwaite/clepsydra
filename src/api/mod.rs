@@ -1,4 +1,5 @@
 pub mod academic;
+pub mod archive;
 pub mod attachments;
 pub mod error;
 pub mod events;
