@@ -171,6 +171,18 @@ impl ContentStore {
         Ok(pruned)
     }
 
+    /// Return the current ref_count for a blob (for testing).
+    #[cfg(test)]
+    pub(crate) fn ref_count(&self, hash: &str) -> Result<i64, Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
+        let count: i64 = self.db.query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            params![hash],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     /// Return summary stats for the store.
     pub fn stats(&self) -> Result<CasStats, Box<dyn std::error::Error>> {
         let blob_count: i64 = self
@@ -234,5 +246,74 @@ mod tests {
         assert!(store
             .retrieve("sha256:0000000000000000000000000000000000000000000000000000000000000000")
             .is_err());
+    }
+
+    #[test]
+    fn storing_same_blob_twice_deduplicates() {
+        let (store, _tmp) = test_store();
+        let data = b"duplicate content";
+        let r1 = store.store(data, "text/plain").unwrap();
+        let r2 = store.store(data, "text/plain").unwrap();
+
+        assert_eq!(r1.hash, r2.hash);
+        assert!(!r1.already_existed);
+        assert!(r2.already_existed);
+    }
+
+    #[test]
+    fn ref_count_increments_on_duplicate_store() {
+        let (store, _tmp) = test_store();
+        let data = b"ref counted";
+        let r = store.store(data, "text/plain").unwrap();
+        store.store(data, "text/plain").unwrap();
+
+        let count = store.ref_count(&r.hash).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn decrement_ref_and_gc() {
+        let (store, _tmp) = test_store();
+        let data = b"ephemeral";
+        let result = store.store(data, "text/plain").unwrap();
+
+        store.decrement_ref(&result.hash).unwrap();
+        let pruned = store.gc(std::time::Duration::ZERO).unwrap();
+        assert_eq!(pruned, 1);
+        assert!(!store.exists(&result.hash).unwrap());
+    }
+
+    #[test]
+    fn gc_respects_min_age() {
+        let (store, _tmp) = test_store();
+        let data = b"young blob";
+        let result = store.store(data, "text/plain").unwrap();
+
+        store.decrement_ref(&result.hash).unwrap();
+        // min_age of 1 hour — blob was just created, should not be pruned
+        let pruned = store.gc(std::time::Duration::from_secs(3600)).unwrap();
+        assert_eq!(pruned, 0);
+        assert!(store.exists(&result.hash).unwrap());
+    }
+
+    #[test]
+    fn retrieve_nonexistent_returns_error() {
+        let (store, _tmp) = test_store();
+        let result = store.retrieve(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stats_reflect_stored_blobs() {
+        let (store, _tmp) = test_store();
+        store.store(b"blob1", "text/plain").unwrap();
+        store.store(b"blob2", "image/png").unwrap();
+        store.store(b"blob1", "text/plain").unwrap(); // dedup
+
+        let stats = store.stats().unwrap();
+        assert_eq!(stats.blob_count, 2);
+        assert_eq!(stats.total_size_bytes, 10); // 5 + 5
     }
 }
