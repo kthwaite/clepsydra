@@ -95,10 +95,7 @@ async fn archive_ingest_creates_page_and_stores_blobs() {
     assert_eq!(body["blobs_deduped"], 0);
     assert_eq!(body["status"], "created");
     assert!(
-        body["vault_path"]
-            .as_str()
-            .unwrap()
-            .starts_with("archive/"),
+        body["vault_path"].as_str().unwrap().starts_with("archive/"),
         "expected vault_path to start with 'archive/', got: {}",
         body["vault_path"]
     );
