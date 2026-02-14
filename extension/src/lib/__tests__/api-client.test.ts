@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArchiveConflictError, ArchiveError, ClepsydraClient } from "../api-client";
 import type { ArchiveManifest, ArchiveResponse, ArchiveStatusResponse } from "../types";
 
@@ -21,7 +21,7 @@ function makeManifest(overrides: Partial<ArchiveManifest> = {}): ArchiveManifest
 
 describe("ClepsydraClient", () => {
   let client: ClepsydraClient;
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance;
 
   beforeEach(() => {
     client = new ClepsydraClient(BASE_URL);
