@@ -104,6 +104,35 @@ fn resolve_vault_root(root: &str, config_path: &Path, cwd: &Path) -> PathBuf {
     cwd.join(root_path)
 }
 
+fn drain_change_batch(
+    first: ChangeEvent,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ChangeEvent>,
+) -> Vec<ChangeEvent> {
+    let mut batch = vec![first];
+    while let Ok(event) = rx.try_recv() {
+        batch.push(event);
+    }
+    batch
+}
+
+fn notification_from_batch(batch: &[ChangeEvent]) -> Option<api::events::SyncNotification> {
+    let mut upserted: Vec<String> = Vec::new();
+    let mut removed: Vec<String> = Vec::new();
+
+    for ev in batch {
+        match ev {
+            ChangeEvent::Upsert(vp) => upserted.push(vp.as_str().to_string()),
+            ChangeEvent::Remove(vp) => removed.push(vp.as_str().to_string()),
+        }
+    }
+
+    if upserted.is_empty() && removed.is_empty() {
+        None
+    } else {
+        Some(api::events::SyncNotification::IndexChanged { upserted, removed })
+    }
+}
+
 pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Logging via `tracing`.
     // Configure with `RUST_LOG=debug` (or e.g. `RUST_LOG=clepsydra=debug,tower_http=debug`).
@@ -122,6 +151,17 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     // Open vault
     let vault = Vault::open(&vault_root)?;
+
+    // Open CAS
+    let cas_path_raw = &vault.config().archive.cas_path;
+    let cas_path = if let Some(stripped) = cas_path_raw.strip_prefix("~/") {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(stripped)
+    } else {
+        PathBuf::from(cas_path_raw)
+    };
+    let cas = vault::cas::ContentStore::open(&cas_path)?;
 
     // Open index
     let db_path = vault.root().join(".clepsydra/cache.db");
@@ -153,6 +193,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState {
         vault,
         index: Arc::clone(&index),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
         hooks,
@@ -168,18 +209,11 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let _watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
 
     tokio::spawn(async move {
-        let mut batch: Vec<ChangeEvent> = Vec::new();
         loop {
-            match change_rx.recv().await {
-                Some(event) => {
-                    batch.push(event);
-                    // Drain any additional buffered events
-                    while let Ok(event) = change_rx.try_recv() {
-                        batch.push(event);
-                    }
-                }
+            let batch = match change_rx.recv().await {
+                Some(event) => drain_change_batch(event, &mut change_rx),
                 None => break,
-            }
+            };
 
             let mut idx = sync_index.lock();
             match SyncEngine::process_events(&batch, &sync_vault, &mut idx) {
@@ -195,27 +229,14 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
 
-                    // Notify connected SSE clients
-                    let mut upserted: Vec<String> = Vec::new();
-                    let mut removed: Vec<String> = Vec::new();
-                    for ev in &batch {
-                        match ev {
-                            ChangeEvent::Upsert(vp) => upserted.push(vp.as_str().to_string()),
-                            ChangeEvent::Remove(vp) => removed.push(vp.as_str().to_string()),
-                        }
-                    }
-                    if !upserted.is_empty() || !removed.is_empty() {
-                        let _ = sync_change_tx.send(api::events::SyncNotification::IndexChanged {
-                            upserted,
-                            removed,
-                        });
+                    if let Some(notification) = notification_from_batch(&batch) {
+                        let _ = sync_change_tx.send(notification);
                     }
                 }
                 Err(e) => {
                     tracing::error!("sync error: {e}");
                 }
             }
-            batch.clear();
         }
     });
 
@@ -237,4 +258,68 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn root() -> impl IntoResponse {
     "ok"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notification_from_batch_collects_upserts_and_removes() {
+        let batch = vec![
+            ChangeEvent::Upsert(vault::path::VaultPath::new("notes/a.md").unwrap()),
+            ChangeEvent::Remove(vault::path::VaultPath::new("notes/b.md").unwrap()),
+            ChangeEvent::Upsert(vault::path::VaultPath::new("notes/c.md").unwrap()),
+        ];
+
+        let notification = notification_from_batch(&batch).expect("expected notification");
+        let api::events::SyncNotification::IndexChanged { upserted, removed } = notification;
+
+        assert_eq!(upserted, vec!["notes/a.md", "notes/c.md"]);
+        assert_eq!(removed, vec!["notes/b.md"]);
+    }
+
+    #[test]
+    fn notification_from_empty_batch_is_none() {
+        let batch = Vec::<ChangeEvent>::new();
+        assert!(notification_from_batch(&batch).is_none());
+    }
+
+    #[tokio::test]
+    async fn drain_change_batch_collects_buffered_events() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
+        tx.send(ChangeEvent::Upsert(
+            vault::path::VaultPath::new("notes/a.md").unwrap(),
+        ))
+        .unwrap();
+        tx.send(ChangeEvent::Remove(
+            vault::path::VaultPath::new("notes/b.md").unwrap(),
+        ))
+        .unwrap();
+        tx.send(ChangeEvent::Upsert(
+            vault::path::VaultPath::new("notes/c.md").unwrap(),
+        ))
+        .unwrap();
+
+        let first = rx.recv().await.expect("first event missing");
+        let batch = drain_change_batch(first, &mut rx);
+
+        assert_eq!(batch.len(), 3);
+    }
+
+    #[test]
+    fn resolve_vault_root_uses_config_parent_for_relative_roots() {
+        let cwd = PathBuf::from("/tmp/cwd");
+        let config = PathBuf::from("/tmp/config-dir/config.toml");
+        let resolved = resolve_vault_root("vault", &config, &cwd);
+        assert_eq!(resolved, PathBuf::from("/tmp/config-dir/vault"));
+    }
+
+    #[test]
+    fn resolve_vault_root_preserves_absolute_roots() {
+        let cwd = PathBuf::from("/tmp/cwd");
+        let config = PathBuf::from("/tmp/config-dir/config.toml");
+        let resolved = resolve_vault_root("/var/data/vault", &config, &cwd);
+        assert_eq!(resolved, PathBuf::from("/var/data/vault"));
+    }
 }

@@ -16,12 +16,14 @@ use tokio::sync::broadcast;
 
 use crate::api::events::SyncNotification;
 use crate::vault::Vault;
+use crate::vault::cas::ContentStore;
 use crate::vault::index::VaultIndex;
 
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
     pub vault: Vault,
     pub index: Arc<parking_lot::Mutex<VaultIndex>>,
+    pub cas: Arc<parking_lot::Mutex<ContentStore>>,
     pub warnings: parking_lot::Mutex<Vec<String>>,
     pub change_tx: broadcast::Sender<SyncNotification>,
     pub hooks: Vec<Box<dyn crate::vault::hooks::PostMoveHook>>,
@@ -37,5 +39,6 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .nest("/folders-move", folders::move_router())
         .nest("/attachments", attachments::router())
         .nest("/academic", academic::router())
+        .nest("/archive", archive::router())
         .nest("/index", index_routes::router())
 }
