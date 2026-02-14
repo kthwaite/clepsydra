@@ -42,6 +42,7 @@ fn setup_server() -> (TestServer, TempDir) {
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()

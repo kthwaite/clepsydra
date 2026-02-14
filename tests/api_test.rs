@@ -42,6 +42,7 @@ fn setup_server() -> (TestServer, TempDir) {
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -676,6 +677,7 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -909,6 +911,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
+        delete_hooks: vec![],
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1195,6 +1198,7 @@ async fn sse_events_endpoint_returns_stream() {
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -1330,6 +1334,7 @@ async fn create_page_emits_sync_notification() {
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()

@@ -189,14 +189,24 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let hooks: Vec<Box<dyn vault::hooks::PostMoveHook>> =
         vec![Box::new(vault::academic_hook::AcademicMoveHook)];
 
+    // Wrap CAS for shared access
+    let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
+
+    // Build post-delete hooks
+    let delete_hooks: Vec<Box<dyn vault::hooks::PostDeleteHook>> =
+        vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas_arc),
+        })];
+
     // Build shared state
     let state = Arc::new(AppState {
         vault,
         index: Arc::clone(&index),
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
+        cas: cas_arc,
         warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
         hooks,
+        delete_hooks,
     });
 
     // Spawn file watcher + sync loop

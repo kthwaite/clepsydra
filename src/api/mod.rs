@@ -27,6 +27,7 @@ pub struct AppState {
     pub warnings: parking_lot::Mutex<Vec<String>>,
     pub change_tx: broadcast::Sender<SyncNotification>,
     pub hooks: Vec<Box<dyn crate::vault::hooks::PostMoveHook>>,
+    pub delete_hooks: Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>,
 }
 
 /// Build the API router mounted at `/api/vault`.
