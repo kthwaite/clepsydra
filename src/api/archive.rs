@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Path, State};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,13 @@ pub enum ArchiveStatus {
 }
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/", post(ingest_archive))
+    Router::new()
+        .route("/", post(ingest_archive))
+        .route("/status", get(archive_status))
+}
+
+pub fn cas_router() -> Router<Arc<AppState>> {
+    Router::new().route("/{hash}", get(serve_blob))
 }
 
 /// Convert a title to a URL-safe slug, truncated to `max_len` chars.
@@ -145,6 +151,42 @@ fn find_existing_archive(
     }
 
     None
+}
+
+async fn serve_blob(
+    State(state): State<Arc<AppState>>,
+    Path(hash): Path<String>,
+) -> Result<Response, ApiError> {
+    let cas = state.cas.lock();
+    let (data, content_type) = cas
+        .retrieve(&hash)
+        .map_err(|_| ApiError::not_found(format!("blob not found: {hash}")))?;
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, content_type)],
+        data,
+    )
+        .into_response())
+}
+
+async fn archive_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Response, ApiError> {
+    let cas = state.cas.lock();
+    let stats = cas
+        .stats()
+        .map_err(|e| ApiError::internal(format!("stats: {e}")))?;
+
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "enabled": state.vault.config().archive.enabled,
+            "blob_count": stats.blob_count,
+            "total_size_bytes": stats.total_size_bytes,
+        })),
+    )
+        .into_response())
 }
 
 async fn ingest_archive(

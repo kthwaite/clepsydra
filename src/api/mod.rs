@@ -40,5 +40,6 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .nest("/attachments", attachments::router())
         .nest("/academic", academic::router())
         .nest("/archive", archive::router())
+        .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
 }
