@@ -1,6 +1,7 @@
 pub mod academic;
 pub mod academic_hook;
 pub mod canonical;
+pub mod cas;
 pub mod config;
 pub mod context;
 pub mod derivation;
