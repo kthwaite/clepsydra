@@ -1,0 +1,28 @@
+{
+  "name": "clepsydra-web-archive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "build:firefox": "TARGET=firefox vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/turndown": "^5.0.6",
+    "chrome-types": "^0.1.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vite-plugin-web-extension": "^4.0.0",
+    "vitest": "^3.0.0"
+  }
+}

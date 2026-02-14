@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { max-width: 480px; margin: 40px auto; padding: 0 16px;
+           font-family: system-ui, sans-serif; font-size: 14px; }
+    h1 { font-size: 18px; margin-bottom: 24px; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input[type="text"] { width: 100%; padding: 8px; border: 2px solid #000;
+                          margin-top: 4px; font-size: 14px; box-sizing: border-box; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    select { padding: 8px; border: 2px solid #000; margin-top: 4px; font-size: 14px; }
+    button { margin-top: 24px; padding: 10px 20px; border: 2px solid #000;
+             background: #000; color: #fff; font-size: 14px; cursor: pointer; }
+    button:hover { background: #333; }
+    .saved { color: #22c55e; margin-left: 12px; display: none; }
+    .status { margin-top: 16px; padding: 8px; border: 2px solid #000; }
+  </style>
+</head>
+<body>
+  <h1>Clepsydra Web Archive</h1>
+
+  <label for="server-url">Server URL</label>
+  <input type="text" id="server-url" placeholder="http://localhost:3000" />
+
+  <label for="default-tags">Default Tags (comma-separated)</label>
+  <input type="text" id="default-tags" placeholder="reading, research" />
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="notify-success" />
+    <label for="notify-success" style="margin-top:0;font-weight:normal">
+      Notify on successful capture
+    </label>
+  </div>
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="notify-duplicate" />
+    <label for="notify-duplicate" style="margin-top:0;font-weight:normal">
+      Notify when page already archived
+    </label>
+  </div>
+
+  <label for="on-changed">When content has changed</label>
+  <select id="on-changed">
+    <option value="ask">Ask me</option>
+    <option value="update">Update existing page</option>
+    <option value="new_version">Create new version</option>
+  </select>
+
+  <div>
+    <button id="save-btn">Save</button>
+    <span class="saved" id="saved-msg">Saved</span>
+  </div>
+
+  <div class="status" id="status-box"></div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>
