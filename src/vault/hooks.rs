@@ -17,3 +17,15 @@ pub trait PostMoveHook: Send + Sync {
         index: &VaultIndex,
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
+
+/// Hook invoked after a page has been deleted.
+///
+/// Domain modules implement this to clean up related resources.
+pub trait PostDeleteHook: Send + Sync {
+    fn on_page_deleted(
+        &self,
+        path: &VaultPath,
+        page_id: &Uuid,
+        meta: &crate::vault::page::PageMeta,
+    ) -> Result<(), Box<dyn std::error::Error>>;
+}

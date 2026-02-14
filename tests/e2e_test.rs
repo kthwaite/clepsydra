@@ -8,9 +8,16 @@ use tokio::sync::broadcast;
 
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
+use clepsydra::vault::academic_hook::AcademicMoveHook;
+use clepsydra::vault::cas::ContentStore;
+use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
+
+fn production_hooks() -> Vec<Box<dyn PostMoveHook>> {
+    vec![Box::new(AcademicMoveHook)]
+}
 
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
@@ -24,13 +31,18 @@ fn setup_server() -> (TestServer, TempDir) {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let cas_path = tmp.path().join("cas");
+    let cas = ContentStore::open(&cas_path).unwrap();
+
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(parking_lot::Mutex::new(index)),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
-        hooks: vec![],
+        hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -182,10 +194,7 @@ async fn folder_tree_returns_all_non_hidden_folders() {
         .map(|v| v.as_str().unwrap())
         .collect();
 
-    assert!(
-        paths.contains(&"notes"),
-        "expected 'notes' in {paths:?}"
-    );
+    assert!(paths.contains(&"notes"), "expected 'notes' in {paths:?}");
     assert!(
         paths.contains(&"notes/sub"),
         "expected 'notes/sub' in {paths:?}"

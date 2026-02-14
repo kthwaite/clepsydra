@@ -8,9 +8,16 @@ use tokio::sync::broadcast;
 
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
+use clepsydra::vault::academic_hook::AcademicMoveHook;
+use clepsydra::vault::cas::ContentStore;
+use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
+
+fn production_hooks() -> Vec<Box<dyn PostMoveHook>> {
+    vec![Box::new(AcademicMoveHook)]
+}
 
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
@@ -24,13 +31,18 @@ fn setup_server() -> (TestServer, TempDir) {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let cas_path = tmp.path().join("cas");
+    let cas = ContentStore::open(&cas_path).unwrap();
+
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(parking_lot::Mutex::new(index)),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
-        hooks: vec![],
+        hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -654,13 +666,18 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let cas_path = tmp.path().join("cas");
+    let cas = ContentStore::open(&cas_path).unwrap();
+
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(parking_lot::Mutex::new(index)),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
-        hooks: vec![],
+        hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -878,19 +895,23 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
-    fs::write(root.join("config.toml"), config_content).unwrap();
+    fs::write(root.join(".clepsydra/config.toml"), config_content).unwrap();
     let vault = Vault::open(&root).unwrap();
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
+    let cas_path = tmp.path().join("cas");
+    let cas = ContentStore::open(&cas_path).unwrap();
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(parking_lot::Mutex::new(index)),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
-        hooks: vec![],
+        hooks: production_hooks(),
+        delete_hooks: vec![],
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -901,7 +922,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
 
 #[tokio::test]
 async fn create_page_indexes_property_links() {
-    let (server, _tmp) = setup_server_with_config("[vault]\nlinkable_properties = [\"tags\"]\n");
+    let (server, _tmp) = setup_server_with_config("[vault]\nlinkable_properties = []\n");
 
     let res = server
         .post("/api/vault/pages/props.md")
@@ -913,8 +934,8 @@ async fn create_page_indexes_property_links() {
         .await;
     res.assert_status(StatusCode::CREATED);
 
-    // The unresolved endpoint will show property_ref links since "concept"
-    // and "rust" won't resolve to any page
+    // With linkable_properties disabled via config, tags must not emit
+    // property_ref links.
     let res = server.get("/api/vault/index/unresolved").await;
     res.assert_status(StatusCode::OK);
     let body: serde_json::Value = res.json();
@@ -924,8 +945,8 @@ async fn create_page_indexes_property_links() {
         .filter(|l| l["kind"] == "property_ref")
         .collect();
     assert!(
-        property_links.len() >= 2,
-        "expected at least 2 property_ref links for tags, got {}",
+        property_links.is_empty(),
+        "expected no property_ref links when linkable_properties is empty, got {}",
         property_links.len()
     );
 }
@@ -1166,13 +1187,18 @@ async fn sse_events_endpoint_returns_stream() {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let cas_path = tmp.path().join("cas");
+    let cas = ContentStore::open(&cas_path).unwrap();
+
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(parking_lot::Mutex::new(index)),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
-        hooks: vec![],
+        hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -1296,14 +1322,19 @@ async fn create_page_emits_sync_notification() {
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
+    let cas_path = tmp.path().join("cas");
+    let cas = ContentStore::open(&cas_path).unwrap();
+
     let (change_tx, _) = broadcast::channel(64);
     let mut rx = change_tx.subscribe();
     let state = Arc::new(AppState {
         vault,
         index: Arc::new(parking_lot::Mutex::new(index)),
+        cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
-        hooks: vec![],
+        hooks: production_hooks(),
+        delete_hooks: vec![],
     });
 
     let app: Router = Router::new()
@@ -1783,6 +1814,40 @@ async fn update_work_changes_status() {
     assert_eq!(body["title"], "Update Test");
 }
 
+#[tokio::test]
+async fn update_work_duplicate_cite_key_returns_409() {
+    let (server, _tmp) = setup_server();
+
+    let first = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "First",
+            "cite_key": "duplicate-key"
+        }))
+        .await;
+    first.assert_status(StatusCode::CREATED);
+
+    let second = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Second",
+            "cite_key": "second-key"
+        }))
+        .await;
+    second.assert_status(StatusCode::CREATED);
+    let second_body: serde_json::Value = second.json();
+    let second_id = second_body["id"].as_str().unwrap();
+
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{second_id}"))
+        .json(&serde_json::json!({ "cite_key": "duplicate-key" }))
+        .await;
+
+    res.assert_status(StatusCode::CONFLICT);
+}
+
 // ---------------------------------------------------------------------------
 // Academic API: annotations
 // ---------------------------------------------------------------------------
@@ -1826,6 +1891,93 @@ async fn create_and_list_annotations() {
     let body: Vec<serde_json::Value> = res.json();
     assert_eq!(body.len(), 1);
     assert_eq!(body[0]["annotation_type"], "highlight");
+}
+
+#[tokio::test]
+async fn move_folder_updates_annotation_work_paths_for_moved_works() {
+    let (server, _tmp) = setup_server();
+
+    let work_a = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper A"
+        }))
+        .await;
+    work_a.assert_status(StatusCode::CREATED);
+    let work_a_body: serde_json::Value = work_a.json();
+    let work_a_id = work_a_body["id"].as_str().unwrap().to_string();
+
+    let work_b = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Paper B"
+        }))
+        .await;
+    work_b.assert_status(StatusCode::CREATED);
+    let work_b_body: serde_json::Value = work_b.json();
+    let work_b_id = work_b_body["id"].as_str().unwrap().to_string();
+
+    server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_a_id.clone(),
+            "annotation_type": "highlight",
+            "body": "A"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/academic/annotations")
+        .json(&serde_json::json!({
+            "work_id": work_b_id.clone(),
+            "annotation_type": "note",
+            "body": "B"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/folders-move/library/papers")
+        .json(&serde_json::json!({ "destination": "archive/papers" }))
+        .await
+        .assert_status(StatusCode::OK);
+
+    let ann_a = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_a_id}/annotations"
+        ))
+        .await;
+    ann_a.assert_status(StatusCode::OK);
+    let ann_a_body: Vec<serde_json::Value> = ann_a.json();
+    assert_eq!(ann_a_body.len(), 1);
+    assert!(
+        ann_a_body[0]["work_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("archive/papers/"),
+        "expected updated work_path for annotation A, got: {:?}",
+        ann_a_body[0]["work_path"]
+    );
+
+    let ann_b = server
+        .get(&format!(
+            "/api/vault/academic/works/by-id/{work_b_id}/annotations"
+        ))
+        .await;
+    ann_b.assert_status(StatusCode::OK);
+    let ann_b_body: Vec<serde_json::Value> = ann_b.json();
+    assert_eq!(ann_b_body.len(), 1);
+    assert!(
+        ann_b_body[0]["work_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("archive/papers/"),
+        "expected updated work_path for annotation B, got: {:?}",
+        ann_b_body[0]["work_path"]
+    );
 }
 
 // ---------------------------------------------------------------------------

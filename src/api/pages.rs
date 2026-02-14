@@ -539,6 +539,11 @@ pub async fn delete_page(
         // index lock dropped here
     }
 
+    // Read page metadata before deletion (needed by delete hooks)
+    let page_meta = Page::from_file(&abs_path, vault_path.clone())
+        .map(|p| p.meta)
+        .ok();
+
     // Plan and execute the delete
     let rewrite_mode = match query.rewrite.as_str() {
         "unlink" => RewriteMode::Unlink,
@@ -561,6 +566,15 @@ pub async fn delete_page(
         plan.execute(&state.vault, &mut index, &state.hooks)
             .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
     } // lock released
+
+    // Run post-delete hooks (e.g. CAS ref_count cleanup for archive pages)
+    if let Some(ref meta) = page_meta {
+        for hook in &state.delete_hooks {
+            if let Err(e) = hook.on_page_deleted(&vault_path, &meta.id, meta) {
+                tracing::warn!("delete hook error: {e}");
+            }
+        }
+    }
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![],

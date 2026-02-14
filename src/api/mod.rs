@@ -1,4 +1,5 @@
 pub mod academic;
+pub mod archive;
 pub mod attachments;
 pub mod error;
 pub mod events;
@@ -15,15 +16,18 @@ use tokio::sync::broadcast;
 
 use crate::api::events::SyncNotification;
 use crate::vault::Vault;
+use crate::vault::cas::ContentStore;
 use crate::vault::index::VaultIndex;
 
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
     pub vault: Vault,
     pub index: Arc<parking_lot::Mutex<VaultIndex>>,
+    pub cas: Arc<parking_lot::Mutex<ContentStore>>,
     pub warnings: parking_lot::Mutex<Vec<String>>,
     pub change_tx: broadcast::Sender<SyncNotification>,
     pub hooks: Vec<Box<dyn crate::vault::hooks::PostMoveHook>>,
+    pub delete_hooks: Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>,
 }
 
 /// Build the API router mounted at `/api/vault`.
@@ -36,5 +40,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .nest("/folders-move", folders::move_router())
         .nest("/attachments", attachments::router())
         .nest("/academic", academic::router())
+        .nest("/archive", archive::router())
+        .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
 }
