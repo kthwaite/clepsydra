@@ -56,14 +56,14 @@ export function usePageEditor(path: string): PageEditorState {
     body: "",
   });
 
-  // Tracks whether the user has made actual body edits (AST changes).
-  // Used to:
-  // 1. Skip overwriting editor state on refetches triggered by our own saves
-  // 2. Avoid serializing the lossy Slate tree when only metadata changed,
-  //    which would silently drop unsupported markdown nodes (tables, HTML, etc.)
-  const bodyDirtyRef = useRef(false);
-  // Tracks whether metadata (title/tags/aliases) has local unsaved changes
-  const metaDirtyRef = useRef(false);
+  // Generation counters for dirty tracking. Each edit increments the edit gen;
+  // successful saves advance the saved gen to the value captured at save start.
+  // This way edits during an in-flight save keep the edit gen ahead of saved gen,
+  // so onSuccess never accidentally marks them clean.
+  const bodyEditGenRef = useRef(0);
+  const metaEditGenRef = useRef(0);
+  const savedBodyGenRef = useRef(0);
+  const savedMetaGenRef = useRef(0);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -81,7 +81,9 @@ export function usePageEditor(path: string): PageEditorState {
   // triggered by our own saves from overwriting in-flight user work.
   useEffect(() => {
     if (!page) return;
-    if (bodyDirtyRef.current || metaDirtyRef.current) return;
+    const bodyDirty = bodyEditGenRef.current > savedBodyGenRef.current;
+    const metaDirty = metaEditGenRef.current > savedMetaGenRef.current;
+    if (bodyDirty || metaDirty) return;
 
     const t = page.meta.title ?? "";
     const tg = page.meta.tags ?? [];
@@ -100,6 +102,13 @@ export function usePageEditor(path: string): PageEditorState {
       timerRef.current = null;
     }
 
+    // Snapshot generation counters at save start. onSuccess advances the
+    // saved watermark to these values — edits that arrive during the save
+    // flight will have incremented past them and stay dirty.
+    const saveBodyGen = bodyEditGenRef.current;
+    const saveMetaGen = metaEditGenRef.current;
+    const bodyDirty = saveBodyGen > savedBodyGenRef.current;
+
     const currentTitle = titleRef.current;
     const currentTags = tagsRef.current;
     const currentAliases = aliasesRef.current;
@@ -108,10 +117,10 @@ export function usePageEditor(path: string): PageEditorState {
     // This prevents the lossy mdast→slate→mdast round-trip from silently
     // dropping unsupported markdown nodes (tables, HTML blocks, footnotes, etc.)
     // when only metadata was changed.
-    const body = bodyDirtyRef.current
+    const body = bodyDirty
       ? slateToMarkdown(editorValueRef.current)
       : savedRef.current.body;
-    const bodyChanged = bodyDirtyRef.current && body !== savedRef.current.body;
+    const bodyChanged = bodyDirty && body !== savedRef.current.body;
 
     const titleChanged = currentTitle !== savedRef.current.title;
     const tagsChanged =
@@ -121,6 +130,10 @@ export function usePageEditor(path: string): PageEditorState {
       JSON.stringify(savedRef.current.aliases);
 
     if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
+      // User reverted to saved state — clear the dirty gap so the sync
+      // effect can accept future refetches again.
+      savedBodyGenRef.current = saveBodyGen;
+      savedMetaGenRef.current = saveMetaGen;
       setSaveStatus("saved");
       return;
     }
@@ -145,8 +158,11 @@ export function usePageEditor(path: string): PageEditorState {
             aliases: currentAliases,
             body,
           };
-          bodyDirtyRef.current = false;
-          metaDirtyRef.current = false;
+          // Advance saved watermarks to the generation captured at save start.
+          // If user edited during flight, edit gens will be higher and dirty
+          // state is preserved; if not, gens match and dirty clears.
+          savedBodyGenRef.current = saveBodyGen;
+          savedMetaGenRef.current = saveMetaGen;
           setSaveStatus("saved");
           setSaveError(null);
         },
@@ -173,7 +189,7 @@ export function usePageEditor(path: string): PageEditorState {
         (op) => op.type !== "set_selection",
       );
       if (isAstChange) {
-        bodyDirtyRef.current = true;
+        bodyEditGenRef.current += 1;
         scheduleSave();
       }
     },
@@ -183,7 +199,7 @@ export function usePageEditor(path: string): PageEditorState {
   const setTitle = useCallback(
     (t: string) => {
       setTitleState(t);
-      metaDirtyRef.current = true;
+      metaEditGenRef.current += 1;
       scheduleSave();
     },
     [scheduleSave],
@@ -192,7 +208,7 @@ export function usePageEditor(path: string): PageEditorState {
   const setTags = useCallback(
     (t: string[]) => {
       setTagsState(t);
-      metaDirtyRef.current = true;
+      metaEditGenRef.current += 1;
       scheduleSave();
     },
     [scheduleSave],
@@ -201,7 +217,7 @@ export function usePageEditor(path: string): PageEditorState {
   const setAliases = useCallback(
     (a: string[]) => {
       setAliasesState(a);
-      metaDirtyRef.current = true;
+      metaEditGenRef.current += 1;
       scheduleSave();
     },
     [scheduleSave],
