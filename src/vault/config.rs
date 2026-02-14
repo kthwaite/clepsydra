@@ -25,6 +25,8 @@ pub struct VaultConfig {
     pub vault: VaultSection,
     #[serde(default)]
     pub academic: AcademicSection,
+    #[serde(default)]
+    pub archive: ArchiveSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +116,60 @@ fn default_annotations_folder() -> String {
     "library/annotations".to_string()
 }
 
+/// Configuration for the web archive subsystem.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ArchiveSection {
+    #[serde(default = "default_archive_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_cas_path")]
+    pub cas_path: String,
+    #[serde(default = "default_archive_path_prefix")]
+    pub default_path_prefix: String,
+    #[serde(default = "default_max_blob_size_mb")]
+    pub max_blob_size_mb: u64,
+    #[serde(default = "default_max_request_size_mb")]
+    pub max_request_size_mb: u64,
+    #[serde(default = "default_gc_min_age_days")]
+    pub gc_min_age_days: u32,
+}
+
+impl Default for ArchiveSection {
+    fn default() -> Self {
+        Self {
+            enabled: default_archive_enabled(),
+            cas_path: default_cas_path(),
+            default_path_prefix: default_archive_path_prefix(),
+            max_blob_size_mb: default_max_blob_size_mb(),
+            max_request_size_mb: default_max_request_size_mb(),
+            gc_min_age_days: default_gc_min_age_days(),
+        }
+    }
+}
+
+fn default_archive_enabled() -> bool {
+    true
+}
+
+fn default_cas_path() -> String {
+    "~/.clepsydra/cas".to_string()
+}
+
+fn default_archive_path_prefix() -> String {
+    "archive".to_string()
+}
+
+fn default_max_blob_size_mb() -> u64 {
+    50
+}
+
+fn default_max_request_size_mb() -> u64 {
+    100
+}
+
+fn default_gc_min_age_days() -> u32 {
+    30
+}
+
 impl VaultConfig {
     /// Load vault configuration from `.clepsydra/config.toml` under the given
     /// vault root. Returns defaults if the file does not exist.
@@ -125,5 +181,47 @@ impl VaultConfig {
         let contents = std::fs::read_to_string(&config_path)?;
         let config: VaultConfig = toml::from_str(&contents)?;
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn archive_config_defaults() {
+        let config = VaultConfig::default();
+        assert!(config.archive.enabled);
+        assert_eq!(config.archive.cas_path, "~/.clepsydra/cas");
+        assert_eq!(config.archive.default_path_prefix, "archive");
+        assert_eq!(config.archive.max_blob_size_mb, 50);
+        assert_eq!(config.archive.max_request_size_mb, 100);
+        assert_eq!(config.archive.gc_min_age_days, 30);
+    }
+
+    #[test]
+    fn archive_config_from_toml() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path();
+        fs::create_dir_all(vault_root.join(".clepsydra")).unwrap();
+        fs::write(
+            vault_root.join(".clepsydra/config.toml"),
+            r#"
+[archive]
+enabled = false
+cas_path = "/custom/cas"
+max_blob_size_mb = 200
+"#,
+        )
+        .unwrap();
+
+        let config = VaultConfig::load(vault_root).unwrap();
+        assert!(!config.archive.enabled);
+        assert_eq!(config.archive.cas_path, "/custom/cas");
+        assert_eq!(config.archive.max_blob_size_mb, 200);
+        // Unset fields keep defaults
+        assert_eq!(config.archive.default_path_prefix, "archive");
     }
 }
