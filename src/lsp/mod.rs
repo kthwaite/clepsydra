@@ -1,9 +1,9 @@
 pub mod document;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -18,6 +18,8 @@ pub struct LspBackend {
     pub state: Arc<AppState>,
     /// Open documents keyed by URI.
     pub documents: Mutex<HashMap<Url, document::Document>>,
+    /// Cached snapshot of all canonical names for fast diagnostic checks.
+    pub canonical_names: Arc<RwLock<HashSet<String>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -56,6 +58,22 @@ impl LanguageServer for LspBackend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
+        let names = self
+            .state
+            .index
+            .with_index(|index, _| {
+                let mut stmt = index
+                    .connection()
+                    .prepare("SELECT canonical_name FROM canonical_names")
+                    .unwrap();
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .filter_map(|r| r.ok())
+                    .collect::<HashSet<String>>()
+            })
+            .await
+            .unwrap_or_default();
+        *self.canonical_names.write().await = names;
         self.client
             .log_message(MessageType::INFO, "clepsydra LSP initialized")
             .await;
@@ -72,8 +90,17 @@ impl LanguageServer for LspBackend {
 
         let doc = document::Document::from_text(&text, version);
 
-        let mut docs = self.documents.lock().await;
-        docs.insert(uri.clone(), doc);
+        {
+            let mut docs = self.documents.lock().await;
+            docs.insert(uri.clone(), doc);
+        }
+
+        {
+            let docs = self.documents.lock().await;
+            if let Some(doc) = docs.get(&uri) {
+                self.publish_diagnostics_for(&uri, doc).await;
+            }
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -84,8 +111,17 @@ impl LanguageServer for LspBackend {
         if let Some(change) = params.content_changes.into_iter().last() {
             let mut doc = document::Document::from_text(&change.text, version);
             doc.dirty = true;
-            let mut docs = self.documents.lock().await;
-            docs.insert(uri.clone(), doc);
+            {
+                let mut docs = self.documents.lock().await;
+                docs.insert(uri.clone(), doc);
+            }
+
+            {
+                let docs = self.documents.lock().await;
+                if let Some(doc) = docs.get(&uri) {
+                    self.publish_diagnostics_for(&uri, doc).await;
+                }
+            }
         }
     }
 
@@ -93,6 +129,37 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document.uri;
         let mut docs = self.documents.lock().await;
         docs.remove(&uri);
+    }
+}
+
+impl LspBackend {
+    /// Publish diagnostics for a single open document.
+    ///
+    /// Checks each extracted link against the cached canonical name snapshot
+    /// and reports unresolved links as warnings.
+    async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
+        let mut diagnostics = Vec::new();
+        let names = self.canonical_names.read().await;
+
+        for link in &doc.links {
+            if link.span.start == 0 && link.span.end == 0 {
+                continue; // skip property ref links
+            }
+            let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+            if !names.contains(canonical.as_str()) {
+                diagnostics.push(Diagnostic {
+                    range: doc.link_to_range(link),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    code: Some(NumberOrString::String("unresolved-link".into())),
+                    source: Some("clepsydra".into()),
+                    message: format!("Unresolved link: \"{}\"", link.target_raw),
+                    ..Default::default()
+                });
+            }
+        }
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
+            .await;
     }
 }
 
@@ -107,6 +174,7 @@ pub async fn run_lsp(state: Arc<AppState>) {
         client,
         state,
         documents: Mutex::new(HashMap::new()),
+        canonical_names: Arc::new(RwLock::new(HashSet::new())),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
