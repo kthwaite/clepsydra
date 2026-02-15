@@ -499,6 +499,64 @@ impl LanguageServer for LspBackend {
         }
     }
 
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = params.text_document.uri;
+        let vault_path = match self.uri_to_vault_path(&uri) {
+            Some(vp) => vp,
+            None => return Ok(None),
+        };
+
+        Ok(Some(vec![CodeLens {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
+            },
+            command: None,
+            data: Some(serde_json::to_value(vault_path.as_str()).unwrap()),
+        }]))
+    }
+
+    async fn code_lens_resolve(&self, lens: CodeLens) -> Result<CodeLens> {
+        let vault_path_str = lens
+            .data
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let count = if let Ok(vp) = crate::vault::path::VaultPath::new(vault_path_str) {
+            self.state
+                .index
+                .backlinks(vp, 0)
+                .await
+                .map(|bl| bl.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        let title = if count == 1 {
+            "1 reference".to_string()
+        } else {
+            format!("{count} references")
+        };
+
+        Ok(CodeLens {
+            range: lens.range,
+            command: Some(Command {
+                title,
+                command: "clepsydra.findReferences".to_string(),
+                arguments: lens.data.map(|d| vec![d]),
+            }),
+            data: None,
+        })
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
