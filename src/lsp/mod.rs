@@ -1,5 +1,6 @@
 pub mod completion;
 pub mod document;
+pub mod rename;
 pub mod symbols;
 
 use std::collections::{HashMap, HashSet};
@@ -555,6 +556,82 @@ impl LanguageServer for LspBackend {
             }),
             data: None,
         })
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let pos = params.position;
+
+        let docs = self.documents.lock().await;
+        let doc = match docs.get(&uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        // Case 1: Cursor on a wikilink
+        if let Some(link) = doc.link_at_position(pos)
+            && link.kind == crate::vault::link::LinkKind::Wiki
+        {
+            let range = doc.link_to_range(link);
+            return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                range,
+                placeholder: link.target_raw.clone(),
+            }));
+        }
+
+        // Case 2: Cursor in frontmatter on the title line
+        if doc.position_to_body_byte_offset(pos).is_none() {
+            // Cursor is in frontmatter region
+            let line_idx = pos.line as usize;
+            if line_idx < doc.rope.len_lines() {
+                let line_text = doc.rope.line(line_idx).to_string();
+                let trimmed = line_text.trim_start();
+                if let Some(rest) = trimmed.strip_prefix("title:") {
+                    let value = rest.trim();
+                    // Strip surrounding quotes if present
+                    let title_value = if (value.starts_with('"') && value.ends_with('"'))
+                        || (value.starts_with('\'') && value.ends_with('\''))
+                    {
+                        &value[1..value.len() - 1]
+                    } else {
+                        value.trim_end_matches('\n')
+                    };
+
+                    // Compute the range of the title value on this line.
+                    let value_start_in_line = if (value.starts_with('"') && value.ends_with('"'))
+                        || (value.starts_with('\'') && value.ends_with('\''))
+                    {
+                        // Position after the opening quote
+                        line_text.find(value).unwrap_or(0) + 1
+                    } else {
+                        // Position at start of the trimmed value
+                        line_text.find(value).unwrap_or(0)
+                    };
+                    let value_end_in_line = value_start_in_line + title_value.len();
+
+                    let range = Range {
+                        start: Position {
+                            line: pos.line,
+                            character: value_start_in_line as u32,
+                        },
+                        end: Position {
+                            line: pos.line,
+                            character: value_end_in_line as u32,
+                        },
+                    };
+
+                    return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                        range,
+                        placeholder: title_value.to_string(),
+                    }));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     async fn document_symbol(
