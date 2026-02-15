@@ -9,10 +9,11 @@ import {
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
-import { Editable, ReactEditor, Slate, withReact } from "slate-react";
+import { Editable, Slate, withReact } from "slate-react";
 import { usePages } from "#/api/pages";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
+import { createSelectionReference } from "./floatingSelectionReference";
 import { withLinks } from "./plugins/withLinks";
 import { withWikilinks } from "./plugins/withWikilinks";
 import type { WikilinkElement } from "./types";
@@ -44,25 +45,6 @@ export function SlateEditor({
 
   const [wikilinkTrigger, setWikilinkTrigger] =
     useState<WikilinkTrigger | null>(null);
-  const [comboboxPosition, setComboboxPosition] = useState({
-    top: 0,
-    left: 0,
-  });
-
-  const updateComboboxPosition = () => {
-    const { selection } = editor;
-    if (!selection || !Range.isCollapsed(selection)) return;
-    try {
-      const domRange = ReactEditor.toDOMRange(editor, selection);
-      const rect = domRange.getBoundingClientRect();
-      setComboboxPosition({
-        top: rect.bottom + 4,
-        left: rect.left,
-      });
-    } catch {
-      // DOM range may not exist during initialization
-    }
-  };
 
   const handleChange = (value: Descendant[]) => {
     onChange(value, editor);
@@ -100,7 +82,6 @@ export function SlateEditor({
     };
 
     setWikilinkTrigger({ anchor, query });
-    updateComboboxPosition();
   };
 
   const insertWikilink = (page: {
@@ -203,7 +184,7 @@ export function SlateEditor({
         <WikilinkCombobox
           pages={pages}
           query={wikilinkTrigger.query}
-          position={comboboxPosition}
+          reference={createSelectionReference(editor)}
           onSelect={insertWikilink}
           onClose={() => setWikilinkTrigger(null)}
         />

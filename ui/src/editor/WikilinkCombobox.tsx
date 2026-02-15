@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useFloating,
+  type VirtualElement,
+} from "@floating-ui/react";
+import { useCallback, useEffect, useState } from "react";
 import type { PageSummary } from "#/api/types";
 
 interface WikilinkComboboxProps {
   pages: PageSummary[];
   query: string;
-  position: { top: number; left: number };
+  reference: VirtualElement | null;
   onSelect: (page: PageSummary) => void;
   onClose: () => void;
 }
@@ -12,12 +20,16 @@ interface WikilinkComboboxProps {
 export function WikilinkCombobox({
   pages,
   query,
-  position,
+  reference,
   onSelect,
   onClose,
 }: WikilinkComboboxProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { refs, floatingStyles, update } = useFloating({
+    placement: "bottom-start",
+    strategy: "fixed",
+    middleware: [offset(6), flip(), shift({ padding: 8 })],
+  });
 
   const lowerQuery = query.toLowerCase();
   const filtered = pages
@@ -64,12 +76,25 @@ export function WikilinkCombobox({
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [handleKeyDown]);
 
+  useEffect(() => {
+    refs.setPositionReference(reference);
+  }, [reference, refs]);
+
+  useEffect(() => {
+    if (!reference || !refs.floating.current) return;
+    return autoUpdate(reference, refs.floating.current, update);
+  }, [reference, refs.floating, update]);
+
+  if (!reference) {
+    return null;
+  }
+
   if (filtered.length === 0) {
     return (
       <div
-        ref={containerRef}
+        ref={refs.setFloating}
         className="fixed z-50 border border-border bg-popover p-2 text-xs text-muted-foreground shadow-md"
-        style={{ top: position.top, left: position.left }}
+        style={floatingStyles}
       >
         No pages found
       </div>
@@ -78,9 +103,9 @@ export function WikilinkCombobox({
 
   return (
     <div
-      ref={containerRef}
+      ref={refs.setFloating}
       className="fixed z-50 max-h-64 overflow-y-auto border border-border bg-popover shadow-md"
-      style={{ top: position.top, left: position.left }}
+      style={floatingStyles}
     >
       {filtered.map((page, index) => (
         <div
