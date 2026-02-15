@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -301,9 +302,6 @@ pub async fn create_page(
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
     let abs_path = state.vault.resolve(&vault_path);
-    if abs_path.exists() {
-        return Err(ApiError::conflict(format!("page already exists: {path}")));
-    }
 
     // Create parent directories
     if let Some(parent) = abs_path.parent() {
@@ -325,10 +323,25 @@ pub async fn create_page(
 
     let page_body = body.body.unwrap_or_default();
 
-    // Write file
+    // Write file atomically: create_new prevents overwriting a file
+    // created by a concurrent endpoint (e.g. archive ingest).
     let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&abs_path)
+    {
+        Ok(mut file) => {
+            file.write_all(content.as_bytes())
+                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(ApiError::conflict(format!("page already exists: {path}")));
+        }
+        Err(e) => {
+            return Err(ApiError::internal(format!("failed to create file: {e}")));
+        }
+    }
 
     // Re-index the file
     {

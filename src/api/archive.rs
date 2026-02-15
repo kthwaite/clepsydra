@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -365,20 +366,42 @@ async fn ingest_archive(
 
     let page_body = &req.markdown_body;
 
-    // Write file
+    // Write file atomically: create_new ensures we don't overwrite a file
+    // created by a concurrent endpoint (e.g. POST /pages).
     let content = write_page_content(&meta, page_body);
-    if let Err(e) = fs::write(&abs_path, &content) {
-        rollback_cas(&state, &stored_hashes);
-        return Err(ApiError::internal(format!("failed to write file: {e}")));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&abs_path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = file.write_all(content.as_bytes()) {
+                let _ = fs::remove_file(&abs_path);
+                rollback_cas(&state, &stored_hashes);
+                return Err(ApiError::internal(format!("failed to write file: {e}")));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            rollback_cas(&state, &stored_hashes);
+            return Err(ApiError::conflict(format!(
+                "path already exists (concurrent write): {}",
+                vault_path.as_str()
+            )));
+        }
+        Err(e) => {
+            rollback_cas(&state, &stored_hashes);
+            return Err(ApiError::internal(format!("failed to create file: {e}")));
+        }
     }
 
     let page_id = meta.id.to_string();
 
-    // 6. Index the page
+    // 6. Index the page.
+    // create_new above guarantees we own this file, so remove_file on
+    // index failure is safe — no concurrent endpoint could have written it.
     {
         let mut index = state.index.lock();
         if let Err(e) = index.index_page(&state.vault, &vault_path) {
-            // Best-effort cleanup: remove the file we just wrote
             let _ = fs::remove_file(&abs_path);
             rollback_cas(&state, &stored_hashes);
             return Err(ApiError::internal(e.to_string()));
