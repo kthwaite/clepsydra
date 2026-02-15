@@ -979,6 +979,89 @@ impl LanguageServer for LspBackend {
         }))
     }
 
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+
+        let docs = self.documents.lock().await;
+        let doc = match docs.get(&uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        for diag in &params.context.diagnostics {
+            let code = match &diag.code {
+                Some(NumberOrString::String(s)) => s.as_str(),
+                _ => continue,
+            };
+
+            match code {
+                "unresolved-link" => {
+                    // Find the link at this diagnostic range
+                    if let Some(link) = doc.links.iter().find(|l| {
+                        l.kind == crate::vault::link::LinkKind::Wiki
+                            && doc.link_to_range(l) == diag.range
+                    }) {
+                        let target = &link.target_raw;
+                        let new_vp = crate::vault::path::VaultPath::from_title(target);
+                        let new_abs = self.state.vault.resolve(&new_vp);
+                        let new_uri = match Url::from_file_path(&new_abs) {
+                            Ok(u) => u,
+                            Err(_) => continue,
+                        };
+
+                        // Build frontmatter scaffold
+                        let mut meta = crate::vault::page::PageMeta::new();
+                        meta.title = Some(target.to_string());
+                        let content = crate::vault::page::write_page_content(&meta, "\n");
+
+                        let mut ops: Vec<DocumentChangeOperation> = Vec::new();
+                        ops.push(DocumentChangeOperation::Op(ResourceOp::Create(
+                            CreateFile {
+                                uri: new_uri.clone(),
+                                options: Some(CreateFileOptions {
+                                    overwrite: Some(false),
+                                    ignore_if_exists: Some(true),
+                                }),
+                                annotation_id: None,
+                            },
+                        )));
+                        ops.push(DocumentChangeOperation::Edit(TextDocumentEdit {
+                            text_document: OptionalVersionedTextDocumentIdentifier {
+                                uri: new_uri,
+                                version: None,
+                            },
+                            edits: vec![OneOf::Left(TextEdit {
+                                range: Range::default(),
+                                new_text: content,
+                            })],
+                        }));
+
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: format!("Create page: {target}"),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diag.clone()]),
+                            edit: Some(WorkspaceEdit {
+                                changes: None,
+                                document_changes: Some(DocumentChanges::Operations(ops)),
+                                change_annotations: None,
+                            }),
+                            is_preferred: Some(true),
+                            ..Default::default()
+                        }));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(actions))
+        }
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
