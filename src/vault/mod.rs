@@ -12,6 +12,7 @@ pub mod import;
 pub mod import_doi;
 pub mod import_isbn;
 pub mod index;
+pub mod index_handle;
 pub mod init;
 pub mod link;
 pub mod mutation;

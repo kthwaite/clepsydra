@@ -229,12 +229,40 @@ fn slugify(title: &str) -> String {
     format!("{trimmed}.md")
 }
 
+async fn cite_key_in_use(state: &AppState, cite_key: &str, exclude_page_id: Option<&str>) -> bool {
+    let canonical = CanonicalName::new(cite_key);
+    let canonical_str = canonical.as_str().to_string();
+    let exclude = exclude_page_id.map(|s| s.to_string());
+
+    state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1
+                        FROM canonical_names
+                        WHERE canonical_name = ?1
+                          AND source = 'cite_key'
+                          AND (?2 IS NULL OR page_id != ?2)
+                    )",
+                    params![canonical_str, exclude],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|exists| exists > 0)
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 /// Internal work creation logic shared by the create_work endpoint and importers.
-pub(crate) fn create_work_internal(
+pub(crate) async fn create_work_internal(
     state: &AppState,
     title: String,
     work_type: WorkType,
@@ -264,23 +292,12 @@ pub(crate) fn create_work_internal(
     }
 
     // 2. Check cite_key uniqueness
-    if let Some(ref cite_key) = cite_key {
-        let cn = CanonicalName::new(cite_key);
-        let index = state.index.lock();
-        let exists: bool = index
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM canonical_names WHERE canonical_name = ?1",
-                params![cn.as_str()],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|c| c > 0)
-            .unwrap_or(false);
-        if exists {
-            return Err(ApiError::conflict(format!(
-                "cite_key already exists: {cite_key}"
-            )));
-        }
+    if let Some(ref cite_key) = cite_key
+        && cite_key_in_use(state, cite_key, None).await
+    {
+        return Err(ApiError::conflict(format!(
+            "cite_key already exists: {cite_key}"
+        )));
     }
 
     // 3. Determine target folder
@@ -345,12 +362,16 @@ pub(crate) fn create_work_internal(
 
     // 7. Index page + resolve links
     {
-        let mut index = state.index.lock();
-        index
-            .index_page(&state.vault, &vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .resolve_links_for_page(&vault_path)
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::internal(e.to_string()))?;
     }
 
@@ -409,15 +430,21 @@ pub async fn import_bibtex(
 
     for entry in &entries {
         // Check dedup
-        let existing = {
-            let index = state.index.lock();
-            crate::vault::import::find_existing_work(
-                index.connection(),
-                entry.doi.as_deref(),
-                entry.isbn.as_deref(),
-                Some(&entry.cite_key),
-            )
-        };
+        let doi = entry.doi.clone();
+        let isbn = entry.isbn.clone();
+        let ck = entry.cite_key.clone();
+        let existing = state
+            .index
+            .with_index(move |index, _vault| {
+                crate::vault::import::find_existing_work(
+                    index.connection(),
+                    doi.as_deref(),
+                    isbn.as_deref(),
+                    Some(&ck),
+                )
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if let Some(path) = existing {
             results.push(ImportResult {
@@ -453,7 +480,9 @@ pub async fn import_bibtex(
             vec![], // tags
             vec![], // aliases
             None,   // body
-        ) {
+        )
+        .await
+        {
             Ok(detail) => {
                 results.push(ImportResult {
                     cite_key: entry.cite_key.clone(),
@@ -495,10 +524,15 @@ pub async fn import_doi(
 ) -> Result<Response, ApiError> {
     // 1. Check dedup by DOI
     {
-        let index = state.index.lock();
-        if let Some(path) =
-            crate::vault::import::find_existing_work(index.connection(), Some(&req.doi), None, None)
-        {
+        let doi = req.doi.clone();
+        let existing = state
+            .index
+            .with_index(move |index, _vault| {
+                crate::vault::import::find_existing_work(index.connection(), Some(&doi), None, None)
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        if let Some(path) = existing {
             return Ok((
                 StatusCode::OK,
                 Json(ImportResult {
@@ -544,7 +578,8 @@ pub async fn import_doi(
         vec![],
         vec![],
         None,
-    )?;
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -577,13 +612,20 @@ pub async fn import_isbn_handler(
 ) -> Result<Response, ApiError> {
     // 1. Check dedup by ISBN
     {
-        let index = state.index.lock();
-        if let Some(path) = crate::vault::import::find_existing_work(
-            index.connection(),
-            None,
-            Some(&req.isbn),
-            None,
-        ) {
+        let isbn = req.isbn.clone();
+        let existing = state
+            .index
+            .with_index(move |index, _vault| {
+                crate::vault::import::find_existing_work(
+                    index.connection(),
+                    None,
+                    Some(&isbn),
+                    None,
+                )
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        if let Some(path) = existing {
             return Ok((
                 StatusCode::OK,
                 Json(ImportResult {
@@ -630,7 +672,8 @@ pub async fn import_isbn_handler(
         vec![], // tags
         vec![], // aliases
         None,   // body
-    )?;
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -678,7 +721,8 @@ pub async fn create_work(
         req.tags,
         req.aliases,
         req.body,
-    )?;
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(detail)).into_response())
 }
 
@@ -703,18 +747,22 @@ pub async fn get_work(
     Path(uuid): Path<String>,
 ) -> Result<Json<WorkDetail>, ApiError> {
     // 1. Look up page by UUID in index
-    let (page_path, meta_json) = {
-        let index = state.index.lock();
-        let row: Option<(String, String)> = index
-            .connection()
-            .query_row(
-                "SELECT path, meta_json FROM pages WHERE id = ?1",
-                params![uuid],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .ok();
-        row.ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?
-    };
+    let uuid_clone = uuid.clone();
+    let (page_path, meta_json) = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT path, meta_json FROM pages WHERE id = ?1",
+                    params![uuid_clone],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .ok()
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?;
 
     // 2. Check that it's a work
     let meta_value: serde_json::Value = serde_json::from_str(&meta_json).unwrap_or_default();
@@ -772,118 +820,123 @@ pub async fn list_works(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListWorksQuery>,
 ) -> Result<Json<PaginatedResponse<WorkSummary>>, ApiError> {
-    let index = state.index.lock();
+    let works = state
+        .index
+        .with_index(move |index, _vault| {
+            let mut sql = String::from(
+                "SELECT p.id, p.path, p.title, p.meta_json FROM pages p
+                 WHERE json_extract(p.meta_json, '$.kind') = 'work'",
+            );
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            let mut param_idx = 1u32;
 
-    let mut sql = String::from(
-        "SELECT p.id, p.path, p.title, p.meta_json FROM pages p
-         WHERE json_extract(p.meta_json, '$.kind') = 'work'",
-    );
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut param_idx = 1u32;
-
-    if let Some(ref wt) = query.work_type {
-        sql.push_str(&format!(
-            " AND json_extract(p.meta_json, '$.work_type') = ?{param_idx}"
-        ));
-        param_values.push(Box::new(wt.clone()));
-        param_idx += 1;
-    }
-
-    if let Some(ref status) = query.status {
-        sql.push_str(&format!(
-            " AND json_extract(p.meta_json, '$.status') = ?{param_idx}"
-        ));
-        param_values.push(Box::new(status.clone()));
-        param_idx += 1;
-    }
-
-    if let Some(year) = query.year {
-        sql.push_str(&format!(
-            " AND CAST(json_extract(p.meta_json, '$.year') AS INTEGER) = ?{param_idx}"
-        ));
-        param_values.push(Box::new(year));
-        param_idx += 1;
-    }
-
-    if let Some(ref author) = query.author {
-        sql.push_str(&format!(
-            " AND json_extract(p.meta_json, '$.authors') LIKE '%' || ?{param_idx} || '%'"
-        ));
-        param_values.push(Box::new(author.clone()));
-        param_idx += 1;
-    }
-
-    if let Some(ref tag) = query.tag {
-        sql.push_str(&format!(
-            " AND EXISTS (SELECT 1 FROM tags WHERE tags.page_id = p.id AND tags.tag = ?{param_idx})"
-        ));
-        param_values.push(Box::new(tag.clone()));
-        param_idx += 1;
-    }
-
-    // Suppress unused variable warning
-    let _ = param_idx;
-
-    sql.push_str(" ORDER BY p.path");
-
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|b| b.as_ref()).collect();
-
-    let mut stmt = index
-        .connection()
-        .prepare(&sql)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let works: Vec<WorkSummary> = stmt
-        .query_map(param_refs.as_slice(), |row| {
-            let id: String = row.get(0)?;
-            let path: String = row.get(1)?;
-            let title: Option<String> = row.get(2)?;
-            let mj: String = row.get(3)?;
-            Ok((id, path, title, mj))
-        })
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .map(|(id, path, title, mj)| {
-            let meta: serde_json::Value = serde_json::from_str(&mj).unwrap_or_default();
-            WorkSummary {
-                id,
-                path,
-                title,
-                work_type: meta
-                    .get("work_type")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                authors: meta
-                    .get("authors")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                year: meta.get("year").and_then(|v| v.as_i64()).map(|n| n as i32),
-                status: meta
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                cite_key: meta
-                    .get("cite_key")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                tags: meta
-                    .get("tags")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+            if let Some(ref wt) = query.work_type {
+                sql.push_str(&format!(
+                    " AND json_extract(p.meta_json, '$.work_type') = ?{param_idx}"
+                ));
+                param_values.push(Box::new(wt.clone()));
+                param_idx += 1;
             }
+
+            if let Some(ref status) = query.status {
+                sql.push_str(&format!(
+                    " AND json_extract(p.meta_json, '$.status') = ?{param_idx}"
+                ));
+                param_values.push(Box::new(status.clone()));
+                param_idx += 1;
+            }
+
+            if let Some(year) = query.year {
+                sql.push_str(&format!(
+                    " AND CAST(json_extract(p.meta_json, '$.year') AS INTEGER) = ?{param_idx}"
+                ));
+                param_values.push(Box::new(year));
+                param_idx += 1;
+            }
+
+            if let Some(ref author) = query.author {
+                sql.push_str(&format!(
+                    " AND json_extract(p.meta_json, '$.authors') LIKE '%' || ?{param_idx} || '%'"
+                ));
+                param_values.push(Box::new(author.clone()));
+                param_idx += 1;
+            }
+
+            if let Some(ref tag) = query.tag {
+                sql.push_str(&format!(
+                    " AND EXISTS (SELECT 1 FROM tags WHERE tags.page_id = p.id AND tags.tag = ?{param_idx})"
+                ));
+                param_values.push(Box::new(tag.clone()));
+                param_idx += 1;
+            }
+
+            // Suppress unused variable warning
+            let _ = param_idx;
+
+            sql.push_str(" ORDER BY p.path");
+
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|b| b.as_ref()).collect();
+
+            let mut stmt = index
+                .connection()
+                .prepare(&sql)?;
+
+            let works: Vec<WorkSummary> = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    let id: String = row.get(0)?;
+                    let path: String = row.get(1)?;
+                    let title: Option<String> = row.get(2)?;
+                    let mj: String = row.get(3)?;
+                    Ok((id, path, title, mj))
+                })?
+                .filter_map(|r| r.ok())
+                .map(|(id, path, title, mj)| {
+                    let meta: serde_json::Value = serde_json::from_str(&mj).unwrap_or_default();
+                    WorkSummary {
+                        id,
+                        path,
+                        title,
+                        work_type: meta
+                            .get("work_type")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                        authors: meta
+                            .get("authors")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        year: meta.get("year").and_then(|v| v.as_i64()).map(|n| n as i32),
+                        status: meta
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                        cite_key: meta
+                            .get("cite_key")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                        tags: meta
+                            .get("tags")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    }
+                })
+                .collect();
+
+            Ok::<_, rusqlite::Error>(works)
         })
-        .collect();
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let pagination = PaginationParams {
         limit: query.limit,
@@ -905,6 +958,7 @@ pub async fn list_works(
     request_body = UpdateWorkRequest,
     responses(
         (status = 200, description = "Updated work", body = WorkDetail),
+        (status = 409, description = "Cite key conflict", body = ApiError),
         (status = 404, description = "Work not found", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
@@ -928,24 +982,29 @@ pub async fn update_work(
     }
 
     // 2. Look up page by UUID, verify it's a work
-    let page_path = {
-        let index = state.index.lock();
-        let row: Option<(String, String)> = index
-            .connection()
-            .query_row(
-                "SELECT path, meta_json FROM pages WHERE id = ?1",
-                params![uuid],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .ok();
-        let (path, mj) =
-            row.ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?;
-        let meta_value: serde_json::Value = serde_json::from_str(&mj).unwrap_or_default();
-        if meta_value.get("kind").and_then(|k| k.as_str()) != Some("work") {
-            return Err(ApiError::not_found(format!("not a work: {uuid}")));
-        }
-        path
-    };
+    let uuid_for_lookup = uuid.clone();
+    let page_path = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT path, meta_json FROM pages WHERE id = ?1",
+                    params![uuid_for_lookup],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .ok()
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let (path, mj) =
+        page_path.ok_or_else(|| ApiError::not_found(format!("work not found: {uuid}")))?;
+    let meta_value: serde_json::Value = serde_json::from_str(&mj).unwrap_or_default();
+    if meta_value.get("kind").and_then(|k| k.as_str()) != Some("work") {
+        return Err(ApiError::not_found(format!("not a work: {uuid}")));
+    }
+    let page_path = path;
 
     let vault_path = VaultPath::new(&page_path)
         .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
@@ -961,6 +1020,14 @@ pub async fn update_work(
     // 4. Extract current WorkMeta
     let mut wm = extra_to_work_meta(&meta.extra)
         .ok_or_else(|| ApiError::internal("failed to extract work metadata"))?;
+
+    if let Some(ref cite_key) = req.cite_key
+        && cite_key_in_use(&state, cite_key, Some(uuid.as_str())).await
+    {
+        return Err(ApiError::conflict(format!(
+            "cite_key already exists: {cite_key}"
+        )));
+    }
 
     // 5. Merge fields
     if let Some(title) = req.title {
@@ -1014,24 +1081,22 @@ pub async fn update_work(
 
     // 7. Re-index
     {
-        let mut index = state.index.lock();
-        index
-            .invalidate_links_to(&vault_path)
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.invalidate_links_to(&vp)?;
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                let deps = index.reverse_deps(&vp)?;
+                for dep_path in &deps {
+                    index.resolve_links_for_page(dep_path)?;
+                }
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .index_page(&state.vault, &vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .resolve_links_for_page(&vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let deps = index
-            .reverse_deps(&vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        for dep_path in &deps {
-            index
-                .resolve_links_for_page(dep_path)
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-        }
     }
 
     // 8. Send SyncNotification
@@ -1084,18 +1149,22 @@ pub async fn create_annotation(
     Json(req): Json<CreateAnnotationRequest>,
 ) -> Result<Response, ApiError> {
     // 1. Validate work_id exists and is a work
-    let work_path = {
-        let index = state.index.lock();
-        let row: Option<String> = index
-            .connection()
-            .query_row(
-                "SELECT path FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
-                params![req.work_id],
-                |row| row.get(0),
-            )
-            .ok();
-        row.ok_or_else(|| ApiError::not_found(format!("work not found: {}", req.work_id)))?
-    };
+    let work_id_str = req.work_id.clone();
+    let work_path = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT path FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
+                    params![work_id_str],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("work not found: {}", req.work_id)))?;
 
     // 2. Generate filename
     let type_prefix = match &req.annotation_type {
@@ -1157,12 +1226,16 @@ pub async fn create_annotation(
 
     // 6. Index + resolve
     {
-        let mut index = state.index.lock();
-        index
-            .index_page(&state.vault, &vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .resolve_links_for_page(&vault_path)
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::internal(e.to_string()))?;
     }
 
@@ -1210,43 +1283,47 @@ pub async fn list_annotations(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<Vec<AnnotationDetail>>, ApiError> {
-    // Verify the work exists
-    {
-        let index = state.index.lock();
-        let exists: bool = index
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
-                params![uuid],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|c| c > 0)
-            .unwrap_or(false);
-        if !exists {
-            return Err(ApiError::not_found(format!("work not found: {uuid}")));
-        }
-    }
+    // Verify the work exists and query annotation pages in a single index access
+    let uuid_owned = uuid.clone();
+    let rows: Vec<(String, String, String)> = state
+        .index
+        .with_index(move |index, _vault| {
+            // Verify the work exists
+            let exists: bool = index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pages WHERE id = ?1 AND json_extract(meta_json, '$.kind') = 'work'",
+                    params![&uuid_owned],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|c| c > 0)
+                .unwrap_or(false);
+            if !exists {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
 
-    // Query annotation pages linked to this work
-    let rows: Vec<(String, String, String)> = {
-        let index = state.index.lock();
-        let mut stmt = index
-            .connection()
-            .prepare(
-                "SELECT id, path, meta_json FROM pages
-                 WHERE json_extract(meta_json, '$.kind') = 'annotation'
-                   AND json_extract(meta_json, '$.work_id') = ?1
-                 ORDER BY path",
-            )
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+            // Query annotation pages linked to this work
+            let mut stmt = index
+                .connection()
+                .prepare(
+                    "SELECT id, path, meta_json FROM pages
+                     WHERE json_extract(meta_json, '$.kind') = 'annotation'
+                       AND json_extract(meta_json, '$.work_id') = ?1
+                     ORDER BY path",
+                )?;
 
-        stmt.query_map(params![uuid], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            let rows = stmt
+                .query_map(params![&uuid_owned], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(rows)
         })
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect()
-    };
+        .map_err(|_| ApiError::not_found(format!("work not found: {uuid}")))?;
 
     // For each annotation, read the file to get the body
     let mut results = Vec::with_capacity(rows.len());

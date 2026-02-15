@@ -15,11 +15,12 @@ use clepsydra::vault::archive_hook::ArchiveDeleteHook;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::{PostDeleteHook, PostMoveHook};
 use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
 
-fn production_hooks() -> Vec<Box<dyn PostMoveHook>> {
-    vec![Box::new(AcademicMoveHook)]
+fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
+    Arc::new(vec![Box::new(AcademicMoveHook)])
 }
 
 fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
@@ -42,15 +43,17 @@ fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
             cas: Arc::clone(&cas_arc),
         })];
 
+    let index_handle = IndexHandle::spawn(index, vault.clone());
+
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(parking_lot::Mutex::new(index)),
+        index: index_handle,
         cas: cas_arc,
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
-        delete_hooks,
+        delete_hooks: Arc::new(delete_hooks),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 

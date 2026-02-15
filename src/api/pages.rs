@@ -155,25 +155,30 @@ pub async fn list_pages(
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<PageSummary>>, ApiError> {
-    let index = state.index.lock();
+    let pages = state
+        .index
+        .with_index(move |index, _vault| {
+            let mut stmt = index
+                .connection()
+                .prepare("SELECT id, path, title, canonical_name FROM pages ORDER BY path")?;
 
-    let mut stmt = index
-        .connection()
-        .prepare("SELECT id, path, title, canonical_name FROM pages ORDER BY path")
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+            let pages: Vec<PageSummary> = stmt
+                .query_map([], |row| {
+                    Ok(PageSummary {
+                        id: row.get(0)?,
+                        path: row.get(1)?,
+                        title: row.get(2)?,
+                        canonical_name: row.get(3)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
-    let pages: Vec<PageSummary> = stmt
-        .query_map([], |row| {
-            Ok(PageSummary {
-                id: row.get(0)?,
-                path: row.get(1)?,
-                title: row.get(2)?,
-                canonical_name: row.get(3)?,
-            })
+            Ok::<_, rusqlite::Error>(pages)
         })
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(PaginatedResponse::from_vec(pages, &pagination)))
 }
@@ -237,20 +242,22 @@ pub async fn get_page_by_id(
     Path(uuid): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
     // Look up the path from the index
-    let page_path = {
-        let index = state.index.lock();
-
-        let path: Option<String> = index
-            .connection()
-            .query_row(
-                "SELECT path FROM pages WHERE id = ?1",
-                params![uuid],
-                |row| row.get(0),
-            )
-            .ok();
-
-        path.ok_or_else(|| ApiError::not_found(format!("page not found with id: {uuid}")))?
-    };
+    let uuid_clone = uuid.clone();
+    let page_path = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT path FROM pages WHERE id = ?1",
+                    params![uuid_clone],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("page not found with id: {uuid}")))?;
 
     let vault_path = VaultPath::new(&page_path)
         .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
@@ -345,12 +352,16 @@ pub async fn create_page(
 
     // Re-index the file
     {
-        let mut index = state.index.lock();
-        index
-            .index_page(&state.vault, &vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .resolve_links_for_page(&vault_path)
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::internal(e.to_string()))?;
     }
 
@@ -435,24 +446,22 @@ pub async fn update_page(
 
     // Re-index
     {
-        let mut index = state.index.lock();
-        index
-            .invalidate_links_to(&vault_path)
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.invalidate_links_to(&vp)?;
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                let deps = index.reverse_deps(&vp)?;
+                for dep_path in &deps {
+                    index.resolve_links_for_page(dep_path)?;
+                }
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .index_page(&state.vault, &vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .resolve_links_for_page(&vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let deps = index
-            .reverse_deps(&vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        for dep_path in &deps {
-            index
-                .resolve_links_for_page(dep_path)
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-        }
     }
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
@@ -507,49 +516,58 @@ pub async fn delete_page(
 
     // Check backlinks if not forcing
     if !query.force {
-        let index = state.index.lock();
+        let vp_str = vault_path.as_str().to_string();
+        let canonical = CanonicalName::from_filename(vault_path.filename());
+        let canonical_str = canonical.as_str().to_string();
 
-        let page_id: Option<String> = index
-            .connection()
-            .query_row(
-                "SELECT id FROM pages WHERE path = ?1",
-                params![vault_path.as_str()],
-                |row| row.get(0),
-            )
-            .ok();
+        let backlinks = state
+            .index
+            .with_index(move |index, _vault| {
+                let page_id: Option<String> = index
+                    .connection()
+                    .query_row(
+                        "SELECT id FROM pages WHERE path = ?1",
+                        params![vp_str],
+                        |row| row.get(0),
+                    )
+                    .ok();
 
-        if let Some(ref pid) = page_id {
-            let canonical = CanonicalName::from_filename(vault_path.filename());
-            let mut stmt = index
-                .connection()
-                .prepare(
-                    "SELECT DISTINCT p.path FROM links l
-                     JOIN pages p ON p.id = l.source_id
-                     WHERE (l.target_id = ?1 OR l.target_path = ?2 OR l.target_canonical = ?3)
-                       AND l.source_id != ?1",
-                )
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+                if let Some(ref pid) = page_id {
+                    let mut stmt = index
+                        .connection()
+                        .prepare(
+                            "SELECT DISTINCT p.path FROM links l
+                             JOIN pages p ON p.id = l.source_id
+                             WHERE (l.target_id = ?1 OR l.target_path = ?2 OR l.target_canonical = ?3)
+                               AND l.source_id != ?1",
+                        )?;
 
-            let backlinks: Vec<String> = stmt
-                .query_map(
-                    params![pid, vault_path.as_str(), canonical.as_str()],
-                    |row| row.get(0),
-                )
-                .map_err(|e| ApiError::internal(e.to_string()))?
-                .filter_map(|r| r.ok())
-                .collect();
+                    let backlinks: Vec<String> = stmt
+                        .query_map(
+                            params![pid, vp_str, canonical_str],
+                            |row| row.get(0),
+                        )?
+                        .filter_map(|r| r.ok())
+                        .collect();
 
-            if !backlinks.is_empty() {
-                return Err(ApiError::conflict_with_detail(
-                    format!(
-                        "page has {} backlink(s); use force=true to delete",
-                        backlinks.len()
-                    ),
-                    serde_json::json!({ "backlinks": backlinks }),
-                ));
-            }
+                    Ok(backlinks)
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e: rusqlite::Error| ApiError::internal(e.to_string()))?;
+
+        if !backlinks.is_empty() {
+            return Err(ApiError::conflict_with_detail(
+                format!(
+                    "page has {} backlink(s); use force=true to delete",
+                    backlinks.len()
+                ),
+                serde_json::json!({ "backlinks": backlinks }),
+            ));
         }
-        // index lock dropped here
     }
 
     // Read page metadata before deletion (needed by delete hooks)
@@ -564,25 +582,28 @@ pub async fn delete_page(
         _ => RewriteMode::PlainText,
     };
 
-    let plan = {
-        let index = state.index.lock();
-        let planner = MutationPlanner::new(&state.vault, &index);
-        planner
-            .plan(&MutationOp::DeletePage {
-                path: path.clone(),
-                rewrite: rewrite_mode,
-            })
-            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
-    }; // lock released
     {
-        let mut index = state.index.lock();
-        plan.execute(&state.vault, &mut index, &state.hooks)
-            .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
-    } // lock released
+        let op = MutationOp::DeletePage {
+            path: path.clone(),
+            rewrite: rewrite_mode,
+        };
+        let hooks = Arc::clone(&state.hooks);
+        state
+            .index
+            .with_index(move |index, vault| {
+                let planner = MutationPlanner::new(vault, index);
+                let plan = planner.plan(&op)?;
+                plan.execute(vault, index, &hooks)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?
+            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?;
+    }
 
     // Run post-delete hooks (e.g. CAS ref_count cleanup for archive pages)
     if let Some(ref meta) = page_meta {
-        for hook in &state.delete_hooks {
+        for hook in state.delete_hooks.iter() {
             if let Err(e) = hook.on_page_deleted(&vault_path, &meta.id, meta) {
                 tracing::warn!("delete hook error: {e}");
             }
@@ -641,21 +662,24 @@ pub async fn move_page(
     }
 
     // 3. Plan and execute
-    let plan = {
-        let index = state.index.lock();
-        let planner = MutationPlanner::new(&state.vault, &index);
-        planner
-            .plan(&MutationOp::MovePage {
-                source: path.clone(),
-                destination: body.destination.clone(),
-            })
-            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
-    }; // lock released
     {
-        let mut index = state.index.lock();
-        plan.execute(&state.vault, &mut index, &state.hooks)
-            .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
-    } // lock released
+        let op = MutationOp::MovePage {
+            source: path.clone(),
+            destination: body.destination.clone(),
+        };
+        let hooks = Arc::clone(&state.hooks);
+        state
+            .index
+            .with_index(move |index, vault| {
+                let planner = MutationPlanner::new(vault, index);
+                let plan = planner.plan(&op)?;
+                plan.execute(vault, index, &hooks)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?
+            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?;
+    }
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![body.destination.clone()],

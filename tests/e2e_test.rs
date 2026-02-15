@@ -12,11 +12,12 @@ use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
 
-fn production_hooks() -> Vec<Box<dyn PostMoveHook>> {
-    vec![Box::new(AcademicMoveHook)]
+fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
+    Arc::new(vec![Box::new(AcademicMoveHook)])
 }
 
 /// Set up a test server backed by a fresh vault in a temporary directory.
@@ -34,15 +35,17 @@ fn setup_server() -> (TestServer, TempDir) {
     let cas_path = tmp.path().join("cas");
     let cas = ContentStore::open(&cas_path).unwrap();
 
+    let index_handle = IndexHandle::spawn(index, vault.clone());
+
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         vault,
-        index: Arc::new(parking_lot::Mutex::new(index)),
+        index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
-        delete_hooks: vec![],
+        delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 

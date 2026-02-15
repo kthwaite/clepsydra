@@ -62,7 +62,11 @@ enum Commands {
         about = "Start the API server",
         long_about = "Start the Clepsydra HTTP API server.\n\nRequires a config file discovered via:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\nVault root is read from [vault].root."
     )]
-    Serve,
+    Serve {
+        /// Start the LSP server on stdio alongside the HTTP server
+        #[arg(long)]
+        lsp: bool,
+    },
     #[command(
         about = "Print version",
         long_about = "Print the clepsydra version string. Equivalent to `clepsydra --version`."
@@ -94,8 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Doctor => {
             println!("doctor command not implemented yet");
         }
-        Commands::Serve => {
-            run_server().await?;
+        Commands::Serve { lsp } => {
+            run_server(lsp).await?;
         }
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
