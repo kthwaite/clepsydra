@@ -3,7 +3,7 @@ pub mod document;
 pub mod rename;
 pub mod symbols;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
@@ -21,8 +21,8 @@ pub struct LspBackend {
     pub state: Arc<AppState>,
     /// Open documents keyed by URI.
     pub documents: Mutex<HashMap<Url, document::Document>>,
-    /// Cached snapshot of all canonical names for fast diagnostic checks.
-    pub canonical_names: Arc<RwLock<HashSet<String>>>,
+    /// Cached snapshot of canonical names → page paths for diagnostic checks.
+    pub canonical_names: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -1103,20 +1103,31 @@ impl LspBackend {
     }
 
     /// Reload the canonical name snapshot from the index.
+    ///
+    /// Builds a map from canonical name to all page paths that share it,
+    /// enabling both unresolved-link and ambiguous-link diagnostics.
     async fn refresh_canonical_names(&self) {
         let result = self
             .state
             .index
-            .with_index(|index, _| -> std::result::Result<HashSet<String>, rusqlite::Error> {
-                let mut stmt = index
-                    .connection()
-                    .prepare("SELECT canonical_name FROM canonical_names")?;
-                let names = stmt
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-                Ok(names)
-            })
+            .with_index(
+                |index, _| -> std::result::Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+                    let mut stmt = index.connection().prepare(
+                        "SELECT cn.canonical_name, p.path \
+                         FROM canonical_names cn \
+                         JOIN pages p ON p.id = cn.page_id \
+                         ORDER BY cn.canonical_name",
+                    )?;
+                    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+                    let rows = stmt.query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?;
+                    for row in rows.flatten() {
+                        map.entry(row.0).or_default().push(row.1);
+                    }
+                    Ok(map)
+                },
+            )
             .await;
 
         match result {
@@ -1261,8 +1272,9 @@ impl LspBackend {
 
     /// Publish diagnostics for a single open document.
     ///
-    /// Checks each extracted link against the cached canonical name snapshot
-    /// and reports unresolved links as warnings.
+    /// Checks each extracted link against the cached canonical name snapshot.
+    /// Reports unresolved links (no match) as warnings and ambiguous links
+    /// (multiple matches) as informational diagnostics with related locations.
     async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
         let mut diagnostics = Vec::new();
         let names = self.canonical_names.read().await;
@@ -1272,15 +1284,60 @@ impl LspBackend {
                 continue; // skip property ref links
             }
             let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
-            if !names.contains(canonical.as_str()) {
-                diagnostics.push(Diagnostic {
-                    range: doc.link_to_range(link),
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    code: Some(NumberOrString::String("unresolved-link".into())),
-                    source: Some("clepsydra".into()),
-                    message: format!("Unresolved link: \"{}\"", link.target_raw),
-                    ..Default::default()
-                });
+            let cn_str = canonical.as_str();
+
+            match names.get(cn_str) {
+                None => {
+                    // Unresolved link
+                    diagnostics.push(Diagnostic {
+                        range: doc.link_to_range(link),
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("unresolved-link".into())),
+                        source: Some("clepsydra".into()),
+                        message: format!("Unresolved link: \"{}\"", link.target_raw),
+                        ..Default::default()
+                    });
+                }
+                Some(paths) if paths.len() > 1 => {
+                    // Ambiguous link — multiple pages share this canonical name
+                    let vault_root = self.state.vault.root();
+                    let related: Vec<DiagnosticRelatedInformation> = paths
+                        .iter()
+                        .filter_map(|p| {
+                            let vp = crate::vault::path::VaultPath::new(p).ok()?;
+                            let abs = vault_root.join(vp.as_str());
+                            let file_uri = Url::from_file_path(&abs).ok()?;
+                            Some(DiagnosticRelatedInformation {
+                                location: Location {
+                                    uri: file_uri,
+                                    range: Range::default(),
+                                },
+                                message: p.clone(),
+                            })
+                        })
+                        .collect();
+
+                    diagnostics.push(Diagnostic {
+                        range: doc.link_to_range(link),
+                        severity: Some(DiagnosticSeverity::INFORMATION),
+                        code: Some(NumberOrString::String("ambiguous-link".into())),
+                        source: Some("clepsydra".into()),
+                        message: format!(
+                            "Ambiguous link: \"{}\" matches {} pages",
+                            link.target_raw,
+                            paths.len()
+                        ),
+                        related_information: if related.is_empty() {
+                            None
+                        } else {
+                            Some(related)
+                        },
+                        ..Default::default()
+                    });
+                }
+                Some(_) => {
+                    // Single match — resolved, no diagnostic
+                }
             }
         }
         self.client
@@ -1300,7 +1357,7 @@ pub async fn run_lsp(state: Arc<AppState>) {
         client,
         state,
         documents: Mutex::new(HashMap::new()),
-        canonical_names: Arc::new(RwLock::new(HashSet::new())),
+        canonical_names: Arc::new(RwLock::new(HashMap::new())),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
