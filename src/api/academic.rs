@@ -748,10 +748,11 @@ pub async fn import_zotero_handler(
     let conn = crate::vault::import_zotero::open_zotero_db(&db_path)
         .map_err(ApiError::internal)?;
 
+    let normalized_since = req.since.as_deref().map(crate::vault::import_zotero::normalize_since);
     let items = crate::vault::import_zotero::query_items(
         &conn,
         req.collection.as_deref(),
-        req.since.as_deref(),
+        normalized_since.as_deref(),
     )
     .map_err(ApiError::internal)?;
 
@@ -773,6 +774,8 @@ pub async fn import_zotero_handler(
         .await
         .unwrap_or_else(|_| HashSet::new());
 
+    let zotero_data_dir = db_path.parent().unwrap_or(std::path::Path::new("."));
+
     let mut results = Vec::with_capacity(items.len());
 
     // 4. Process each item
@@ -793,7 +796,7 @@ pub async fn import_zotero_handler(
         if let Some(path) = existing_by_zk {
             results.push(ImportResult {
                 cite_key: format!("zotero:{}", item.zotero_key),
-                status: "skipped".to_string(),
+                status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
                 page_path: Some(path),
                 error: None,
             });
@@ -817,7 +820,6 @@ pub async fn import_zotero_handler(
             &item.title,
             &used_cite_keys,
         );
-        used_cite_keys.insert(entry.cite_key.clone());
 
         // d. Check dedup by DOI/ISBN/cite_key
         let doi = entry.doi.clone();
@@ -839,12 +841,15 @@ pub async fn import_zotero_handler(
         if let Some(path) = existing {
             results.push(ImportResult {
                 cite_key: entry.cite_key.clone(),
-                status: "skipped".to_string(),
+                status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
                 page_path: Some(path),
                 error: None,
             });
             continue;
         }
+
+        // Reserve cite_key only after all dedup checks pass
+        used_cite_keys.insert(entry.cite_key.clone());
 
         // e. If dry_run, skip creation
         if req.dry_run {
@@ -916,6 +921,38 @@ pub async fn import_zotero_handler(
                     "import".to_string(),
                     serde_yaml::Value::Mapping(import_map),
                 );
+
+                // Resolve and add attachment references
+                let mut assets: Vec<String> = Vec::new();
+                let mut pdf_url: Option<String> = None;
+                for att in &item.pdf_attachments {
+                    if let Some(resolved) =
+                        crate::vault::import_zotero::resolve_attachment_path(&zotero_data_dir, att)
+                    {
+                        match att.link_mode {
+                            0 | 2 => assets.push(resolved),
+                            1 | 3 => pdf_url = Some(resolved),
+                            _ => {}
+                        }
+                    }
+                }
+                if !assets.is_empty() {
+                    page.meta.extra.insert(
+                        "assets".to_string(),
+                        serde_yaml::to_value(&assets).unwrap_or_default(),
+                    );
+                }
+                if let Some(url) = pdf_url {
+                    let urls_val = page.meta.extra.entry("urls".to_string()).or_insert_with(|| {
+                        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+                    });
+                    if let serde_yaml::Value::Mapping(m) = urls_val {
+                        m.insert(
+                            serde_yaml::Value::String("pdf".into()),
+                            serde_yaml::Value::String(url),
+                        );
+                    }
+                }
 
                 // Write back
                 let new_content = write_page_content(&page.meta, &page.body);

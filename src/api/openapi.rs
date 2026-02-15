@@ -64,7 +64,8 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::academic::create_annotation,
         crate::api::academic::import_bibtex,
         crate::api::academic::import_doi,
-        crate::api::academic::import_isbn_handler
+        crate::api::academic::import_isbn_handler,
+        crate::api::academic::import_zotero_handler
     ),
     components(
         schemas(
@@ -121,7 +122,8 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::vault::academic::AnnotationType,
             crate::vault::academic::ExternalIds,
             crate::vault::academic::WorkUrls,
-            crate::vault::academic::SourceLocation
+            crate::vault::academic::SourceLocation,
+            crate::vault::import_zotero::ImportZoteroRequest
         )
     )
 )]
@@ -146,6 +148,10 @@ mod tests {
         assert!(spec.paths.paths.contains_key("/api/vault/folders/{path}"));
         assert!(spec.paths.paths.contains_key("/api/vault/index/search"));
         assert!(spec.paths.paths.contains_key("/api/vault/academic/works"));
-        assert!(spec.paths.paths.contains_key("/api/vault/attachments/{path}"));
+        assert!(
+            spec.paths
+                .paths
+                .contains_key("/api/vault/attachments/{path}")
+        );
     }
 }

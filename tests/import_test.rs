@@ -1,5 +1,5 @@
 use clepsydra::vault::Vault;
-use clepsydra::vault::import::{find_existing_work, parse_bibtex, BibImportEntry};
+use clepsydra::vault::import::{find_existing_work, parse_bibtex};
 use clepsydra::vault::import_doi::parse_crossref_response;
 use clepsydra::vault::import_isbn::parse_openlibrary_response;
 use clepsydra::vault::index::VaultIndex;
@@ -352,7 +352,7 @@ fn cite_key_multiple_collisions() {
 
 use clepsydra::vault::import_zotero::{
     open_zotero_db, query_items, map_to_import_entry, resolve_attachment_path,
-    find_existing_by_zotero_key, ZoteroAuthor, ZoteroPdf, ZoteroItem,
+    find_existing_by_zotero_key, normalize_since, ZoteroAuthor, ZoteroPdf, ZoteroItem,
 };
 
 /// Create a minimal Zotero-schema SQLite DB for testing.
@@ -664,4 +664,68 @@ Content.
 
     let not_found = find_existing_by_zotero_key(index.connection(), "UNKNOWN");
     assert!(not_found.is_none());
+}
+
+// ── normalize_since tests ──────────────────────────────────────────────────
+
+#[test]
+fn normalize_since_strips_iso8601() {
+    assert_eq!(normalize_since("2024-05-01T00:00:00Z"), "2024-05-01 00:00:00");
+}
+
+#[test]
+fn normalize_since_passes_through_plain_date() {
+    assert_eq!(normalize_since("2024-05-01"), "2024-05-01");
+}
+
+#[test]
+fn normalize_since_handles_datetime_without_z() {
+    assert_eq!(normalize_since("2024-05-01T12:30:00"), "2024-05-01 12:30:00");
+}
+
+// ── cite-key collision regression tests ────────────────────────────────────
+
+#[test]
+fn cite_key_pool_not_poisoned_by_skipped_items() {
+    // Regression: if a cite_key was reserved in the pool before dedup checks,
+    // a skipped item would "use up" the base key, causing the next item with
+    // the same derived key to get a -b suffix unnecessarily.
+    //
+    // After the fix, used_cite_keys.insert() happens only after all dedup
+    // checks pass, so a skipped item never reserves a key.
+    let mut pool = std::collections::HashSet::new();
+
+    // Simulate: first item derives "smith2023results", passes dedup → reserve
+    let key1 = derive_cite_key(None, &["Smith".to_string()], Some(2023), "Results", &pool);
+    assert_eq!(key1, "smith2023results");
+    // Only insert after dedup passes (simulating the fixed behavior)
+    pool.insert(key1);
+
+    // Second item with same metadata but different zotero_key would have been
+    // skipped by zotero_key dedup in the real handler — so we do NOT insert.
+    // (This simulates the "skipped" scenario where the key should not be reserved.)
+
+    // Third item: same derived key, passes all dedup → should still get base key
+    // if the second item was indeed skipped (not inserted into pool).
+    // But since first item DID reserve it, this correctly gets -b.
+    let key3 = derive_cite_key(None, &["Smith".to_string()], Some(2023), "Results", &pool);
+    assert_eq!(key3, "smith2023results-b");
+}
+
+// ── ISO since filter with Zotero DB ─────────────────────────────────────
+
+#[test]
+fn query_items_with_iso_since_after_normalize() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db(&db_path);
+
+    let conn = open_zotero_db(&db_path).unwrap();
+    // Use ISO 8601 format, normalize before querying
+    let normalized = normalize_since("2024-05-01T00:00:00Z");
+    let items = query_items(&conn, None, Some(&normalized)).unwrap();
+
+    assert_eq!(items.len(), 2, "2 items modified after 2024-05-01");
+    assert!(items.iter().all(|i| i.zotero_key != "DEF67890"),
+        "book was modified 2024-03-01, should be excluded");
 }

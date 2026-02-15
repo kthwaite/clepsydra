@@ -402,6 +402,19 @@ pub fn resolve_attachment_path(zotero_data_dir: &Path, pdf: &ZoteroPdf) -> Optio
     }
 }
 
+/// Normalize a user-provided `since` timestamp to Zotero's datetime format.
+///
+/// Zotero stores `dateModified` as `YYYY-MM-DD HH:MM:SS` (space-separated,
+/// no timezone). ISO 8601 variants like `2024-05-01T00:00:00Z` need the `T`
+/// replaced with a space and trailing `Z` stripped so that SQLite lexical
+/// comparison works correctly.
+pub fn normalize_since(since: &str) -> String {
+    since
+        .replace('T', " ")
+        .trim_end_matches('Z')
+        .to_string()
+}
+
 // ── Deduplication query ────────────────────────────────────────────────────
 
 /// Check if a work was previously imported from Zotero by its item key.
