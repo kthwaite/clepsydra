@@ -43,6 +43,7 @@ fn setup_server() -> (TestServer, TempDir) {
         change_tx,
         hooks: production_hooks(),
         delete_hooks: vec![],
+        archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 
     let app: Router = Router::new()
@@ -678,6 +679,7 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         change_tx,
         hooks: production_hooks(),
         delete_hooks: vec![],
+        archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 
     let app: Router = Router::new()
@@ -912,6 +914,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
         change_tx,
         hooks: production_hooks(),
         delete_hooks: vec![],
+        archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1199,6 +1202,7 @@ async fn sse_events_endpoint_returns_stream() {
         change_tx,
         hooks: production_hooks(),
         delete_hooks: vec![],
+        archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 
     let app: Router = Router::new()
@@ -1335,6 +1339,7 @@ async fn create_page_emits_sync_notification() {
         change_tx,
         hooks: production_hooks(),
         delete_hooks: vec![],
+        archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 
     let app: Router = Router::new()

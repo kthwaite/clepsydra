@@ -178,6 +178,10 @@ async fn ingest_archive(
 
     let prefix = &archive_config.default_path_prefix;
 
+    // Serialize the entire mutating section to prevent concurrent races
+    // (duplicate URL check + path collision + file write + index commit).
+    let _ingest_guard = state.archive_ingest_lock.lock().await;
+
     // 1. Check for existing archive of this URL via the index
     let existing = {
         let index = state.index.lock();
@@ -239,9 +243,15 @@ async fn ingest_archive(
     let vault_path = VaultPath::new(&page_path)
         .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
 
-    // 3. Decode and verify all blobs before storing anything (fail fast)
+    // 3. Decode and verify all blobs before storing anything (fail fast).
+    //    Deduplicate by hash so duplicate entries don't inflate ref_counts.
+    let mut seen_hashes = std::collections::HashSet::new();
     let mut decoded_blobs: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(req.blobs.len());
     for blob in &req.blobs {
+        if !seen_hashes.insert(blob.hash.clone()) {
+            continue; // skip duplicate hash within same request
+        }
+
         let data = BASE64
             .decode(&blob.data)
             .map_err(|e| ApiError::bad_request(format!("invalid base64 in blob: {e}")))?;
@@ -334,13 +344,12 @@ async fn ingest_archive(
         );
     }
 
-    // Store blob hashes in frontmatter, excluding snapshot_hash to avoid
-    // double ref_count decrement on delete (snapshot_hash is stored separately)
-    let non_snapshot_blobs: Vec<serde_yaml::Value> = req
-        .blobs
+    // Store blob hashes in frontmatter from the deduplicated set,
+    // excluding snapshot_hash to avoid double ref_count decrement on delete.
+    let non_snapshot_blobs: Vec<serde_yaml::Value> = decoded_blobs
         .iter()
-        .filter(|b| b.hash != req.snapshot_hash)
-        .map(|b| serde_yaml::Value::String(b.hash.clone()))
+        .filter(|(h, _, _)| *h != req.snapshot_hash)
+        .map(|(h, _, _)| serde_yaml::Value::String(h.clone()))
         .collect();
     if !non_snapshot_blobs.is_empty() {
         archive_map.insert(

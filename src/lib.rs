@@ -207,6 +207,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         change_tx: change_broadcast_tx,
         hooks,
         delete_hooks,
+        archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
 
     // Spawn file watcher + sync loop

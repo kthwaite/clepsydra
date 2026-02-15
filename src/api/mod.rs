@@ -28,6 +28,9 @@ pub struct AppState {
     pub change_tx: broadcast::Sender<SyncNotification>,
     pub hooks: Vec<Box<dyn crate::vault::hooks::PostMoveHook>>,
     pub delete_hooks: Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>,
+    /// Serializes archive ingest to prevent concurrent race conditions
+    /// (duplicate URL check, path collision, file write/index atomicity).
+    pub archive_ingest_lock: tokio::sync::Mutex<()>,
 }
 
 /// Build the API router mounted at `/api/vault`.
