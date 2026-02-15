@@ -754,7 +754,7 @@ impl LanguageServer for LspBackend {
             })
             .await
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
-            .unwrap_or_default();
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
         if old_canonical_names.is_empty() {
             return Ok(None);
@@ -830,7 +830,7 @@ impl LanguageServer for LspBackend {
             })
             .await
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
-            .unwrap_or_default();
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
         // ---------------------------------------------------------------
         // 6. Build DocumentChanges::Operations
@@ -871,21 +871,18 @@ impl LanguageServer for LspBackend {
             },
         };
 
-        if let Some(new_text) = rename::update_frontmatter_title(&target_text, &new_name) {
+        {
+            let new_text = rename::update_frontmatter_title(&target_text, &new_name);
             let full_range = {
                 let line_count = target_text.lines().count();
-                let last_line = if line_count > 0 {
-                    target_text.lines().last().unwrap_or("")
-                } else {
-                    ""
-                };
+                let last_line = target_text.lines().last().unwrap_or("");
                 Range {
                     start: Position {
                         line: 0,
                         character: 0,
                     },
                     end: Position {
-                        line: line_count as u32,
+                        line: line_count.saturating_sub(1) as u32,
                         character: last_line.len() as u32,
                     },
                 }
@@ -983,32 +980,24 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document.uri;
         let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
-        // Extract link data while holding the documents lock, then drop it
-        // before acquiring any other lock (canonical_names).
-        let link_data: Vec<(crate::vault::link::Link, Range)> = {
+        // Extract link data and body text in a single lock scope, then drop
+        // the lock before acquiring canonical_names in the diagnostic loop.
+        let (link_data, body_text) = {
             let docs = self.documents.lock().await;
             let doc = match docs.get(&uri) {
                 Some(d) => d,
                 None => return Ok(None),
             };
-            doc.links
+            let links: Vec<(crate::vault::link::Link, Range)> = doc
+                .links
                 .iter()
                 .filter(|l| {
                     l.kind == crate::vault::link::LinkKind::Wiki
                         && !(l.span.start == 0 && l.span.end == 0)
                 })
                 .map(|l| (l.clone(), doc.link_to_range(l)))
-                .collect()
-        };
-
-        // Get body text for raw span extraction (separate lock scope)
-        let body_text = {
-            let docs = self.documents.lock().await;
-            docs.get(&uri).map(|d| d.body.clone())
-        };
-        let body_text = match body_text {
-            Some(b) => b,
-            None => return Ok(None),
+                .collect();
+            (links, doc.body.clone())
         };
 
         for diag in &params.context.diagnostics {

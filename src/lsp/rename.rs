@@ -1,5 +1,5 @@
 use crate::vault::canonical::CanonicalName;
-use crate::vault::page::{parse_frontmatter, write_page_content};
+use crate::vault::page::{parse_or_repair_frontmatter, write_page_content};
 
 /// Rewrite a wikilink span text with a new target, preserving display text.
 ///
@@ -64,12 +64,12 @@ pub fn shortest_unique_prefixes(paths: &[String]) -> Vec<String> {
 
 /// Update frontmatter title in full document text. Returns new full text.
 ///
-/// Parses the existing frontmatter, replaces the title, and re-serializes.
-/// Returns `None` if frontmatter parsing fails.
-pub fn update_frontmatter_title(full_text: &str, new_title: &str) -> Option<String> {
-    let (mut meta, body) = parse_frontmatter(full_text).ok()?;
+/// Uses `parse_or_repair_frontmatter` which always succeeds, even on
+/// malformed YAML (it falls back to defaults).
+pub fn update_frontmatter_title(full_text: &str, new_title: &str) -> String {
+    let (mut meta, body, _, _) = parse_or_repair_frontmatter(full_text);
     meta.title = Some(new_title.to_string());
-    Some(write_page_content(&meta, &body))
+    write_page_content(&meta, &body)
 }
 
 #[cfg(test)]
@@ -129,9 +129,7 @@ mod tests {
     #[test]
     fn update_title_in_frontmatter() {
         let content = "---\nid: 00000000-0000-0000-0000-000000000001\ntitle: Old Title\n---\nBody text here.\n";
-        let result = update_frontmatter_title(content, "New Title");
-        assert!(result.is_some());
-        let new_text = result.unwrap();
+        let new_text = update_frontmatter_title(content, "New Title");
         assert!(new_text.contains("title: New Title"));
         assert!(new_text.contains("Body text here."));
         assert!(!new_text.contains("Old Title"));
