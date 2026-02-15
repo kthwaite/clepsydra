@@ -239,3 +239,110 @@ fn parse_openlibrary_json_into_import_entry() {
     ));
     assert_eq!(entry.isbn, Some("978-0-387-31073-2".to_string()));
 }
+
+// ── cite key derivation tests ──────────────────────────────────────────────
+
+use clepsydra::vault::import_zotero::derive_cite_key;
+
+#[test]
+fn cite_key_from_bbt_extra_field() {
+    let key = derive_cite_key(
+        Some("Citation Key: vaswani2017\nsome other stuff"),
+        &["Ashish Vaswani".to_string()],
+        Some(2017),
+        "Attention Is All You Need",
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(key, "vaswani2017");
+}
+
+#[test]
+fn cite_key_derived_from_metadata() {
+    let key = derive_cite_key(
+        None,
+        &["Ashish Vaswani".to_string()],
+        Some(2017),
+        "Attention Is All You Need",
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(key, "vaswani2017attention");
+}
+
+#[test]
+fn cite_key_skips_articles() {
+    let key = derive_cite_key(
+        None,
+        &["Hans Muller".to_string()],
+        Some(2023),
+        "The Grand Unified Theory",
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(key, "muller2023grand");
+}
+
+#[test]
+fn cite_key_no_author() {
+    let key = derive_cite_key(
+        None,
+        &[],
+        Some(2020),
+        "Some Report",
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(key, "anon2020some");
+}
+
+#[test]
+fn cite_key_no_year() {
+    let key = derive_cite_key(
+        None,
+        &["Smith".to_string()],
+        None,
+        "Title",
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(key, "smithtitle");
+}
+
+#[test]
+fn cite_key_unicode_normalization() {
+    let key = derive_cite_key(
+        None,
+        &["Hans Müller".to_string()],
+        Some(2023),
+        "Results",
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(key, "muller2023results");
+}
+
+#[test]
+fn cite_key_collision_suffix() {
+    let mut existing = std::collections::HashSet::new();
+    existing.insert("vaswani2017attention".to_string());
+
+    let key = derive_cite_key(
+        None,
+        &["Ashish Vaswani".to_string()],
+        Some(2017),
+        "Attention Is All You Need",
+        &existing,
+    );
+    assert_eq!(key, "vaswani2017attention-b");
+}
+
+#[test]
+fn cite_key_multiple_collisions() {
+    let mut existing = std::collections::HashSet::new();
+    existing.insert("vaswani2017attention".to_string());
+    existing.insert("vaswani2017attention-b".to_string());
+
+    let key = derive_cite_key(
+        None,
+        &["Ashish Vaswani".to_string()],
+        Some(2017),
+        "Attention Is All You Need",
+        &existing,
+    );
+    assert_eq!(key, "vaswani2017attention-c");
+}
