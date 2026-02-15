@@ -99,7 +99,7 @@ export function TabBar() {
               onDragEnd={handleDragEnd}
               className={[
                 "group flex items-center gap-1.5 px-3 py-1.5 text-xs uppercase tracking-wider select-none",
-                "border-t-2",
+                "border-t-2 border-r border-r-border/50 last:border-r-0",
                 isActive
                   ? "border-t-foreground border-x border-x-border bg-background"
                   : "border-t-transparent bg-card hover:bg-accent",
@@ -121,7 +121,7 @@ export function TabBar() {
                     closeTab(tab.id);
                   }
                 }}
-                className="ml-1 opacity-0 group-hover:opacity-100 hover:bg-accent p-0.5"
+                className="ml-1 p-0.5 opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10"
               >
                 <X className="h-3 w-3" />
               </span>
