@@ -983,9 +983,31 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document.uri;
         let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
-        let docs = self.documents.lock().await;
-        let doc = match docs.get(&uri) {
-            Some(d) => d,
+        // Extract link data while holding the documents lock, then drop it
+        // before acquiring any other lock (canonical_names).
+        let link_data: Vec<(crate::vault::link::Link, Range)> = {
+            let docs = self.documents.lock().await;
+            let doc = match docs.get(&uri) {
+                Some(d) => d,
+                None => return Ok(None),
+            };
+            doc.links
+                .iter()
+                .filter(|l| {
+                    l.kind == crate::vault::link::LinkKind::Wiki
+                        && !(l.span.start == 0 && l.span.end == 0)
+                })
+                .map(|l| (l.clone(), doc.link_to_range(l)))
+                .collect()
+        };
+
+        // Get body text for raw span extraction (separate lock scope)
+        let body_text = {
+            let docs = self.documents.lock().await;
+            docs.get(&uri).map(|d| d.body.clone())
+        };
+        let body_text = match body_text {
+            Some(b) => b,
             None => return Ok(None),
         };
 
@@ -995,28 +1017,29 @@ impl LanguageServer for LspBackend {
                 _ => continue,
             };
 
+            // Find the link matching this diagnostic range
+            let link = match link_data.iter().find(|(_, range)| *range == diag.range) {
+                Some((l, _)) => l,
+                None => continue,
+            };
+
             match code {
                 "unresolved-link" => {
-                    // Find the link at this diagnostic range
-                    if let Some(link) = doc.links.iter().find(|l| {
-                        l.kind == crate::vault::link::LinkKind::Wiki
-                            && doc.link_to_range(l) == diag.range
-                    }) {
-                        let target = &link.target_raw;
-                        let new_vp = crate::vault::path::VaultPath::from_title(target);
-                        let new_abs = self.state.vault.resolve(&new_vp);
-                        let new_uri = match Url::from_file_path(&new_abs) {
-                            Ok(u) => u,
-                            Err(_) => continue,
-                        };
+                    let target = &link.target_raw;
+                    let new_vp = crate::vault::path::VaultPath::from_title(target);
+                    let new_abs = self.state.vault.resolve(&new_vp);
+                    let new_uri = match Url::from_file_path(&new_abs) {
+                        Ok(u) => u,
+                        Err(_) => continue,
+                    };
 
-                        // Build frontmatter scaffold
-                        let mut meta = crate::vault::page::PageMeta::new();
-                        meta.title = Some(target.to_string());
-                        let content = crate::vault::page::write_page_content(&meta, "\n");
+                    // Build frontmatter scaffold
+                    let mut meta = crate::vault::page::PageMeta::new();
+                    meta.title = Some(target.to_string());
+                    let content = crate::vault::page::write_page_content(&meta, "\n");
 
-                        let mut ops: Vec<DocumentChangeOperation> = Vec::new();
-                        ops.push(DocumentChangeOperation::Op(ResourceOp::Create(
+                    let ops = vec![
+                        DocumentChangeOperation::Op(ResourceOp::Create(
                             CreateFile {
                                 uri: new_uri.clone(),
                                 options: Some(CreateFileOptions {
@@ -1025,8 +1048,8 @@ impl LanguageServer for LspBackend {
                                 }),
                                 annotation_id: None,
                             },
-                        )));
-                        ops.push(DocumentChangeOperation::Edit(TextDocumentEdit {
+                        )),
+                        DocumentChangeOperation::Edit(TextDocumentEdit {
                             text_document: OptionalVersionedTextDocumentIdentifier {
                                 uri: new_uri,
                                 version: None,
@@ -1035,20 +1058,73 @@ impl LanguageServer for LspBackend {
                                 range: Range::default(),
                                 new_text: content,
                             })],
-                        }));
+                        }),
+                    ];
 
-                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                            title: format!("Create page: {target}"),
-                            kind: Some(CodeActionKind::QUICKFIX),
-                            diagnostics: Some(vec![diag.clone()]),
-                            edit: Some(WorkspaceEdit {
-                                changes: None,
-                                document_changes: Some(DocumentChanges::Operations(ops)),
-                                change_annotations: None,
-                            }),
-                            is_preferred: Some(true),
-                            ..Default::default()
-                        }));
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: format!("Create page: {target}"),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![diag.clone()]),
+                        edit: Some(WorkspaceEdit {
+                            changes: None,
+                            document_changes: Some(DocumentChanges::Operations(ops)),
+                            change_annotations: None,
+                        }),
+                        is_preferred: Some(true),
+                        ..Default::default()
+                    }));
+                }
+                "ambiguous-link" => {
+                    let canonical =
+                        crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+                    let names = self.canonical_names.read().await;
+
+                    if let Some(candidate_paths) = names.get(canonical.as_str())
+                        && candidate_paths.len() > 1
+                    {
+                        let prefixes =
+                            rename::shortest_unique_prefixes(candidate_paths);
+
+                        for (path, prefix) in
+                            candidate_paths.iter().zip(prefixes.iter())
+                        {
+                            // Read raw wikilink text to preserve display text
+                            let raw_text = if link.span.end <= body_text.len() {
+                                &body_text[link.span.clone()]
+                            } else {
+                                continue;
+                            };
+                            let new_text =
+                                rename::rewrite_wikilink(raw_text, prefix);
+
+                            let edit = TextEdit {
+                                range: diag.range,
+                                new_text,
+                            };
+
+                            let title_display =
+                                path.strip_suffix(".md").unwrap_or(path);
+
+                            actions.push(CodeActionOrCommand::CodeAction(
+                                CodeAction {
+                                    title: format!(
+                                        "Resolve to: {title_display}"
+                                    ),
+                                    kind: Some(CodeActionKind::QUICKFIX),
+                                    diagnostics: Some(vec![diag.clone()]),
+                                    edit: Some(WorkspaceEdit {
+                                        changes: Some(
+                                            [(uri.clone(), vec![edit])]
+                                                .into_iter()
+                                                .collect(),
+                                        ),
+                                        document_changes: None,
+                                        change_annotations: None,
+                                    }),
+                                    ..Default::default()
+                                },
+                            ));
+                        }
                     }
                 }
                 _ => {}

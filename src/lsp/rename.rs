@@ -29,6 +29,39 @@ pub fn link_matches_target(target_raw: &str, target_canonical_names: &[String]) 
         .any(|cn| cn == canonical.as_str())
 }
 
+/// Compute the shortest unique suffix for each path that distinguishes it
+/// from all others in the set.
+///
+/// Strips `.md` extensions first, then walks up path segments until each
+/// suffix is unique. Example: `["notes/foo.md", "projects/foo.md"]` yields
+/// `["notes/foo", "projects/foo"]`.
+pub fn shortest_unique_prefixes(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| {
+            let stripped = path.strip_suffix(".md").unwrap_or(path);
+            let segments: Vec<&str> = stripped.split('/').collect();
+
+            // Try increasingly long suffixes until unique
+            for len in 1..=segments.len() {
+                let suffix = segments[segments.len() - len..].join("/");
+                let matches = paths
+                    .iter()
+                    .filter(|other| {
+                        let other_stripped = other.strip_suffix(".md").unwrap_or(other);
+                        other_stripped.ends_with(&suffix)
+                    })
+                    .count();
+                if matches == 1 {
+                    return suffix;
+                }
+            }
+            // Fallback: full path without .md
+            stripped.to_string()
+        })
+        .collect()
+}
+
 /// Update frontmatter title in full document text. Returns new full text.
 ///
 /// Parses the existing frontmatter, replaces the title, and re-serializes.
@@ -67,6 +100,30 @@ mod tests {
         assert!(link_matches_target("HELLO WORLD", &names));
         assert!(link_matches_target("Hello World", &names));
         assert!(!link_matches_target("goodbye world", &names));
+    }
+
+    #[test]
+    fn shortest_prefix_simple_disambiguation() {
+        let paths = vec!["notes/foo.md".to_string(), "projects/foo.md".to_string()];
+        let prefixes = shortest_unique_prefixes(&paths);
+        assert_eq!(prefixes, vec!["notes/foo", "projects/foo"]);
+    }
+
+    #[test]
+    fn shortest_prefix_already_unique() {
+        let paths = vec!["notes/alpha.md".to_string(), "notes/beta.md".to_string()];
+        let prefixes = shortest_unique_prefixes(&paths);
+        assert_eq!(prefixes, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn shortest_prefix_deep_nesting() {
+        let paths = vec![
+            "a/shared/foo.md".to_string(),
+            "b/shared/foo.md".to_string(),
+        ];
+        let prefixes = shortest_unique_prefixes(&paths);
+        assert_eq!(prefixes, vec!["a/shared/foo", "b/shared/foo"]);
     }
 
     #[test]
