@@ -6,6 +6,7 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use std::fs;
 use tempfile::TempDir;
+use rusqlite::Connection;
 
 #[test]
 fn parse_single_article() {
@@ -345,4 +346,184 @@ fn cite_key_multiple_collisions() {
         &existing,
     );
     assert_eq!(key, "vaswani2017attention-c");
+}
+
+// ── Zotero DB query tests ─────────────────────────────────────────────────
+
+use clepsydra::vault::import_zotero::{
+    open_zotero_db, query_items,
+};
+
+/// Create a minimal Zotero-schema SQLite DB for testing.
+fn create_mock_zotero_db(path: &std::path::Path) {
+    let conn = Connection::open(path).unwrap();
+    conn.execute_batch(
+        "
+        CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
+        INSERT INTO itemTypes VALUES (1, 'attachment');
+        INSERT INTO itemTypes VALUES (2, 'book');
+        INSERT INTO itemTypes VALUES (3, 'bookSection');
+        INSERT INTO itemTypes VALUES (4, 'journalArticle');
+        INSERT INTO itemTypes VALUES (26, 'conferencePaper');
+        INSERT INTO itemTypes VALUES (7, 'thesis');
+        INSERT INTO itemTypes VALUES (27, 'report');
+
+        CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT);
+        INSERT INTO fields VALUES (1, 'url');
+        INSERT INTO fields VALUES (4, 'volume');
+        INSERT INTO fields VALUES (6, 'pages');
+        INSERT INTO fields VALUES (12, 'publisher');
+        INSERT INTO fields VALUES (14, 'date');
+        INSERT INTO fields VALUES (26, 'DOI');
+        INSERT INTO fields VALUES (62, 'extra');
+        INSERT INTO fields VALUES (110, 'title');
+        INSERT INTO fields VALUES (11, 'ISBN');
+        INSERT INTO fields VALUES (37, 'publicationTitle');
+
+        CREATE TABLE libraries (libraryID INTEGER PRIMARY KEY, type TEXT);
+        INSERT INTO libraries VALUES (1, 'user');
+
+        CREATE TABLE items (
+            itemID INTEGER PRIMARY KEY, itemTypeID INT, dateAdded TEXT,
+            dateModified TEXT, clientDateModified TEXT, libraryID INT,
+            key TEXT, version INT DEFAULT 0, synced INT DEFAULT 0
+        );
+        CREATE TABLE itemData (itemID INT, fieldID INT, valueID INT, PRIMARY KEY(itemID, fieldID));
+        CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value TEXT UNIQUE);
+        CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY);
+
+        CREATE TABLE creators (creatorID INTEGER PRIMARY KEY, firstName TEXT, lastName TEXT, fieldMode INT);
+        CREATE TABLE creatorTypes (creatorTypeID INTEGER PRIMARY KEY, creatorType TEXT);
+        INSERT INTO creatorTypes VALUES (1, 'author');
+        INSERT INTO creatorTypes VALUES (2, 'editor');
+        CREATE TABLE itemCreators (itemID INT, creatorID INT, creatorTypeID INT, orderIndex INT);
+
+        CREATE TABLE tags (tagID INTEGER PRIMARY KEY, name TEXT UNIQUE);
+        CREATE TABLE itemTags (itemID INT, tagID INT, type INT);
+
+        CREATE TABLE collections (
+            collectionID INTEGER PRIMARY KEY, collectionName TEXT,
+            parentCollectionID INT, libraryID INT, key TEXT, version INT DEFAULT 0, synced INT DEFAULT 0,
+            clientDateModified TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE collectionItems (collectionID INT, itemID INT, orderIndex INT);
+
+        CREATE TABLE itemAttachments (
+            itemID INTEGER PRIMARY KEY, parentItemID INT, linkMode INT,
+            contentType TEXT, charsetID INT, path TEXT,
+            syncState INT DEFAULT 0, storageModTime INT, storageHash TEXT
+        );
+
+        -- Insert a journal article
+        INSERT INTO items VALUES (1, 4, '2024-01-01', '2024-06-15', '2024-06-15', 1, 'ABC12345', 1, 0);
+        INSERT INTO itemDataValues VALUES (1, 'Attention Is All You Need');
+        INSERT INTO itemDataValues VALUES (2, '2017');
+        INSERT INTO itemDataValues VALUES (3, '10.48550/arXiv.1706.03762');
+        INSERT INTO itemDataValues VALUES (4, 'NeurIPS');
+        INSERT INTO itemData VALUES (1, 110, 1);
+        INSERT INTO itemData VALUES (1, 14, 2);
+        INSERT INTO itemData VALUES (1, 26, 3);
+        INSERT INTO itemData VALUES (1, 37, 4);
+
+        INSERT INTO creators VALUES (1, 'Ashish', 'Vaswani', 0);
+        INSERT INTO creators VALUES (2, 'Noam', 'Shazeer', 0);
+        INSERT INTO itemCreators VALUES (1, 1, 1, 0);
+        INSERT INTO itemCreators VALUES (1, 2, 1, 1);
+
+        INSERT INTO tags VALUES (1, 'machine-learning');
+        INSERT INTO tags VALUES (2, 'transformers');
+        INSERT INTO itemTags VALUES (1, 1, 0);
+        INSERT INTO itemTags VALUES (1, 2, 0);
+
+        -- Insert a book
+        INSERT INTO items VALUES (2, 2, '2024-01-01', '2024-03-01', '2024-03-01', 1, 'DEF67890', 1, 0);
+        INSERT INTO itemDataValues VALUES (5, 'Pattern Recognition and Machine Learning');
+        INSERT INTO itemDataValues VALUES (6, '2006');
+        INSERT INTO itemDataValues VALUES (7, '978-0-387-31073-2');
+        INSERT INTO itemDataValues VALUES (8, 'Springer');
+        INSERT INTO itemData VALUES (2, 110, 5);
+        INSERT INTO itemData VALUES (2, 14, 6);
+        INSERT INTO itemData VALUES (2, 11, 7);
+        INSERT INTO itemData VALUES (2, 12, 8);
+
+        INSERT INTO creators VALUES (3, 'Christopher M.', 'Bishop', 0);
+        INSERT INTO itemCreators VALUES (2, 3, 1, 0);
+
+        -- Insert a PDF attachment for item 1
+        INSERT INTO items VALUES (100, 1, '2024-01-01', '2024-01-01', '2024-01-01', 1, 'PDFKEY01', 1, 0);
+        INSERT INTO itemAttachments VALUES (100, 1, 0, 'application/pdf', NULL, 'storage:attention.pdf', 0, NULL, NULL);
+
+        -- Insert an item with BBT citation key in extra
+        INSERT INTO items VALUES (3, 4, '2024-01-01', '2024-07-01', '2024-07-01', 1, 'GHI11111', 1, 0);
+        INSERT INTO itemDataValues VALUES (9, 'Some Paper Title');
+        INSERT INTO itemDataValues VALUES (10, '2023');
+        INSERT INTO itemDataValues VALUES (11, 'Citation Key: custombbt2023\nSome other extra');
+        INSERT INTO itemData VALUES (3, 110, 9);
+        INSERT INTO itemData VALUES (3, 14, 10);
+        INSERT INTO itemData VALUES (3, 62, 11);
+
+        INSERT INTO creators VALUES (4, 'Jane', 'Doe', 0);
+        INSERT INTO itemCreators VALUES (3, 4, 1, 0);
+
+        -- A collection
+        INSERT INTO collections VALUES (1, 'ML Papers', NULL, 1, 'COL00001', 1, 0, '2024-01-01');
+        INSERT INTO collectionItems VALUES (1, 1, 0);
+        INSERT INTO collectionItems VALUES (1, 3, 1);
+        "
+    ).unwrap();
+}
+
+#[test]
+fn query_items_returns_all_bibliographic_items() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db(&db_path);
+
+    let conn = open_zotero_db(&db_path).unwrap();
+    let items = query_items(&conn, None, None).unwrap();
+
+    assert_eq!(items.len(), 3, "should find 3 items (article, book, article w/ BBT key)");
+
+    let article = items.iter().find(|i| i.zotero_key == "ABC12345").unwrap();
+    assert_eq!(article.title, "Attention Is All You Need");
+    assert_eq!(article.item_type, "journalArticle");
+    assert_eq!(article.doi.as_deref(), Some("10.48550/arXiv.1706.03762"));
+    assert_eq!(article.venue.as_deref(), Some("NeurIPS"));
+    assert_eq!(article.authors.len(), 2);
+    assert_eq!(article.authors[0].last_name, "Vaswani");
+    assert_eq!(article.tags, vec!["machine-learning", "transformers"]);
+    assert_eq!(article.pdf_attachments.len(), 1);
+
+    let book = items.iter().find(|i| i.zotero_key == "DEF67890").unwrap();
+    assert_eq!(book.title, "Pattern Recognition and Machine Learning");
+    assert_eq!(book.item_type, "book");
+    assert_eq!(book.isbn.as_deref(), Some("978-0-387-31073-2"));
+    assert_eq!(book.publisher.as_deref(), Some("Springer"));
+}
+
+#[test]
+fn query_items_filters_by_collection() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db(&db_path);
+
+    let conn = open_zotero_db(&db_path).unwrap();
+    let items = query_items(&conn, Some("ML Papers"), None).unwrap();
+
+    assert_eq!(items.len(), 2, "ML Papers collection has 2 items");
+    assert!(items.iter().any(|i| i.zotero_key == "ABC12345"));
+    assert!(items.iter().any(|i| i.zotero_key == "GHI11111"));
+}
+
+#[test]
+fn query_items_filters_by_since() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db(&db_path);
+
+    let conn = open_zotero_db(&db_path).unwrap();
+    let items = query_items(&conn, None, Some("2024-05-01")).unwrap();
+
+    assert_eq!(items.len(), 2, "2 items modified after 2024-05-01");
+    assert!(items.iter().all(|i| i.zotero_key != "DEF67890"), "book was modified 2024-03-01, should be excluded");
 }
