@@ -518,7 +518,7 @@ impl LanguageServer for LspBackend {
                 },
             },
             command: None,
-            data: Some(serde_json::to_value(vault_path.as_str()).unwrap()),
+            data: serde_json::to_value(vault_path.as_str()).ok(),
         }]))
     }
 
