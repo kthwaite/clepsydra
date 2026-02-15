@@ -64,6 +64,36 @@ impl LanguageServer for LspBackend {
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let text = params.text_document.text;
+        let version = params.text_document.version;
+
+        let doc = document::Document::from_text(&text, version);
+
+        let mut docs = self.documents.lock().await;
+        docs.insert(uri.clone(), doc);
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let version = params.text_document.version;
+
+        // Full sync: take the last (only) content change
+        if let Some(change) = params.content_changes.into_iter().last() {
+            let mut doc = document::Document::from_text(&change.text, version);
+            doc.dirty = true;
+            let mut docs = self.documents.lock().await;
+            docs.insert(uri.clone(), doc);
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let mut docs = self.documents.lock().await;
+        docs.remove(&uri);
+    }
 }
 
 /// Start the LSP server on stdio, using the given shared state.
