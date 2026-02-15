@@ -138,10 +138,7 @@ pub async fn list_folder_tree(
     let root = state.vault.root();
     let mut paths = Vec::new();
 
-    for entry in walkdir::WalkDir::new(root)
-        .min_depth(1)
-        .sort_by_file_name()
-    {
+    for entry in walkdir::WalkDir::new(root).min_depth(1).sort_by_file_name() {
         let entry = entry.map_err(|e| ApiError::internal(e.to_string()))?;
         if !entry.file_type().is_dir() {
             continue;
@@ -204,9 +201,7 @@ pub async fn list_folder_contents(
     let entries = fs::read_dir(&abs_path).map_err(|e| ApiError::internal(e.to_string()))?;
 
     let mut folders = Vec::new();
-    let mut pages = Vec::new();
-
-    let index = state.index.lock();
+    let mut md_children: Vec<(String, VaultPath)> = Vec::new();
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -226,9 +221,19 @@ pub async fn list_folder_contents(
                 name: name.clone(),
                 path: child_rel,
             });
-        } else if name.ends_with(".md") {
-            // Look up in index for summary info
-            if let Ok(vp) = VaultPath::new(&child_rel) {
+        } else if name.ends_with(".md")
+            && let Ok(vp) = VaultPath::new(&child_rel)
+        {
+            md_children.push((name, vp));
+        }
+    }
+
+    // Look up all markdown children in the index in one closure
+    let pages = state
+        .index
+        .with_index(move |index, _vault| {
+            let mut pages = Vec::new();
+            for (name, vp) in &md_children {
                 let summary: Option<PageSummary> = index
                     .connection()
                     .query_row(
@@ -248,19 +253,21 @@ pub async fn list_folder_contents(
                 if let Some(s) = summary {
                     pages.push(s);
                 } else {
-                    // Not in index yet, just return basic info
                     pages.push(PageSummary {
                         id: String::new(),
-                        path: child_rel,
+                        path: vp.as_str().to_string(),
                         title: None,
                         canonical_name: name.trim_end_matches(".md").to_string(),
                     });
                 }
             }
-        }
-    }
+            pages
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     folders.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut pages = pages;
     pages.sort_by(|a, b| a.path.cmp(&b.path));
 
     Ok(Json(FolderListing {
@@ -358,33 +365,39 @@ pub async fn delete_folder(
 
     // Remove orphaned pages from the index via SyncEngine (handles dependency re-resolution)
     {
-        let mut index = state.index.lock();
-
-        // Find pages that were under this folder
         let folder_prefix = format!("{}/", vault_path.as_str());
-        let orphaned: Vec<String> = {
-            let mut stmt = index
-                .connection()
-                .prepare("SELECT path FROM pages WHERE path LIKE ?1")
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-            stmt.query_map(params![format!("{}%", folder_prefix)], |row| {
-                row.get::<_, String>(0)
+        let orphaned = state
+            .index
+            .with_index(move |index, vault| {
+                // Find pages that were under this folder
+                let orphaned: Vec<String> = {
+                    let mut stmt = index
+                        .connection()
+                        .prepare("SELECT path FROM pages WHERE path LIKE ?1")?;
+                    stmt.query_map(params![format!("{}%", folder_prefix)], |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect()
+                };
+
+                if !orphaned.is_empty() {
+                    use crate::vault::sync::{ChangeEvent, SyncEngine};
+                    let events: Vec<ChangeEvent> = orphaned
+                        .iter()
+                        .filter_map(|p| VaultPath::new(p).ok())
+                        .map(ChangeEvent::Remove)
+                        .collect();
+                    SyncEngine::process_events(&events, vault, index)?;
+                }
+
+                Ok::<_, crate::vault::index::IndexError>(orphaned)
             })
+            .await
             .map_err(|e| ApiError::internal(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect()
-        };
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if !orphaned.is_empty() {
-            use crate::vault::sync::{ChangeEvent, SyncEngine};
-            let events: Vec<ChangeEvent> = orphaned
-                .iter()
-                .filter_map(|p| VaultPath::new(p).ok())
-                .map(ChangeEvent::Remove)
-                .collect();
-            SyncEngine::process_events(&events, &state.vault, &mut index)
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-
             let _ = state.change_tx.send(SyncNotification::IndexChanged {
                 upserted: vec![],
                 removed: orphaned,
@@ -439,21 +452,25 @@ pub async fn move_folder(
     }
 
     // Plan and execute
-    let plan = {
-        let index = state.index.lock();
-        let planner = MutationPlanner::new(&state.vault, &index);
-        planner
-            .plan(&MutationOp::MoveFolder {
-                source: path.clone(),
-                destination: body.destination.clone(),
-            })
-            .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
-    }; // lock released
-    {
-        let mut index = state.index.lock();
-        plan.execute(&state.vault, &mut index, &state.hooks)
-            .map_err(|e| ApiError::internal(format!("execute failed: {e}")))?;
-    } // lock released
+    let op = MutationOp::MoveFolder {
+        source: path.clone(),
+        destination: body.destination.clone(),
+    };
+    let hooks = Arc::clone(&state.hooks);
+    state
+        .index
+        .with_index(move |index, vault| {
+            let planner = MutationPlanner::new(vault, index);
+            let plan = planner
+                .plan(&op)
+                .map_err(|e| crate::vault::index::IndexError::Other(format!("plan failed: {e}")))?;
+            plan.execute(vault, index, &hooks)
+                .map_err(|e| crate::vault::index::IndexError::Other(format!("execute failed: {e}")))?;
+            Ok::<_, crate::vault::index::IndexError>(())
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![body.destination.clone()],

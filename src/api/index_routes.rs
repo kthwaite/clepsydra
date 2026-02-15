@@ -203,10 +203,10 @@ pub async fn backlinks(
     let vault_path =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
-    let index = state.index.lock();
-
-    let backlinks = index
-        .backlinks_with_context(&state.vault, &vault_path, 200)
+    let backlinks = state
+        .index
+        .backlinks(vault_path, 200)
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let entries: Vec<BacklinkEntry> = backlinks
@@ -244,39 +244,48 @@ pub async fn outlinks(
     let vault_path =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
-    let index = state.index.lock();
+    let vp_str = vault_path.as_str().to_string();
+    let path_clone = path.clone();
 
-    // Look up the page's UUID from its path
-    let page_id: String = index
-        .connection()
-        .query_row(
-            "SELECT id FROM pages WHERE path = ?1",
-            params![vault_path.as_str()],
-            |row| row.get(0),
-        )
-        .map_err(|_| ApiError::not_found(format!("page not found in index: {path}")))?;
+    let links = state
+        .index
+        .with_index(move |index, _vault| {
+            let page_id: String = index
+                .connection()
+                .query_row(
+                    "SELECT id FROM pages WHERE path = ?1",
+                    params![vp_str],
+                    |row| row.get(0),
+                )
+                .map_err(|_| {
+                    rusqlite::Error::QueryReturnedNoRows
+                })?;
 
-    let mut stmt = index
-        .connection()
-        .prepare(
-            "SELECT l.target_raw, l.target_path, l.target_id, l.kind, l.source_field
-             FROM links l WHERE l.source_id = ?1",
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+            let mut stmt = index
+                .connection()
+                .prepare(
+                    "SELECT l.target_raw, l.target_path, l.target_id, l.kind, l.source_field
+                     FROM links l WHERE l.source_id = ?1",
+                )?;
 
-    let links: Vec<OutlinkEntry> = stmt
-        .query_map(params![page_id], |row| {
-            Ok(OutlinkEntry {
-                target_raw: row.get(0)?,
-                target_path: row.get(1)?,
-                target_id: row.get(2)?,
-                kind: row.get(3)?,
-                source_field: row.get(4)?,
-            })
+            let links: Vec<OutlinkEntry> = stmt
+                .query_map(params![page_id], |row| {
+                    Ok(OutlinkEntry {
+                        target_raw: row.get(0)?,
+                        target_path: row.get(1)?,
+                        target_id: row.get(2)?,
+                        kind: row.get(3)?,
+                        source_field: row.get(4)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok::<_, rusqlite::Error>(links)
         })
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .map_err(|_| ApiError::not_found(format!("page not found in index: {path_clone}")))?;
 
     Ok(Json(links))
 }
@@ -294,47 +303,52 @@ pub async fn outlinks(
 pub async fn unresolved(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<UnresolvedLink>>, ApiError> {
-    let index = state.index.lock();
-
-    let details = index
-        .unresolved_with_candidates()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
     let strategy = state.vault.config().vault.disambiguation_strategy;
 
-    let links: Vec<UnresolvedLink> = details
-        .into_iter()
-        .map(|d| {
-            let ranked_candidates = if d.reason == UnresolvedReason::Ambiguous {
-                index.rank_candidates(&d.candidates, &d.source_path, strategy)
-            } else {
-                d.candidates
-            };
+    let links = state
+        .index
+        .with_index(move |index, _vault| {
+            let details = index.unresolved_with_candidates()?;
 
-            let reason_str = match d.reason {
-                UnresolvedReason::NoMatch => "no_match",
-                UnresolvedReason::Ambiguous => "ambiguous",
-            };
+            let links: Vec<UnresolvedLink> = details
+                .into_iter()
+                .map(|d| {
+                    let ranked_candidates = if d.reason == UnresolvedReason::Ambiguous {
+                        index.rank_candidates(&d.candidates, &d.source_path, strategy)
+                    } else {
+                        d.candidates
+                    };
 
-            UnresolvedLink {
-                source_id: d.source_id,
-                source_path: d.source_path,
-                target_raw: d.target_raw,
-                target_canonical: d.target_canonical,
-                kind: d.kind,
-                span_start: d.span_start,
-                reason: reason_str.to_string(),
-                candidates: ranked_candidates
-                    .into_iter()
-                    .map(|c| CandidateEntry {
-                        page_id: c.page_id,
-                        path: c.path,
-                        title: c.title,
-                    })
-                    .collect(),
-            }
+                    let reason_str = match d.reason {
+                        UnresolvedReason::NoMatch => "no_match",
+                        UnresolvedReason::Ambiguous => "ambiguous",
+                    };
+
+                    UnresolvedLink {
+                        source_id: d.source_id,
+                        source_path: d.source_path,
+                        target_raw: d.target_raw,
+                        target_canonical: d.target_canonical,
+                        kind: d.kind,
+                        span_start: d.span_start,
+                        reason: reason_str.to_string(),
+                        candidates: ranked_candidates
+                            .into_iter()
+                            .map(|c| CandidateEntry {
+                                page_id: c.page_id,
+                                path: c.path,
+                                title: c.title,
+                            })
+                            .collect(),
+                    }
+                })
+                .collect();
+
+            Ok::<_, crate::vault::index::IndexError>(links)
         })
-        .collect();
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(links))
 }
@@ -352,31 +366,37 @@ pub async fn unresolved(
 pub async fn ambiguous(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AmbiguousName>>, ApiError> {
-    let index = state.index.lock();
+    let names = state
+        .index
+        .with_index(move |index, _vault| {
+            let mut stmt = index
+                .connection()
+                .prepare(
+                    "SELECT cn.canonical_name, GROUP_CONCAT(cn.page_id) as page_ids
+                     FROM canonical_names cn
+                     GROUP BY cn.canonical_name
+                     HAVING COUNT(*) > 1",
+                )?;
 
-    let mut stmt = index
-        .connection()
-        .prepare(
-            "SELECT cn.canonical_name, GROUP_CONCAT(cn.page_id) as page_ids
-             FROM canonical_names cn
-             GROUP BY cn.canonical_name
-             HAVING COUNT(*) > 1",
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+            let names: Vec<AmbiguousName> = stmt
+                .query_map([], |row| {
+                    let name: String = row.get(0)?;
+                    let ids_str: String = row.get(1)?;
+                    let page_ids: Vec<String> =
+                        ids_str.split(',').map(|s| s.to_string()).collect();
+                    Ok(AmbiguousName {
+                        canonical_name: name,
+                        page_ids,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
-    let names: Vec<AmbiguousName> = stmt
-        .query_map([], |row| {
-            let name: String = row.get(0)?;
-            let ids_str: String = row.get(1)?;
-            let page_ids: Vec<String> = ids_str.split(',').map(|s| s.to_string()).collect();
-            Ok(AmbiguousName {
-                canonical_name: name,
-                page_ids,
-            })
+            Ok::<_, rusqlite::Error>(names)
         })
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(names))
 }
@@ -408,23 +428,28 @@ pub async fn warnings(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Str
     )
 )]
 pub async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>, ApiError> {
-    let index = state.index.lock();
+    let tag_counts = state
+        .index
+        .with_index(move |index, _vault| {
+            let mut stmt = index
+                .connection()
+                .prepare("SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY count DESC")?;
 
-    let mut stmt = index
-        .connection()
-        .prepare("SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY count DESC")
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+            let tag_counts: Vec<TagCount> = stmt
+                .query_map([], |row| {
+                    Ok(TagCount {
+                        tag: row.get(0)?,
+                        count: row.get(1)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
-    let tag_counts: Vec<TagCount> = stmt
-        .query_map([], |row| {
-            Ok(TagCount {
-                tag: row.get(0)?,
-                count: row.get(1)?,
-            })
+            Ok::<_, rusqlite::Error>(tag_counts)
         })
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(tag_counts))
 }
@@ -440,41 +465,9 @@ pub async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCoun
     )
 )]
 pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats>, ApiError> {
-    let index = state.index.lock();
-
-    let conn = index.connection();
-
-    let pages: i64 = conn
-        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let links_total: i64 = conn
-        .query_row("SELECT COUNT(*) FROM links", [], |row| row.get(0))
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let links_resolved: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM links WHERE target_id IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let links_unresolved: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let tags_count: i64 = conn
-        .query_row("SELECT COUNT(DISTINCT tag) FROM tags", [], |row| row.get(0))
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    // Count attachments on disk
-    let attachment_folder = &state.vault.config().vault.attachment_folder;
-    let attachment_dir = state.vault.root().join(attachment_folder);
+    // Count attachments on disk (doesn't need index)
+    let attachment_folder = state.vault.config().vault.attachment_folder.clone();
+    let attachment_dir = state.vault.root().join(&attachment_folder);
     let attachments: i64 = if attachment_dir.is_dir() {
         walkdir::WalkDir::new(&attachment_dir)
             .into_iter()
@@ -484,6 +477,40 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
     } else {
         0
     };
+
+    let (pages, links_total, links_resolved, links_unresolved, tags_count) = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
+
+            let pages: i64 = conn
+                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))?;
+
+            let links_total: i64 = conn
+                .query_row("SELECT COUNT(*) FROM links", [], |row| row.get(0))?;
+
+            let links_resolved: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM links WHERE target_id IS NOT NULL",
+                    [],
+                    |row| row.get(0),
+                )?;
+
+            let links_unresolved: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
+                    [],
+                    |row| row.get(0),
+                )?;
+
+            let tags_count: i64 = conn
+                .query_row("SELECT COUNT(DISTINCT tag) FROM tags", [], |row| row.get(0))?;
+
+            Ok::<_, rusqlite::Error>((pages, links_total, links_resolved, links_unresolved, tags_count))
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(VaultStats {
         pages,
@@ -506,43 +533,44 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
     )
 )]
 pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphResponse>, ApiError> {
-    let index = state.index.lock();
+    let (nodes, edges) = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
 
-    let conn = index.connection();
+            let mut node_stmt = conn
+                .prepare("SELECT id, path, title FROM pages")?;
 
-    // Nodes: all pages
-    let mut node_stmt = conn
-        .prepare("SELECT id, path, title FROM pages")
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+            let nodes: Vec<GraphNode> = node_stmt
+                .query_map([], |row| {
+                    Ok(GraphNode {
+                        id: row.get(0)?,
+                        path: row.get(1)?,
+                        title: row.get(2)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
-    let nodes: Vec<GraphNode> = node_stmt
-        .query_map([], |row| {
-            Ok(GraphNode {
-                id: row.get(0)?,
-                path: row.get(1)?,
-                title: row.get(2)?,
-            })
+            let mut edge_stmt = conn
+                .prepare("SELECT source_id, target_id, kind FROM links WHERE target_id IS NOT NULL")?;
+
+            let edges: Vec<GraphEdge> = edge_stmt
+                .query_map([], |row| {
+                    Ok(GraphEdge {
+                        source: row.get(0)?,
+                        target: row.get(1)?,
+                        kind: row.get(2)?,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok::<_, rusqlite::Error>((nodes, edges))
         })
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    // Edges: resolved links only (target_id IS NOT NULL)
-    let mut edge_stmt = conn
-        .prepare("SELECT source_id, target_id, kind FROM links WHERE target_id IS NOT NULL")
         .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let edges: Vec<GraphEdge> = edge_stmt
-        .query_map([], |row| {
-            Ok(GraphEdge {
-                source: row.get(0)?,
-                target: row.get(1)?,
-                kind: row.get(2)?,
-            })
-        })
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
 
     Ok(Json(GraphResponse { nodes, edges }))
 }
@@ -558,15 +586,16 @@ pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphRespo
     )
 )]
 pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
-    let mut index = state.index.lock();
-
-    let build_stats = index
-        .build(&state.vault)
+    let build_stats = state
+        .index
+        .with_index(move |index, vault| {
+            let stats = index.build(vault)?;
+            index.resolve_links()?;
+            Ok::<_, crate::vault::index::IndexError>(stats)
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("index build failed: {e}")))?
         .map_err(|e| ApiError::internal(format!("index build failed: {e}")))?;
-
-    index
-        .resolve_links()
-        .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
 
     // Store warnings for the /warnings endpoint
     {
@@ -633,11 +662,14 @@ pub async fn preview_mutation(
         }
     };
 
-    let index = state.index.lock();
-
-    let planner = MutationPlanner::new(&state.vault, &index);
-    let plan = planner
-        .plan(&op)
+    let plan = state
+        .index
+        .with_index(move |index, vault| {
+            let planner = MutationPlanner::new(vault, index);
+            planner.plan(&op)
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?
         .map_err(|e| ApiError::internal(format!("plan failed: {e}")))?;
 
     Ok(Json(plan).into_response())
@@ -701,15 +733,17 @@ pub async fn create_from_link(
 
     // Index the new page and resolve links
     {
-        let mut index = state.index.lock();
-
-        index
-            .index_page(&state.vault, &vault_path)
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("index failed: {e}")))?
             .map_err(|e| ApiError::internal(format!("index failed: {e}")))?;
-
-        index
-            .resolve_links_for_page(&vault_path)
-            .map_err(|e| ApiError::internal(format!("link resolution failed: {e}")))?;
     }
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
@@ -768,76 +802,73 @@ pub async fn content_index(
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<PaginatedResponse<ContentEntry>>, ApiError> {
-    let index = state.index.lock();
+    let entries = state
+        .index
+        .with_index(move |index, vault| {
+            let conn = index.connection();
 
-    let conn = index.connection();
+            let mut page_stmt = conn
+                .prepare("SELECT id, path, title FROM pages")?;
 
-    // Get all pages
-    let mut page_stmt = conn
-        .prepare("SELECT id, path, title FROM pages")
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+            let pages: Vec<(String, String, Option<String>)> = page_stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
 
-    let pages: Vec<(String, String, Option<String>)> = page_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+            let mut entries = Vec::with_capacity(pages.len());
 
-    let mut entries = Vec::with_capacity(pages.len());
+            for (page_id, path, title) in &pages {
+                let mut tag_stmt = conn
+                    .prepare_cached("SELECT tag FROM tags WHERE page_id = ?1")?;
+                let tags: Vec<String> = tag_stmt
+                    .query_map(params![page_id], |row| row.get(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
 
-    for (page_id, path, title) in &pages {
-        // Tags for this page
-        let mut tag_stmt = conn
-            .prepare_cached("SELECT tag FROM tags WHERE page_id = ?1")
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let tags: Vec<String> = tag_stmt
-            .query_map(params![page_id], |row| row.get(0))
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect();
+                let mut link_stmt = conn
+                    .prepare_cached(
+                        "SELECT DISTINCT target_path FROM links WHERE source_id = ?1 AND target_path IS NOT NULL",
+                    )?;
+                let links: Vec<String> = link_stmt
+                    .query_map(params![page_id], |row| row.get(0))?
+                    .filter_map(|r| r.ok())
+                    .collect();
 
-        // Outgoing link targets for this page (resolved only)
-        let mut link_stmt = conn
-            .prepare_cached(
-                "SELECT DISTINCT target_path FROM links WHERE source_id = ?1 AND target_path IS NOT NULL",
-            )
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        let links: Vec<String> = link_stmt
-            .query_map(params![page_id], |row| row.get(0))
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect();
+                let vault_path = match VaultPath::new(path) {
+                    Ok(vp) => vp,
+                    Err(_) => continue,
+                };
+                let abs_path = vault.resolve(&vault_path);
+                let (created_at, updated_at, description) = if abs_path.exists() {
+                    match Page::from_file(&abs_path, vault_path) {
+                        Ok(page) => {
+                            let desc = page.body.chars().take(200).collect::<String>();
+                            let created = page.meta.created_at.map(|d| d.to_rfc3339());
+                            let updated = page.meta.updated_at.map(|d| d.to_rfc3339());
+                            (created, updated, desc)
+                        }
+                        Err(_) => (None, None, String::new()),
+                    }
+                } else {
+                    (None, None, String::new())
+                };
 
-        // Read page file for dates and description
-        let vault_path = match VaultPath::new(path) {
-            Ok(vp) => vp,
-            Err(_) => continue,
-        };
-        let abs_path = state.vault.resolve(&vault_path);
-        let (created_at, updated_at, description) = if abs_path.exists() {
-            match Page::from_file(&abs_path, vault_path) {
-                Ok(page) => {
-                    let desc = page.body.chars().take(200).collect::<String>();
-                    let created = page.meta.created_at.map(|d| d.to_rfc3339());
-                    let updated = page.meta.updated_at.map(|d| d.to_rfc3339());
-                    (created, updated, desc)
-                }
-                Err(_) => (None, None, String::new()),
+                entries.push(ContentEntry {
+                    path: path.clone(),
+                    title: title.clone(),
+                    tags,
+                    links,
+                    created_at,
+                    updated_at,
+                    description,
+                });
             }
-        } else {
-            (None, None, String::new())
-        };
 
-        entries.push(ContentEntry {
-            path: path.clone(),
-            title: title.clone(),
-            tags,
-            links,
-            created_at,
-            updated_at,
-            description,
-        });
-    }
+            Ok::<_, rusqlite::Error>(entries)
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(PaginatedResponse::from_vec(entries, &pagination)))
 }
@@ -872,9 +903,10 @@ pub async fn search(
 
     let limit = query.limit.unwrap_or(20) as usize;
 
-    let index = state.index.lock();
-    let results = index
-        .search(&q, limit)
+    let results = state
+        .index
+        .search(q, limit)
+        .await
         .map_err(|e| ApiError::internal(format!("search failed: {e}")))?;
 
     let entries: Vec<SearchResultEntry> = results

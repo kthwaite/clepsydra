@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::{Router, response::IntoResponse, routing::get};
+use axum::Router;
 use config::{Config, Environment, File};
 use serde::Deserialize;
-use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::{Level, info};
@@ -19,8 +18,9 @@ use api::AppState;
 use app_config::{config_candidates, find_config_path};
 use vault::Vault;
 use vault::index::VaultIndex;
+use vault::index_handle::IndexHandle;
+use vault::sync::ChangeEvent;
 use vault::sync::watcher::VaultWatcher;
-use vault::sync::{ChangeEvent, SyncEngine};
 
 #[derive(Debug, Deserialize)]
 struct Settings {
@@ -33,6 +33,18 @@ struct Settings {
 struct ServerSettings {
     host: String,
     port: u16,
+    #[serde(default)]
+    dev_mode: bool,
+    #[serde(default)]
+    tls: TlsSettings,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct TlsSettings {
+    #[serde(default)]
+    enabled: bool,
+    cert_path: Option<PathBuf>,
+    key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,8 +83,10 @@ impl Settings {
 
         // Precedence (later wins): defaults < config file < env vars
         let settings = Config::builder()
-            .set_default("server.host", "127.0.0.1")?
+            .set_default("server.host", "localhost")?
             .set_default("server.port", 3000)?
+            .set_default("server.dev_mode", false)?
+            .set_default("server.tls.enabled", false)?
             .set_default("vault.root", "./vault")?
             .add_source(File::from(config_path.clone()))
             .add_source(Environment::with_prefix("CLEPSYDRA").separator("__"))
@@ -133,6 +147,54 @@ fn notification_from_batch(batch: &[ChangeEvent]) -> Option<api::events::SyncNot
     }
 }
 
+use axum_server::tls_rustls::RustlsConfig;
+
+async fn ensure_certificates(
+    tls: &TlsSettings,
+) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
+    if let (Some(cert), Some(key)) = (&tls.cert_path, &tls.key_path) {
+        return Ok((cert.clone(), key.clone()));
+    }
+
+    let data_dir = dirs::data_dir()
+        .ok_or("could not find app data directory")?
+        .join("clepsydra");
+    std::fs::create_dir_all(&data_dir)?;
+
+    let cert_path = data_dir.join("localhost.pem");
+    let key_path = data_dir.join("localhost-key.pem");
+
+    if !cert_path.exists() || !key_path.exists() {
+        info!("Generating TLS certificates with mkcert...");
+        let status = std::process::Command::new("mkcert")
+            .arg("-install")
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                let status = std::process::Command::new("mkcert")
+                    .arg("-cert-file")
+                    .arg(&cert_path)
+                    .arg("-key-file")
+                    .arg(&key_path)
+                    .arg("localhost")
+                    .arg("127.0.0.1")
+                    .arg("::1")
+                    .status()?;
+
+                if !status.success() {
+                    return Err("mkcert failed to generate certificates".into());
+                }
+            }
+            _ => {
+                return Err("mkcert not found or failed to install CA. Please install mkcert (https://github.com/FiloSottile/mkcert)".into());
+            }
+        }
+    }
+
+    Ok((cert_path, key_path))
+}
+
 pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Logging via `tracing`.
     // Configure with `RUST_LOG=debug` (or e.g. `RUST_LOG=clepsydra=debug,tower_http=debug`).
@@ -178,30 +240,30 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     );
     index.resolve_links()?;
 
-    // Wrap index for shared access
-    let index = Arc::new(parking_lot::Mutex::new(index));
+    // Spawn index on a dedicated thread
+    let index_handle = IndexHandle::spawn(index, vault.clone());
 
     // Broadcast channel for SSE notifications
     let (change_broadcast_tx, _) =
         tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
 
     // Build post-move hooks
-    let hooks: Vec<Box<dyn vault::hooks::PostMoveHook>> =
-        vec![Box::new(vault::academic_hook::AcademicMoveHook)];
+    let hooks: Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>> =
+        Arc::new(vec![Box::new(vault::academic_hook::AcademicMoveHook)]);
 
     // Wrap CAS for shared access
     let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
 
     // Build post-delete hooks
-    let delete_hooks: Vec<Box<dyn vault::hooks::PostDeleteHook>> =
-        vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
+    let delete_hooks: Arc<Vec<Box<dyn vault::hooks::PostDeleteHook>>> =
+        Arc::new(vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
             cas: Arc::clone(&cas_arc),
-        })];
+        })]);
 
     // Build shared state
     let state = Arc::new(AppState {
         vault,
-        index: Arc::clone(&index),
+        index: index_handle.clone(),
         cas: cas_arc,
         warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
@@ -212,8 +274,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn file watcher + sync loop
     let vault_root_buf = state.vault.root().to_path_buf();
-    let sync_index = Arc::clone(&state.index);
-    let sync_vault = state.vault.clone();
+    let sync_index = index_handle;
     let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
     let sync_change_tx = state.change_tx.clone();
 
@@ -226,8 +287,10 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                 None => break,
             };
 
-            let mut idx = sync_index.lock();
-            match SyncEngine::process_events(&batch, &sync_vault, &mut idx) {
+            // Compute notification before passing batch to process_sync_events (which consumes it)
+            let notification = notification_from_batch(&batch);
+
+            match sync_index.process_sync_events(batch).await {
                 Ok(stats) => {
                     if stats.pages_indexed > 0 || stats.pages_removed > 0 {
                         tracing::info!(
@@ -240,7 +303,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
 
-                    if let Some(notification) = notification_from_batch(&batch) {
+                    if let Some(notification) = notification {
                         let _ = sync_change_tx.send(notification);
                     }
                 }
@@ -253,27 +316,40 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let archive_body_limit =
         (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;
-    let app = Router::new()
-        .route("/", get(root))
+
+    let mut app = Router::new()
         .nest(
             "/api/vault",
             api::api_router_with_archive_limit(archive_body_limit),
         )
-        .merge(api::openapi::router())
+        .merge(api::openapi::router());
+
+    if !settings.server.dev_mode {
+        app = app.merge(api::frontend::frontend_router());
+    }
+
+    let app = app
         .with_state(state)
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
-    let addr = format!("{}:{}", settings.server.host, settings.server.port);
+    let addr = format!("{}:{}", settings.server.host, settings.server.port)
+        .parse::<std::net::SocketAddr>()?;
 
-    let listener = TcpListener::bind(&addr).await?;
-    info!(%addr, ?settings.server, vault_root = %vault_root.display(), "listening");
+    if settings.server.tls.enabled {
+        let (cert_path, key_path) = ensure_certificates(&settings.server.tls).await?;
+        let config = RustlsConfig::from_pem_file(cert_path, key_path).await?;
+        info!(%addr, ?settings.server, vault_root = %vault_root.display(), "listening (HTTPS)");
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        info!(%addr, ?settings.server, vault_root = %vault_root.display(), "listening (HTTP)");
+        axum_server::bind(addr)
+            .serve(app.into_make_service())
+            .await?;
+    }
 
-    axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn root() -> impl IntoResponse {
-    "ok"
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod error;
 pub mod events;
 pub mod folders;
+pub mod frontend;
 pub mod index_routes;
 pub mod openapi;
 pub mod pages;
@@ -17,17 +18,17 @@ use tokio::sync::broadcast;
 use crate::api::events::SyncNotification;
 use crate::vault::Vault;
 use crate::vault::cas::ContentStore;
-use crate::vault::index::VaultIndex;
+use crate::vault::index_handle::IndexHandle;
 
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
     pub vault: Vault,
-    pub index: Arc<parking_lot::Mutex<VaultIndex>>,
+    pub index: IndexHandle,
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
     pub warnings: parking_lot::Mutex<Vec<String>>,
     pub change_tx: broadcast::Sender<SyncNotification>,
-    pub hooks: Vec<Box<dyn crate::vault::hooks::PostMoveHook>>,
-    pub delete_hooks: Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>,
+    pub hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostMoveHook>>>,
+    pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,

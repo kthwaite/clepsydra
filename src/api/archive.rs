@@ -184,12 +184,15 @@ async fn ingest_archive(
     let _ingest_guard = state.archive_ingest_lock.lock().await;
 
     // 1. Check for existing archive of this URL via the index
-    let existing = {
-        let index = state.index.lock();
-        index
-            .find_by_archive_url(&req.url)
-            .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
-    };
+    let url_for_lookup = req.url.clone();
+    let existing = state
+        .index
+        .with_index(move |index, _vault| {
+            index.find_by_archive_url(&url_for_lookup)
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
+        .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?;
 
     if let Some((page_id, vault_path, existing_hash)) = existing {
         if existing_hash == req.content_hash {
@@ -400,14 +403,24 @@ async fn ingest_archive(
     // create_new above guarantees we own this file, so remove_file on
     // index failure is safe — no concurrent endpoint could have written it.
     {
-        let mut index = state.index.lock();
-        if let Err(e) = index.index_page(&state.vault, &vault_path) {
-            let _ = fs::remove_file(&abs_path);
-            rollback_cas(&state, &stored_hashes);
-            return Err(ApiError::internal(e.to_string()));
+        let vp = vault_path.clone();
+        let index_result = state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                // resolve_links failure is non-fatal (page exists, just links unresolved)
+                let _ = index.resolve_links_for_page(&vp);
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await;
+        match index_result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) | Err(e) => {
+                let _ = fs::remove_file(&abs_path);
+                rollback_cas(&state, &stored_hashes);
+                return Err(ApiError::internal(e.to_string()));
+            }
         }
-        // resolve_links failure is non-fatal (page exists, just links unresolved)
-        let _ = index.resolve_links_for_page(&vault_path);
     }
 
     // 7. Broadcast change
