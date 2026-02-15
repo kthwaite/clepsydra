@@ -191,6 +191,79 @@ impl LanguageServer for LspBackend {
             range: Range::default(),
         })))
     }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+
+        let (link, range) = {
+            let docs = self.documents.lock().await;
+            let doc = match docs.get(&uri) {
+                Some(d) => d,
+                None => return Ok(None),
+            };
+            match doc.link_at_position(pos) {
+                Some(link) => (link.clone(), doc.link_to_range(link)),
+                None => return Ok(None),
+            }
+        };
+
+        let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+        let target_info: Option<(String, Option<String>)> = self
+            .state
+            .index
+            .with_index({
+                let cn = canonical.as_str().to_string();
+                move |index, _| {
+                    index
+                        .connection()
+                        .query_row(
+                            "SELECT p.path, p.title FROM canonical_names cn \
+                             JOIN pages p ON p.id = cn.page_id \
+                             WHERE cn.canonical_name = ?1 LIMIT 1",
+                            rusqlite::params![cn],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, Option<String>>(1)?,
+                                ))
+                            },
+                        )
+                        .ok()
+                }
+            })
+            .await
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        let content = match target_info {
+            Some((path, title)) => {
+                let vault_path = crate::vault::path::VaultPath::new(&path)
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                let abs_path = self.state.vault.resolve(&vault_path);
+                let preview = match tokio::fs::read_to_string(&abs_path).await {
+                    Ok(content) => {
+                        let body = match crate::vault::page::parse_frontmatter(&content) {
+                            Ok((_meta, body)) => body,
+                            Err(_) => content,
+                        };
+                        body.lines().take(10).collect::<Vec<_>>().join("\n")
+                    }
+                    Err(_) => String::new(),
+                };
+                let display_title = title.as_deref().unwrap_or(&path);
+                format!("**{display_title}**\n`{path}`\n\n---\n\n{preview}")
+            }
+            None => format!("*Unresolved link:* `{}`", link.target_raw),
+        };
+
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: content,
+            }),
+            range: Some(range),
+        }))
+    }
 }
 
 impl LspBackend {
