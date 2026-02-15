@@ -87,6 +87,8 @@ pub struct AcademicSection {
     pub books_folder: String,
     #[serde(default = "default_annotations_folder")]
     pub annotations_folder: String,
+    #[serde(default)]
+    pub zotero: ZoteroSection,
 }
 
 impl Default for AcademicSection {
@@ -96,8 +98,16 @@ impl Default for AcademicSection {
             papers_folder: default_papers_folder(),
             books_folder: default_books_folder(),
             annotations_folder: default_annotations_folder(),
+            zotero: ZoteroSection::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ZoteroSection {
+    /// Path to zotero.sqlite. If `None`, auto-detect from platform default.
+    #[serde(default)]
+    pub database_path: Option<String>,
 }
 
 fn default_library_folder() -> String {
@@ -223,5 +233,32 @@ max_blob_size_mb = 200
         assert_eq!(config.archive.max_blob_size_mb, 200);
         // Unset fields keep defaults
         assert_eq!(config.archive.default_path_prefix, "archive");
+    }
+
+    #[test]
+    fn zotero_config_defaults() {
+        let config = VaultConfig::default();
+        assert!(config.academic.zotero.database_path.is_none());
+    }
+
+    #[test]
+    fn zotero_config_from_toml() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path();
+        fs::create_dir_all(vault_root.join(".clepsydra")).unwrap();
+        fs::write(
+            vault_root.join(".clepsydra/config.toml"),
+            r#"
+[academic.zotero]
+database_path = "/custom/path/zotero.sqlite"
+"#,
+        )
+        .unwrap();
+
+        let config = VaultConfig::load(vault_root).unwrap();
+        assert_eq!(
+            config.academic.zotero.database_path.as_deref(),
+            Some("/custom/path/zotero.sqlite")
+        );
     }
 }
