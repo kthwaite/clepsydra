@@ -1,3 +1,4 @@
+pub mod completion;
 pub mod document;
 
 use std::collections::{HashMap, HashSet};
@@ -264,9 +265,134 @@ impl LanguageServer for LspBackend {
             range: Some(range),
         }))
     }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+
+        let line_text = {
+            let docs = self.documents.lock().await;
+            let doc = match docs.get(&uri) {
+                Some(d) => d,
+                None => return Ok(None),
+            };
+            let line_idx = pos.line as usize;
+            if line_idx >= doc.rope.len_lines() {
+                return Ok(None);
+            }
+            doc.rope.line(line_idx).to_string()
+        };
+
+        let character = pos.character as usize;
+
+        if let Some(prefix) = completion::wikilink_prefix(&line_text, character) {
+            let items = self.complete_wikilinks(&prefix).await?;
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
+
+        if let Some(prefix) = completion::tag_prefix(&line_text, character) {
+            let items = self.complete_tags(&prefix).await?;
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
+
+        Ok(None)
+    }
 }
 
 impl LspBackend {
+    /// Complete wikilink targets by prefix matching against canonical names.
+    async fn complete_wikilinks(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
+        let prefix = prefix.to_string();
+        let results: Vec<(String, String, Option<String>)> = self
+            .state
+            .index
+            .with_index({
+                let prefix = prefix.clone();
+                move |index, _| {
+                    let like_pattern = format!("{}%", prefix.to_lowercase());
+                    let mut stmt = index
+                        .connection()
+                        .prepare(
+                            "SELECT DISTINCT cn.canonical_name, p.path, p.title \
+                             FROM canonical_names cn \
+                             JOIN pages p ON p.id = cn.page_id \
+                             WHERE cn.canonical_name LIKE ?1 \
+                             ORDER BY cn.canonical_name LIMIT 50",
+                        )
+                        .unwrap();
+                    stmt.query_map(rusqlite::params![like_pattern], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    })
+                    .unwrap()
+                    .filter_map(|r| r.ok())
+                    .collect()
+                }
+            })
+            .await
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        Ok(results
+            .into_iter()
+            .map(|(_canonical, path, title)| {
+                let label = title.unwrap_or_else(|| {
+                    path.rsplit('/')
+                        .next()
+                        .unwrap_or(&path)
+                        .trim_end_matches(".md")
+                        .to_string()
+                });
+                CompletionItem {
+                    label: label.clone(),
+                    kind: Some(CompletionItemKind::REFERENCE),
+                    detail: Some(path),
+                    insert_text: Some(label),
+                    ..Default::default()
+                }
+            })
+            .collect())
+    }
+
+    /// Complete tags by prefix matching against the tags table.
+    async fn complete_tags(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
+        let prefix = prefix.to_string();
+        let tags: Vec<String> = self
+            .state
+            .index
+            .with_index({
+                let prefix = prefix.clone();
+                move |index, _| {
+                    let like_pattern = format!("{prefix}%");
+                    let mut stmt = index
+                        .connection()
+                        .prepare(
+                            "SELECT DISTINCT tag FROM tags \
+                             WHERE tag LIKE ?1 ORDER BY tag LIMIT 50",
+                        )
+                        .unwrap();
+                    stmt.query_map(rusqlite::params![like_pattern], |row| row.get(0))
+                        .unwrap()
+                        .filter_map(|r| r.ok())
+                        .collect()
+                }
+            })
+            .await
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        Ok(tags
+            .into_iter()
+            .map(|tag| CompletionItem {
+                label: tag.clone(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                insert_text: Some(tag),
+                ..Default::default()
+            })
+            .collect())
+    }
+
     /// Publish diagnostics for a single open document.
     ///
     /// Checks each extracted link against the cached canonical name snapshot
