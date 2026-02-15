@@ -29,8 +29,15 @@ impl LanguageServer for LspBackend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 position_encoding: Some(PositionEncodingKind::UTF8),
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(false),
+                        })),
+                        ..Default::default()
+                    },
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["[".to_string(), "#".to_string()]),
@@ -130,6 +137,47 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document.uri;
         let mut docs = self.documents.lock().await;
         docs.remove(&uri);
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+
+        // Flush index update for this file
+        let vault_path = match self.uri_to_vault_path(&uri) {
+            Some(vp) => vp,
+            None => return,
+        };
+
+        if let Err(e) = self.state.index.index_page(vault_path.clone()).await {
+            tracing::error!("index flush on save failed: {e}");
+            return;
+        }
+        if let Err(e) = self.state.index.resolve_links_for_page(vault_path).await {
+            tracing::error!("link resolution on save failed: {e}");
+        }
+
+        // Refresh canonical name snapshot
+        self.refresh_canonical_names().await;
+
+        // Mark document as clean
+        {
+            let mut docs = self.documents.lock().await;
+            if let Some(doc) = docs.get_mut(&uri) {
+                doc.dirty = false;
+            }
+        }
+
+        // Re-publish diagnostics for all open documents (snapshot changed)
+        let doc_uris: Vec<Url> = {
+            let docs = self.documents.lock().await;
+            docs.keys().cloned().collect()
+        };
+        for doc_uri in doc_uris {
+            let docs = self.documents.lock().await;
+            if let Some(doc) = docs.get(&doc_uri) {
+                self.publish_diagnostics_for(&doc_uri, doc).await;
+            }
+        }
     }
 
     async fn goto_definition(
@@ -300,6 +348,34 @@ impl LanguageServer for LspBackend {
 }
 
 impl LspBackend {
+    /// Convert an LSP URI to a vault-relative path.
+    fn uri_to_vault_path(&self, uri: &Url) -> Option<crate::vault::path::VaultPath> {
+        let file_path = uri.to_file_path().ok()?;
+        let rel = file_path.strip_prefix(self.state.vault.root()).ok()?;
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        crate::vault::path::VaultPath::new(&rel_str).ok()
+    }
+
+    /// Reload the canonical name snapshot from the index.
+    async fn refresh_canonical_names(&self) {
+        let names = self
+            .state
+            .index
+            .with_index(|index, _| {
+                let mut stmt = index
+                    .connection()
+                    .prepare("SELECT canonical_name FROM canonical_names")
+                    .unwrap();
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .filter_map(|r| r.ok())
+                    .collect::<HashSet<String>>()
+            })
+            .await
+            .unwrap_or_default();
+        *self.canonical_names.write().await = names;
+    }
+
     /// Complete wikilink targets by prefix matching against canonical names.
     async fn complete_wikilinks(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
         let prefix = prefix.to_string();
