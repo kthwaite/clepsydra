@@ -1072,12 +1072,14 @@ impl LanguageServer for LspBackend {
                     if let Some(candidate_paths) = names.get(canonical.as_str())
                         && candidate_paths.len() > 1
                     {
-                        let prefixes =
-                            rename::shortest_unique_prefixes(candidate_paths);
+                        for path in candidate_paths {
+                            // Use the full path stem (path minus .md) as the
+                            // wikilink target. This is always indexed as a
+                            // canonical name, unlike shorter suffixes which
+                            // may not have corresponding index entries.
+                            let path_stem =
+                                path.strip_suffix(".md").unwrap_or(path);
 
-                        for (path, prefix) in
-                            candidate_paths.iter().zip(prefixes.iter())
-                        {
                             // Read raw wikilink text to preserve display text
                             let raw_text = if link.span.end <= body_text.len() {
                                 &body_text[link.span.clone()]
@@ -1085,7 +1087,7 @@ impl LanguageServer for LspBackend {
                                 continue;
                             };
                             let new_text =
-                                rename::rewrite_wikilink(raw_text, prefix);
+                                rename::rewrite_wikilink(raw_text, path_stem);
 
                             let edit = TextEdit {
                                 range: diag.range,
