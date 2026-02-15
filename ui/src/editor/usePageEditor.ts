@@ -65,10 +65,10 @@ export function usePageEditor(path: string): PageEditorState {
   const savedBodyGenRef = useRef(0);
   const savedMetaGenRef = useRef(0);
 
-  // Monotonic counter incremented each time doSave fires a mutation.
-  // onSuccess/onError callbacks capture the value at fire time and no-op
-  // if a newer save has been initiated, preventing stale responses from
-  // regressing savedRef or status.
+  // Monotonic counter incremented on every doSave attempt (including no-op
+  // reconciliations that don't send a mutation). onSuccess/onError callbacks
+  // capture the value at fire time and no-op if a newer save attempt has been
+  // initiated, preventing stale responses from regressing savedRef or status.
   const saveSeqRef = useRef(0);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -108,6 +108,11 @@ export function usePageEditor(path: string): PageEditorState {
       timerRef.current = null;
     }
 
+    // Invalidate callbacks from older in-flight saves on every save attempt,
+    // including no-op reconciliation paths that don't send a mutation.
+    saveSeqRef.current += 1;
+    const thisSaveSeq = saveSeqRef.current;
+
     // Snapshot generation counters at save start. onSuccess advances the
     // saved watermark to these values — edits that arrive during the save
     // flight will have incremented past them and stay dirty.
@@ -145,8 +150,6 @@ export function usePageEditor(path: string): PageEditorState {
     }
 
     setSaveStatus("saving");
-    saveSeqRef.current += 1;
-    const thisSaveSeq = saveSeqRef.current;
 
     updatePage.mutate(
       {
