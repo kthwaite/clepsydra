@@ -15,7 +15,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt};
 
-use api::{AppState, api_router};
+use api::AppState;
 use app_config::{config_candidates, find_config_path};
 use vault::Vault;
 use vault::index::VaultIndex;
@@ -250,9 +250,14 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    let archive_body_limit =
+        (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;
     let app = Router::new()
         .route("/", get(root))
-        .nest("/api/vault", api_router())
+        .nest(
+            "/api/vault",
+            api::api_router_with_archive_limit(archive_body_limit),
+        )
         .merge(api::openapi::router())
         .with_state(state)
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));

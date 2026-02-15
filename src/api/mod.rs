@@ -32,6 +32,11 @@ pub struct AppState {
 
 /// Build the API router mounted at `/api/vault`.
 pub fn api_router() -> Router<Arc<AppState>> {
+    api_router_with_archive_limit(100 * 1024 * 1024) // default 100 MB
+}
+
+/// Build the API router with a custom archive body limit (in bytes).
+pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<AppState>> {
     Router::new()
         .route("/events", axum::routing::get(events::event_stream))
         .nest("/pages", pages::router())
@@ -40,7 +45,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .nest("/folders-move", folders::move_router())
         .nest("/attachments", attachments::router())
         .nest("/academic", academic::router())
-        .nest("/archive", archive::router())
+        .nest(
+            "/archive",
+            archive::router_with_body_limit(archive_body_limit),
+        )
         .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
 }

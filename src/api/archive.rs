@@ -10,13 +10,12 @@ use axum::routing::{get, post};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
-use walkdir::WalkDir;
 
 use super::AppState;
 use super::error::ApiError;
 use super::events::SyncNotification;
 use crate::vault::cas::ContentStore;
-use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
+use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
 #[derive(Debug, Deserialize)]
@@ -58,17 +57,28 @@ pub enum ArchiveStatus {
     ContentChanged,
 }
 
+/// Build the archive router.
+///
+/// The body limit for the ingest endpoint is set by the caller via
+/// `archive_router_with_limit` to respect the configured `max_request_size_mb`.
+/// This default uses 100 MB.
 pub fn router() -> Router<Arc<AppState>> {
+    router_with_body_limit(100 * 1024 * 1024)
+}
+
+/// Build the archive router with a specific body size limit (in bytes).
+pub fn router_with_body_limit(max_bytes: usize) -> Router<Arc<AppState>> {
     Router::new()
         .route("/", post(ingest_archive))
         .route("/status", get(archive_status))
+        .layer(axum::extract::DefaultBodyLimit::max(max_bytes))
 }
 
 pub fn cas_router() -> Router<Arc<AppState>> {
     Router::new().route("/{hash}", get(serve_blob))
 }
 
-/// Convert a title to a URL-safe slug, truncated to `max_len` chars.
+/// Convert a title to a URL-safe slug, truncated to `max_len` characters.
 pub(crate) fn slugify(title: &str, max_len: usize) -> String {
     let slug: String = title
         .to_lowercase()
@@ -81,76 +91,17 @@ pub(crate) fn slugify(title: &str, max_len: usize) -> String {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    if collapsed.len() > max_len {
-        // Truncate at a dash boundary if possible
-        match collapsed[..max_len].rfind('-') {
-            Some(pos) if pos > max_len / 2 => collapsed[..pos].to_string(),
-            _ => collapsed[..max_len].to_string(),
+    let char_count = collapsed.chars().count();
+    if char_count > max_len {
+        let truncated: String = collapsed.chars().take(max_len).collect();
+        // Truncate at a dash boundary if possible (rfind on '-' is safe: ASCII char)
+        match truncated.rfind('-') {
+            Some(pos) if pos > truncated.len() / 2 => truncated[..pos].to_string(),
+            _ => truncated,
         }
     } else {
         collapsed
     }
-}
-
-/// Search archive pages for an existing archive of the given URL.
-///
-/// Returns `Some((page_id, vault_path, content_hash))` if found.
-fn find_existing_archive(
-    state: &AppState,
-    url: &str,
-    prefix: &str,
-) -> Option<(String, String, String)> {
-    let archive_dir = state.vault.root().join(prefix);
-    if !archive_dir.exists() {
-        return None;
-    }
-
-    for entry in WalkDir::new(&archive_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        let (meta, _body) = match parse_frontmatter(&content) {
-            Ok(parsed) => parsed,
-            Err(_) => continue,
-        };
-
-        // Check the archive.url field in extra metadata
-        if let Some(archive_val) = meta.extra.get("archive")
-            && let Some(mapping) = archive_val.as_mapping()
-        {
-            let url_key = serde_yaml::Value::String("url".to_string());
-            if let Some(serde_yaml::Value::String(archive_url)) = mapping.get(&url_key)
-                && archive_url == url
-            {
-                let hash_key = serde_yaml::Value::String("content_hash".to_string());
-                let content_hash = mapping
-                    .get(&hash_key)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                let rel_path = path
-                    .strip_prefix(state.vault.root())
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string();
-
-                return Some((meta.id.to_string(), rel_path, content_hash));
-            }
-        }
-    }
-
-    None
 }
 
 async fn serve_blob(
@@ -162,17 +113,10 @@ async fn serve_blob(
         .retrieve(&hash)
         .map_err(|_| ApiError::not_found(format!("blob not found: {hash}")))?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, content_type)],
-        data,
-    )
-        .into_response())
+    Ok((StatusCode::OK, [(header::CONTENT_TYPE, content_type)], data).into_response())
 }
 
-async fn archive_status(
-    State(state): State<Arc<AppState>>,
-) -> Result<Response, ApiError> {
+async fn archive_status(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
     let cas = state.cas.lock();
     let stats = cas
         .stats()
@@ -194,12 +138,55 @@ async fn ingest_archive(
     Json(req): Json<ArchiveRequest>,
 ) -> Result<Response, ApiError> {
     let archive_config = &state.vault.config().archive;
+
+    if !archive_config.enabled {
+        return Err(ApiError::forbidden(
+            "archiving is disabled in server configuration".to_string(),
+        ));
+    }
+
+    // Verify content_hash matches markdown_body (don't trust client-provided hash)
+    let computed_content_hash = ContentStore::hash_bytes(req.markdown_body.as_bytes());
+    if computed_content_hash != req.content_hash {
+        return Err(ApiError::bad_request(format!(
+            "content_hash mismatch: declared={}, computed={}",
+            req.content_hash, computed_content_hash
+        )));
+    }
+
+    // Enforce per-blob and total request size limits
+    let max_blob_bytes = archive_config.max_blob_size_mb * 1024 * 1024;
+    let max_request_bytes = archive_config.max_request_size_mb * 1024 * 1024;
+    let mut total_blob_bytes: u64 = 0;
+    for blob in &req.blobs {
+        // Estimate decoded size from base64 length (3/4 ratio)
+        let estimated_size = (blob.data.len() as u64) * 3 / 4;
+        if estimated_size > max_blob_bytes {
+            return Err(ApiError::bad_request(format!(
+                "blob {} exceeds max_blob_size_mb ({} MB)",
+                blob.hash, archive_config.max_blob_size_mb
+            )));
+        }
+        total_blob_bytes += estimated_size;
+    }
+    if total_blob_bytes > max_request_bytes {
+        return Err(ApiError::bad_request(format!(
+            "total blob size (~{} bytes) exceeds max_request_size_mb ({} MB)",
+            total_blob_bytes, archive_config.max_request_size_mb
+        )));
+    }
+
     let prefix = &archive_config.default_path_prefix;
 
-    // 1. Check for existing archive of this URL
-    if let Some((page_id, vault_path, existing_hash)) =
-        find_existing_archive(&state, &req.url, prefix)
-    {
+    // 1. Check for existing archive of this URL via the index
+    let existing = {
+        let index = state.index.lock();
+        index
+            .find_by_archive_url(&req.url)
+            .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
+    };
+
+    if let Some((page_id, vault_path, existing_hash)) = existing {
         if existing_hash == req.content_hash {
             return Ok((
                 StatusCode::OK,
@@ -225,37 +212,7 @@ async fn ingest_archive(
         }
     }
 
-    // 2. Store blobs in CAS
-    let mut blobs_stored: u32 = 0;
-    let mut blobs_deduped: u32 = 0;
-
-    for blob in &req.blobs {
-        let data = BASE64
-            .decode(&blob.data)
-            .map_err(|e| ApiError::bad_request(format!("invalid base64 in blob: {e}")))?;
-
-        // Verify the declared hash matches
-        let computed_hash = ContentStore::hash_bytes(&data);
-        if computed_hash != blob.hash {
-            return Err(ApiError::bad_request(format!(
-                "blob hash mismatch: declared={}, computed={}",
-                blob.hash, computed_hash
-            )));
-        }
-
-        let cas = state.cas.lock();
-        let result = cas
-            .store(&data, &blob.content_type)
-            .map_err(|e| ApiError::internal(format!("CAS store error: {e}")))?;
-
-        if result.already_existed {
-            blobs_deduped += 1;
-        } else {
-            blobs_stored += 1;
-        }
-    }
-
-    // 3. Create the vault page
+    // 2. Validate path BEFORE touching CAS (prevents orphaned blobs on bad input)
     let slug = slugify(&req.title, 80);
     let slug = if slug.is_empty() {
         "untitled".to_string()
@@ -282,12 +239,59 @@ async fn ingest_archive(
     let vault_path = VaultPath::new(&page_path)
         .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
 
+    // 3. Decode and verify all blobs before storing anything (fail fast)
+    let mut decoded_blobs: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(req.blobs.len());
+    for blob in &req.blobs {
+        let data = BASE64
+            .decode(&blob.data)
+            .map_err(|e| ApiError::bad_request(format!("invalid base64 in blob: {e}")))?;
+
+        let computed_hash = ContentStore::hash_bytes(&data);
+        if computed_hash != blob.hash {
+            return Err(ApiError::bad_request(format!(
+                "blob hash mismatch: declared={}, computed={}",
+                blob.hash, computed_hash
+            )));
+        }
+
+        decoded_blobs.push((blob.hash.clone(), data, blob.content_type.clone()));
+    }
+
+    // 4. Store blobs in CAS (track stored hashes for rollback on downstream failure)
+    let mut blobs_stored: u32 = 0;
+    let mut blobs_deduped: u32 = 0;
+    let mut stored_hashes: Vec<String> = Vec::new();
+
+    for (hash, data, content_type) in &decoded_blobs {
+        let cas = state.cas.lock();
+        let result = cas
+            .store(data, content_type)
+            .map_err(|e| ApiError::internal(format!("CAS store error: {e}")))?;
+
+        if result.already_existed {
+            blobs_deduped += 1;
+        } else {
+            blobs_stored += 1;
+        }
+        stored_hashes.push(hash.clone());
+    }
+
+    // Helper: rollback CAS ref_counts on downstream failure
+    let rollback_cas = |state: &AppState, hashes: &[String]| {
+        let cas = state.cas.lock();
+        for hash in hashes {
+            let _ = cas.decrement_ref(hash);
+        }
+    };
+
+    // 5. Create the vault page
     let abs_path = state.vault.resolve(&vault_path);
 
-    // Create parent directories
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+    if let Some(parent) = abs_path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        rollback_cas(&state, &stored_hashes);
+        return Err(ApiError::internal(format!("failed to create directories: {e}")));
     }
 
     // Build PageMeta with archive metadata in extra
@@ -330,16 +334,18 @@ async fn ingest_archive(
         );
     }
 
-    // Add blob hashes list
-    if !req.blobs.is_empty() {
-        let blob_hashes: Vec<serde_yaml::Value> = req
-            .blobs
-            .iter()
-            .map(|b| serde_yaml::Value::String(b.hash.clone()))
-            .collect();
+    // Store blob hashes in frontmatter, excluding snapshot_hash to avoid
+    // double ref_count decrement on delete (snapshot_hash is stored separately)
+    let non_snapshot_blobs: Vec<serde_yaml::Value> = req
+        .blobs
+        .iter()
+        .filter(|b| b.hash != req.snapshot_hash)
+        .map(|b| serde_yaml::Value::String(b.hash.clone()))
+        .collect();
+    if !non_snapshot_blobs.is_empty() {
         archive_map.insert(
             serde_yaml::Value::String("blobs".to_string()),
-            serde_yaml::Value::Sequence(blob_hashes),
+            serde_yaml::Value::Sequence(non_snapshot_blobs),
         );
     }
 
@@ -352,29 +358,33 @@ async fn ingest_archive(
 
     // Write file
     let content = write_page_content(&meta, page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+    if let Err(e) = fs::write(&abs_path, &content) {
+        rollback_cas(&state, &stored_hashes);
+        return Err(ApiError::internal(format!("failed to write file: {e}")));
+    }
 
     let page_id = meta.id.to_string();
 
-    // 4. Index the page
+    // 6. Index the page
     {
         let mut index = state.index.lock();
-        index
-            .index_page(&state.vault, &vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        index
-            .resolve_links_for_page(&vault_path)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        if let Err(e) = index.index_page(&state.vault, &vault_path) {
+            // Best-effort cleanup: remove the file we just wrote
+            let _ = fs::remove_file(&abs_path);
+            rollback_cas(&state, &stored_hashes);
+            return Err(ApiError::internal(e.to_string()));
+        }
+        // resolve_links failure is non-fatal (page exists, just links unresolved)
+        let _ = index.resolve_links_for_page(&vault_path);
     }
 
-    // 5. Broadcast change
+    // 7. Broadcast change
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
         upserted: vec![vault_path.as_str().to_string()],
         removed: vec![],
     });
 
-    // 6. Return response
+    // 8. Return response
     Ok((
         StatusCode::CREATED,
         Json(ArchiveResponse {
@@ -426,5 +436,23 @@ mod tests {
     #[test]
     fn slugify_all_special() {
         assert_eq!(slugify("---!!!", 80), "");
+    }
+
+    #[test]
+    fn slugify_cjk_no_panic() {
+        // CJK characters are multi-byte in UTF-8; byte-based truncation would panic
+        let title = "漢".repeat(40); // 40 CJK chars, 120 bytes
+        let slug = slugify(&title, 20);
+        assert_eq!(slug.chars().count(), 20);
+        // Verify it doesn't panic and is valid UTF-8
+        assert!(slug.is_ascii() || !slug.is_empty() || slug.len() > 0);
+    }
+
+    #[test]
+    fn slugify_mixed_unicode_truncation() {
+        // Mix of ASCII and multi-byte chars
+        let title = "café résumé à la mode extrêmement long titre pour tester";
+        let slug = slugify(title, 30);
+        assert!(slug.chars().count() <= 30);
     }
 }
