@@ -130,6 +130,67 @@ impl LanguageServer for LspBackend {
         let mut docs = self.documents.lock().await;
         docs.remove(&uri);
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+
+        let link = {
+            let docs = self.documents.lock().await;
+            let doc = match docs.get(&uri) {
+                Some(d) => d,
+                None => return Ok(None),
+            };
+            doc.link_at_position(pos).cloned()
+        };
+
+        let link = match link {
+            Some(l) => l,
+            None => return Ok(None),
+        };
+
+        let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
+        let target_path: Option<String> = self
+            .state
+            .index
+            .with_index({
+                let cn = canonical.as_str().to_string();
+                move |index, _vault| {
+                    index
+                        .connection()
+                        .query_row(
+                            "SELECT p.path FROM canonical_names cn \
+                             JOIN pages p ON p.id = cn.page_id \
+                             WHERE cn.canonical_name = ?1 LIMIT 1",
+                            rusqlite::params![cn],
+                            |row| row.get(0),
+                        )
+                        .ok()
+                }
+            })
+            .await
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        let target_path = match target_path {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        let abs_path = self.state.vault.resolve(
+            &crate::vault::path::VaultPath::new(&target_path)
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
+        );
+        let target_uri = Url::from_file_path(&abs_path)
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        Ok(Some(GotoDefinitionResponse::Scalar(Location {
+            uri: target_uri,
+            range: Range::default(),
+        })))
+    }
 }
 
 impl LspBackend {
