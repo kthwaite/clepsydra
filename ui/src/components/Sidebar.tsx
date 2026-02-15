@@ -1,5 +1,5 @@
-import { Link, useLocation } from "@tanstack/react-router";
-import { FilePlus, FolderPlus } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { FilePlus, FolderPlus, Settings } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useTags } from "#/api/index";
@@ -7,6 +7,7 @@ import { useCreateFolder, useCreatePage } from "#/api/pages";
 import { FileTree } from "#/components/FileTree";
 import { ModalDialog } from "#/components/ModalDialog";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useUiStore } from "#/store/ui";
 
 type CreateTarget = "note" | "folder";
 
@@ -22,11 +23,7 @@ export function Sidebar() {
   const createPage = useCreatePage();
   const createFolder = useCreateFolder();
   const openTab = useOpenTab();
-  const location = useLocation();
-  const pagesActive =
-    location.pathname === "/" ||
-    location.pathname.startsWith("/pages/") ||
-    location.pathname === "/workspace";
+  const openSettings = useUiStore((s) => s.openSettings);
 
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
   const [pathInput, setPathInput] = useState("");
@@ -164,23 +161,26 @@ export function Sidebar() {
           clepsydra
         </Link>
       </div>
-      <div className="flex border-b border-border">
-        <Link
-          to="/"
-          className={`flex-1 px-3 py-1.5 text-center text-xs uppercase tracking-wider hover:bg-accent ${pagesActive ? "bg-accent font-bold" : ""}`}
-        >
-          Pages
-        </Link>
-        <button
-          type="button"
-          onClick={() => openTab("graph")}
-          className="flex-1 border-l border-border px-3 py-1.5 text-center text-xs uppercase tracking-wider hover:bg-accent"
-        >
-          Graph
-        </button>
-      </div>
       <nav className="flex-1 overflow-y-auto px-2 py-2">
         <FileTree />
+        <div className="mt-2 space-y-px border-t border-border pt-2">
+          <button
+            type="button"
+            onClick={() => openCreateDialog("note")}
+            className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <FilePlus className="h-3.5 w-3.5" />
+            New Note
+          </button>
+          <button
+            type="button"
+            onClick={() => openCreateDialog("folder")}
+            className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+            New Folder
+          </button>
+        </div>
       </nav>
       <div className="border-t border-border px-2 py-2">
         {tags && tags.length > 0 && (
@@ -202,22 +202,14 @@ export function Sidebar() {
           </>
         )}
       </div>
-      <div className="flex border-t border-border">
+      <div className="border-t border-border">
         <button
           type="button"
-          onClick={() => openCreateDialog("note")}
-          className="flex flex-1 items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={() => openSettings()}
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <FilePlus className="h-3.5 w-3.5" />
-          New Note
-        </button>
-        <button
-          type="button"
-          onClick={() => openCreateDialog("folder")}
-          className="flex flex-1 items-center justify-center gap-1.5 border-l border-border py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <FolderPlus className="h-3.5 w-3.5" />
-          New Folder
+          <Settings className="h-3.5 w-3.5" />
+          Settings
         </button>
       </div>
     </aside>
