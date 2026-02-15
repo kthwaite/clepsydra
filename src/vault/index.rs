@@ -78,6 +78,10 @@ pub struct BacklinkWithContext {
     pub target_raw: String,
     pub kind: String,
     pub context: String,
+    /// Body byte offset where the link span starts (-1 for property refs).
+    pub span_start: i64,
+    /// Body byte offset where the link span ends.
+    pub span_end: i64,
 }
 
 /// A single full-text search result.
@@ -598,8 +602,7 @@ impl VaultIndex {
         let linkable_properties = &vault.config().vault.linkable_properties;
 
         let mut content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
-        let (meta, body, rewrote_frontmatter, fm_warning) =
-            parse_or_repair_frontmatter(&content);
+        let (meta, body, rewrote_frontmatter, fm_warning) = parse_or_repair_frontmatter(&content);
         if let Some(w) = &fm_warning {
             tracing::warn!("{}: {}", vault_path.as_str(), w);
         }
@@ -1151,6 +1154,8 @@ impl VaultIndex {
                 target_raw,
                 kind,
                 context,
+                span_start,
+                span_end,
             });
         }
 
@@ -1244,6 +1249,34 @@ impl VaultIndex {
             .collect();
 
         Ok(results)
+    }
+
+    /// Find an existing archive page by its original URL.
+    ///
+    /// Returns `Some((page_id, vault_path, content_hash))` if found.
+    pub fn find_by_archive_url(
+        &self,
+        url: &str,
+    ) -> Result<Option<(String, String, String)>, IndexError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, json_extract(meta_json, '$.archive.content_hash')
+             FROM pages
+             WHERE json_extract(meta_json, '$.archive.url') = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![url], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            ))
+        })?;
+
+        if let Some(result) = rows.next() {
+            Ok(Some(result?))
+        } else {
+            Ok(None)
+        }
     }
 }
 

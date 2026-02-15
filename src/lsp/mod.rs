@@ -837,26 +837,12 @@ impl LanguageServer for LspBackend {
         // ---------------------------------------------------------------
         let mut ops: Vec<DocumentChangeOperation> = Vec::new();
 
-        // 6a. File rename operation (if path changes)
+        // 6a. TextDocumentEdit on the target page — update frontmatter title
+        // (Must come BEFORE RenameFile so the edit targets a URI that still exists.)
         let old_abs = self.state.vault.resolve(&old_vp);
         let old_uri = Url::from_file_path(&old_abs)
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-        if new_vp.as_str() != old_vp.as_str() {
-            let new_abs = self.state.vault.resolve(&new_vp);
-            let new_uri = Url::from_file_path(&new_abs)
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-            ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
-                RenameFile {
-                    old_uri: old_uri.clone(),
-                    new_uri,
-                    options: None,
-                    annotation_id: None,
-                },
-            )));
-        }
-
-        // 6b. TextDocumentEdit on the target page — update frontmatter title
         let target_content = {
             let docs = self.documents.lock().await;
             docs.get(&old_uri)
@@ -899,6 +885,21 @@ impl LanguageServer for LspBackend {
                 })],
             };
             ops.push(DocumentChangeOperation::Edit(edit));
+        }
+
+        // 6b. File rename operation (if path changes)
+        if new_vp.as_str() != old_vp.as_str() {
+            let new_abs = self.state.vault.resolve(&new_vp);
+            let new_uri = Url::from_file_path(&new_abs)
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
+                RenameFile {
+                    old_uri: old_uri.clone(),
+                    new_uri,
+                    options: None,
+                    annotation_id: None,
+                },
+            )));
         }
 
         // 6c. TextDocumentEdit on each referring page — rewrite wikilinks
@@ -1033,7 +1034,7 @@ impl LanguageServer for LspBackend {
                                 uri: new_uri.clone(),
                                 options: Some(CreateFileOptions {
                                     overwrite: Some(false),
-                                    ignore_if_exists: Some(true),
+                                    ignore_if_exists: Some(false),
                                 }),
                                 annotation_id: None,
                             },
@@ -1293,28 +1294,31 @@ impl LspBackend {
             .collect())
     }
 
-    /// Resolve a backlink to a source range.
+    /// Resolve a backlink to a source range using its indexed span offsets.
     ///
-    /// First checks if the source file is open in the editor (using the
-    /// in-memory document). Falls back to reading the file from disk and
-    /// building a throwaway `Document` to find the link span.
+    /// Uses the span_start/span_end from the backlink record directly,
+    /// converting body byte offsets to LSP positions via the open document
+    /// or a throwaway Document built from disk.
     async fn backlink_to_range(
         &self,
         source_uri: &Url,
         bl: &crate::vault::index::BacklinkWithContext,
     ) -> Range {
+        // Property refs or invalid spans: return default range
+        if bl.span_start < 0 || bl.span_end < 0 {
+            return Range::default();
+        }
+        let start = bl.span_start as usize;
+        let end = bl.span_end as usize;
+
         // Check if source is open in editor
         {
             let docs = self.documents.lock().await;
             if let Some(doc) = docs.get(source_uri) {
-                for link in &doc.links {
-                    if link.target_raw == bl.target_raw
-                        && link.span.start != 0
-                        && link.span.end != 0
-                    {
-                        return doc.link_to_range(link);
-                    }
-                }
+                return Range {
+                    start: doc.byte_offset_to_position(start),
+                    end: doc.byte_offset_to_position(end),
+                };
             }
         }
         // Fall back: read from disk, build throwaway Document
@@ -1322,14 +1326,10 @@ impl LspBackend {
             let abs_path = self.state.vault.resolve(&vp);
             if let Ok(content) = tokio::fs::read_to_string(&abs_path).await {
                 let doc = document::Document::from_text(&content, 0);
-                for link in &doc.links {
-                    if link.target_raw == bl.target_raw
-                        && link.span.start != 0
-                        && link.span.end != 0
-                    {
-                        return doc.link_to_range(link);
-                    }
-                }
+                return Range {
+                    start: doc.byte_offset_to_position(start),
+                    end: doc.byte_offset_to_position(end),
+                };
             }
         }
         Range::default()
