@@ -1,5 +1,5 @@
 use clepsydra::vault::Vault;
-use clepsydra::vault::import::{find_existing_work, parse_bibtex};
+use clepsydra::vault::import::{find_existing_work, parse_bibtex, BibImportEntry};
 use clepsydra::vault::import_doi::parse_crossref_response;
 use clepsydra::vault::import_isbn::parse_openlibrary_response;
 use clepsydra::vault::index::VaultIndex;
@@ -351,7 +351,8 @@ fn cite_key_multiple_collisions() {
 // ── Zotero DB query tests ─────────────────────────────────────────────────
 
 use clepsydra::vault::import_zotero::{
-    open_zotero_db, query_items,
+    open_zotero_db, query_items, map_to_import_entry, resolve_attachment_path,
+    ZoteroAuthor, ZoteroPdf, ZoteroItem,
 };
 
 /// Create a minimal Zotero-schema SQLite DB for testing.
@@ -526,4 +527,103 @@ fn query_items_filters_by_since() {
 
     assert_eq!(items.len(), 2, "2 items modified after 2024-05-01");
     assert!(items.iter().all(|i| i.zotero_key != "DEF67890"), "book was modified 2024-03-01, should be excluded");
+}
+
+// ── Zotero item mapping tests ────────────────────────────────────────────
+
+fn make_article_item() -> ZoteroItem {
+    ZoteroItem {
+        item_id: 1,
+        zotero_key: "ABC12345".to_string(),
+        item_type: "journalArticle".to_string(),
+        title: "Attention Is All You Need".to_string(),
+        date_raw: Some("2017".to_string()),
+        doi: Some("10.48550/arXiv.1706.03762".to_string()),
+        isbn: None,
+        url: None,
+        venue: Some("NeurIPS".to_string()),
+        publisher: None,
+        extra_field: Some("arXiv: 1706.03762".to_string()),
+        authors: vec![
+            ZoteroAuthor { first_name: "Ashish".to_string(), last_name: "Vaswani".to_string(), field_mode: 0 },
+            ZoteroAuthor { first_name: "Noam".to_string(), last_name: "Shazeer".to_string(), field_mode: 0 },
+        ],
+        tags: vec!["ml".to_string()],
+        pdf_attachments: vec![],
+    }
+}
+
+#[test]
+fn map_journal_article_to_import_entry() {
+    let item = make_article_item();
+    let entry = map_to_import_entry(&item);
+    assert_eq!(entry.title, "Attention Is All You Need");
+    assert!(matches!(entry.work_type, clepsydra::vault::academic::WorkType::Paper));
+    assert_eq!(entry.authors, vec!["Ashish Vaswani", "Noam Shazeer"]);
+    assert_eq!(entry.year, Some(2017));
+    assert_eq!(entry.doi.as_deref(), Some("10.48550/arXiv.1706.03762"));
+    assert_eq!(entry.venue.as_deref(), Some("NeurIPS"));
+    assert_eq!(entry.arxiv.as_deref(), Some("1706.03762"));
+}
+
+#[test]
+fn map_institutional_author() {
+    let item = ZoteroItem {
+        item_id: 2,
+        zotero_key: "X".to_string(),
+        item_type: "report".to_string(),
+        title: "Report".to_string(),
+        date_raw: None,
+        doi: None, isbn: None, url: None, venue: None, publisher: None,
+        extra_field: None,
+        authors: vec![
+            ZoteroAuthor { first_name: String::new(), last_name: "World Health Organization".to_string(), field_mode: 1 },
+        ],
+        tags: vec![],
+        pdf_attachments: vec![],
+    };
+    let entry = map_to_import_entry(&item);
+    assert_eq!(entry.authors, vec!["World Health Organization"]);
+}
+
+#[test]
+fn map_year_extraction_from_full_date() {
+    let mut item = make_article_item();
+    item.date_raw = Some("June 12, 2017".to_string());
+    let entry = map_to_import_entry(&item);
+    assert_eq!(entry.year, Some(2017));
+}
+
+#[test]
+fn resolve_imported_file_attachment() {
+    let pdf = ZoteroPdf {
+        link_mode: 0,
+        path: Some("storage:attention.pdf".to_string()),
+        attachment_key: "PDFKEY01".to_string(),
+    };
+    let zotero_data_dir = std::path::Path::new("/Users/kit/Zotero");
+    let result = resolve_attachment_path(zotero_data_dir, &pdf);
+    assert_eq!(result, Some("/Users/kit/Zotero/storage/PDFKEY01/attention.pdf".to_string()));
+}
+
+#[test]
+fn resolve_linked_file_attachment() {
+    let pdf = ZoteroPdf {
+        link_mode: 2,
+        path: Some("/absolute/path/to/paper.pdf".to_string()),
+        attachment_key: "X".to_string(),
+    };
+    let result = resolve_attachment_path(std::path::Path::new("/unused"), &pdf);
+    assert_eq!(result, Some("/absolute/path/to/paper.pdf".to_string()));
+}
+
+#[test]
+fn resolve_url_attachment() {
+    let pdf = ZoteroPdf {
+        link_mode: 1,
+        path: Some("https://arxiv.org/pdf/1706.03762.pdf".to_string()),
+        attachment_key: "X".to_string(),
+    };
+    let result = resolve_attachment_path(std::path::Path::new("/unused"), &pdf);
+    assert_eq!(result, Some("https://arxiv.org/pdf/1706.03762.pdf".to_string()));
 }

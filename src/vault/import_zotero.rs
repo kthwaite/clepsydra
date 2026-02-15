@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use rusqlite::{Connection, OpenFlags};
 
+use crate::vault::academic::WorkType;
+use crate::vault::import::BibImportEntry;
+
 /// Skip these words when picking the first significant title word.
 const SKIP_WORDS: &[&str] = &["a", "an", "the", "on"];
 
@@ -302,4 +305,84 @@ fn strip_diacritics(s: &str) -> String {
     s.nfkd()
         .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
         .collect()
+}
+
+// ── ZoteroItem mapping functions ──────────────────────────────────────────
+
+/// Extract a 4-digit year from Zotero's free-text date field.
+fn extract_year(date_raw: Option<&str>) -> Option<i32> {
+    let re = Regex::new(r"\b(\d{4})\b").unwrap();
+    date_raw
+        .and_then(|s| re.captures(s))
+        .and_then(|caps| caps[1].parse::<i32>().ok())
+        .filter(|y| *y > 1000 && *y < 3000)
+}
+
+/// Extract arXiv ID from Zotero's `extra` field.
+fn extract_arxiv(extra: Option<&str>) -> Option<String> {
+    let re = Regex::new(r"(?im)^arXiv:\s*(.+)$").unwrap();
+    extra
+        .and_then(|s| re.captures(s))
+        .map(|caps| caps[1].trim().to_string())
+}
+
+/// Map a Zotero item type name to a Clepsydra WorkType.
+fn map_item_type(type_name: &str) -> WorkType {
+    match type_name {
+        "journalArticle" | "conferencePaper" | "preprint" => WorkType::Paper,
+        "book" | "bookSection" => WorkType::Book,
+        "thesis" => WorkType::Thesis,
+        "report" => WorkType::Report,
+        _ => WorkType::Other,
+    }
+}
+
+/// Format a ZoteroAuthor into a display string.
+pub fn format_author(author: &ZoteroAuthor) -> String {
+    if author.field_mode == 1 || author.first_name.is_empty() {
+        author.last_name.clone()
+    } else {
+        format!("{} {}", author.first_name, author.last_name)
+    }
+}
+
+/// Convert a ZoteroItem into a BibImportEntry for the existing import pipeline.
+///
+/// Does NOT set cite_key — that's handled separately by derive_cite_key().
+pub fn map_to_import_entry(item: &ZoteroItem) -> BibImportEntry {
+    BibImportEntry {
+        cite_key: String::new(), // set by caller via derive_cite_key()
+        title: item.title.clone(),
+        work_type: map_item_type(&item.item_type),
+        authors: item.authors.iter().map(format_author).collect(),
+        year: extract_year(item.date_raw.as_deref()),
+        venue: item.venue.clone(),
+        publisher: item.publisher.clone(),
+        doi: item.doi.clone(),
+        isbn: item.isbn.clone(),
+        arxiv: extract_arxiv(item.extra_field.as_deref()),
+        url: item.url.clone(),
+    }
+}
+
+/// Resolve a Zotero PDF attachment to a filesystem path or URL.
+///
+/// - linkMode 0 (imported file): storage:<filename> → <data_dir>/storage/<key>/<filename>
+/// - linkMode 1 (imported URL): return URL as-is
+/// - linkMode 2 (linked file): return absolute path as-is
+/// - linkMode 3 (linked URL): return URL as-is
+pub fn resolve_attachment_path(zotero_data_dir: &Path, pdf: &ZoteroPdf) -> Option<String> {
+    match pdf.link_mode {
+        0 => {
+            let filename = pdf.path.as_deref()?.strip_prefix("storage:")?;
+            let resolved = zotero_data_dir
+                .join("storage")
+                .join(&pdf.attachment_key)
+                .join(filename);
+            Some(resolved.to_string_lossy().to_string())
+        }
+        1 | 3 => pdf.path.clone(),
+        2 => pdf.path.clone(),
+        _ => None,
+    }
 }
