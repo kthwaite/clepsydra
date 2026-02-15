@@ -386,3 +386,16 @@ pub fn resolve_attachment_path(zotero_data_dir: &Path, pdf: &ZoteroPdf) -> Optio
         _ => None,
     }
 }
+
+// ── Deduplication query ────────────────────────────────────────────────────
+
+/// Check if a work was previously imported from Zotero by its item key.
+/// Returns Some(vault_path) if found, None otherwise.
+pub fn find_existing_by_zotero_key(conn: &rusqlite::Connection, zotero_key: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT path FROM pages WHERE json_extract(meta_json, '$.import.source') = 'zotero' AND json_extract(meta_json, '$.import.zotero_key') = ?1",
+        rusqlite::params![zotero_key],
+        |row| row.get(0),
+    )
+    .ok()
+}

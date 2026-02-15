@@ -352,7 +352,7 @@ fn cite_key_multiple_collisions() {
 
 use clepsydra::vault::import_zotero::{
     open_zotero_db, query_items, map_to_import_entry, resolve_attachment_path,
-    ZoteroAuthor, ZoteroPdf, ZoteroItem,
+    find_existing_by_zotero_key, ZoteroAuthor, ZoteroPdf, ZoteroItem,
 };
 
 /// Create a minimal Zotero-schema SQLite DB for testing.
@@ -626,4 +626,42 @@ fn resolve_url_attachment() {
     };
     let result = resolve_attachment_path(std::path::Path::new("/unused"), &pdf);
     assert_eq!(result, Some("https://arxiv.org/pdf/1706.03762.pdf".to_string()));
+}
+
+// ── Zotero-key dedup tests ────────────────────────────────────────────────
+
+#[test]
+fn find_existing_by_zotero_key_returns_path() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    fs::create_dir_all(root.join("library/papers")).unwrap();
+
+    let content = "\
+---
+id: 00000000-0000-0000-0000-000000000600
+kind: work
+work_type: paper
+title: Previously Imported
+cite_key: prev2024
+tags: []
+import:
+  source: zotero
+  zotero_key: ABC12345
+  imported_at: 2024-01-01T00:00:00Z
+---
+Content.
+";
+    fs::write(root.join("library/papers/previously-imported.md"), content).unwrap();
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let found = find_existing_by_zotero_key(index.connection(), "ABC12345");
+    assert_eq!(found, Some("library/papers/previously-imported.md".to_string()));
+
+    let not_found = find_existing_by_zotero_key(index.connection(), "UNKNOWN");
+    assert!(not_found.is_none());
 }
