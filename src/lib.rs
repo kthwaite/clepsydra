@@ -1,5 +1,6 @@
 pub mod api;
 pub mod app_config;
+pub mod lsp;
 pub mod vault;
 
 use std::path::{Path, PathBuf};
@@ -195,7 +196,7 @@ async fn ensure_certificates(
     Ok((cert_path, key_path))
 }
 
-pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Error>> {
     // Logging via `tracing`.
     // Configure with `RUST_LOG=debug` (or e.g. `RUST_LOG=clepsydra=debug,tower_http=debug`).
     fmt()
@@ -271,6 +272,17 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         delete_hooks,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
     });
+
+    // Optionally start LSP on stdio
+    if enable_lsp {
+        info!("starting LSP server on stdio");
+        let lsp_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            lsp::run_lsp(lsp_state).await;
+            tracing::info!("LSP disconnected, shutting down");
+            std::process::exit(0);
+        });
+    }
 
     // Spawn file watcher + sync loop
     let vault_root_buf = state.vault.root().to_path_buf();
