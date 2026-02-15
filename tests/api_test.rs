@@ -2388,3 +2388,187 @@ async fn content_index_pagination() {
     assert_eq!(body["total"], 3);
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Zotero import tests
+// ---------------------------------------------------------------------------
+
+/// Create a minimal Zotero-schema SQLite DB for API testing.
+fn create_mock_zotero_db_for_api(path: &std::path::Path) {
+    use rusqlite::Connection;
+    let conn = Connection::open(path).unwrap();
+    conn.execute_batch(
+        "
+        CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
+        INSERT INTO itemTypes VALUES (1, 'attachment');
+        INSERT INTO itemTypes VALUES (2, 'book');
+        INSERT INTO itemTypes VALUES (4, 'journalArticle');
+
+        CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT);
+        INSERT INTO fields VALUES (14, 'date');
+        INSERT INTO fields VALUES (26, 'DOI');
+        INSERT INTO fields VALUES (110, 'title');
+        INSERT INTO fields VALUES (11, 'ISBN');
+        INSERT INTO fields VALUES (12, 'publisher');
+        INSERT INTO fields VALUES (37, 'publicationTitle');
+
+        CREATE TABLE libraries (libraryID INTEGER PRIMARY KEY, type TEXT);
+        INSERT INTO libraries VALUES (1, 'user');
+
+        CREATE TABLE items (
+            itemID INTEGER PRIMARY KEY, itemTypeID INT, dateAdded TEXT,
+            dateModified TEXT, clientDateModified TEXT, libraryID INT,
+            key TEXT, version INT DEFAULT 0, synced INT DEFAULT 0
+        );
+        CREATE TABLE itemData (itemID INT, fieldID INT, valueID INT, PRIMARY KEY(itemID, fieldID));
+        CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value TEXT UNIQUE);
+        CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY);
+
+        CREATE TABLE creators (creatorID INTEGER PRIMARY KEY, firstName TEXT, lastName TEXT, fieldMode INT);
+        CREATE TABLE creatorTypes (creatorTypeID INTEGER PRIMARY KEY, creatorType TEXT);
+        INSERT INTO creatorTypes VALUES (1, 'author');
+        CREATE TABLE itemCreators (itemID INT, creatorID INT, creatorTypeID INT, orderIndex INT);
+
+        CREATE TABLE tags (tagID INTEGER PRIMARY KEY, name TEXT UNIQUE);
+        CREATE TABLE itemTags (itemID INT, tagID INT, type INT);
+
+        CREATE TABLE collections (
+            collectionID INTEGER PRIMARY KEY, collectionName TEXT,
+            parentCollectionID INT, libraryID INT, key TEXT, version INT DEFAULT 0, synced INT DEFAULT 0,
+            clientDateModified TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE collectionItems (collectionID INT, itemID INT, orderIndex INT);
+
+        CREATE TABLE itemAttachments (
+            itemID INTEGER PRIMARY KEY, parentItemID INT, linkMode INT,
+            contentType TEXT, charsetID INT, path TEXT,
+            syncState INT DEFAULT 0, storageModTime INT, storageHash TEXT
+        );
+
+        -- Insert a journal article
+        INSERT INTO items VALUES (1, 4, '2024-01-01', '2024-06-15', '2024-06-15', 1, 'ABC12345', 1, 0);
+        INSERT INTO itemDataValues VALUES (1, 'Test Article');
+        INSERT INTO itemDataValues VALUES (2, '2023');
+        INSERT INTO itemDataValues VALUES (3, '10.1234/test.article');
+        INSERT INTO itemDataValues VALUES (4, 'Test Journal');
+        INSERT INTO itemData VALUES (1, 110, 1);
+        INSERT INTO itemData VALUES (1, 14, 2);
+        INSERT INTO itemData VALUES (1, 26, 3);
+        INSERT INTO itemData VALUES (1, 37, 4);
+
+        INSERT INTO creators VALUES (1, 'Alice', 'Smith', 0);
+        INSERT INTO itemCreators VALUES (1, 1, 1, 0);
+
+        -- Insert a book
+        INSERT INTO items VALUES (2, 2, '2024-01-01', '2024-03-01', '2024-03-01', 1, 'DEF67890', 1, 0);
+        INSERT INTO itemDataValues VALUES (5, 'Test Book');
+        INSERT INTO itemDataValues VALUES (6, '2022');
+        INSERT INTO itemDataValues VALUES (7, '978-1234567890');
+        INSERT INTO itemDataValues VALUES (8, 'Test Publisher');
+        INSERT INTO itemData VALUES (2, 110, 5);
+        INSERT INTO itemData VALUES (2, 14, 6);
+        INSERT INTO itemData VALUES (2, 11, 7);
+        INSERT INTO itemData VALUES (2, 12, 8);
+
+        INSERT INTO creators VALUES (2, 'Bob', 'Jones', 0);
+        INSERT INTO itemCreators VALUES (2, 2, 1, 0);
+        "
+    ).unwrap();
+}
+
+#[tokio::test]
+async fn import_zotero_creates_works() {
+    let (server, tmp) = setup_server();
+
+    // Create mock Zotero DB
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Import
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy()
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2, "should import 2 items");
+
+    // Verify both were created
+    assert!(results.iter().all(|r| r["status"] == "created"));
+    assert_eq!(results[0]["cite_key"], "smith2023test");
+    assert_eq!(results[1]["cite_key"], "jones2022test");
+
+    // Verify provenance in frontmatter
+    let vault_root = tmp.path().join("vault");
+    let article_path = results[0]["page_path"].as_str().unwrap();
+    let content = fs::read_to_string(vault_root.join(article_path)).unwrap();
+    assert!(content.contains("source: zotero"), "should have import source");
+    assert!(content.contains("zotero_key: ABC12345"), "should have zotero_key");
+    assert!(content.contains("zotero_item_id: 1"), "should have zotero_item_id");
+}
+
+#[tokio::test]
+async fn import_zotero_dry_run() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "dry_run": true
+        }))
+        .await;
+
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Verify all would be created
+    assert!(results.iter().all(|r| r["status"] == "would_create"));
+
+    // Verify no works were actually created
+    let res = server.get("/api/vault/academic/works").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["total"], 0, "dry run should not create works");
+}
+
+#[tokio::test]
+async fn import_zotero_is_idempotent() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy()
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert!(results.iter().all(|r| r["status"] == "created"));
+
+    // Second import — should skip all
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy()
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|r| r["status"] == "skipped"), "second import should skip all items");
+}

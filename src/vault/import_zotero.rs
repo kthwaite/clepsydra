@@ -10,6 +10,21 @@ use crate::vault::import::BibImportEntry;
 /// Skip these words when picking the first significant title word.
 const SKIP_WORDS: &[&str] = &["a", "an", "the", "on"];
 
+// ── Import request ─────────────────────────────────────────────────────────
+
+/// Request for importing from Zotero.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+pub struct ImportZoteroRequest {
+    #[serde(default)]
+    pub database_path: Option<String>,
+    #[serde(default)]
+    pub collection: Option<String>,
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
 // ── Zotero database types and query functions ──────────────────────────────
 
 /// Raw query result from Zotero's EAV tables.

@@ -189,6 +189,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/import/bibtex", post(import_bibtex))
         .route("/import/doi", post(import_doi))
         .route("/import/isbn", post(import_isbn_handler))
+        .route("/import/zotero", post(import_zotero_handler))
 }
 
 // ---------------------------------------------------------------------------
@@ -685,6 +686,271 @@ pub async fn import_isbn_handler(
         }),
     )
         .into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/academic/import/zotero",
+    context_path = "/api/vault",
+    tag = "Academic",
+    request_body = crate::vault::import_zotero::ImportZoteroRequest,
+    responses(
+        (status = 200, description = "Import results", body = ImportResponse),
+        (status = 400, description = "Invalid request", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn import_zotero_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<crate::vault::import_zotero::ImportZoteroRequest>,
+) -> Result<Json<ImportResponse>, ApiError> {
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    // 1. Resolve DB path
+    let db_path_str = if let Some(p) = req.database_path {
+        // Handle tilde expansion
+        if p.starts_with("~/") {
+            let home = dirs::home_dir().ok_or_else(|| ApiError::bad_request("Cannot expand ~"))?;
+            home.join(p.strip_prefix("~/").expect("tilde prefix checked"))
+                .to_string_lossy()
+                .to_string()
+        } else {
+            p
+        }
+    } else if let Some(configured) = state.vault.config().academic.zotero.database_path.clone() {
+        if configured.starts_with("~/") {
+            let home = dirs::home_dir().ok_or_else(|| ApiError::bad_request("Cannot expand ~"))?;
+            home.join(configured.strip_prefix("~/").expect("tilde prefix checked"))
+                .to_string_lossy()
+                .to_string()
+        } else {
+            configured
+        }
+    } else if let Some(detected) = crate::vault::import_zotero::detect_zotero_db() {
+        detected.to_string_lossy().to_string()
+    } else {
+        return Err(ApiError::bad_request(
+            "No Zotero database path provided and auto-detection failed. \
+             Please specify database_path or configure it in config.toml."
+        ));
+    };
+
+    let db_path = PathBuf::from(&db_path_str);
+    if !db_path.exists() {
+        return Err(ApiError::bad_request(format!(
+            "Zotero database not found at: {}",
+            db_path.display()
+        )));
+    }
+
+    // 2. Open DB and query items
+    let conn = crate::vault::import_zotero::open_zotero_db(&db_path)
+        .map_err(ApiError::internal)?;
+
+    let items = crate::vault::import_zotero::query_items(
+        &conn,
+        req.collection.as_deref(),
+        req.since.as_deref(),
+    )
+    .map_err(ApiError::internal)?;
+
+    // 3. Build set of existing cite_keys for collision detection
+    let mut used_cite_keys: HashSet<String> = state
+        .index
+        .with_index(|index, _| {
+            index
+                .connection()
+                .prepare("SELECT canonical_name FROM canonical_names WHERE source = 'cite_key'")
+                .ok()
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| row.get::<_, String>(0))
+                        .ok()
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .unwrap_or_else(HashSet::new)
+        })
+        .await
+        .unwrap_or_else(|_| HashSet::new());
+
+    let mut results = Vec::with_capacity(items.len());
+
+    // 4. Process each item
+    for item in &items {
+        // a. Check dedup by zotero_key
+        let zk = item.zotero_key.clone();
+        let existing_by_zk = state
+            .index
+            .with_index(move |index, _vault| {
+                crate::vault::import_zotero::find_existing_by_zotero_key(
+                    index.connection(),
+                    &zk,
+                )
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        if let Some(path) = existing_by_zk {
+            results.push(ImportResult {
+                cite_key: format!("zotero:{}", item.zotero_key),
+                status: "skipped".to_string(),
+                page_path: Some(path),
+                error: None,
+            });
+            continue;
+        }
+
+        // b. Map to BibImportEntry
+        let mut entry = crate::vault::import_zotero::map_to_import_entry(item);
+
+        // c. Derive cite_key
+        let formatted_authors: Vec<String> = item
+            .authors
+            .iter()
+            .map(crate::vault::import_zotero::format_author)
+            .collect();
+
+        entry.cite_key = crate::vault::import_zotero::derive_cite_key(
+            item.extra_field.as_deref(),
+            &formatted_authors,
+            entry.year,
+            &item.title,
+            &used_cite_keys,
+        );
+        used_cite_keys.insert(entry.cite_key.clone());
+
+        // d. Check dedup by DOI/ISBN/cite_key
+        let doi = entry.doi.clone();
+        let isbn = entry.isbn.clone();
+        let ck = entry.cite_key.clone();
+        let existing = state
+            .index
+            .with_index(move |index, _vault| {
+                crate::vault::import::find_existing_work(
+                    index.connection(),
+                    doi.as_deref(),
+                    isbn.as_deref(),
+                    Some(&ck),
+                )
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        if let Some(path) = existing {
+            results.push(ImportResult {
+                cite_key: entry.cite_key.clone(),
+                status: "skipped".to_string(),
+                page_path: Some(path),
+                error: None,
+            });
+            continue;
+        }
+
+        // e. If dry_run, skip creation
+        if req.dry_run {
+            results.push(ImportResult {
+                cite_key: entry.cite_key.clone(),
+                status: "would_create".to_string(),
+                page_path: None,
+                error: None,
+            });
+            continue;
+        }
+
+        // f. Create work
+        match create_work_internal(
+            &state,
+            entry.title.clone(),
+            entry.work_type.clone(),
+            entry.authors.clone(),
+            entry.year,
+            entry.venue.clone(),
+            entry.publisher.clone(),
+            None, // status
+            None, // rating
+            Some(ExternalIds {
+                doi: entry.doi.clone(),
+                isbn: entry.isbn.clone(),
+                arxiv: entry.arxiv.clone(),
+            }),
+            entry.url.as_ref().map(|u| WorkUrls {
+                landing: Some(u.clone()),
+                pdf: None,
+            }),
+            Some(entry.cite_key.clone()),
+            vec![], // tags
+            vec![], // aliases
+            None,   // body
+        )
+        .await
+        {
+            Ok(detail) => {
+                // g. Patch provenance into the page
+                let vp = VaultPath::new(&detail.path)
+                    .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+                let abs_path = state.vault.resolve(&vp);
+
+                let mut page = Page::from_file(&abs_path, vp.clone())
+                    .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
+
+                // Build import section
+                let mut import_map = serde_yaml::Mapping::new();
+                import_map.insert(
+                    serde_yaml::Value::String("source".to_string()),
+                    serde_yaml::Value::String("zotero".to_string()),
+                );
+                import_map.insert(
+                    serde_yaml::Value::String("zotero_key".to_string()),
+                    serde_yaml::Value::String(item.zotero_key.clone()),
+                );
+                import_map.insert(
+                    serde_yaml::Value::String("zotero_item_id".to_string()),
+                    serde_yaml::Value::Number(item.item_id.into()),
+                );
+                import_map.insert(
+                    serde_yaml::Value::String("imported_at".to_string()),
+                    serde_yaml::Value::String(Utc::now().to_rfc3339()),
+                );
+
+                page.meta.extra.insert(
+                    "import".to_string(),
+                    serde_yaml::Value::Mapping(import_map),
+                );
+
+                // Write back
+                let new_content = write_page_content(&page.meta, &page.body);
+                fs::write(&abs_path, new_content)
+                    .map_err(|e| ApiError::internal(format!("Failed to write page: {e}")))?;
+
+                // Re-index
+                state
+                    .index
+                    .with_index(move |index, vault| {
+                        index.index_page(vault, &vp)
+                    })
+                    .await
+                    .map_err(|e| ApiError::internal(e.to_string()))?
+                    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+                results.push(ImportResult {
+                    cite_key: entry.cite_key.clone(),
+                    status: "created".to_string(),
+                    page_path: Some(detail.path),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(ImportResult {
+                    cite_key: entry.cite_key.clone(),
+                    status: "error".to_string(),
+                    page_path: None,
+                    error: Some(e.error),
+                });
+            }
+        }
+    }
+
+    Ok(Json(ImportResponse { results }))
 }
 
 #[utoipa::path(
