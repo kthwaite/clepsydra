@@ -418,6 +418,87 @@ impl LanguageServer for LspBackend {
         }
     }
 
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = params.query.trim().to_string();
+        let vault_root = self.state.vault.root().to_path_buf();
+
+        let results: Vec<(String, Option<String>)> = if query.is_empty() {
+            // Empty query: return pages sorted by path
+            self.state
+                .index
+                .with_index(
+                    move |index, _| -> std::result::Result<Vec<_>, rusqlite::Error> {
+                        let mut stmt = index.connection().prepare(
+                            "SELECT path, title FROM pages ORDER BY path LIMIT 50",
+                        )?;
+                        let rows = stmt
+                            .query_map([], |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, Option<String>>(1)?,
+                                ))
+                            })?
+                            .filter_map(|r| r.ok())
+                            .collect();
+                        Ok(rows)
+                    },
+                )
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+                .unwrap_or_default()
+        } else {
+            // FTS5 search
+            self.state
+                .index
+                .search(query, 50)
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+                .into_iter()
+                .map(|r| (r.path, r.title))
+                .collect()
+        };
+
+        #[allow(deprecated)]
+        let symbols: Vec<SymbolInformation> = results
+            .into_iter()
+            .filter_map(|(path, title)| {
+                let vp = crate::vault::path::VaultPath::new(&path).ok()?;
+                let abs_path = vault_root.join(vp.as_str());
+                let uri = Url::from_file_path(&abs_path).ok()?;
+                Some(SymbolInformation {
+                    name: title.unwrap_or_else(|| {
+                        path.rsplit('/')
+                            .next()
+                            .unwrap_or(&path)
+                            .trim_end_matches(".md")
+                            .to_string()
+                    }),
+                    kind: SymbolKind::FILE,
+                    tags: None,
+                    deprecated: None,
+                    location: Location {
+                        uri,
+                        range: Range::default(),
+                    },
+                    container_name: Some(
+                        path.rsplit_once('/')
+                            .map(|(folder, _)| folder.to_string())
+                            .unwrap_or_default(),
+                    ),
+                })
+            })
+            .collect();
+
+        if symbols.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(symbols))
+        }
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
