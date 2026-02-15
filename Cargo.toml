@@ -9,6 +9,7 @@ path = "src/bin/cli.rs"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["multipart"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64 = "0.22"
 biblatex = "0.11"
 blake3 = "1"
@@ -25,7 +26,9 @@ percent-encoding = "2"
 pulldown-cmark = "0.12"
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
+ropey = "1"
 rusqlite = { version = "0.33", features = ["bundled"] }
+rust-embed = "8.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -36,6 +39,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 toml = "0.8"
 tower = "0.5.3"
 tower-http = { version = "0.6.8", features = ["trace"] }
+tower-lsp = "0.20"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 unicode-normalization = "0.1"
