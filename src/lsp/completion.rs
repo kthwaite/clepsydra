@@ -1,32 +1,42 @@
 /// Detect if the cursor is in a wikilink context.
 /// Returns the filter prefix (text between `[[` and cursor) if found.
 pub fn wikilink_prefix(line_text: &str, character: usize) -> Option<String> {
-    let before = &line_text[..character.min(line_text.len())];
-    let mut i = before.len();
-    while i >= 2 {
-        i -= 1;
-        if i > 0 && &before[i - 1..=i] == "[[" {
-            let between = &before[i + 1..];
-            if !between.contains("]]") {
-                return Some(between.to_string());
-            }
+    let end = clamp_to_char_boundary(line_text, character);
+    let before = &line_text[..end];
+    // Find the last unclosed `[[`
+    let bracket_pos = before.rfind("[[")?;
+    let after_bracket = &before[bracket_pos + 2..];
+    // If there's a closing `]]` between the `[[` and cursor, we're not inside a link
+    if after_bracket.contains("]]") {
+        return None;
+    }
+    Some(after_bracket.to_string())
+}
+
+/// Detect if the cursor is in a tag context (#word_boundary).
+pub fn tag_prefix(line_text: &str, character: usize) -> Option<String> {
+    let end = clamp_to_char_boundary(line_text, character);
+    let before = &line_text[..end];
+    // `#` is ASCII, so rfind always returns a valid char boundary
+    let hash_pos = before.rfind('#')?;
+    if hash_pos == 0 || before.as_bytes()[hash_pos - 1].is_ascii_whitespace() {
+        let prefix = &before[hash_pos + 1..]; // safe: '#' is single-byte ASCII
+        if !prefix.contains(' ') {
+            return Some(prefix.to_string());
         }
     }
     None
 }
 
-/// Detect if the cursor is in a tag context (#word_boundary).
-pub fn tag_prefix(line_text: &str, character: usize) -> Option<String> {
-    let before = &line_text[..character.min(line_text.len())];
-    if let Some(hash_pos) = before.rfind('#') {
-        if hash_pos == 0 || before.as_bytes()[hash_pos - 1].is_ascii_whitespace() {
-            let prefix = &before[hash_pos + 1..];
-            if !prefix.contains(' ') {
-                return Some(prefix.to_string());
-            }
-        }
+/// Clamp a byte offset to the nearest valid UTF-8 char boundary at or before it.
+fn clamp_to_char_boundary(s: &str, offset: usize) -> usize {
+    let offset = offset.min(s.len());
+    // Walk backwards to find a valid char boundary (at most 3 bytes for UTF-8)
+    let mut i = offset;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
     }
-    None
+    i
 }
 
 #[cfg(test)]
@@ -102,5 +112,34 @@ mod tests {
     fn tag_with_space_in_prefix() {
         // Space after # means this is not a tag
         assert_eq!(tag_prefix("# heading text", 14), None);
+    }
+
+    // ---- UTF-8 safety tests ----
+
+    #[test]
+    fn wikilink_with_multibyte_chars() {
+        // 你 is 3 bytes in UTF-8
+        assert_eq!(
+            wikilink_prefix("你好 [[Des", 13),
+            Some("Des".to_string())
+        );
+    }
+
+    #[test]
+    fn tag_with_multibyte_chars() {
+        assert_eq!(tag_prefix("你好 #tag", 11), Some("tag".to_string()));
+    }
+
+    #[test]
+    fn wikilink_offset_mid_codepoint() {
+        // Offset 1 is mid-codepoint of 你 (3-byte char) — should not panic
+        let result = wikilink_prefix("你[[x", 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn tag_offset_mid_codepoint() {
+        let result = tag_prefix("你#tag", 1);
+        assert!(result.is_none());
     }
 }

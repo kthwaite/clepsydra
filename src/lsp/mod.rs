@@ -66,22 +66,7 @@ impl LanguageServer for LspBackend {
     }
 
     async fn initialized(&self, _params: InitializedParams) {
-        let names = self
-            .state
-            .index
-            .with_index(|index, _| {
-                let mut stmt = index
-                    .connection()
-                    .prepare("SELECT canonical_name FROM canonical_names")
-                    .unwrap();
-                stmt.query_map([], |row| row.get::<_, String>(0))
-                    .unwrap()
-                    .filter_map(|r| r.ok())
-                    .collect::<HashSet<String>>()
-            })
-            .await
-            .unwrap_or_default();
-        *self.canonical_names.write().await = names;
+        self.refresh_canonical_names().await;
         self.client
             .log_message(MessageType::INFO, "clepsydra LSP initialized")
             .await;
@@ -358,22 +343,26 @@ impl LspBackend {
 
     /// Reload the canonical name snapshot from the index.
     async fn refresh_canonical_names(&self) {
-        let names = self
+        let result = self
             .state
             .index
-            .with_index(|index, _| {
+            .with_index(|index, _| -> std::result::Result<HashSet<String>, rusqlite::Error> {
                 let mut stmt = index
                     .connection()
-                    .prepare("SELECT canonical_name FROM canonical_names")
-                    .unwrap();
-                stmt.query_map([], |row| row.get::<_, String>(0))
-                    .unwrap()
+                    .prepare("SELECT canonical_name FROM canonical_names")?;
+                let names = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
                     .filter_map(|r| r.ok())
-                    .collect::<HashSet<String>>()
+                    .collect();
+                Ok(names)
             })
-            .await
-            .unwrap_or_default();
-        *self.canonical_names.write().await = names;
+            .await;
+
+        match result {
+            Ok(Ok(names)) => *self.canonical_names.write().await = names,
+            Ok(Err(e)) => tracing::error!("failed to load canonical names: {e}"),
+            Err(e) => tracing::error!("index thread error loading canonical names: {e}"),
+        }
     }
 
     /// Complete wikilink targets by prefix matching against canonical names.
@@ -384,32 +373,31 @@ impl LspBackend {
             .index
             .with_index({
                 let prefix = prefix.clone();
-                move |index, _| {
+                move |index, _| -> std::result::Result<Vec<_>, rusqlite::Error> {
                     let like_pattern = format!("{}%", prefix.to_lowercase());
-                    let mut stmt = index
-                        .connection()
-                        .prepare(
-                            "SELECT DISTINCT cn.canonical_name, p.path, p.title \
-                             FROM canonical_names cn \
-                             JOIN pages p ON p.id = cn.page_id \
-                             WHERE cn.canonical_name LIKE ?1 \
-                             ORDER BY cn.canonical_name LIMIT 50",
-                        )
-                        .unwrap();
-                    stmt.query_map(rusqlite::params![like_pattern], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                        ))
-                    })
-                    .unwrap()
-                    .filter_map(|r| r.ok())
-                    .collect()
+                    let mut stmt = index.connection().prepare(
+                        "SELECT DISTINCT cn.canonical_name, p.path, p.title \
+                         FROM canonical_names cn \
+                         JOIN pages p ON p.id = cn.page_id \
+                         WHERE cn.canonical_name LIKE ?1 \
+                         ORDER BY cn.canonical_name LIMIT 50",
+                    )?;
+                    let rows = stmt
+                        .query_map(rusqlite::params![like_pattern], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok(rows)
                 }
             })
             .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+            .unwrap_or_default();
 
         Ok(results
             .into_iter()
@@ -440,23 +428,22 @@ impl LspBackend {
             .index
             .with_index({
                 let prefix = prefix.clone();
-                move |index, _| {
+                move |index, _| -> std::result::Result<Vec<String>, rusqlite::Error> {
                     let like_pattern = format!("{prefix}%");
-                    let mut stmt = index
-                        .connection()
-                        .prepare(
-                            "SELECT DISTINCT tag FROM tags \
-                             WHERE tag LIKE ?1 ORDER BY tag LIMIT 50",
-                        )
-                        .unwrap();
-                    stmt.query_map(rusqlite::params![like_pattern], |row| row.get(0))
-                        .unwrap()
+                    let mut stmt = index.connection().prepare(
+                        "SELECT DISTINCT tag FROM tags \
+                         WHERE tag LIKE ?1 ORDER BY tag LIMIT 50",
+                    )?;
+                    let rows = stmt
+                        .query_map(rusqlite::params![like_pattern], |row| row.get(0))?
                         .filter_map(|r| r.ok())
-                        .collect()
+                        .collect();
+                    Ok(rows)
                 }
             })
             .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+            .unwrap_or_default();
 
         Ok(tags
             .into_iter()
