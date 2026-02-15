@@ -1,5 +1,6 @@
 pub mod completion;
 pub mod document;
+pub mod symbols;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -330,6 +331,122 @@ impl LanguageServer for LspBackend {
 
         Ok(None)
     }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+
+        // Determine target vault path: either link target or current file
+        let target_vp = {
+            let link_target = {
+                let docs = self.documents.lock().await;
+                let doc = match docs.get(&uri) {
+                    Some(d) => d,
+                    None => return Ok(None),
+                };
+                doc.link_at_position(pos).map(|l| l.target_raw.clone())
+            };
+
+            if let Some(target_raw) = link_target {
+                let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
+                let path: Option<String> = self
+                    .state
+                    .index
+                    .with_index({
+                        let cn = canonical.as_str().to_string();
+                        move |index, _| {
+                            index
+                                .connection()
+                                .query_row(
+                                    "SELECT p.path FROM canonical_names cn \
+                                     JOIN pages p ON p.id = cn.page_id \
+                                     WHERE cn.canonical_name = ?1 LIMIT 1",
+                                    rusqlite::params![cn],
+                                    |row| row.get(0),
+                                )
+                                .ok()
+                        }
+                    })
+                    .await
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+                match path {
+                    Some(p) => match crate::vault::path::VaultPath::new(&p) {
+                        Ok(vp) => vp,
+                        Err(_) => return Ok(None),
+                    },
+                    None => return Ok(None),
+                }
+            } else {
+                match self.uri_to_vault_path(&uri) {
+                    Some(vp) => vp,
+                    None => return Ok(None),
+                }
+            }
+        };
+
+        let backlinks = self
+            .state
+            .index
+            .backlinks(target_vp, 0)
+            .await
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+        let vault_root = self.state.vault.root().to_path_buf();
+        let mut locations = Vec::new();
+        for bl in &backlinks {
+            let source_vp = match crate::vault::path::VaultPath::new(&bl.source_path) {
+                Ok(vp) => vp,
+                Err(_) => continue,
+            };
+            let abs_path = vault_root.join(source_vp.as_str());
+            let source_uri = match Url::from_file_path(&abs_path) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            let range = self.backlink_to_range(&source_uri, bl).await;
+            locations.push(Location {
+                uri: source_uri,
+                range,
+            });
+        }
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
+        }
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+
+        let docs = self.documents.lock().await;
+        let doc = match docs.get(&uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        let title = doc
+            .meta
+            .title
+            .as_deref()
+            .unwrap_or_else(|| {
+                uri.path_segments()
+                    .and_then(|mut s| s.next_back())
+                    .unwrap_or("untitled")
+            })
+            .to_string();
+
+        let syms = symbols::build_document_symbols(&title, &doc.body, |offset| {
+            doc.byte_offset_to_position(offset)
+        });
+
+        Ok(Some(DocumentSymbolResponse::Nested(syms)))
+    }
 }
 
 impl LspBackend {
@@ -454,6 +571,48 @@ impl LspBackend {
                 ..Default::default()
             })
             .collect())
+    }
+
+    /// Resolve a backlink to a source range.
+    ///
+    /// First checks if the source file is open in the editor (using the
+    /// in-memory document). Falls back to reading the file from disk and
+    /// building a throwaway `Document` to find the link span.
+    async fn backlink_to_range(
+        &self,
+        source_uri: &Url,
+        bl: &crate::vault::index::BacklinkWithContext,
+    ) -> Range {
+        // Check if source is open in editor
+        {
+            let docs = self.documents.lock().await;
+            if let Some(doc) = docs.get(source_uri) {
+                for link in &doc.links {
+                    if link.target_raw == bl.target_raw
+                        && link.span.start != 0
+                        && link.span.end != 0
+                    {
+                        return doc.link_to_range(link);
+                    }
+                }
+            }
+        }
+        // Fall back: read from disk, build throwaway Document
+        if let Some(vp) = self.uri_to_vault_path(source_uri) {
+            let abs_path = self.state.vault.resolve(&vp);
+            if let Ok(content) = tokio::fs::read_to_string(&abs_path).await {
+                let doc = document::Document::from_text(&content, 0);
+                for link in &doc.links {
+                    if link.target_raw == bl.target_raw
+                        && link.span.start != 0
+                        && link.span.end != 0
+                    {
+                        return doc.link_to_range(link);
+                    }
+                }
+            }
+        }
+        Range::default()
     }
 
     /// Publish diagnostics for a single open document.
