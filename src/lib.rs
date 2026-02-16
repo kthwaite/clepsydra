@@ -40,6 +40,17 @@ struct ServerSettings {
     tls: TlsSettings,
 }
 
+impl Default for ServerSettings {
+    fn default() -> Self {
+        Self {
+            host: "localhost".to_string(),
+            port: 16667,
+            dev_mode: false,
+            tls: TlsSettings::default(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct TlsSettings {
     #[serde(default)]
@@ -344,8 +355,12 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
         .with_state(state)
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
-    let addr = format!("{}:{}", settings.server.host, settings.server.port)
-        .parse::<std::net::SocketAddr>()?;
+    let host_port = format!("{}:{}", settings.server.host, settings.server.port);
+    let addr = tokio::net::lookup_host(&host_port)
+        .await
+        .map_err(|e| format!("cannot resolve server address \"{host_port}\": {e}"))?
+        .next()
+        .ok_or_else(|| format!("server address \"{host_port}\" resolved to no addresses"))?;
 
     if settings.server.tls.enabled {
         let (cert_path, key_path) = ensure_certificates(&settings.server.tls).await?;
