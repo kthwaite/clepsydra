@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use super::pages::PageDetail;
+use super::tasks::TaskItem;
 use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::page::{Page, PageMeta, write_page_content};
@@ -50,6 +52,13 @@ pub struct JournalSummary {
     pub path: String,
     pub title: Option<String>,
     pub journal_date: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct JournalTodayResponse {
+    #[serde(flatten)]
+    pub page: PageDetail,
+    pub carried_forward: Vec<TaskItem>,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,9 +180,14 @@ async fn ensure_journal(
 // ---------------------------------------------------------------------------
 
 /// GET /journal/today — get or auto-create today's journal page.
+///
+/// The response includes a `carried_forward` array of incomplete tasks from
+/// journal pages in the past 7 days (excluding today). These tasks are not
+/// copied into today's file — they are surfaced in the API response for the
+/// UI to render.
 async fn get_today(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<PageDetail>, ApiError> {
+) -> Result<Json<JournalTodayResponse>, ApiError> {
     let date = Utc::now().format("%Y-%m-%d").to_string();
     let (vault_path, _created) = ensure_journal(&state, &date).await?;
 
@@ -181,7 +195,105 @@ async fn get_today(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail(&page, &vault_path)))
+    let detail = page_detail(&page, &vault_path);
+
+    // Query for carried-forward tasks: incomplete tasks from recent journals
+    // (past 7 days, excluding today).
+    let today_clone = date.clone();
+    let lookback_date = {
+        let today_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap();
+        (today_date - chrono::Duration::days(7))
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+
+    let carried = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
+
+            let sql = "\
+                SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
+                       status_prop.value AS status, p.path, p.title \
+                FROM blocks b \
+                JOIN block_properties status_prop \
+                  ON status_prop.page_id = b.page_id \
+                 AND status_prop.span_start = b.span_start \
+                 AND status_prop.key = 'status' \
+                JOIN pages p ON b.page_id = p.id \
+                WHERE p.journal_date IS NOT NULL \
+                  AND p.journal_date < ?1 \
+                  AND p.journal_date >= ?2 \
+                  AND status_prop.value IN ('todo', 'doing') \
+                ORDER BY p.journal_date DESC, b.order_index ASC";
+
+            let mut stmt = conn.prepare(sql)?;
+            let rows = stmt.query_map(params![today_clone, lookback_date], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,        // page_id
+                    row.get::<_, Option<String>>(1)?, // block_id
+                    row.get::<_, String>(2)?,         // content
+                    row.get::<_, i64>(3)?,            // span_start
+                    row.get::<_, i64>(4)?,            // span_end
+                    row.get::<_, String>(5)?,         // status
+                    row.get::<_, String>(6)?,         // path
+                    row.get::<_, Option<String>>(7)?, // title
+                ))
+            })?;
+
+            let mut tasks: Vec<TaskItem> = Vec::new();
+            let mut task_keys: Vec<(String, i64)> = Vec::new();
+
+            for row in rows {
+                let (
+                    page_id,
+                    block_id,
+                    content,
+                    span_start,
+                    span_end,
+                    status,
+                    page_path,
+                    page_title,
+                ) = row?;
+                task_keys.push((page_id, span_start));
+                tasks.push(TaskItem {
+                    block_id,
+                    content,
+                    status,
+                    properties: HashMap::new(),
+                    page_path,
+                    page_title,
+                    span_start,
+                    span_end,
+                });
+            }
+
+            // Fill properties for each task
+            for (i, (page_id, span_start)) in task_keys.iter().enumerate() {
+                let mut prop_stmt = conn.prepare(
+                    "SELECT bp.key, bp.value FROM block_properties bp \
+                     WHERE bp.page_id = ?1 AND bp.span_start = ?2",
+                )?;
+                let prop_rows =
+                    prop_stmt.query_map(params![page_id, span_start], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?;
+                for prop_row in prop_rows {
+                    let (key, value) = prop_row?;
+                    tasks[i].properties.insert(key, value);
+                }
+            }
+
+            Ok::<_, rusqlite::Error>(tasks)
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    Ok(Json(JournalTodayResponse {
+        page: detail,
+        carried_forward: carried,
+    }))
 }
 
 /// GET /journal/:date — get a journal page by date.

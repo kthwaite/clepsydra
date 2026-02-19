@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::Router;
@@ -21,9 +22,19 @@ fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
 }
 
 fn setup_server() -> (TestServer, TempDir) {
+    setup_server_with_files(|_| {})
+}
+
+/// Like `setup_server`, but calls `pre_index` with the vault root path after
+/// `init_vault` and before the index build. Use this to seed the vault with
+/// files that must be indexed before the server starts.
+fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
+
+    // Allow the caller to write files into the vault before indexing.
+    pre_index(&root);
 
     let vault = Vault::open(&root).unwrap();
     let db_path = vault.root().join(".clepsydra/cache.db");
@@ -281,4 +292,82 @@ async fn range_rejects_invalid_dates() {
         .get("/api/vault/journal/range?from=bad&to=also-bad")
         .await;
     res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// Carried-forward tasks in GET /journal/today
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn today_journal_includes_carried_forward_tasks() {
+    let yesterday = {
+        let today = Utc::now().date_naive();
+        (today - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    let yesterday_clone = yesterday.clone();
+
+    let (server, _tmp) = setup_server_with_files(move |vault_root| {
+        let journals_dir = vault_root.join("journals");
+        std::fs::create_dir_all(&journals_dir).unwrap();
+
+        let content = format!(
+            "---\nid: 00000000-0000-0000-0000-aaaaaaaaaaaa\ntitle: \"{yesterday_clone}\"\ntags:\n  - journal\n---\n\
+             - [ ] Unfinished task from yesterday [due:: {yesterday_clone}]\n\
+             - [x] Completed task\n"
+        );
+        std::fs::write(journals_dir.join(format!("{yesterday_clone}.md")), &content).unwrap();
+    });
+
+    // Get today's journal — it should include carried_forward
+    let res = server.get("/api/vault/journal/today").await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+
+    // The page detail fields should still be present (flattened)
+    assert!(body["path"].as_str().is_some());
+    assert!(body["meta"]["title"].as_str().is_some());
+
+    let carried = body["carried_forward"]
+        .as_array()
+        .expect("carried_forward should be an array");
+
+    // Should have the incomplete task but NOT the completed one
+    assert!(!carried.is_empty(), "should have carried-forward tasks");
+    assert!(
+        carried
+            .iter()
+            .any(|t| t["content"].as_str().unwrap().contains("Unfinished")),
+        "should contain the unfinished task"
+    );
+    assert!(
+        !carried
+            .iter()
+            .any(|t| t["content"].as_str().unwrap().contains("Completed")),
+        "should not contain the completed task"
+    );
+
+    // Verify source metadata — the task should reference yesterday's journal
+    let task = &carried[0];
+    assert_eq!(
+        task["page_path"].as_str().unwrap(),
+        format!("journals/{yesterday}.md")
+    );
+    assert_eq!(task["status"].as_str().unwrap(), "todo");
+}
+
+#[tokio::test]
+async fn today_journal_carried_forward_empty_when_no_recent_tasks() {
+    let (server, _tmp) = setup_server();
+
+    let res = server.get("/api/vault/journal/today").await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    let carried = body["carried_forward"]
+        .as_array()
+        .expect("carried_forward should be an array");
+    assert!(carried.is_empty(), "should be empty when no recent journal tasks");
 }
