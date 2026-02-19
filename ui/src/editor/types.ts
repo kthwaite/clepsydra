@@ -6,23 +6,31 @@ import type { ReactEditor } from "slate-react";
 
 export interface ParagraphElement {
   type: "paragraph";
+  blockId?: string;
+  properties?: Record<string, string>;
   children: Descendant[];
 }
 
 export interface HeadingElement {
   type: "heading";
   level: 1 | 2 | 3 | 4 | 5 | 6;
+  blockId?: string;
+  properties?: Record<string, string>;
   children: Descendant[];
 }
 
 export interface CodeBlockElement {
   type: "code-block";
   language?: string;
+  blockId?: string;
+  properties?: Record<string, string>;
   children: CustomText[];
 }
 
 export interface BlockquoteElement {
   type: "blockquote";
+  blockId?: string;
+  properties?: Record<string, string>;
   children: Descendant[];
 }
 
@@ -38,6 +46,10 @@ export interface NumberedListElement {
 
 export interface ListItemElement {
   type: "list-item";
+  checked?: boolean | null;
+  blockId?: string;
+  properties?: Record<string, string>;
+  collapsed?: boolean;
   children: Descendant[];
 }
 

@@ -365,6 +365,161 @@ describe("markdownToSlate", () => {
     });
   });
 
+  describe("task lists", () => {
+    it("converts checkbox list items with checked state", () => {
+      const result = markdownToSlate("- [ ] Todo item\n- [x] Done item\n");
+      expect(result).toEqual([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              checked: false,
+              children: [
+                { type: "paragraph", children: [{ text: "Todo item" }] },
+              ],
+            },
+            {
+              type: "list-item",
+              checked: true,
+              children: [
+                { type: "paragraph", children: [{ text: "Done item" }] },
+              ],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("leaves checked undefined for non-task items", () => {
+      const result = markdownToSlate("- Regular item\n");
+      const list = result[0] as {
+        children: Array<{ checked?: boolean | null }>;
+      };
+      expect(list.children[0].checked).toBeUndefined();
+    });
+
+    it("handles mixed task and non-task items", () => {
+      const result = markdownToSlate("- [ ] Task\n- Regular\n- [x] Done\n");
+      const list = result[0] as {
+        children: Array<{ type: string; checked?: boolean | null }>;
+      };
+      expect(list.children[0].checked).toBe(false);
+      expect(list.children[1].checked).toBeUndefined();
+      expect(list.children[2].checked).toBe(true);
+    });
+  });
+
+  describe("block IDs", () => {
+    it("extracts ^id from end of list item text", () => {
+      const result = markdownToSlate("- Item ^abc123DEF0\n");
+      const list = result[0] as {
+        children: Array<{
+          type: string;
+          blockId?: string;
+          children: Array<{ children: Array<{ text: string }> }>;
+        }>;
+      };
+      expect(list.children[0].blockId).toBe("abc123DEF0");
+      expect(list.children[0].children[0].children[0].text).toBe("Item");
+    });
+
+    it("extracts ^id from paragraph", () => {
+      const result = markdownToSlate("Some text ^abc123DEF0\n");
+      const para = result[0] as {
+        type: string;
+        blockId?: string;
+        children: Array<{ text: string }>;
+      };
+      expect(para.blockId).toBe("abc123DEF0");
+      expect(para.children[0].text).toBe("Some text");
+    });
+
+    it("extracts ^id from heading", () => {
+      const result = markdownToSlate("## My heading ^abc123DEF0\n");
+      const heading = result[0] as {
+        type: string;
+        blockId?: string;
+        children: Array<{ text: string }>;
+      };
+      expect(heading.blockId).toBe("abc123DEF0");
+      expect(heading.children[0].text).toBe("My heading");
+    });
+
+    it("does not extract IDs shorter than 10 chars", () => {
+      const result = markdownToSlate("Text ^short\n");
+      const para = result[0] as { blockId?: string };
+      expect(para.blockId).toBeUndefined();
+    });
+
+    it("does not extract IDs longer than 12 chars", () => {
+      const result = markdownToSlate("Text ^abcdefghijklm\n");
+      const para = result[0] as { blockId?: string };
+      expect(para.blockId).toBeUndefined();
+    });
+  });
+
+  describe("inline properties", () => {
+    it("extracts [key:: value] pairs from list items", () => {
+      const result = markdownToSlate(
+        "- Buy milk [due:: 2026-03-01] [priority:: A]\n",
+      );
+      const list = result[0] as {
+        children: Array<{
+          properties?: Record<string, string>;
+          children: Array<{ children: Array<{ text: string }> }>;
+        }>;
+      };
+      expect(list.children[0].properties).toEqual({
+        due: "2026-03-01",
+        priority: "A",
+      });
+      expect(list.children[0].children[0].children[0].text).toBe("Buy milk");
+    });
+
+    it("extracts [key:: value] from paragraphs", () => {
+      const result = markdownToSlate(
+        "Some note [status:: draft] [author:: kit]\n",
+      );
+      const para = result[0] as {
+        properties?: Record<string, string>;
+        children: Array<{ text: string }>;
+      };
+      expect(para.properties).toEqual({ status: "draft", author: "kit" });
+      expect(para.children[0].text).toBe("Some note");
+    });
+
+    it("handles properties with hyphens and underscores in keys", () => {
+      const result = markdownToSlate("Text [my_key:: val] [my-key2:: val2]\n");
+      const para = result[0] as { properties?: Record<string, string> };
+      expect(para.properties).toEqual({ my_key: "val", "my-key2": "val2" });
+    });
+
+    it("does not set properties when none are found", () => {
+      const result = markdownToSlate("Just plain text\n");
+      const para = result[0] as { properties?: Record<string, string> };
+      expect(para.properties).toBeUndefined();
+    });
+  });
+
+  describe("combined block metadata", () => {
+    it("extracts both properties and blockId from a list item", () => {
+      const result = markdownToSlate(
+        "- Buy milk [due:: 2026-03-01] ^abc123DEF0\n",
+      );
+      const list = result[0] as {
+        children: Array<{
+          blockId?: string;
+          properties?: Record<string, string>;
+          children: Array<{ children: Array<{ text: string }> }>;
+        }>;
+      };
+      expect(list.children[0].blockId).toBe("abc123DEF0");
+      expect(list.children[0].properties).toEqual({ due: "2026-03-01" });
+      expect(list.children[0].children[0].children[0].text).toBe("Buy milk");
+    });
+  });
+
   describe("mixed content", () => {
     it("handles a document with varied block types", () => {
       const md = `# Title

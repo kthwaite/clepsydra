@@ -5,6 +5,7 @@ import wikiLinkPlugin from "remark-wiki-link";
 import type { Descendant } from "slate";
 import { unified } from "unified";
 import type {
+  CustomElement,
   CustomText,
   LinkElement,
   ListItemElement,
@@ -66,11 +67,16 @@ export function mdastToSlate(markdown: string): Descendant[] {
 
 /**
  * Convert an array of mdast block-level nodes to Slate Descendant[].
+ * When `extractMetadata` is true, block-level metadata (^blockId, [key:: value])
+ * is extracted from paragraphs and headings.
  */
-function convertChildren(nodes: RootContent[]): Descendant[] {
+function convertChildren(
+  nodes: RootContent[],
+  extractMetadata = true,
+): Descendant[] {
   const result: Descendant[] = [];
   for (const node of nodes) {
-    const converted = convertBlockNode(node);
+    const converted = convertBlockNode(node, extractMetadata);
     if (converted != null) {
       result.push(converted);
     }
@@ -82,20 +88,27 @@ function convertChildren(nodes: RootContent[]): Descendant[] {
  * Convert a single mdast block-level node to a Slate element.
  * Returns null for node types we choose to skip (e.g., yaml, html, definition).
  */
-function convertBlockNode(node: RootContent): Descendant | null {
+function convertBlockNode(
+  node: RootContent,
+  extractMetadata = true,
+): Descendant | null {
   switch (node.type) {
-    case "paragraph":
-      return {
-        type: "paragraph",
+    case "paragraph": {
+      const el = {
+        type: "paragraph" as const,
         children: convertPhrasingContent(node.children, {}),
       };
+      return extractMetadata ? extractBlockMetadata(el) : el;
+    }
 
-    case "heading":
-      return {
-        type: "heading",
+    case "heading": {
+      const el = {
+        type: "heading" as const,
         level: node.depth,
         children: convertPhrasingContent(node.children, {}),
       };
+      return extractMetadata ? extractBlockMetadata(el) : el;
+    }
 
     case "code":
       return {
@@ -138,15 +151,28 @@ function convertBlockNode(node: RootContent): Descendant | null {
 
 /**
  * Convert an mdast listItem to a Slate list-item element.
+ * Metadata extraction is done at the list-item level (not on child paragraphs).
  */
 function convertListItem(node: {
   type: "listItem";
+  checked?: boolean | null;
   children: RootContent[];
 }): ListItemElement {
-  return {
+  // Convert children WITHOUT metadata extraction — we extract at the list-item level
+  const el: ListItemElement = {
     type: "list-item",
-    children: convertChildren(node.children as RootContent[]),
+    children: convertChildren(node.children as RootContent[], false),
   };
+
+  // Propagate checkbox state from GFM task list items
+  if (node.checked === true) {
+    el.checked = true;
+  } else if (node.checked === false) {
+    el.checked = false;
+  }
+  // node.checked === null or undefined → leave checked off
+
+  return extractBlockMetadata(el) as ListItemElement;
 }
 
 /**
@@ -269,4 +295,106 @@ function textNode(text: string, marks: Marks): CustomText {
   if (marks.italic) node.italic = true;
   if (marks.code) node.code = true;
   return node;
+}
+
+// ---------------------------------------------------------------------------
+// Post-processing: extract block IDs and inline properties from text nodes
+// ---------------------------------------------------------------------------
+
+/** Pattern for block IDs: whitespace + ^ + 10-12 alphanumeric chars at end of text */
+const BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})$/;
+
+/** Pattern for inline properties: [key:: value] */
+const INLINE_PROP_RE = /\[([A-Za-z_][\w-]*)::[ \t]+([^\]]+)\]/g;
+
+function isTextNode(node: Descendant): node is CustomText {
+  return "text" in node;
+}
+
+/**
+ * Find the last CustomText node in a Descendant[] tree (depth-first, rightmost).
+ */
+function findLastTextNode(children: Descendant[]): CustomText | null {
+  for (let i = children.length - 1; i >= 0; i--) {
+    const child = children[i];
+    if (isTextNode(child)) {
+      return child;
+    }
+    const el = child as CustomElement;
+    if (el.children) {
+      const found = findLastTextNode(el.children);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Collect all CustomText nodes from a Descendant[] tree (in order).
+ */
+function collectTextNodes(children: Descendant[]): CustomText[] {
+  const result: CustomText[] = [];
+  for (const child of children) {
+    if (isTextNode(child)) {
+      result.push(child);
+    } else {
+      const el = child as CustomElement;
+      if (el.children) {
+        result.push(...collectTextNodes(el.children));
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Post-process a block element to extract ^blockId and [key:: value]
+ * inline properties from its text content. Mutates the element in place
+ * and returns it for convenience.
+ */
+function extractBlockMetadata<T extends Descendant>(element: T): T {
+  const el = element as unknown as CustomElement & {
+    blockId?: string;
+    properties?: Record<string, string>;
+  };
+
+  // 1. Extract inline properties from all text nodes
+  const allTextNodes = collectTextNodes(el.children);
+  const properties: Record<string, string> = {};
+  for (const textChild of allTextNodes) {
+    INLINE_PROP_RE.lastIndex = 0;
+    const matches: Array<{ full: string; key: string; value: string }> = [];
+    let match: RegExpExecArray | null;
+    while ((match = INLINE_PROP_RE.exec(textChild.text)) !== null) {
+      matches.push({ full: match[0], key: match[1], value: match[2] });
+    }
+    for (const m of matches) {
+      properties[m.key] = m.value;
+      textChild.text = textChild.text.replace(m.full, "");
+    }
+  }
+  if (Object.keys(properties).length > 0) {
+    el.properties = properties;
+  }
+
+  // 2. Extract block ID from the last text node
+  const lastText = findLastTextNode(el.children);
+  if (lastText) {
+    const blockIdMatch = BLOCK_ID_RE.exec(lastText.text);
+    if (blockIdMatch) {
+      el.blockId = blockIdMatch[1];
+      lastText.text = lastText.text.slice(
+        0,
+        lastText.text.length - blockIdMatch[0].length,
+      );
+    }
+  }
+
+  // 3. Clean up trailing whitespace left by property/blockId removal
+  const lastTextAfter = findLastTextNode(el.children);
+  if (lastTextAfter && (el.blockId || el.properties)) {
+    lastTextAfter.text = lastTextAfter.text.trimEnd();
+  }
+
+  return element;
 }

@@ -119,18 +119,22 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
 function convertElement(node: CustomElement): RootContent {
   switch (node.type) {
     case "paragraph": {
+      const children = convertInlineChildren(node.children);
+      appendBlockMetadataSuffix(children, node);
       const p: Paragraph = {
         type: "paragraph",
-        children: convertInlineChildren(node.children),
+        children,
       };
       return p;
     }
 
     case "heading": {
+      const children = convertInlineChildren(node.children);
+      appendBlockMetadataSuffix(children, node);
       const h: Heading = {
         type: "heading",
         depth: node.level,
-        children: convertInlineChildren(node.children),
+        children,
       };
       return h;
     }
@@ -231,7 +235,84 @@ function convertListItem(
     spread: false,
     children: convertBlockChildren(node.children),
   };
+
+  // Propagate checkbox state for GFM task list items
+  if (node.checked === true || node.checked === false) {
+    li.checked = node.checked;
+  }
+
+  // Append properties and blockId to the last text node in the list item's
+  // first paragraph (if any). We need to find the deepest phrasing content.
+  appendBlockMetadataToListItem(li, node);
+
   return li;
+}
+
+// ---------------------------------------------------------------------------
+// Block metadata serialization helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the suffix string for properties and blockId.
+ * Uses inline HTML node to bypass markdown escaping of brackets.
+ */
+function buildMetadataSuffix(element: {
+  properties?: Record<string, string>;
+  blockId?: string;
+}): string {
+  let suffix = "";
+  if (element.properties) {
+    for (const [key, value] of Object.entries(element.properties)) {
+      suffix += ` [${key}:: ${value}]`;
+    }
+  }
+  if (element.blockId) {
+    suffix += ` ^${element.blockId}`;
+  }
+  return suffix;
+}
+
+/**
+ * Append properties/blockId suffix as an inline HTML node to a PhrasingContent[].
+ * Using HTML type prevents toMarkdown from escaping brackets in [key:: value].
+ */
+function appendBlockMetadataSuffix(
+  children: PhrasingContent[],
+  element: { properties?: Record<string, string>; blockId?: string },
+): void {
+  const suffix = buildMetadataSuffix(element);
+  if (!suffix) return;
+  // Append as inline HTML to bypass bracket escaping
+  children.push({ type: "html", value: suffix } as unknown as PhrasingContent);
+}
+
+/**
+ * Append properties/blockId to the content of a list item's first paragraph.
+ */
+function appendBlockMetadataToListItem(
+  li: ListItem,
+  slateNode: { properties?: Record<string, string>; blockId?: string },
+): void {
+  const suffix = buildMetadataSuffix(slateNode);
+  if (!suffix) return;
+
+  // Find the first paragraph in the list item and append as inline HTML
+  for (const child of li.children) {
+    if (child.type === "paragraph") {
+      child.children.push({
+        type: "html",
+        value: suffix,
+      } as unknown as PhrasingContent);
+      return;
+    }
+  }
+  // No paragraph found — add one with just the suffix
+  li.children.push({
+    type: "paragraph",
+    children: [
+      { type: "html", value: suffix.trimStart() } as unknown as PhrasingContent,
+    ],
+  });
 }
 
 function convertBlockChildren(children: Descendant[]): Array<BlockContent> {

@@ -1,6 +1,6 @@
 import type { Descendant } from "slate";
 import { describe, expect, it } from "vitest";
-import { slateToMarkdown } from "../index";
+import { markdownToSlate, slateToMarkdown } from "../index";
 
 describe("slateToMarkdown", () => {
   it("converts a paragraph to plain text", () => {
@@ -226,5 +226,145 @@ describe("slateToMarkdown", () => {
   it("handles empty document", () => {
     const slate: Descendant[] = [];
     expect(slateToMarkdown(slate).trim()).toBe("");
+  });
+
+  describe("task list serialization", () => {
+    it("serializes checked state to markdown checkboxes", () => {
+      const slate: Descendant[] = [
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              checked: false,
+              children: [{ type: "paragraph", children: [{ text: "Todo" }] }],
+            },
+            {
+              type: "list-item",
+              checked: true,
+              children: [{ type: "paragraph", children: [{ text: "Done" }] }],
+            },
+          ],
+        },
+      ];
+      const md = slateToMarkdown(slate);
+      expect(md).toContain("[ ] Todo");
+      expect(md).toContain("[x] Done");
+    });
+
+    it("omits checkbox for items without checked property", () => {
+      const slate: Descendant[] = [
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                { type: "paragraph", children: [{ text: "Regular" }] },
+              ],
+            },
+          ],
+        },
+      ];
+      const md = slateToMarkdown(slate);
+      expect(md.trim()).toBe("* Regular");
+    });
+  });
+
+  describe("block ID serialization", () => {
+    it("serializes blockId to ^id suffix on paragraph", () => {
+      const slate: Descendant[] = [
+        {
+          type: "paragraph",
+          blockId: "abc123DEF0",
+          children: [{ text: "Some text" }],
+        },
+      ];
+      const md = slateToMarkdown(slate).trim();
+      expect(md).toBe("Some text ^abc123DEF0");
+    });
+
+    it("serializes blockId on heading", () => {
+      const slate: Descendant[] = [
+        {
+          type: "heading",
+          level: 2,
+          blockId: "abc123DEF0",
+          children: [{ text: "Title" }],
+        },
+      ];
+      const md = slateToMarkdown(slate).trim();
+      expect(md).toBe("## Title ^abc123DEF0");
+    });
+
+    it("serializes blockId on list item", () => {
+      const slate: Descendant[] = [
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              blockId: "abc123DEF0",
+              children: [{ type: "paragraph", children: [{ text: "Item" }] }],
+            },
+          ],
+        },
+      ];
+      const md = slateToMarkdown(slate).trim();
+      expect(md).toBe("* Item ^abc123DEF0");
+    });
+  });
+
+  describe("inline properties serialization", () => {
+    it("serializes properties to [key:: value]", () => {
+      const slate: Descendant[] = [
+        {
+          type: "paragraph",
+          properties: { due: "2026-03-01", priority: "A" },
+          children: [{ text: "Buy milk" }],
+        },
+      ];
+      const md = slateToMarkdown(slate).trim();
+      expect(md).toContain("Buy milk");
+      expect(md).toContain("[due:: 2026-03-01]");
+      expect(md).toContain("[priority:: A]");
+    });
+
+    it("serializes properties on list items", () => {
+      const slate: Descendant[] = [
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              properties: { status: "todo" },
+              children: [{ type: "paragraph", children: [{ text: "Task" }] }],
+            },
+          ],
+        },
+      ];
+      const md = slateToMarkdown(slate).trim();
+      expect(md).toBe("* Task [status:: todo]");
+    });
+  });
+
+  describe("full round-trip", () => {
+    it("round-trips a task with id, properties, and checkbox", () => {
+      const md = "- [ ] Buy milk [due:: 2026-03-01] ^abc123DEF0\n";
+      const slate = markdownToSlate(md);
+      const output = slateToMarkdown(slate);
+      expect(output).toContain("[ ] Buy milk");
+      expect(output).toContain("[due:: 2026-03-01]");
+      expect(output).toContain("^abc123DEF0");
+    });
+
+    it("round-trips a paragraph with properties and blockId", () => {
+      const md = "Some note [status:: draft] ^abcDEF12345\n";
+      const slate = markdownToSlate(md);
+      const output = slateToMarkdown(slate);
+      expect(output).toContain("Some note");
+      expect(output).toContain("[status:: draft]");
+      expect(output).toContain("^abcDEF12345");
+    });
   });
 });
