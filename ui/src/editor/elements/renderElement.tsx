@@ -1,4 +1,10 @@
-import type { RenderElementProps } from "slate-react";
+import { type Element, Transforms } from "slate";
+import {
+  type RenderElementProps,
+  ReactEditor,
+  useSlateStatic,
+} from "slate-react";
+import type { ListItemElement } from "#/editor/types";
 import { CodeBlockElement } from "./CodeBlockElement";
 import { WikilinkElement } from "./WikilinkElement";
 
@@ -51,7 +57,11 @@ export function renderElement(props: RenderElementProps) {
       );
 
     case "list-item":
-      return <li {...attributes}>{children}</li>;
+      return (
+        <ListItem attributes={attributes} element={element}>
+          {children}
+        </ListItem>
+      );
 
     case "thematic-break":
       return (
@@ -86,4 +96,54 @@ export function renderElement(props: RenderElementProps) {
     default:
       return <p {...attributes}>{children}</p>;
   }
+}
+
+// ---------------------------------------------------------------------------
+// ListItem — renders an interactive checkbox when `checked` is set
+// ---------------------------------------------------------------------------
+
+function ListItem({
+  attributes,
+  element,
+  children,
+}: {
+  attributes: RenderElementProps["attributes"];
+  element: RenderElementProps["element"];
+  children: React.ReactNode;
+}) {
+  const editor = useSlateStatic();
+  const checked = (element as ListItemElement).checked;
+  const isTask = checked !== undefined && checked !== null;
+
+  if (!isTask) {
+    return <li {...attributes}>{children}</li>;
+  }
+
+  return (
+    <li
+      {...attributes}
+      className={checked === true ? "line-through text-muted-foreground" : ""}
+    >
+      <span
+        contentEditable={false}
+        className="mr-2 inline-flex cursor-pointer select-none align-text-top"
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => {
+            e.preventDefault();
+            const path = ReactEditor.findPath(editor, element);
+            Transforms.setNodes(
+              editor,
+              { checked: !checked } as Partial<Element>,
+              { at: path },
+            );
+          }}
+          className="accent-foreground"
+        />
+      </span>
+      {children}
+    </li>
+  );
 }
