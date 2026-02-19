@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use rusqlite::Transaction;
 
+use super::block::Block;
 use super::canonical::CanonicalName;
 use super::index::IndexError;
 use super::link::Link;
@@ -27,6 +28,8 @@ pub struct IndexedPage {
     pub prop_links: Vec<Link>,
     /// Canonical name derived from title or filename.
     pub canonical: CanonicalName,
+    /// Blocks extracted from the markdown body.
+    pub blocks: Vec<Block>,
     /// Absolute filesystem path. Used during UUID conflict resolution; not
     /// consumed by derivers.
     pub(crate) abs_path: PathBuf,

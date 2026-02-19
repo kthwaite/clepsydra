@@ -13,6 +13,7 @@ use super::canonical::CanonicalName;
 use super::config::DisambiguationStrategy;
 use super::context::extract_context;
 use super::derivation::{Deriver, IndexedPage};
+use super::derivers::blocks::BlockDeriver;
 use super::derivers::canonical_names::CanonicalNameDeriver;
 use super::derivers::cite_key::CiteKeyDeriver;
 use super::derivers::links::LinkDeriver;
@@ -157,6 +158,33 @@ CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
 CREATE INDEX IF NOT EXISTS idx_links_target_canonical ON links(target_canonical);
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 
+CREATE TABLE IF NOT EXISTS blocks (
+    block_id    TEXT,
+    page_id     TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    block_type  TEXT NOT NULL,
+    parent_id   TEXT,
+    order_index INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    depth       INTEGER NOT NULL,
+    span_start  INTEGER NOT NULL,
+    span_end    INTEGER NOT NULL,
+    PRIMARY KEY (page_id, span_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocks_block_id ON blocks(block_id) WHERE block_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blocks_page_id ON blocks(page_id);
+
+CREATE TABLE IF NOT EXISTS block_properties (
+    page_id     TEXT NOT NULL,
+    span_start  INTEGER NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    FOREIGN KEY (page_id, span_start) REFERENCES blocks(page_id, span_start) ON DELETE CASCADE,
+    PRIMARY KEY (page_id, span_start, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_block_props_key_value ON block_properties(key, value);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     page_id UNINDEXED,
     path UNINDEXED,
@@ -206,6 +234,7 @@ impl VaultIndex {
                 Box::new(CiteKeyDeriver),
                 Box::new(LinkDeriver),
                 Box::new(TagDeriver),
+                Box::new(BlockDeriver),
             ],
         })
     }
@@ -344,6 +373,9 @@ impl VaultIndex {
             // Extract body links
             let body_links = extract_links(&body);
 
+            // Extract blocks
+            let blocks = crate::vault::block::parse_blocks(&body);
+
             // Extract property ref links for configured linkable_properties
             let mut prop_links = Vec::new();
             for prop in linkable_properties {
@@ -373,6 +405,7 @@ impl VaultIndex {
                 body_links,
                 prop_links,
                 canonical,
+                blocks,
             });
         }
 
@@ -483,7 +516,10 @@ impl VaultIndex {
                 ],
             )?;
 
-            // Clear old links/tags/canonical_names for this page
+            // Clear old derived data for this page
+            // block_properties must be deleted before blocks due to FK constraint
+            tx.execute("DELETE FROM block_properties WHERE page_id = ?1", params![page_id])?;
+            tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
             tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
             tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
             tx.execute(
@@ -635,6 +671,7 @@ impl VaultIndex {
         };
 
         let body_links = extract_links(&body);
+        let blocks = crate::vault::block::parse_blocks(&body);
 
         let mut prop_links = Vec::new();
         for prop in linkable_properties {
@@ -663,6 +700,7 @@ impl VaultIndex {
             body_links,
             prop_links,
             canonical,
+            blocks,
         };
 
         let tx = self.conn.transaction()?;
@@ -707,6 +745,9 @@ impl VaultIndex {
         )?;
 
         // Clear old derived data
+        // block_properties must be deleted before blocks due to FK constraint
+        tx.execute("DELETE FROM block_properties WHERE page_id = ?1", params![page_id])?;
+        tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
         tx.execute(
