@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
+import { Route as JournalRouteImport } from './routes/journal'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PagesSplatRouteImport } from './routes/pages/$'
@@ -17,6 +18,11 @@ import { Route as PagesSplatRouteImport } from './routes/pages/$'
 const WorkspaceRoute = WorkspaceRouteImport.update({
   id: '/workspace',
   path: '/workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JournalRoute = JournalRouteImport.update({
+  id: '/journal',
+  path: '/journal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GraphRoute = GraphRouteImport.update({
@@ -38,12 +44,14 @@ const PagesSplatRoute = PagesSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/graph': typeof GraphRoute
+  '/journal': typeof JournalRoute
   '/workspace': typeof WorkspaceRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/graph': typeof GraphRoute
+  '/journal': typeof JournalRoute
   '/workspace': typeof WorkspaceRoute
   '/pages/$': typeof PagesSplatRoute
 }
@@ -51,20 +59,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/graph': typeof GraphRoute
+  '/journal': typeof JournalRoute
   '/workspace': typeof WorkspaceRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/graph' | '/workspace' | '/pages/$'
+  fullPaths: '/' | '/graph' | '/journal' | '/workspace' | '/pages/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/graph' | '/workspace' | '/pages/$'
-  id: '__root__' | '/' | '/graph' | '/workspace' | '/pages/$'
+  to: '/' | '/graph' | '/journal' | '/workspace' | '/pages/$'
+  id: '__root__' | '/' | '/graph' | '/journal' | '/workspace' | '/pages/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   GraphRoute: typeof GraphRoute
+  JournalRoute: typeof JournalRoute
   WorkspaceRoute: typeof WorkspaceRoute
   PagesSplatRoute: typeof PagesSplatRoute
 }
@@ -76,6 +86,13 @@ declare module '@tanstack/react-router' {
       path: '/workspace'
       fullPath: '/workspace'
       preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/journal': {
+      id: '/journal'
+      path: '/journal'
+      fullPath: '/journal'
+      preLoaderRoute: typeof JournalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/graph': {
@@ -105,6 +122,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   GraphRoute: GraphRoute,
+  JournalRoute: JournalRoute,
   WorkspaceRoute: WorkspaceRoute,
   PagesSplatRoute: PagesSplatRoute,
 }
