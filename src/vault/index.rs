@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS pages (
     created_at      TEXT,
     updated_at      TEXT,
     meta_json       TEXT NOT NULL,
-    content_hash    TEXT NOT NULL
+    content_hash    TEXT NOT NULL,
+    journal_date    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS canonical_names (
@@ -150,6 +151,7 @@ CREATE TABLE IF NOT EXISTS tags (
     PRIMARY KEY (page_id, tag)
 );
 
+CREATE INDEX IF NOT EXISTS idx_pages_journal_date ON pages(journal_date) WHERE journal_date IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pages_path ON pages(path);
 CREATE INDEX IF NOT EXISTS idx_pages_canonical_name ON pages(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_canonical_names_name ON canonical_names(canonical_name);
@@ -480,10 +482,12 @@ impl VaultIndex {
             let created_at = pf.meta.created_at.map(|dt| dt.to_rfc3339());
             let updated_at = pf.meta.updated_at.map(|dt| dt.to_rfc3339());
 
+            let journal_date = extract_journal_date(pf.vault_path.as_str());
+
             // Upsert into pages table
             tx.execute(
-                "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET
                    path = excluded.path,
                    title = excluded.title,
@@ -491,7 +495,8 @@ impl VaultIndex {
                    created_at = excluded.created_at,
                    updated_at = excluded.updated_at,
                    meta_json = excluded.meta_json,
-                   content_hash = excluded.content_hash",
+                   content_hash = excluded.content_hash,
+                   journal_date = excluded.journal_date",
                 params![
                     page_id,
                     pf.vault_path.as_str(),
@@ -501,6 +506,7 @@ impl VaultIndex {
                     updated_at,
                     meta_json,
                     pf.content_hash,
+                    journal_date,
                 ],
             )?;
 
@@ -708,10 +714,11 @@ impl VaultIndex {
         let meta_json = serde_json::to_string(&page.meta).unwrap_or_else(|_| "{}".to_string());
         let created_at = page.meta.created_at.map(|dt| dt.to_rfc3339());
         let updated_at = page.meta.updated_at.map(|dt| dt.to_rfc3339());
+        let journal_date = extract_journal_date(page.vault_path.as_str());
 
         tx.execute(
-            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                path = excluded.path,
                title = excluded.title,
@@ -719,7 +726,8 @@ impl VaultIndex {
                created_at = excluded.created_at,
                updated_at = excluded.updated_at,
                meta_json = excluded.meta_json,
-               content_hash = excluded.content_hash",
+               content_hash = excluded.content_hash,
+               journal_date = excluded.journal_date",
             params![
                 page_id,
                 page.vault_path.as_str(),
@@ -729,6 +737,7 @@ impl VaultIndex {
                 updated_at,
                 meta_json,
                 page.content_hash,
+                journal_date,
             ],
         )?;
 
@@ -1389,6 +1398,33 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
     }
 
     Ok(())
+}
+
+/// Extract a journal date from a vault path like `journals/YYYY-MM-DD.md` or
+/// `journals/YYYY-MM-DD` (stem without extension).
+///
+/// Returns `Some("YYYY-MM-DD")` if the path matches, `None` otherwise.
+/// Only matches top-level `journals/` — e.g. `other/journals/2026-02-17.md` is
+/// rejected.
+fn extract_journal_date(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("journals/")?;
+    // Strip optional .md extension
+    let stem = rest.strip_suffix(".md").unwrap_or(rest);
+    // Validate YYYY-MM-DD format (exactly 10 chars, correct punctuation, all digits)
+    if stem.len() != 10 {
+        return None;
+    }
+    let bytes = stem.as_bytes();
+    if bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    // Check that YYYY, MM, DD are all ASCII digits
+    for &i in &[0, 1, 2, 3, 5, 6, 8, 9] {
+        if !bytes[i].is_ascii_digit() {
+            return None;
+        }
+    }
+    Some(stem.to_string())
 }
 
 /// Extract string values from a serde_yaml::Value (handles both scalar strings
