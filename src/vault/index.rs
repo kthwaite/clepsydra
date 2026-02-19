@@ -1339,7 +1339,7 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
 }
 
 /// Find the byte offset where the body starts (after the frontmatter `---` fences).
-fn find_body_start(content: &str) -> usize {
+pub(crate) fn find_body_start(content: &str) -> usize {
     if !content.starts_with("---") {
         return 0;
     }

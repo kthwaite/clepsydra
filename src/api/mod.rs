@@ -9,6 +9,7 @@ pub mod index_routes;
 pub mod openapi;
 pub mod pages;
 pub mod pagination;
+pub mod tasks;
 
 use std::sync::Arc;
 
@@ -55,4 +56,5 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         )
         .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
+        .nest("/tasks", tasks::router())
 }
