@@ -1,6 +1,7 @@
 pub mod academic;
 pub mod academic_hook;
 pub mod archive_hook;
+pub mod block;
 pub mod block_id;
 pub mod canonical;
 pub mod cas;
