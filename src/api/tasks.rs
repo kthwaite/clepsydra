@@ -35,7 +35,7 @@ pub struct TaskQueryParams {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskItem {
     pub block_id: Option<String>,
     pub content: String,
