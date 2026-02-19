@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { BookOpen, FilePlus, FolderPlus, Settings } from "lucide-react";
+import { BookOpen, FilePlus, FolderPlus, ListChecks, Settings } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useTags } from "#/api/index";
@@ -169,6 +169,13 @@ export function Sidebar() {
           >
             <BookOpen className="h-3.5 w-3.5" />
             Journal
+          </Link>
+          <Link
+            to="/agenda"
+            className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground [&.active]:font-bold [&.active]:text-foreground"
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+            Agenda
           </Link>
         </div>
         <FileTree />
