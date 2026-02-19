@@ -446,6 +446,18 @@ describe("markdownToSlate", () => {
       expect(heading.children[0].text).toBe("My heading");
     });
 
+    it("extracts blockId from parent in nested list", () => {
+      const result = markdownToSlate("- Parent ^abc123DEF0\n  - Child\n");
+      const list = result[0] as any;
+      const parent = list.children[0];
+      expect(parent.blockId).toBe("abc123DEF0");
+      // Text should be cleaned
+      const firstChild = parent.children[0];
+      if (firstChild.text !== undefined) {
+        expect(firstChild.text.trim()).toBe("Parent");
+      }
+    });
+
     it("does not extract IDs shorter than 10 chars", () => {
       const result = markdownToSlate("Text ^short\n");
       const para = result[0] as { blockId?: string };

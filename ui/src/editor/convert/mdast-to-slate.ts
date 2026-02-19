@@ -304,11 +304,29 @@ function textNode(text: string, marks: Marks): CustomText {
 /** Pattern for block IDs: whitespace + ^ + 10-12 alphanumeric chars at end of text */
 const BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})$/;
 
-/** Pattern for inline properties: [key:: value] */
+/**
+ * Pattern for inline properties: [key:: value]
+ *
+ * Known limitation: URL values (e.g. `[url:: https://example.com]`) fail to
+ * parse because remark-gfm auto-links the URL before this regex runs,
+ * fragmenting the `[key:: value]` text across multiple AST nodes (text + link
+ * + text). Fixing this would require either disabling auto-linking globally
+ * (breaking other features) or pre-processing raw markdown (fragile). Accepted
+ * as a v2 concern — URL values in inline properties are uncommon in practice.
+ */
 const INLINE_PROP_RE = /\[([A-Za-z_][\w-]*)::[ \t]+([^\]]+)\]/g;
+
+const NESTED_LIST_TYPES: ReadonlySet<string> = new Set([
+  "bulleted-list",
+  "numbered-list",
+]);
 
 function isTextNode(node: Descendant): node is CustomText {
   return "text" in node;
+}
+
+function isNestedList(node: Descendant): boolean {
+  return !isTextNode(node) && NESTED_LIST_TYPES.has((node as CustomElement).type);
 }
 
 /**
@@ -351,6 +369,10 @@ function collectTextNodes(children: Descendant[]): CustomText[] {
  * Post-process a block element to extract ^blockId and [key:: value]
  * inline properties from its text content. Mutates the element in place
  * and returns it for convenience.
+ *
+ * For list-item elements, only direct paragraph children are searched —
+ * nested lists (bulleted-list, numbered-list) are excluded so that a
+ * child item's text is never mistaken for the parent's block metadata.
  */
 function extractBlockMetadata<T extends Descendant>(element: T): T {
   const el = element as unknown as CustomElement & {
@@ -358,8 +380,15 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
     properties?: Record<string, string>;
   };
 
+  // For list-items, restrict metadata search to non-list children (paragraphs)
+  // so nested list text doesn't contaminate the parent's metadata extraction.
+  const searchChildren =
+    el.type === "list-item"
+      ? el.children.filter((c) => !isNestedList(c))
+      : el.children;
+
   // 1. Extract inline properties from all text nodes
-  const allTextNodes = collectTextNodes(el.children);
+  const allTextNodes = collectTextNodes(searchChildren);
   const properties: Record<string, string> = {};
   for (const textChild of allTextNodes) {
     INLINE_PROP_RE.lastIndex = 0;
@@ -377,8 +406,8 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
     el.properties = properties;
   }
 
-  // 2. Extract block ID from the last text node
-  const lastText = findLastTextNode(el.children);
+  // 2. Extract block ID from the last text node (within search scope)
+  const lastText = findLastTextNode(searchChildren);
   if (lastText) {
     const blockIdMatch = BLOCK_ID_RE.exec(lastText.text);
     if (blockIdMatch) {
@@ -391,7 +420,7 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
   }
 
   // 3. Clean up trailing whitespace left by property/blockId removal
-  const lastTextAfter = findLastTextNode(el.children);
+  const lastTextAfter = findLastTextNode(searchChildren);
   if (lastTextAfter && (el.blockId || el.properties)) {
     lastTextAfter.text = lastTextAfter.text.trimEnd();
   }
