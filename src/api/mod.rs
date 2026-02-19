@@ -6,6 +6,7 @@ pub mod events;
 pub mod folders;
 pub mod frontend;
 pub mod index_routes;
+pub mod journal;
 pub mod openapi;
 pub mod pages;
 pub mod pagination;
@@ -56,5 +57,6 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         )
         .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
+        .nest("/journal", journal::router())
         .nest("/tasks", tasks::router())
 }
