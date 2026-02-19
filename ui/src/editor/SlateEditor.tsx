@@ -15,6 +15,14 @@ import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
 import { withLinks } from "./plugins/withLinks";
+import {
+  indentListItem,
+  moveBlockDown,
+  moveBlockUp,
+  outdentListItem,
+  toggleCheckbox,
+  withOutliner,
+} from "./plugins/withOutliner";
 import { withWikilinks } from "./plugins/withWikilinks";
 import type { WikilinkElement } from "./types";
 import { WikilinkCombobox } from "./WikilinkCombobox";
@@ -36,7 +44,10 @@ export function SlateEditor({
   onSaveNow,
 }: SlateEditorProps) {
   const editor = useMemo(
-    () => withReact(withHistory(withLinks(withWikilinks(createEditor())))),
+    () =>
+      withReact(
+        withHistory(withOutliner(withLinks(withWikilinks(createEditor())))),
+      ),
     [],
   );
 
@@ -121,12 +132,41 @@ export function SlateEditor({
       }
     }
 
+    // --- Outliner keybindings ---
+    if (event.key === "Tab" && !event.shiftKey) {
+      event.preventDefault();
+      indentListItem(editor);
+      return;
+    }
+    if (event.key === "Tab" && event.shiftKey) {
+      event.preventDefault();
+      outdentListItem(editor);
+      return;
+    }
+    if (event.key === "ArrowUp" && event.altKey) {
+      event.preventDefault();
+      moveBlockUp(editor);
+      return;
+    }
+    if (event.key === "ArrowDown" && event.altKey) {
+      event.preventDefault();
+      moveBlockDown(editor);
+      return;
+    }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      toggleCheckbox(editor);
+      return;
+    }
+
+    // --- Save ---
     if ((event.metaKey || event.ctrlKey) && event.key === "s") {
       event.preventDefault();
       onSaveNow();
       return;
     }
 
+    // --- Formatting marks ---
     if (event.metaKey || event.ctrlKey) {
       switch (event.key) {
         case "b": {
