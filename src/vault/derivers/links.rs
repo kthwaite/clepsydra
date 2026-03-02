@@ -27,6 +27,7 @@ impl Deriver for LinkDeriver {
                 LinkKind::PropertyRef { source_field } => {
                     ("property_ref", Some(source_field.clone()))
                 }
+                LinkKind::BlockRef => ("block_ref", None),
             };
             let target_canonical = CanonicalName::new(&link.target_raw);
             tx.execute(
@@ -52,6 +53,7 @@ impl Deriver for LinkDeriver {
                 LinkKind::PropertyRef { source_field } => {
                     ("property_ref", Some(source_field.clone()))
                 }
+                LinkKind::BlockRef => ("block_ref", None),
             };
             let target_canonical = CanonicalName::new(&link.target_raw);
             let neg_span = -((i as i64) + 1);

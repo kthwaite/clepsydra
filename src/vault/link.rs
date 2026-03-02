@@ -26,6 +26,8 @@ pub enum LinkKind {
         /// The frontmatter field that produced this link.
         source_field: String,
     },
+    /// `((block-id))` block reference (transclusion).
+    BlockRef,
 }
 
 /// Return a lazily compiled regex for wikilinks: `[[target]]` or `[[target|display]]`.
@@ -33,6 +35,13 @@ fn wikilink_regex() -> &'static Regex {
     use std::sync::OnceLock;
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap())
+}
+
+/// Return a lazily compiled regex for block references: `((10-12 alphanumeric chars))`.
+fn block_ref_regex() -> &'static Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\(\(([A-Za-z0-9]{10,12})\)\)").unwrap())
 }
 
 /// Returns `true` if `url` points outside the vault (http, https, mailto, or
@@ -104,6 +113,19 @@ pub fn extract_links(body: &str) -> Vec<Link> {
                         target_raw: target.to_string(),
                         span: start..end,
                         kind: LinkKind::Wiki,
+                    });
+                }
+
+                let block_ref_re = block_ref_regex();
+                for cap in block_ref_re.captures_iter(source_slice) {
+                    let m = cap.get(0).unwrap();
+                    let id = &cap[1];
+                    let start = range.start + m.start();
+                    let end = range.start + m.end();
+                    links.push(Link {
+                        target_raw: id.to_string(),
+                        span: start..end,
+                        kind: LinkKind::BlockRef,
                     });
                 }
             }

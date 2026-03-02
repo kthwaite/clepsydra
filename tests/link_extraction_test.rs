@@ -105,3 +105,57 @@ fn links_in_blockquote() {
     assert_eq!(links[0].target_raw, "quoted link");
     assert_eq!(links[0].kind, LinkKind::Wiki);
 }
+
+#[test]
+fn extract_block_ref() {
+    let body = "See ((abc123DEF0a)) for details.";
+    let links = extract_links(body);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target_raw, "abc123DEF0a");
+    assert_eq!(links[0].kind, LinkKind::BlockRef);
+    assert_eq!(links[0].span.start, 4);
+    assert_eq!(links[0].span.end, 19);
+}
+
+#[test]
+fn extract_block_ref_10_char() {
+    let body = "((abcDEF1234))";
+    let links = extract_links(body);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target_raw, "abcDEF1234");
+    assert_eq!(links[0].kind, LinkKind::BlockRef);
+}
+
+#[test]
+fn extract_block_ref_12_char() {
+    let body = "((abcDEF12345X))";
+    let links = extract_links(body);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target_raw, "abcDEF12345X");
+    assert_eq!(links[0].kind, LinkKind::BlockRef);
+}
+
+#[test]
+fn skip_block_ref_in_code_block() {
+    let body = "```\n((abc123DEF0a))\n```";
+    let links = extract_links(body);
+    assert_eq!(links.len(), 0, "block refs inside fenced code blocks must be ignored");
+}
+
+#[test]
+fn skip_block_ref_in_inline_code() {
+    let body = "`((abc123DEF0a))`";
+    let links = extract_links(body);
+    assert_eq!(links.len(), 0, "block refs inside inline code must be ignored");
+}
+
+#[test]
+fn block_ref_and_wikilink_in_same_paragraph() {
+    let body = "[[Page A]] mentions ((abc123DEF0a))";
+    let links = extract_links(body);
+    assert_eq!(links.len(), 2);
+    let wiki = links.iter().find(|l| l.kind == LinkKind::Wiki).unwrap();
+    let bref = links.iter().find(|l| l.kind == LinkKind::BlockRef).unwrap();
+    assert_eq!(wiki.target_raw, "Page A");
+    assert_eq!(bref.target_raw, "abc123DEF0a");
+}
