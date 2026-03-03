@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS links (
     target_canonical TEXT,
     target_id       TEXT REFERENCES pages(id) ON DELETE SET NULL,
     target_path     TEXT,
+    target_block_id TEXT,
     kind            TEXT NOT NULL,
     source_field    TEXT,
     span_start      INTEGER NOT NULL,
@@ -158,6 +159,7 @@ CREATE INDEX IF NOT EXISTS idx_canonical_names_name ON canonical_names(canonical
 CREATE INDEX IF NOT EXISTS idx_links_target_id ON links(target_id);
 CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
 CREATE INDEX IF NOT EXISTS idx_links_target_canonical ON links(target_canonical);
+CREATE INDEX IF NOT EXISTS idx_links_target_block_id ON links(target_block_id) WHERE target_block_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -1381,17 +1383,19 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
                 target_canonical TEXT,
                 target_id       TEXT REFERENCES pages(id) ON DELETE SET NULL,
                 target_path     TEXT,
+                target_block_id TEXT,
                 kind            TEXT NOT NULL,
                 source_field    TEXT,
                 span_start      INTEGER NOT NULL,
                 span_end        INTEGER NOT NULL,
                 PRIMARY KEY (source_id, span_start)
             );
-            INSERT INTO links_new SELECT * FROM links;
+            INSERT INTO links_new (source_id, target_raw, target_canonical, target_id, target_path, kind, source_field, span_start, span_end) SELECT source_id, target_raw, target_canonical, target_id, target_path, kind, source_field, span_start, span_end FROM links;
             DROP TABLE links;
             ALTER TABLE links_new RENAME TO links;
             CREATE INDEX IF NOT EXISTS idx_links_target_id ON links(target_id);
             CREATE INDEX IF NOT EXISTS idx_links_target_path ON links(target_path);
+            CREATE INDEX IF NOT EXISTS idx_links_target_block_id ON links(target_block_id) WHERE target_block_id IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_links_target_canonical ON links(target_canonical);
             PRAGMA foreign_keys=ON;",
         )?;
