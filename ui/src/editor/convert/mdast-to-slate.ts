@@ -5,6 +5,7 @@ import wikiLinkPlugin from "remark-wiki-link";
 import type { Descendant } from "slate";
 import { unified } from "unified";
 import type {
+  BlockRefElement,
   CustomElement,
   CustomText,
   LinkElement,
@@ -212,7 +213,7 @@ function convertPhrasingNode(
 ): Descendant[] {
   switch (node.type) {
     case "text":
-      return [textNode(node.value, marks)];
+      return splitBlockRefs(node.value, marks);
 
     case "strong":
       return convertPhrasingContent(
@@ -297,6 +298,49 @@ function textNode(text: string, marks: Marks): CustomText {
   return node;
 }
 
+/**
+ * Pattern for block references: ((10-12 alphanumeric chars))
+ */
+const BLOCK_REF_RE = /\(\(([A-Za-z0-9]{10,12})\)\)/g;
+
+/**
+ * Split a text value into text nodes and BlockRefElement nodes.
+ * If no block references are found, returns a single text node.
+ */
+function splitBlockRefs(value: string, marks: Marks): Descendant[] {
+  const result: Descendant[] = [];
+  let lastIndex = 0;
+  BLOCK_REF_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = BLOCK_REF_RE.exec(value)) !== null) {
+    // Text before the match
+    if (match.index > lastIndex) {
+      result.push(textNode(value.slice(lastIndex, match.index), marks));
+    }
+    // The block reference element
+    const element: BlockRefElement = {
+      type: "block-ref",
+      blockId: match[1],
+      children: [{ text: "" }],
+    };
+    result.push(element as unknown as Descendant);
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining text after last match (or entire string if no matches)
+  if (lastIndex < value.length) {
+    result.push(textNode(value.slice(lastIndex), marks));
+  }
+
+  // If nothing was produced (empty string, no matches), return a single text node
+  if (result.length === 0) {
+    result.push(textNode("", marks));
+  }
+
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Post-processing: extract block IDs and inline properties from text nodes
 // ---------------------------------------------------------------------------
@@ -326,7 +370,9 @@ function isTextNode(node: Descendant): node is CustomText {
 }
 
 function isNestedList(node: Descendant): boolean {
-  return !isTextNode(node) && NESTED_LIST_TYPES.has((node as CustomElement).type);
+  return (
+    !isTextNode(node) && NESTED_LIST_TYPES.has((node as CustomElement).type)
+  );
 }
 
 /**

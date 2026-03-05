@@ -5,6 +5,7 @@ import {
   useSlateStatic,
 } from "slate-react";
 import type { ListItemElement } from "#/editor/types";
+import { BlockRefElement } from "./BlockRefElement";
 import { CodeBlockElement } from "./CodeBlockElement";
 import { WikilinkElement } from "./WikilinkElement";
 
@@ -73,6 +74,9 @@ export function renderElement(props: RenderElementProps) {
 
     case "wikilink":
       return <WikilinkElement {...props} element={element} />;
+
+    case "block-ref":
+      return <BlockRefElement {...props} element={element} />;
 
     case "link": {
       const isSafeUrl = /^https?:|^mailto:/i.test(element.url);

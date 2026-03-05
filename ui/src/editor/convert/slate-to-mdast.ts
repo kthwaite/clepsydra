@@ -107,6 +107,13 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
           result.push(wl as unknown as PhrasingContent);
           break;
         }
+        case "block-ref": {
+          result.push({
+            type: "text",
+            value: `((${el.blockId}))`,
+          } as PhrasingContent);
+          break;
+        }
         default:
           // Unexpected inline element — treat its children as inline text
           result.push(...convertInlineChildren((el as CustomElement).children));
@@ -221,6 +228,17 @@ function convertElement(node: CustomElement): RootContent {
       const p: Paragraph = {
         type: "paragraph",
         children: [wl as unknown as PhrasingContent],
+      };
+      return p;
+    }
+
+    case "block-ref": {
+      // A block-ref at block level — wrap in paragraph
+      const p: Paragraph = {
+        type: "paragraph",
+        children: [
+          { type: "text", value: `((${node.blockId}))` } as PhrasingContent,
+        ],
       };
       return p;
     }

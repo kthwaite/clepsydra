@@ -86,6 +86,12 @@ describe("round-trip: markdown → slate → markdown", () => {
     expect(result).toMatch(/3\.\s+Third/);
   });
 
+  it("preserves block references", () => {
+    const input = "See ((abc123DEF0a)) for details";
+    const result = normalize(roundTrip(input));
+    expect(result).toContain("((abc123DEF0a))");
+  });
+
   it("preserves a complex mixed document", () => {
     const input = `# Title
 

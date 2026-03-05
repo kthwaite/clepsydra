@@ -71,6 +71,12 @@ export interface LinkElement {
   children: Descendant[];
 }
 
+export interface BlockRefElement {
+  type: "block-ref";
+  blockId: string;
+  children: CustomText[];
+}
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -81,7 +87,8 @@ export type CustomElement =
   | ListItemElement
   | ThematicBreakElement
   | WikilinkElement
-  | LinkElement;
+  | LinkElement
+  | BlockRefElement;
 
 // --- Text type ---
 
