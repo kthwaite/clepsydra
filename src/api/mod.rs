@@ -2,6 +2,7 @@ pub mod academic;
 pub mod agenda;
 pub mod archive;
 pub mod attachments;
+pub mod blocks;
 pub mod error;
 pub mod events;
 pub mod folders;
@@ -61,4 +62,5 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/journal", journal::router())
         .nest("/tasks", tasks::router())
         .nest("/agenda", agenda::router())
+        .nest("/blocks", blocks::router())
 }
