@@ -10,7 +10,9 @@ import {
 } from "slate";
 import { withHistory } from "slate-history";
 import { Editable, Slate, withReact } from "slate-react";
+import type { BlockResponse } from "#/api/blocks";
 import { usePages } from "#/api/pages";
+import { BlockRefCombobox } from "./BlockRefCombobox";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
@@ -24,7 +26,7 @@ import {
   withOutliner,
 } from "./plugins/withOutliner";
 import { withWikilinks } from "./plugins/withWikilinks";
-import type { WikilinkElement } from "./types";
+import type { BlockRefElement, WikilinkElement } from "./types";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 
 interface SlateEditorProps {
@@ -33,7 +35,7 @@ interface SlateEditorProps {
   onSaveNow: () => void;
 }
 
-interface WikilinkTrigger {
+interface ComboboxTrigger {
   anchor: BasePoint;
   query: string;
 }
@@ -55,7 +57,9 @@ export function SlateEditor({
   const pages = pagesData?.items ?? [];
 
   const [wikilinkTrigger, setWikilinkTrigger] =
-    useState<WikilinkTrigger | null>(null);
+    useState<ComboboxTrigger | null>(null);
+  const [blockRefTrigger, setBlockRefTrigger] =
+    useState<ComboboxTrigger | null>(null);
 
   const handleChange = (value: Descendant[]) => {
     onChange(value, editor);
@@ -63,36 +67,50 @@ export function SlateEditor({
     const { selection } = editor;
     if (!selection || !Range.isCollapsed(selection)) {
       setWikilinkTrigger(null);
+      setBlockRefTrigger(null);
       return;
     }
 
     const [node] = Editor.node(editor, selection.anchor.path);
     if (!Text.isText(node)) {
       setWikilinkTrigger(null);
+      setBlockRefTrigger(null);
       return;
     }
 
     const textBefore = node.text.slice(0, selection.anchor.offset);
-    const triggerIndex = textBefore.lastIndexOf("[[");
 
-    if (triggerIndex === -1) {
-      setWikilinkTrigger(null);
-      return;
+    // Check for [[ wikilink trigger
+    const wikiTriggerIndex = textBefore.lastIndexOf("[[");
+    if (wikiTriggerIndex !== -1) {
+      const afterTrigger = textBefore.slice(wikiTriggerIndex + 2);
+      if (!afterTrigger.includes("]]")) {
+        setWikilinkTrigger({
+          anchor: { path: selection.anchor.path, offset: wikiTriggerIndex },
+          query: afterTrigger,
+        });
+        setBlockRefTrigger(null);
+        return;
+      }
     }
+    setWikilinkTrigger(null);
 
-    const afterTrigger = textBefore.slice(triggerIndex + 2);
-    if (afterTrigger.includes("]]")) {
-      setWikilinkTrigger(null);
-      return;
+    // Check for (( block ref trigger
+    const blockRefTriggerIndex = textBefore.lastIndexOf("((");
+    if (blockRefTriggerIndex !== -1) {
+      const afterTrigger = textBefore.slice(blockRefTriggerIndex + 2);
+      if (!afterTrigger.includes("))")) {
+        setBlockRefTrigger({
+          anchor: {
+            path: selection.anchor.path,
+            offset: blockRefTriggerIndex,
+          },
+          query: afterTrigger,
+        });
+        return;
+      }
     }
-
-    const query = afterTrigger;
-    const anchor: BasePoint = {
-      path: selection.anchor.path,
-      offset: triggerIndex,
-    };
-
-    setWikilinkTrigger({ anchor, query });
+    setBlockRefTrigger(null);
   };
 
   const insertWikilink = (page: {
@@ -124,8 +142,34 @@ export function SlateEditor({
     setWikilinkTrigger(null);
   };
 
+  const insertBlockRef = (block: BlockResponse) => {
+    if (!blockRefTrigger) return;
+
+    const { selection } = editor;
+    if (!selection) return;
+
+    const deleteRange = {
+      anchor: blockRefTrigger.anchor,
+      focus: selection.focus,
+    };
+
+    Transforms.select(editor, deleteRange);
+    Transforms.delete(editor);
+
+    const blockRefNode: BlockRefElement = {
+      type: "block-ref",
+      blockId: block.block_id,
+      children: [{ text: "" }],
+    };
+
+    Transforms.insertNodes(editor, blockRefNode);
+    Transforms.move(editor);
+
+    setBlockRefTrigger(null);
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (wikilinkTrigger) {
+    if (wikilinkTrigger || blockRefTrigger) {
       if (["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(event.key)) {
         event.preventDefault();
         return;
@@ -227,6 +271,15 @@ export function SlateEditor({
           reference={createSelectionReference(editor)}
           onSelect={insertWikilink}
           onClose={() => setWikilinkTrigger(null)}
+        />
+      )}
+
+      {blockRefTrigger && (
+        <BlockRefCombobox
+          query={blockRefTrigger.query}
+          reference={createSelectionReference(editor)}
+          onSelect={insertBlockRef}
+          onClose={() => setBlockRefTrigger(null)}
         />
       )}
     </div>
