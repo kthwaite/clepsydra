@@ -11,6 +11,7 @@ import {
 import { withHistory } from "slate-history";
 import { Editable, Slate, withReact } from "slate-react";
 import type { BlockResponse } from "#/api/blocks";
+import { useAssignBlockId } from "#/api/blocks";
 import { usePages } from "#/api/pages";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import { renderElement } from "./elements/renderElement";
@@ -55,6 +56,7 @@ export function SlateEditor({
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
+  const assignBlockId = useAssignBlockId();
 
   const [wikilinkTrigger, setWikilinkTrigger] =
     useState<ComboboxTrigger | null>(null);
@@ -142,7 +144,7 @@ export function SlateEditor({
     setWikilinkTrigger(null);
   };
 
-  const insertBlockRef = (block: BlockResponse) => {
+  const doInsertBlockRef = (blockId: string) => {
     if (!blockRefTrigger) return;
 
     const { selection } = editor;
@@ -158,7 +160,7 @@ export function SlateEditor({
 
     const blockRefNode: BlockRefElement = {
       type: "block-ref",
-      blockId: block.block_id,
+      blockId,
       children: [{ text: "" }],
     };
 
@@ -166,6 +168,22 @@ export function SlateEditor({
     Transforms.move(editor);
 
     setBlockRefTrigger(null);
+  };
+
+  const insertBlockRef = (block: BlockResponse) => {
+    if (block.block_id) {
+      doInsertBlockRef(block.block_id);
+    } else {
+      // Block has no ID yet — assign one first
+      assignBlockId.mutate(
+        { page_path: block.page_path, span_start: block.span_start },
+        {
+          onSuccess: (result) => {
+            doInsertBlockRef(result.block_id);
+          },
+        },
+      );
+    }
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {

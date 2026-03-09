@@ -225,10 +225,13 @@ impl VaultIndex {
         // 3. Pragmas
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
 
-        // 4. Execute schema
+        // 4. Run pre-schema migrations (column additions required before index creation)
+        migrate_links_add_target_block_id(&conn)?;
+
+        // 5. Execute schema
         conn.execute_batch(SCHEMA)?;
 
-        // 5. Migration: ensure links.target_id has ON DELETE SET NULL
+        // 6. Migration: ensure links.target_id has ON DELETE SET NULL
         migrate_links_fk(&conn)?;
 
         Ok(Self {
@@ -253,6 +256,7 @@ impl VaultIndex {
         }
         let conn = Connection::open(db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        migrate_links_add_target_block_id(&conn)?;
         conn.execute_batch(SCHEMA)?;
 
         // Migration: ensure links.target_id has ON DELETE SET NULL
@@ -916,7 +920,46 @@ impl VaultIndex {
             }
         }
 
-        // 2. Resolve incoming links targeting this page's canonical names
+        // 2. Resolve outgoing block_ref links from this page
+        let mut block_ref_stmt = tx.prepare(
+            "SELECT source_id, span_start, target_block_id
+             FROM links
+             WHERE source_id = ?1 AND target_id IS NULL AND kind = 'block_ref' AND target_block_id IS NOT NULL",
+        )?;
+        let outgoing_block_refs: Vec<(String, i64, String)> = block_ref_stmt
+            .query_map(params![page_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(block_ref_stmt);
+
+        for (source_id, span_start, block_id) in &outgoing_block_refs {
+            let mut lookup = tx.prepare(
+                "SELECT b.page_id, p.path
+                 FROM blocks b JOIN pages p ON p.id = b.page_id
+                 WHERE b.block_id = ?1",
+            )?;
+            let matches: Vec<(String, String)> = lookup
+                .query_map(params![block_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(lookup);
+
+            if matches.len() == 1 {
+                let (target_id, target_path) = &matches[0];
+                tx.execute(
+                    "UPDATE links SET target_id = ?1, target_path = ?2
+                     WHERE source_id = ?3 AND span_start = ?4",
+                    params![target_id, target_path, source_id, span_start],
+                )?;
+                resolved_count += 1;
+            }
+        }
+
+        // 3. Resolve incoming links targeting this page's canonical names
         let mut cn_stmt =
             tx.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
         let canonical_names: Vec<String> = cn_stmt
@@ -955,6 +998,43 @@ impl VaultIndex {
                     )?;
                     resolved_count += 1;
                 }
+            }
+        }
+
+        // 4. Resolve incoming block_ref links targeting block IDs on this page
+        let mut block_id_stmt = tx.prepare(
+            "SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL",
+        )?;
+        let page_block_ids: Vec<String> = block_id_stmt
+            .query_map(params![page_id], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(block_id_stmt);
+
+        let page_path: String = tx.query_row(
+            "SELECT path FROM pages WHERE id = ?1",
+            params![page_id],
+            |row| row.get(0),
+        )?;
+
+        for bid in &page_block_ids {
+            let mut stmt = tx.prepare(
+                "SELECT source_id, span_start FROM links
+                 WHERE target_block_id = ?1 AND target_id IS NULL AND kind = 'block_ref'",
+            )?;
+            let unresolved: Vec<(String, i64)> = stmt
+                .query_map(params![bid], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
+            drop(stmt);
+
+            for (source_id, span_start) in &unresolved {
+                tx.execute(
+                    "UPDATE links SET target_id = ?1, target_path = ?2
+                     WHERE source_id = ?3 AND span_start = ?4",
+                    params![page_id, page_path, source_id, span_start],
+                )?;
+                resolved_count += 1;
             }
         }
 
@@ -1401,6 +1481,33 @@ pub(crate) fn find_body_start(content: &str) -> usize {
     } else {
         0
     }
+}
+
+/// Add `target_block_id` column to `links` if it doesn't exist.
+///
+/// Must run BEFORE the main SCHEMA batch, since SCHEMA creates an index on
+/// `target_block_id` and will fail if the column is missing on pre-existing DBs.
+fn migrate_links_add_target_block_id(conn: &Connection) -> Result<(), IndexError> {
+    // If the links table doesn't exist yet, nothing to migrate — SCHEMA will create it.
+    let table_exists: bool = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='links'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+
+    if !table_exists {
+        return Ok(());
+    }
+
+    let has_column: bool = conn
+        .prepare("SELECT target_block_id FROM links LIMIT 0")
+        .is_ok();
+
+    if !has_column {
+        conn.execute_batch("ALTER TABLE links ADD COLUMN target_block_id TEXT;")?;
+    }
+
+    Ok(())
 }
 
 /// Migrate the `links` table so that `target_id` carries `ON DELETE SET NULL`.

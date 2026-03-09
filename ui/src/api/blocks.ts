@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 const API_BASE = "/api/vault/blocks";
 
 export interface BlockResponse {
-  block_id: string;
+  block_id: string | null;
   content: string;
   block_type: string;
   properties: Record<string, string>;

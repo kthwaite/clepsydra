@@ -128,8 +128,10 @@ export function BlockRefCombobox({
           <div className="font-medium truncate">{block.content}</div>
           <div className="text-xs text-muted-foreground">
             {block.page_title ?? block.page_path}
-            {block.block_id && (
+            {block.block_id ? (
               <span className="ml-1 opacity-50">^{block.block_id}</span>
+            ) : (
+              <span className="ml-1 italic opacity-50">no id</span>
             )}
           </div>
         </div>

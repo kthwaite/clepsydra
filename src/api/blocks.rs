@@ -19,7 +19,7 @@ use crate::vault::path::VaultPath;
 
 #[derive(Debug, Serialize)]
 pub struct BlockResponse {
-    pub block_id: String,
+    pub block_id: Option<String>,
     pub content: String,
     pub block_type: String,
     pub properties: HashMap<String, String>,
@@ -109,9 +109,8 @@ async fn get_block(
                 properties.insert(key, value);
             }
 
-            let bid_str: String = bid.unwrap_or_else(|| block_id.clone());
             Ok(Some(BlockResponse {
-                block_id: bid_str,
+                block_id: Some(bid.unwrap_or_else(|| block_id.clone())),
                 content,
                 block_type,
                 properties,
@@ -184,7 +183,7 @@ async fn search_blocks(
                 }
 
                 results.push(BlockResponse {
-                    block_id: bid.unwrap_or_default(),
+                    block_id: bid,
                     content,
                     block_type,
                     properties,
