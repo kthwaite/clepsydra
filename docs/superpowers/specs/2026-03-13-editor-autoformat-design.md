@@ -92,6 +92,7 @@ bulleted-list
 - **List continuation** (`insertBreak`) must create new list-items with a paragraph child, not bare text nodes.
 - **Task-list prefix detection** (`[ ]`/`[x]` at start of list-item) operates on the text within the first paragraph child.
 - The `withOutliner` normalizer skips list-items entirely (returns early, line 39), so there is no safety net — transforms must produce structurally valid nodes.
+- **Pre-requisite fix:** `withOutliner`'s empty-children fallback (line 34) currently inserts a bare `{ text: "" }` — this must be changed to `{ type: "paragraph", children: [{ text: "" }] }` as part of this implementation so the normalizer and transforms agree on canonical shape.
 
 ## Block-Level Transforms
 
@@ -153,7 +154,11 @@ The opening marker must be preceded by whitespace or be at the start of text (pr
 
 ### Ambiguity resolution (`*` / `**`, `_` / `__`)
 
-When the user types `*`, check if the preceding character is also `*`. If so, treat as `**` closing pair for bold. Otherwise treat as `*` closing for italic. Same logic for `_` / `__`.
+Disambiguation reads the character immediately before the current cursor position in the text node **after** any overtype move has occurred. This means the check sees the full accumulated marker characters in the text, not the character preceding where the user physically pressed the key.
+
+When the character at `cursor_offset - 1` in the post-overtype text node is `*`, treat the closing as `**` (bold). Otherwise treat as `*` (italic). Same logic for `_` / `__`.
+
+Additionally, a bold closer requires that both closing markers have been consumed (i.e., the cursor has moved past both auto-paired `*` characters). The first `*` of a `**` closing pair does not fire a transform — only the second does, when the full `**...**` structure is present.
 
 ### Link detection `[text](url)`
 
@@ -218,7 +223,9 @@ Pass through to default Slate behavior (new line within code block). Exiting cod
 
 `/` typed at **position 0** of a block's text content only. The slash menu is a block-level tool for converting block types — it does not make sense mid-sentence. Restricting to position 0 avoids false triggers in URLs, file paths, prose, and fractions.
 
-Detection in `handleChange` alongside existing `[[` and `((` detection. The check is simple: is the `/` at offset 0 in the text node, and is that text node the first child of a paragraph?
+Detection in `handleChange` alongside existing `[[` and `((` detection. The check: compute `textBefore` (all text content before the cursor in the block, same method used for wikilink trigger detection). The slash menu triggers only when `textBefore` is exactly `"/"` — i.e., the `/` is at offset 0, it's in the first text node of a paragraph, and there's no other content before it. This prevents false triggers when the paragraph has leading formatted text or inline elements.
+
+**Dismissal and re-trigger:** On Escape, the slash trigger state is cleared and the `/` text (plus any query characters) is deleted from the document. This prevents residual `/` text from re-triggering the menu on subsequent `handleChange` calls and keeps the document clean.
 
 The slash menu follows the same `handleKeyDown` interception pattern as `WikilinkCombobox` and `BlockRefCombobox` — when the slash combobox is active, Enter/ArrowUp/ArrowDown/Escape are intercepted with `event.preventDefault()` so they don't reach Slate's `insertBreak`.
 
@@ -304,3 +311,4 @@ Same pattern as wikilinks. `(` is not auto-paired (never was proposed for genera
 - `ui/src/editor/convert/slate-to-mdast.ts` — serialize strikethrough
 - `ui/src/editor/convert/mdast-to-slate.ts` — deserialize strikethrough (update existing `delete` case)
 - `ui/src/editor/SlateEditor.tsx` — wire up `withAutoformat`, add slash menu trigger detection and `SlashCombobox`
+- `ui/src/editor/plugins/withOutliner.ts` — fix empty-children fallback to insert paragraph child instead of bare text node
