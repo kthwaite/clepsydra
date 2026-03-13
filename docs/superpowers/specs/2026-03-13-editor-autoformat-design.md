@@ -3,75 +3,87 @@
 **Date:** 2026-03-13
 **Status:** Design approved, pending implementation
 
-## Overview
+---
 
-Add a comprehensive autoformat layer to the Slate editor that transforms typed markdown syntax into rendered blocks and formatted text, plus a slash command menu for discoverability. The editing model is document-first (Obsidian-style): paragraphs are the default block type, lists are opt-in.
+## 1) Scope
 
-## Architecture
+### In scope
+- Autoformat plugin for block + inline transforms.
+- Enter-key list continuation + blockquote/code-fence behavior.
+- Slash command menu for block transforms.
+- New `strikethrough` mark end-to-end (render + md serialization).
 
-### Plugin: `withAutoformat`
+### Explicitly out of scope
+- Bracket/paren auto-pair (`[`, `(`) — deferred to avoid `[[` / link conflicts.
+- Backtick auto-pair — deferred to avoid triple-backtick fence conflicts.
+- Autoformat across multiple text nodes/elements.
+- Plugin-registered slash commands, categories, MRU ordering.
 
-A single Slate plugin overriding `insertText` and `insertBreak`, inserted into the editor chain outside `withOutliner`:
+---
 
-```
+## 2) Plugin composition
+
+`withAutoformat` is inserted outside `withOutliner`:
+
+```ts
 withReact(withHistory(withAutoformat(withOutliner(withLinks(withWikilinks(createEditor()))))))
 ```
 
-Internally organized into four sub-modules:
+`withAutoformat` owns overrides for:
+- `insertText`
+- `insertBreak`
+
+And delegates to submodules:
 
 ```
 plugins/
   autoformat/
-    withAutoformat.ts    — plugin entry, insertText/insertBreak overrides
-    blockTransforms.ts   — # → heading, - → list, > → blockquote, --- → hr
-    inlineTransforms.ts  — **bold**, *italic*, `code`, ~strike~, [text](url)
-    autoPair.ts          — auto-insert closing marker on open
-    listContinuation.ts  — Enter in list → new item, Enter on empty → exit
+    withAutoformat.ts
+    blockTransforms.ts
+    inlineTransforms.ts
+    autoPair.ts
+    listContinuation.ts
 ```
 
-### `insertText` evaluation order
+---
 
-The `insertText` override evaluates in this exact sequence:
+## 3) Hard invariants (must hold)
 
-1. **Overtype check** — if cursor is immediately before a closing marker and the typed character matches, move cursor past it. No insertion. **Does not short-circuit** — continues to step 4 to check whether the resulting buffer now contains a complete marker pair.
-2. **Block transform (space-triggered)** — if typed character is space and text before cursor is a recognized block prefix in a paragraph or list-item, apply block transform. Short-circuits on match.
-3. **Block transform (immediate)** — if typed character is `-` and text before cursor is exactly `--` in a paragraph, convert to thematic-break. Short-circuits on match.
-4. **Inline transform** — if typed character completes a closing marker (e.g., second `*` of `**`), or if overtype (step 1) just moved the cursor past a closing marker, scan for matching opener and apply mark/element. Uses the `*`/`**` disambiguation rule (see Ambiguity Resolution below). Short-circuits on match.
-5. **Auto-pair** — if typed character is an opening marker and conditions are met, insert both opening and closing markers. Short-circuits on match.
-6. **Fallback** — call original `insertText` (normal character insertion).
+### I-1 Selection/shape guards
+- Autoformat runs only when selection exists.
+- Inline/block trigger transforms require collapsed selection.
+- Selection wrapping (auto-pair) is the only non-collapsed path.
 
-Steps 2–6 follow a first-match-wins short-circuit rule. Step 1 is the exception: overtype always continues to step 4 because moving past a closing marker often completes an inline format pair.
+### I-2 Context guards
+- No block prefix transforms unless current block is `paragraph` or `list-item` (task-promotion only).
+- No inline transforms in `code-block`.
+- No inline transforms when active marks include `code`.
 
-Step 2 covers both paragraph-level transforms (headings, lists, blockquotes) and list-item-level transforms (`[ ]`/`[x]` → task item). The context (paragraph vs list-item) determines which prefix set is checked.
+### I-3 Text locality
+- Inline marker transforms only operate when opener and closer are in the **same text node**.
 
-**Example: `*hello*` (italic with auto-pair):**
-- First `*`: step 1 (no marker to overtype) → step 2 (not space) → step 3 (not `-`) → step 4 (no opener to match) → step 5 (auto-pair) fires, inserting `*|*`
-- `h`, `e`, `l`, `l`, `o`: all fall through to step 6 (normal insertion), giving `*hello|*`
-- Second `*`: step 1 (overtype) fires — cursor moves past the auto-paired `*`, giving `*hello*|`. Continues to step 4 (inline transform) — finds the opener `*` at start, applies italic, removes both markers.
+### I-4 Undo behavior
+Every successful transform executes in exactly one history batch:
 
-**Example: `**hello**` (bold with auto-pair):**
-- First `*`: auto-pair → `*|*`
-- Second `*`: step 1 (overtype) moves past paired `*` → `**|`. Step 4: scans for opener, finds `*` at position 0, but disambiguation rule checks if preceding char is also `*` — position 0 has no preceding char, so this would be italic, not bold. But there's only one character of content (`*`) between opener and closer, and it's the marker itself, so no valid text to format. Step 4 finds no valid match → no transform. Continue to step 5: auto-pair fires, inserting `*` → `**|**`.
-- `h`, `e`, `l`, `l`, `o`: normal insertion → `**hello|**`
-- First closing `*`: step 1 (overtype) moves past paired `*` → `**hello*|*`. Step 4: scans for opener `*`, finds match at position 1. Disambiguation: preceding char at position 0 is `*`, so treat as `**` bold closer — but only one `*` has been closed so far. The disambiguation rule recognizes this as the first `*` of a `**` pair and does **not** fire. No match.
-- Second closing `*`: step 1 (overtype) moves past paired `*` → `**hello**|`. Step 4: scans for `**` opener (disambiguation sees preceding char is `*`), finds `**` at position 0, applies bold to "hello", removes all four markers.
+```ts
+HistoryEditor.withNewBatch(editor, () => {
+  Editor.withoutNormalizing(editor, () => {
+    // transform ops
+  });
+});
+```
 
-### Undo batching strategy
+Expected result: one Cmd/Ctrl+Z reverts one autoformat action.
 
-All multi-operation transforms use `Editor.withoutNormalizing` for the mutation sequence plus `editor.writeHistory('undos', { operations: [...], selectionBefore })` within a `HistoryEditor.withoutSaving` block. This gives us explicit control: the entire transform (marker deletion + mark application + cursor move) appears as a single undo entry.
+### I-5 Combobox exclusivity
+At most one trigger is active at a time:
+- `[[` wikilink
+- `((` block-ref
+- `/` slash
 
-Concretely, each transform function:
-1. Calls `HistoryEditor.withoutSaving(editor, () => { ... })` to suppress per-op undo entries
-2. Inside that, calls `Editor.withoutNormalizing(editor, () => { ... })` to batch normalization
-3. After the mutations complete, manually pushes one compound undo entry with all operations and the pre-transform selection
+Priority: `[[` > `((` > `/`.
 
-This pattern is already established in the Slate ecosystem (slate-history's own merge logic) and ensures Cmd+Z reverts any transform cleanly to the typed-prefix state.
-
-### Slash Menu: `SlashCombobox`
-
-A new combobox component following the existing `WikilinkCombobox` / `BlockRefCombobox` pattern, triggered by `/` at start of a block.
-
-## List-Item Canonical Shape
+### I-6 List-item shape contract
 
 The parser (`mdast-to-slate.ts`) emits list-items with **paragraph children** — a list-item's first child is always a `ParagraphElement` containing the item's text content. Nested lists, when present, appear as subsequent children.
 
@@ -88,227 +100,407 @@ bulleted-list
 
 **This is the canonical shape all transforms must produce and preserve.** Specifically:
 
+- `list-item.children[0]` = `paragraph`.
+- Optional additional children = nested lists only.
 - **Block transforms** that create a list-item must wrap the existing text in a paragraph child: `{ type: "list-item", children: [{ type: "paragraph", children: [{ text: "" }] }] }`.
 - **List continuation** (`insertBreak`) must create new list-items with a paragraph child, not bare text nodes.
 - **Task-list prefix detection** (`[ ]`/`[x]` at start of list-item) operates on the text within the first paragraph child.
-- The `withOutliner` normalizer skips list-items entirely (returns early, line 39), so there is no safety net — transforms must produce structurally valid nodes.
-- **Pre-requisite fix:** `withOutliner`'s empty-children fallback (line 34) currently inserts a bare `{ text: "" }` — this must be changed to `{ type: "paragraph", children: [{ text: "" }] }` as part of this implementation so the normalizer and transforms agree on canonical shape.
+- The `withOutliner` normalizer skips list-items entirely (returns early), so there is no safety net — transforms must produce structurally valid nodes.
+- **Pre-requisite fix:** `withOutliner`'s empty-children fallback currently inserts a bare `{ text: "" }` — this must be changed to `{ type: "paragraph", children: [{ text: "" }] }` as part of this implementation so the normalizer and transforms agree on canonical shape.
 
-## Block-Level Transforms
+Legacy mixed shapes are tolerated on read, but new transforms must write canonical shape.
 
-Triggered in `insertText` when the inserted character is `" "` (space) and the text before the cursor matches a recognized prefix. Only fires in **paragraph** blocks — no re-conversion of existing typed blocks, no transforms inside code blocks, blockquotes, or headings.
+---
 
-**Prefix matching**: checked against the full text content of the paragraph before the cursor at the moment space is typed.
+## 4) `insertText` pipeline (exact order)
 
-The check order for the primary (paragraph → block) transform:
+For each typed character `ch`:
 
-1. `######` through `#` → heading (most hashes first)
-2. `N.` (digit(s) + dot) → numbered list
-3. `-` or `*` → bulleted list
+1. **Try overtype**
+   - If cursor is directly before same char and char is one of `*`, `_`, `~`, `` ` ``, `]`, `)`, move cursor past it.
+   - If overtype occurred, attempt inline transform (step 4 logic only) on the post-overtype buffer state, then return.
+   - Disambiguation reads the character immediately before the current cursor position in the text node **after** the overtype move. This means the check sees the full accumulated marker characters, not the character preceding where the user physically pressed the key.
+
+2. **Immediate thematic-break trigger** (`---`)
+   - If `ch === "-"` and paragraph text before cursor is exactly `"--"` and cursor at end of block: convert to thematic break + insert trailing empty paragraph; return.
+
+3. **Space-triggered block transforms**
+   - If `ch === " "`, run paragraph/list-item prefix checks (Section 5) in defined order.
+   - First match wins; return.
+
+4. **Inline transform**
+   - If `ch` can close an inline pattern (`*`, `_`, `~`, `` ` ``, `)`), attempt inline transform (Section 6).
+   - If matched, apply and return.
+
+5. **Auto-pair**
+   - If `ch` is supported opener (`*`, `_`, `~`), try auto-pair (Section 7).
+   - If paired/wrapped, return.
+
+6. **Fallback**
+   - Call original `insertText(ch)`.
+
+No other implicit paths. This order is normative.
+
+### Walkthrough: `*hello*` (italic with auto-pair)
+
+- First `*`: step 1 (no marker to overtype) → step 2 (not `-`) → step 3 (not space) → step 4 (no opener to match) → step 5 (auto-pair) fires, inserting `*|*`
+- `h`, `e`, `l`, `l`, `o`: all fall through to step 6 (normal insertion), giving `*hello|*`
+- Second `*`: step 1 (overtype) fires — cursor moves past the auto-paired `*`, giving `*hello*|`. Continues to step 4 (inline transform) — finds the opener `*` at start, applies italic, removes both markers.
+
+### Walkthrough: `**hello**` (bold with auto-pair)
+
+- First `*`: auto-pair → `*|*`
+- Second `*`: step 1 (overtype) moves past paired `*` → `**|`. Step 4: scans for opener, finds `*` at position 0, but disambiguation checks char at `cursor_offset - 1` in the post-overtype text — position 0 has no preceding char, so this would be single-`*` italic. But there's only one character of content between opener and closer, and it's the marker itself, so no valid text to format (content validity rule 6.3). No match. Continue to step 5: auto-pair fires, inserting `*` → `**|**`.
+- `h`, `e`, `l`, `l`, `o`: normal insertion → `**hello|**`
+- First closing `*`: step 1 (overtype) moves past paired `*` → `**hello*|*`. Step 4: scans for opener `*`, finds match at position 1. Disambiguation: char at `cursor_offset - 1` (position 6, `o`) is not `*`, so treat as single-`*` italic closer. But scanning backward for `*` opener preceded by whitespace/start-of-text finds `*` at position 0 — preceded by nothing (start of text). The content between position 0 and position 1 is `*`, which is a marker character, not valid text. No match.
+- Second closing `*`: step 1 (overtype) moves past paired `*` → `**hello**|`. Step 4: char at `cursor_offset - 1` is `*` → treat as `**` bold closer. Scans backward for `**` opener at start of text, finds `**` at position 0. Content between is `hello`. Applies bold, removes all four markers.
+
+---
+
+## 5) Block transforms
+
+### 5.1 Paragraph transforms (triggered by space)
+
+Only when current block is `paragraph`, cursor is collapsed, and text from block start to cursor equals the prefix.
+
+Check order (first-match wins):
+1. `######` … `#` → heading levels 6..1 (longest first)
+2. `^\d+\.$` → numbered list item
+3. `-` or `*` → bulleted list item
 4. `>` → blockquote
 
-**Task-list transform** — runs inside **list-item** blocks only (not paragraphs). This is the sole mechanism for creating task items:
+Notes:
+- Numbered-list transform ignores typed start number in data model (list starts at 1 in schema).
+- If converting to list item and adjacent same-type list exists, merge (Section 5.4).
 
-5. `[ ]` or `[x]` at start of the list-item's first paragraph text + space → set `checked` on the list-item, remove prefix text
+### 5.2 List-item task promotion (triggered by space)
 
-The two-step flow for creating a task from scratch: type `- ` (converts paragraph to bulleted list-item), then type `[ ] ` (converts list-item to task item). This avoids any ambiguity between `- ` and `- [ ]` prefix racing — they operate in different block contexts.
+Only when current block is `list-item`, selection is in the first paragraph text, and text before cursor is:
+- `[ ]` → `checked: false`
+- `[x]` or `[X]` → `checked: true`
 
-| Prefix | Context | Transform |
-|--------|---------|-----------|
-| `#` through `######` | Paragraph | Convert → heading (level 1–6) |
-| `-` or `*` | Paragraph | Wrap in bulleted-list, convert to list-item |
-| `N.` (digit(s) + dot) | Paragraph | Wrap in numbered-list, convert to list-item |
-| `>` | Paragraph | Convert → blockquote containing paragraph |
-| `[ ]` or `[x]` | List-item | Set `checked` on item, remove prefix text |
+Action:
+1. Remove typed marker from start of item text.
+2. Set `list-item.checked` accordingly.
+3. Keep list type unchanged.
 
-### Special cases
+This is the sole task-list autoformat path. The two-step flow for creating a task from scratch: type `- ` (converts paragraph to bulleted list-item), then type `[ ] ` (converts list-item to task item). These operate in different block contexts, so they never race.
 
-- **` ``` ` + Enter**: Detected in `insertBreak`. When Enter is pressed and the block text is exactly ` ``` ` (optionally followed by a language string like ` ```rust `), convert to code-block with language set, clear text. Only fires in paragraph blocks.
-- **`---`**: Detected in `insertText` when typing the third `-` and text is exactly `--`. No space needed — convert immediately to thematic-break. Only fires in paragraph blocks.
-- **List merging**: When converting to a list item, if the previous or next sibling is already the same list type, merge into it rather than creating a new list wrapper.
+### 5.3 Special block triggers
 
-## Inline Transforms
+#### `---` immediate
+- On third `-` in paragraph-start context (`"--"` before cursor):
+  - Replace paragraph with `thematic-break`.
+  - Insert following empty paragraph.
+  - Place cursor in new paragraph.
 
-Triggered in `insertText` when the user types a closing marker that matches an earlier opening marker in the same text node.
+#### Triple-backtick fence on Enter
+Handled in `insertBreak` only.
 
-The opening marker must be preceded by whitespace or be at the start of text (prevents mid-word triggers like `path_to_file_name`).
+When current block is paragraph and full text matches:
+- ````^```([A-Za-z0-9_-]+)?$````
 
-| Marker pair | Result |
-|-------------|--------|
-| `**...**` | Apply `bold` mark |
-| `*...*` | Apply `italic` mark (must not be `**`) |
-| `__...__` | Apply `bold` mark |
-| `_..._` | Apply `italic` mark (must not be `__`) |
-| `` `...` `` | Apply `code` mark |
-| `~...~` | Apply `strikethrough` mark (**new mark**) |
-| `[text](url)` | Insert `link` element |
+Action:
+- Convert paragraph to `code-block`.
+- Set `language` when capture exists.
+- Clear content to empty text leaf.
+- Place cursor at offset 0 in code-block.
 
-### Mark application flow
+### 5.4 List merge policy (deterministic)
 
-1. User types closing marker (e.g., second `*` after `hello *world`)
-2. Scan backward for matching opener preceded by whitespace/start-of-text
-3. Delete opening and closing markers
-4. Apply mark to text between them
-5. Move cursor after formatted text
-6. Entire sequence in a single undo batch (see Undo Batching Strategy above)
+When creating a new list-item from a paragraph:
+1. If both previous and next siblings are same list type:
+   - Insert item into previous list tail.
+   - Move next list's children into previous list.
+   - Remove next list.
+2. Else if previous sibling is same list type:
+   - Append to previous list.
+3. Else if next sibling is same list type:
+   - Prepend to next list.
+4. Else:
+   - Create new list wrapper containing item.
 
-### Ambiguity resolution (`*` / `**`, `_` / `__`)
+---
 
-Disambiguation reads the character immediately before the current cursor position in the text node **after** any overtype move has occurred. This means the check sees the full accumulated marker characters in the text, not the character preceding where the user physically pressed the key.
+## 6) Inline transforms
 
-When the character at `cursor_offset - 1` in the post-overtype text node is `*`, treat the closing as `**` (bold). Otherwise treat as `*` (italic). Same logic for `_` / `__`.
+Only within one text node.
 
-Additionally, a bold closer requires that both closing markers have been consumed (i.e., the cursor has moved past both auto-paired `*` characters). The first `*` of a `**` closing pair does not fire a transform — only the second does, when the full `**...**` structure is present.
+| Markdown pattern | Result |
+|---|---|
+| `**text**` | `bold` |
+| `*text*` | `italic` |
+| `__text__` | `bold` |
+| `_text_` | `italic` |
+| `~text~` | `strikethrough` |
+| `` `text` `` | `code` |
+| `[text](url)` | `link` element |
 
-### Link detection `[text](url)`
+### 6.1 Opener validity
+An opener is valid only if:
+- it is at text start, or
+- previous char is whitespace.
 
-Triggered when user types `)`. Scan backward for `](` to find URL, then further back for `[` to find link text. If full `[...](...)` structure found:
+(Prevents mid-word triggers like `foo_bar_baz`.)
 
-1. Delete entire `[text](url)` text
-2. Insert `link` element with URL and text content
-3. Single undo batch
+### 6.2 Closer disambiguation
+For `*` and `_`:
+- If char at `cursor_offset - 1` (post-overtype) equals typed char, treat closer as double-char (`**`, `__`).
+- Else treat as single-char (`*`, `_`).
 
-## Auto-Pairing
+Search for matching opener of the same width; do not downgrade double to single in same attempt.
 
-When the user types an opening formatting marker, the closing marker is automatically inserted and cursor placed between them.
+Note: `~` uses single-tilde only — no disambiguation needed.
 
-### Trigger characters: `*`, `_`, `~`
+### 6.3 Content validity
+Do not transform if content between opener/closer is empty.
 
-**Note:** Backtick (`` ` ``) is **not** auto-paired. Auto-pairing backticks would conflict with the ` ``` ` (triple backtick) code fence trigger — the auto-paired backticks would create `` `|` `` on the first keystroke, making it impossible to build up ` ``` ` naturally. Inline code formatting via `` `...` `` still works through inline transforms (type opening `` ` ``, type text, type closing `` ` `` → code mark applied).
+### 6.4 Link transform (`[text](url)`)
+Trigger: typed `)`.
 
-**Note:** Square bracket `[` is **not** auto-paired. Auto-pairing `[` would conflict with the existing `[[` wikilink trigger flow. Currently, typing `[[` opens the wikilink combobox, and selecting a page deletes from the `[[` anchor to the cursor and inserts a wikilink element. If `[` auto-paired to `[]`, the first `[` would insert `[]` and the cursor would be between them. The second `[` would then produce `[[|]` — the stray `]` would remain after wikilink insertion, corrupting the text. Bracket characters are left to normal insertion; the `[text](url)` link workflow works through inline transform detection on `)`.
+Parse nearest suffix ending at cursor with shape:
+- `[...](...)` contiguous, no newline in either segment.
 
-**Behavior:**
-1. Type `*` → inserts `**` with cursor between: `*|*`
-2. Type another `*` → `**|**` (building up to bold)
-3. Type text → `**hello|**`
-4. Type closing markers → inline transform fires
+Action:
+1. Delete full markdown substring.
+2. Insert `link` element with parsed URL and inline text children.
+3. Cursor moves after inserted link.
 
-### Skip auto-pair when:
-- Character after cursor is already the same character
-- Cursor is inside a code mark or code-block
-- Non-whitespace character immediately precedes cursor and character is `*`, `_`, or `~` (mid-word)
+---
 
-### Overtype
-When cursor is immediately before a closing marker and user types that same character, move cursor past it instead of inserting a duplicate. Applies to all auto-pairable characters (`*`, `_`, `~`).
+## 7) Auto-pair and overtype
 
-### Selection wrapping
-If text is selected and user types a pairing character, wrap the selection. E.g., select "hello", type `*` → `*hello*`.
+### 7.1 Auto-pair enabled chars
+- `*`
+- `_`
+- `~`
 
-## List Continuation
+### 7.2 Auto-pair disabled
+- `` ` `` — auto-pairing would create `` `|` `` on first keystroke, making triple-backtick ` ``` ` fence impossible to build up naturally.
+- `[` — auto-pairing would conflict with `[[` wikilink trigger. First `[` would insert `[]`, second `[` would produce `[[|]` — stray `]` remains after wikilink insertion, corrupting text.
+- `(` — not auto-paired; avoids complexity with prose parentheses and link syntax.
 
-Handled in `insertBreak` override.
+### 7.3 Pairing rules
+For enabled chars:
+- Collapsed selection: insert opener + closer, place cursor between.
+- Non-collapsed selection (single text node only): wrap selection.
 
-### Enter in a list item
+### 7.4 Skip auto-pair when
+- In `code-block`.
+- Active mark `code`.
+- Immediately before same character.
+- For `*`/`_`/`~`: previous char is non-whitespace (mid-word).
 
-1. **Non-empty item**: Insert new list-item after current one, with canonical shape (paragraph child). If the current item has `checked` defined (task item), new item gets `checked: false`. Cursor moves to the new empty paragraph inside the new item.
+### 7.5 Overtype
+If cursor is directly before same closing marker character, advance cursor instead of inserting duplicate.
 
-2. **Empty item, nested**: Outdent one level (same as Shift+Tab). Second Enter on outdented empty item exits list.
+Applies to: `*`, `_`, `~`, `` ` ``, `]`, `)`.
 
-3. **Empty item, top-level**: Unwrap from list, convert to empty paragraph.
+(Overtype applies to more characters than auto-pair — it supports typing through manually-entered or auto-paired closers, and through the `[text](url)` workflow.)
 
-4. **Cursor mid-text**: Split at cursor. Text before stays in current item's paragraph, text after moves to a new list-item's paragraph (new node is a list-item with paragraph child, not a bare paragraph).
+---
 
-### Enter in a blockquote
+## 8) `insertBreak` behavior (exact order)
 
-New paragraph inside blockquote. Enter on empty paragraph inside blockquote exits (unwraps to top-level paragraph).
+1. If inside `list-item`: run list continuation logic (Section 9) and return if handled.
+2. Else if inside `blockquote`: new paragraph inside quote; empty paragraph exits quote.
+3. Else if paragraph matches triple-backtick fence: convert to code-block (Section 5.3).
+4. Else fallback to original `insertBreak`.
 
-### Enter in a code block
+---
 
-Pass through to default Slate behavior (new line within code block). Exiting code blocks deferred to later iteration.
+## 9) List continuation rules
 
-## Slash Menu
+Inside `list-item` on Enter:
 
-### Trigger
+1. **Non-empty item**
+   - Create next sibling list-item with canonical shape (paragraph child).
+   - If current item is task (`checked` present), new item gets `checked: false`.
+   - Cursor in new item's paragraph start.
 
-`/` typed at **position 0** of a block's text content only. The slash menu is a block-level tool for converting block types — it does not make sense mid-sentence. Restricting to position 0 avoids false triggers in URLs, file paths, prose, and fractions.
+2. **Empty item + nested level**
+   - Outdent one level (same structural effect as Shift+Tab).
 
-Detection in `handleChange` alongside existing `[[` and `((` detection. The check: compute `textBefore` (all text content before the cursor in the block, same method used for wikilink trigger detection). The slash menu triggers only when `textBefore` is exactly `"/"` — i.e., the `/` is at offset 0, it's in the first text node of a paragraph, and there's no other content before it. This prevents false triggers when the paragraph has leading formatted text or inline elements.
+3. **Empty item + top level**
+   - Exit list: unwrap to empty paragraph after list position.
 
-**Dismissal and re-trigger:** On Escape, the slash trigger state is cleared and the `/` text (plus any query characters) is deleted from the document. This prevents residual `/` text from re-triggering the menu on subsequent `handleChange` calls and keeps the document clean.
+4. **Cursor mid-text**
+   - Split text at cursor into current/new item.
+   - Nested list children remain on current item.
+   - New item has canonical shape (paragraph child containing the split-off text).
 
-The slash menu follows the same `handleKeyDown` interception pattern as `WikilinkCombobox` and `BlockRefCombobox` — when the slash combobox is active, Enter/ArrowUp/ArrowDown/Escape are intercepted with `event.preventDefault()` so they don't reach Slate's `insertBreak`.
+"Empty" means first paragraph text (trimmed) is empty and no non-empty inline content.
 
-### Component: `SlashCombobox`
+---
 
+## 10) Slash menu
+
+### 10.1 Trigger
+Slash menu opens only when all are true:
+- Current block is `paragraph`.
+- Selection is collapsed in first text node of paragraph.
+- Text from paragraph start to cursor matches `^/.*$`.
+- Cursor is at paragraph end (no trailing text after cursor).
+- No active `[[` or `((` trigger (combobox exclusivity, I-5).
+
+This intentionally disables mid-sentence slash command invocation.
+
+### 10.2 Key handling
+When slash menu active, intercept and `preventDefault` for:
+- `ArrowUp`
+- `ArrowDown`
+- `Enter`
+- `Tab`
+- `Escape`
+
+### 10.3 Dismissal
+On Escape, the slash trigger state is cleared and the `/` text (plus any query characters) is deleted from the document. This prevents residual `/` text from re-triggering the menu on subsequent `handleChange` calls and keeps the document clean.
+
+### 10.4 Commands (v1 flat set)
+- Heading 1..6
+- Bullet list
+- Numbered list
+- Task list
+- Blockquote
+- Code block
+- Divider
+
+### 10.5 Execution contract
+On command selection:
+1. Delete `/query` range.
+2. Apply same transform functions used by autoformat.
+3. Close menu.
+
+Divider inserts thematic break + trailing empty paragraph, cursor in paragraph.
+
+### 10.6 Component: `SlashCombobox`
 Follows existing combobox pattern:
-- floating-ui positioning relative to cursor
-- Arrow key navigation, Enter/Tab to select, Escape to dismiss
-- Fuzzy filtering as user types after `/`
+- floating-ui positioning relative to cursor.
+- Arrow key navigation, Enter/Tab to select, Escape to dismiss.
+- Fuzzy filtering as user types after `/`.
 
-### Command set (v1, flat list)
+---
 
-| Command | Action |
-|---------|--------|
-| Heading 1 | Convert to heading level 1 |
-| Heading 2 | Convert to heading level 2 |
-| Heading 3 | Convert to heading level 3 |
-| Heading 4 | Convert to heading level 4 |
-| Heading 5 | Convert to heading level 5 |
-| Heading 6 | Convert to heading level 6 |
-| Bullet list | Convert to bulleted list item |
-| Numbered list | Convert to numbered list item |
-| Task list | Convert to list item with checkbox |
-| Blockquote | Convert to blockquote |
-| Code block | Convert to code block |
-| Divider | Insert thematic break |
+## 11) Strikethrough mark
 
-### Execution
+`CustomText` adds:
 
-Each command deletes the `/` trigger text and any query characters, then calls the same transform functions as block-level autoformat — shared code. The transform receives the current block and converts it, same as if the user had typed the markdown prefix.
-
-### Deferred
-
-Categories/grouping, plugin-registered commands, recently-used ordering.
-
-## New Type: `strikethrough` mark
-
-Added to `CustomText`:
-
-```typescript
-export interface CustomText {
-  text: string;
-  bold?: true;
-  italic?: true;
-  code?: true;
-  strikethrough?: true;  // new
-}
+```ts
+strikethrough?: true;
 ```
 
-Rendering in `renderLeaf`: wrap in `<del>`.
+Render in `renderLeaf` with `<del>`.
 
 Serialization:
-- `slate-to-mdast.ts`: emit `delete` mdast node wrapping strikethrough text
-- `mdast-to-slate.ts`: detect `delete` mdast node and apply `strikethrough` mark (currently at line 262, the `delete` case drops to plain text — update to pass `{ ...marks, strikethrough: true }`)
+- `slate-to-mdast.ts`: map mark to mdast `delete` node (serialized as `~text~`).
+- `mdast-to-slate.ts`: map mdast `delete` to `strikethrough: true` in marks accumulator (currently at line 262, the `delete` case drops to plain text — update to pass `{ ...marks, strikethrough: true }`).
 
-## Integration risks and mitigations
+Mark precedence:
+- `code` remains exclusive (highest precedence).
+- Non-code marks can combine (`bold`, `italic`, `strikethrough`).
+
+---
+
+## 12) Integration risks and mitigations
 
 ### Wikilink `[[` flow
-
-The existing wikilink combobox (triggered by `[[`) works by detecting `[[` in `handleChange` and inserting a void wikilink element that replaces the range from the `[[` anchor to the cursor. Auto-pairing `[` would break this flow (see Auto-Pairing section for details). **Mitigation:** `[` is explicitly excluded from auto-pairing.
+The existing wikilink combobox deletes from `[[` anchor to cursor and inserts a void wikilink element. **Mitigation:** `[` excluded from auto-pairing; combobox exclusivity (I-5) prevents slash menu from interfering.
 
 ### Block ref `((` flow
-
-Same pattern as wikilinks. `(` is not auto-paired (never was proposed for general auto-pairing — only `(` after `]` was considered for link syntax, and that has been dropped to keep things simple).
+Same pattern as wikilinks. `(` is not auto-paired. Combobox exclusivity applies.
 
 ### `withOutliner` normalizer bypass
+`withOutliner` returns early for all list-items without calling `normalizeNode`. **Mitigation:** canonical shape contract (I-6); `withOutliner` fallback fix; test coverage for list-item shape after each transform.
 
-`withOutliner` returns early for all list-items without calling the default `normalizeNode`. This means malformed list-items are never corrected automatically. **Mitigation:** the canonical list-item shape is documented above; all transforms that create or modify list-items must produce valid nodes with paragraph children. Test coverage for list-item shape after each transform.
+---
 
-## Files to create
+## 13) Files
 
+### New
 - `ui/src/editor/plugins/autoformat/withAutoformat.ts`
 - `ui/src/editor/plugins/autoformat/blockTransforms.ts`
 - `ui/src/editor/plugins/autoformat/inlineTransforms.ts`
 - `ui/src/editor/plugins/autoformat/autoPair.ts`
 - `ui/src/editor/plugins/autoformat/listContinuation.ts`
+- `ui/src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts`
 - `ui/src/editor/SlashCombobox.tsx`
+- `ui/src/editor/__tests__/SlashCombobox.test.tsx`
 
-## Files to modify
+### Modify
+- `ui/src/editor/SlateEditor.tsx` (plugin wiring + slash trigger + keydown routing)
+- `ui/src/editor/types.ts` (`strikethrough`)
+- `ui/src/editor/elements/renderLeaf.tsx` (`<del>` rendering)
+- `ui/src/editor/convert/slate-to-mdast.ts` (serialize `delete`)
+- `ui/src/editor/convert/mdast-to-slate.ts` (deserialize `delete`)
+- `ui/src/editor/convert/__tests__/slate-to-mdast.test.ts`
+- `ui/src/editor/convert/__tests__/mdast-to-slate.test.ts`
+- `ui/src/editor/convert/__tests__/round-trip.test.ts`
+- `ui/src/editor/plugins/withOutliner.ts` (fix empty-children fallback to insert paragraph child)
 
-- `ui/src/editor/types.ts` — add `strikethrough` mark
-- `ui/src/editor/elements/renderLeaf.tsx` — render strikethrough
-- `ui/src/editor/convert/slate-to-mdast.ts` — serialize strikethrough
-- `ui/src/editor/convert/mdast-to-slate.ts` — deserialize strikethrough (update existing `delete` case)
-- `ui/src/editor/SlateEditor.tsx` — wire up `withAutoformat`, add slash menu trigger detection and `SlashCombobox`
-- `ui/src/editor/plugins/withOutliner.ts` — fix empty-children fallback to insert paragraph child instead of bare text node
+---
+
+## 14) Required test cases (minimum set)
+
+### A. Regression guards
+- **RG-01** Typing `[[abc` still opens wikilink combobox (no leftover auto-paired brackets).
+- **RG-02** Typing a fence start (e.g. ` ```ts `) then Enter creates `code-block(language="ts")`.
+- **RG-03** Typing `/` in `https://` does **not** open slash menu.
+
+### B. Block transforms
+- **BT-01** `#` + space → heading level 1.
+- **BT-02** `######` + space → heading level 6.
+- **BT-03** `1.` + space → numbered-list/list-item.
+- **BT-04** `-` + space and `*` + space → bulleted-list/list-item.
+- **BT-05** `>` + space → blockquote containing paragraph.
+- **BT-06** Third `-` in empty paragraph (`---`) → thematic-break + trailing paragraph.
+- **BT-07** Start-of-item `[ ]` + space in list-item sets `checked:false` and removes marker text.
+- **BT-08** Start-of-item `[x]` + space in list-item sets `checked:true` and removes marker text.
+
+### C. Inline transforms
+- **IT-01** `*a*` → italic.
+- **IT-02** `**a**` → bold (double-char disambiguation).
+- **IT-03** `_a_` and `__a__` equivalents.
+- **IT-04** `~a~` → strikethrough.
+- **IT-05** `` `a` `` → code mark.
+- **IT-06** `[x](https://a.b)` → link element.
+- **IT-07** Mid-word `_` in `foo_bar` does not trigger italic.
+- **IT-08** No inline transform inside `code-block`.
+- **IT-09** Empty content `**` does not transform (content validity).
+
+### D. Auto-pair/overtype
+- **AP-01** Typing `*` inserts `*|*`.
+- **AP-02** Typing second `*` in `*|*` yields `**|**` path for bold typing.
+- **AP-03** Overtype at closer advances cursor; does not duplicate marker.
+- **AP-04** Auto-pair skipped for mid-word `*` and `_`.
+- **AP-05** Selection wrap with `*`, `_`, and `~` works in single text node.
+- **AP-06** Typing `~` inserts `~|~`; typing text then `~` applies strikethrough.
+
+### E. Enter/list continuation
+- **LC-01** Enter in non-empty list-item creates next item with canonical shape.
+- **LC-02** Enter in non-empty task item creates `checked:false` next item.
+- **LC-03** Enter on empty nested item outdents once.
+- **LC-04** Enter on empty top-level item exits to paragraph.
+- **LC-05** Enter mid-item splits text into two items with canonical shape.
+
+### F. Slash menu
+- **SM-01** `/` at empty paragraph start opens menu.
+- **SM-02** `/he` filters headings.
+- **SM-03** Enter executes command and deletes `/query`.
+- **SM-04** Arrow/Escape are intercepted while active.
+- **SM-05** If `[[` trigger is active, slash menu remains inactive.
+- **SM-06** Escape deletes `/` text and closes menu.
+
+### G. Serialization
+- **SZ-01** Slate `strikethrough` serializes to markdown `~text~`.
+- **SZ-02** Markdown `~text~` deserializes to Slate `strikethrough:true`.
+- **SZ-03** Round-trip preserves combined marks excluding code-precedence cases.
+
+---
+
+## 15) Definition of done
+
+Implementation is complete when:
+1. All invariants (I-1 through I-6) are satisfied.
+2. Required tests A–G pass.
+3. No regressions in existing wikilink/block-ref combobox behavior.
+4. Manual QA confirms single-step undo for each autoformat action.
