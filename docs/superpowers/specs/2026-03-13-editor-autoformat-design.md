@@ -31,20 +31,30 @@ plugins/
 
 ### `insertText` evaluation order
 
-The `insertText` override evaluates in this exact sequence. The first handler that returns `true` (handled) short-circuits the rest:
+The `insertText` override evaluates in this exact sequence:
 
-1. **Overtype check** — if cursor is immediately before a closing marker and the typed character matches, move cursor past it. No insertion. **Does not short-circuit** — continues to step 3 (inline transform) to check whether the resulting buffer now contains a complete marker pair.
-2. **Block transform** — if typed character is space and text before cursor is a recognized block prefix in a paragraph, apply block transform. Short-circuits on match.
-3. **Inline transform** — if typed character completes a closing marker (e.g., second `*` of `**`), or if overtype (step 1) just moved the cursor past a closing marker, scan for matching opener and apply mark/element. Short-circuits on match.
-4. **Auto-pair** — if typed character is an opening marker and conditions are met, insert both opening and closing markers. Short-circuits on match.
-5. **Fallback** — call original `insertText` (normal character insertion).
+1. **Overtype check** — if cursor is immediately before a closing marker and the typed character matches, move cursor past it. No insertion. **Does not short-circuit** — continues to step 3 to check whether the resulting buffer now contains a complete marker pair.
+2. **Block transform (space-triggered)** — if typed character is space and text before cursor is a recognized block prefix in a paragraph or list-item, apply block transform. Short-circuits on match.
+3. **Block transform (immediate)** — if typed character is `-` and text before cursor is exactly `--` in a paragraph, convert to thematic-break. Short-circuits on match.
+4. **Inline transform** — if typed character completes a closing marker (e.g., second `*` of `**`), or if overtype (step 1) just moved the cursor past a closing marker, scan for matching opener and apply mark/element. Uses the `*`/`**` disambiguation rule (see Ambiguity Resolution below). Short-circuits on match.
+5. **Auto-pair** — if typed character is an opening marker and conditions are met, insert both opening and closing markers. Short-circuits on match.
+6. **Fallback** — call original `insertText` (normal character insertion).
 
-Steps 2–5 follow a first-match-wins short-circuit rule. Step 1 is the exception: overtype always continues to step 3 because moving past a closing marker often completes an inline format pair.
+Steps 2–6 follow a first-match-wins short-circuit rule. Step 1 is the exception: overtype always continues to step 4 because moving past a closing marker often completes an inline format pair.
 
-Example: user types `*hello*`:
-- First `*`: step 1 (no marker to overtype) → step 2 (not space) → step 3 (no opener to match) → step 4 (auto-pair) fires, inserting `*|*`
-- `h`, `e`, `l`, `l`, `o`: all fall through to step 5 (normal insertion), giving `*hello|*`
-- Second `*`: step 1 (overtype) fires — cursor moves past the auto-paired `*`, giving `*hello*|`. Continues to step 3 (inline transform) — finds the opener `*` at start, applies italic, removes both markers.
+Step 2 covers both paragraph-level transforms (headings, lists, blockquotes) and list-item-level transforms (`[ ]`/`[x]` → task item). The context (paragraph vs list-item) determines which prefix set is checked.
+
+**Example: `*hello*` (italic with auto-pair):**
+- First `*`: step 1 (no marker to overtype) → step 2 (not space) → step 3 (not `-`) → step 4 (no opener to match) → step 5 (auto-pair) fires, inserting `*|*`
+- `h`, `e`, `l`, `l`, `o`: all fall through to step 6 (normal insertion), giving `*hello|*`
+- Second `*`: step 1 (overtype) fires — cursor moves past the auto-paired `*`, giving `*hello*|`. Continues to step 4 (inline transform) — finds the opener `*` at start, applies italic, removes both markers.
+
+**Example: `**hello**` (bold with auto-pair):**
+- First `*`: auto-pair → `*|*`
+- Second `*`: step 1 (overtype) moves past paired `*` → `**|`. Step 4: scans for opener, finds `*` at position 0, but disambiguation rule checks if preceding char is also `*` — position 0 has no preceding char, so this would be italic, not bold. But there's only one character of content (`*`) between opener and closer, and it's the marker itself, so no valid text to format. Step 4 finds no valid match → no transform. Continue to step 5: auto-pair fires, inserting `*` → `**|**`.
+- `h`, `e`, `l`, `l`, `o`: normal insertion → `**hello|**`
+- First closing `*`: step 1 (overtype) moves past paired `*` → `**hello*|*`. Step 4: scans for opener `*`, finds match at position 1. Disambiguation: preceding char at position 0 is `*`, so treat as `**` bold closer — but only one `*` has been closed so far. The disambiguation rule recognizes this as the first `*` of a `**` pair and does **not** fire. No match.
+- Second closing `*`: step 1 (overtype) moves past paired `*` → `**hello**|`. Step 4: scans for `**` opener (disambiguation sees preceding char is `*`), finds `**` at position 0, applies bold to "hello", removes all four markers.
 
 ### Slash Menu: `SlashCombobox`
 
