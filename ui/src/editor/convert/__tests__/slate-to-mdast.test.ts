@@ -367,4 +367,31 @@ describe("slateToMarkdown", () => {
       expect(output).toContain("^abcDEF12345");
     });
   });
+
+  it("converts strikethrough text", () => {
+    const slate: Descendant[] = [
+      {
+        type: "paragraph",
+        children: [
+          { text: "some " },
+          { text: "deleted", strikethrough: true },
+          { text: " text" },
+        ],
+      },
+    ];
+    expect(slateToMarkdown(slate).trim()).toBe("some ~deleted~ text");
+  });
+
+  it("converts bold + strikethrough combined", () => {
+    const slate: Descendant[] = [
+      {
+        type: "paragraph",
+        children: [{ text: "both", bold: true, strikethrough: true }],
+      },
+    ];
+    const md = slateToMarkdown(slate).trim();
+    expect(md).toContain("**");
+    expect(md).toContain("~");
+    expect(md).toContain("both");
+  });
 });
