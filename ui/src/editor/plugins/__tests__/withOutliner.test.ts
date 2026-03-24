@@ -2,7 +2,7 @@ import {
   createEditor,
   type Descendant,
   Editor,
-  type Element as SlateElement,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
@@ -445,5 +445,29 @@ describe("toggleCheckbox", () => {
     toggleCheckbox(editor);
 
     expect((editor.children[0] as SlateElement).type).toBe("paragraph");
+  });
+});
+
+describe("withOutliner empty-children fallback", () => {
+  it("inserts paragraph child (not bare text) into empty list-item", () => {
+    const editor = withOutliner(withHistory(createEditor()));
+    editor.children = [
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [],
+          },
+        ],
+      },
+    ] as any;
+    Editor.normalize(editor, { force: true });
+
+    const listItem = (editor.children[0] as any).children[0];
+    expect(listItem.children.length).toBeGreaterThanOrEqual(1);
+    const firstChild = listItem.children[0];
+    expect(SlateElement.isElement(firstChild)).toBe(true);
+    expect((firstChild as any).type).toBe("paragraph");
   });
 });
