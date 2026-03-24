@@ -574,4 +574,34 @@ See [[Other Page]] for more.`;
       expect(result[6]).toMatchObject({ type: "paragraph" });
     });
   });
+
+  describe("strikethrough", () => {
+    it("converts single-tilde strikethrough", () => {
+      const result = markdownToSlate("Some ~deleted~ text");
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "Some " },
+            { text: "deleted", strikethrough: true },
+            { text: " text" },
+          ],
+        },
+      ]);
+    });
+
+    it("converts double-tilde strikethrough", () => {
+      const result = markdownToSlate("Some ~~deleted~~ text");
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "Some " },
+            { text: "deleted", strikethrough: true },
+            { text: " text" },
+          ],
+        },
+      ]);
+    });
+  });
 });

@@ -23,6 +23,7 @@ interface Marks {
   bold?: true;
   italic?: true;
   code?: true;
+  strikethrough?: true;
 }
 
 /**
@@ -260,13 +261,12 @@ function convertPhrasingNode(
       return [textNode("\n", marks)];
 
     case "delete":
-      // Strikethrough: we don't have a strikethrough mark, so just render the text
       return convertPhrasingContent(
         (node as { children: RootContent[] }).children as (
           | RootContent
           | WikiLinkMdastNode
         )[],
-        marks,
+        { ...marks, strikethrough: true },
       );
 
     case "image":
@@ -295,6 +295,7 @@ function textNode(text: string, marks: Marks): CustomText {
   if (marks.bold) node.bold = true;
   if (marks.italic) node.italic = true;
   if (marks.code) node.code = true;
+  if (marks.strikethrough) node.strikethrough = true;
   return node;
 }
 
