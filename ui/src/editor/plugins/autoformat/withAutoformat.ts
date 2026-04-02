@@ -33,8 +33,9 @@ export function withAutoformat(editor: Editor): Editor {
     }
 
     // Step 1: overtype -> inline transform -> return
+    // After overtype the closer is already in the text, so pass closerConsumed.
     if (tryOvertype(editor, ch)) {
-      tryInlineTransform(editor, ch);
+      tryInlineTransform(editor, ch, /* closerConsumed */ true);
       return;
     }
     // Step 2: thematic break

@@ -1,4 +1,4 @@
-import { Editor, Element as SlateElement, Transforms, type Point } from "slate";
+import { Editor, type Point, Element as SlateElement, Transforms } from "slate";
 import { HistoryEditor } from "slate-history";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
@@ -6,8 +6,15 @@ type MarkType = "bold" | "italic" | "strikethrough" | "code";
 /**
  * Attempts an inline transform triggered by the typed character.
  * Returns true if a transform was applied, false otherwise.
+ *
+ * @param closerConsumed - When true, the closing character is already in the
+ *   text (e.g. after overtype moved past it). The search adjusts accordingly.
  */
-export function tryInlineTransform(editor: Editor, typed: string): boolean {
+export function tryInlineTransform(
+  editor: Editor,
+  typed: string,
+  closerConsumed = false,
+): boolean {
   // Context guard: no transforms inside code-block
   if (isInCodeBlock(editor)) return false;
 
@@ -15,9 +22,10 @@ export function tryInlineTransform(editor: Editor, typed: string): boolean {
   if (typed === ")") return tryLinkTransform(editor);
 
   // Mark transforms: *, _, ~, `
-  if (typed === "*" || typed === "_") return tryMarkTransform(editor, typed);
-  if (typed === "~") return tryMarkTransform(editor, typed);
-  if (typed === "`") return tryMarkTransform(editor, typed);
+  if (typed === "*" || typed === "_")
+    return tryMarkTransform(editor, typed, closerConsumed);
+  if (typed === "~") return tryMarkTransform(editor, typed, closerConsumed);
+  if (typed === "`") return tryMarkTransform(editor, typed, closerConsumed);
 
   return false;
 }
@@ -28,12 +36,17 @@ function isInCodeBlock(editor: Editor): boolean {
 
   const [match] = Editor.nodes(editor, {
     at: selection,
-    match: (n) => SlateElement.isElement(n) && !Editor.isEditor(n) && (n as any).type === "code-block",
+    match: (n) =>
+      SlateElement.isElement(n) &&
+      !Editor.isEditor(n) &&
+      (n as any).type === "code-block",
   });
   return !!match;
 }
 
-function getTextBefore(editor: Editor): { text: string; path: number[] } | null {
+function getTextBefore(
+  editor: Editor,
+): { text: string; path: number[] } | null {
   const { selection } = editor;
   if (!selection) return null;
 
@@ -46,16 +59,28 @@ function getTextBefore(editor: Editor): { text: string; path: number[] } | null 
   return { text: textBefore, path: anchor.path as unknown as number[] };
 }
 
-function tryMarkTransform(editor: Editor, typed: string): boolean {
+function tryMarkTransform(
+  editor: Editor,
+  typed: string,
+  closerConsumed = false,
+): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
   const { text: textBefore, path } = info;
   const offset = textBefore.length;
 
-  // Determine closer width
+  // Determine closer width.
+  // When closerConsumed is true the full closer is already in textBefore
+  // (e.g. after overtype), so we must not bump to double-width just because
+  // the last char matches — the closer is already complete at width 1.
   let closerWidth = 1;
-  if ((typed === "*" || typed === "_") && offset > 0 && textBefore[offset - 1] === typed) {
+  if (
+    !closerConsumed &&
+    (typed === "*" || typed === "_") &&
+    offset > 0 &&
+    textBefore[offset - 1] === typed
+  ) {
     closerWidth = 2;
   }
 
@@ -64,11 +89,11 @@ function tryMarkTransform(editor: Editor, typed: string): boolean {
     closerWidth = 1;
   }
 
-  // Search backward for the opener
-  // The closer hasn't been typed yet, so textBefore is everything before cursor.
-  // For double-width closer: the last char of textBefore is the first closer char,
-  // so content is between opener end and (offset - (closerWidth - 1))
-  const closerAlreadyInText = closerWidth - 1; // chars of the closer already in textBefore
+  // Search backward for the opener.
+  // closerAlreadyInText: how many closer chars are already in textBefore.
+  // Normal path (closerConsumed=false): closerWidth - 1 (the typed char hasn't been inserted yet).
+  // Overtype path (closerConsumed=true): the full closer is in textBefore.
+  const closerAlreadyInText = closerConsumed ? closerWidth : closerWidth - 1;
   const searchEnd = offset - closerAlreadyInText;
 
   // Find opener in textBefore
@@ -93,7 +118,8 @@ function tryMarkTransform(editor: Editor, typed: string): boolean {
     if (i > 0 && textBefore[i - 1] === typed) continue;
 
     // Make sure it's exactly the right width (not more chars of same type after opener)
-    if (i + closerWidth < searchEnd && textBefore[i + closerWidth] === typed) continue;
+    if (i + closerWidth < searchEnd && textBefore[i + closerWidth] === typed)
+      continue;
 
     openerStart = i;
     break;
@@ -154,7 +180,8 @@ function tryLinkTransform(editor: Editor): boolean {
   if (openBracketIdx === -1) return false;
 
   // Opener validity: at text start or preceded by whitespace
-  if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1])) return false;
+  if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
+    return false;
 
   const linkText = textBefore.slice(openBracketIdx + 1, bracketParenIdx);
   const url = textBefore.slice(bracketParenIdx + 2);
