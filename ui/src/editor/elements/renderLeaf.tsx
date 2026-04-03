@@ -12,5 +12,8 @@ export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
   if (leaf.italic) {
     children = <em>{children}</em>;
   }
+  if (leaf.strikethrough) {
+    children = <del>{children}</del>;
+  }
   return <span {...attributes}>{children}</span>;
 }

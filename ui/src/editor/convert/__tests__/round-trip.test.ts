@@ -124,4 +124,9 @@ See [[Other Page]] for more.`;
     expect(result).toContain("---");
     expect(result).toContain("[[Other Page]]");
   });
+
+  it("preserves strikethrough", () => {
+    const input = "Some ~deleted~ text";
+    expect(normalize(roundTrip(input))).toBe(normalize(input));
+  });
 });

@@ -31,7 +31,11 @@ export function withOutliner(editor: Editor): Editor {
     if (SlateElement.isElement(node) && node.type === "list-item") {
       // Ensure at least one child exists (Slate requires it)
       if (node.children.length === 0) {
-        Transforms.insertNodes(editor, { text: "" }, { at: [...path, 0] });
+        Transforms.insertNodes(
+          editor,
+          { type: "paragraph", children: [{ text: "" }] } as any,
+          { at: [...path, 0] },
+        );
         return;
       }
       // Skip the mixed-content normalization — everything else proceeds

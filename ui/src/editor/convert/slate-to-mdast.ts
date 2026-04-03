@@ -54,6 +54,27 @@ function wikiLinkToMarkdownExtension(): Options {
 }
 
 // ---------------------------------------------------------------------------
+// toMarkdown extension for single-tilde strikethrough
+// ---------------------------------------------------------------------------
+
+function singleTildeStrikethroughExtension(): Options {
+  return {
+    handlers: {
+      delete(node: any, _parent: any, state: any, info: any) {
+        const exit = state.enter("strikethrough");
+        const value = state.containerPhrasing(node, {
+          ...info,
+          before: "~",
+          after: "~",
+        });
+        exit();
+        return `~${value}~`;
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Text leaf → mdast phrasing content
 // ---------------------------------------------------------------------------
 
@@ -71,6 +92,9 @@ function textToMdast(leaf: CustomText): PhrasingContent {
   }
   if (leaf.bold) {
     node = { type: "strong", children: [node] };
+  }
+  if (leaf.strikethrough) {
+    node = { type: "delete", children: [node] };
   }
 
   return node;
@@ -368,6 +392,10 @@ export function slateToMdast(nodes: Descendant[]): string {
   return toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
-    extensions: [gfmToMarkdown(), wikiLinkToMarkdownExtension()],
+    extensions: [
+      gfmToMarkdown(),
+      wikiLinkToMarkdownExtension(),
+      singleTildeStrikethroughExtension(),
+    ],
   });
 }

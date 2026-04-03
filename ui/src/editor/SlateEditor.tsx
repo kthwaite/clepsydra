@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   type BasePoint,
   createEditor,
   type Descendant,
   Editor,
+  Node,
+  Path,
   Range,
+  Element as SlateElement,
   Text,
   Transforms,
 } from "slate";
@@ -17,6 +20,7 @@ import { BlockRefCombobox } from "./BlockRefCombobox";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
+import { withAutoformat } from "./plugins/autoformat/withAutoformat";
 import { withLinks } from "./plugins/withLinks";
 import {
   indentListItem,
@@ -27,6 +31,7 @@ import {
   withOutliner,
 } from "./plugins/withOutliner";
 import { withWikilinks } from "./plugins/withWikilinks";
+import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import type { BlockRefElement, WikilinkElement } from "./types";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 
@@ -49,7 +54,11 @@ export function SlateEditor({
   const editor = useMemo(
     () =>
       withReact(
-        withHistory(withOutliner(withLinks(withWikilinks(createEditor())))),
+        withHistory(
+          withAutoformat(
+            withOutliner(withLinks(withWikilinks(createEditor()))),
+          ),
+        ),
       ),
     [],
   );
@@ -62,6 +71,9 @@ export function SlateEditor({
     useState<ComboboxTrigger | null>(null);
   const [blockRefTrigger, setBlockRefTrigger] =
     useState<ComboboxTrigger | null>(null);
+  const [slashTrigger, setSlashTrigger] = useState<ComboboxTrigger | null>(
+    null,
+  );
 
   const handleChange = (value: Descendant[]) => {
     onChange(value, editor);
@@ -113,6 +125,29 @@ export function SlateEditor({
       }
     }
     setBlockRefTrigger(null);
+
+    // Slash trigger detection (combobox exclusivity)
+    const blockEntry = Editor.above(editor, {
+      match: (n) => SlateElement.isElement(n) && !Editor.isEditor(n),
+    });
+    if (blockEntry) {
+      const [block] = blockEntry;
+      if ((block as any).type === "paragraph") {
+        const fullText = Node.string(block);
+        if (
+          textBefore.startsWith("/") &&
+          textBefore === fullText &&
+          selection.anchor.offset === fullText.length
+        ) {
+          setSlashTrigger({
+            anchor: { path: selection.anchor.path, offset: 0 },
+            query: textBefore.slice(1),
+          });
+          return;
+        }
+      }
+    }
+    setSlashTrigger(null);
   };
 
   const insertWikilink = (page: {
@@ -186,9 +221,197 @@ export function SlateEditor({
     }
   };
 
+  const slashCommands: SlashCommand[] = useMemo(
+    () => [
+      { id: "h1", label: "Heading 1", description: "Large heading" },
+      { id: "h2", label: "Heading 2", description: "Medium heading" },
+      { id: "h3", label: "Heading 3", description: "Small heading" },
+      { id: "h4", label: "Heading 4", description: "Smaller heading" },
+      { id: "h5", label: "Heading 5", description: "Tiny heading" },
+      { id: "h6", label: "Heading 6", description: "Smallest heading" },
+      { id: "bullet", label: "Bullet list", description: "Unordered list" },
+      { id: "number", label: "Numbered list", description: "Ordered list" },
+      { id: "task", label: "Task list", description: "Checklist item" },
+      { id: "quote", label: "Blockquote", description: "Quoted text" },
+      { id: "code", label: "Code block", description: "Code snippet" },
+      { id: "divider", label: "Divider", description: "Horizontal rule" },
+    ],
+    [],
+  );
+
+  const executeSlashCommand = useCallback(
+    (cmd: SlashCommand) => {
+      if (!slashTrigger) return;
+      const { selection } = editor;
+      if (!selection) return;
+
+      // Delete /query text
+      Transforms.delete(editor, {
+        at: { anchor: slashTrigger.anchor, focus: selection.focus },
+      });
+
+      // Apply transform based on command
+      switch (cmd.id) {
+        case "h1":
+        case "h2":
+        case "h3":
+        case "h4":
+        case "h5":
+        case "h6": {
+          const level = Number.parseInt(cmd.id.slice(1)) as
+            | 1
+            | 2
+            | 3
+            | 4
+            | 5
+            | 6;
+          const entry = Editor.above(editor, {
+            match: (n) =>
+              SlateElement.isElement(n) && (n as any).type === "paragraph",
+          });
+          if (entry) {
+            Transforms.setNodes(editor, { type: "heading", level } as any, {
+              at: entry[1],
+            });
+          }
+          break;
+        }
+        case "bullet":
+        case "number": {
+          const listType =
+            cmd.id === "bullet" ? "bulleted-list" : "numbered-list";
+          const entry = Editor.above(editor, {
+            match: (n) =>
+              SlateElement.isElement(n) && (n as any).type === "paragraph",
+          });
+          if (entry) {
+            const [, blockPath] = entry;
+            Transforms.setNodes(editor, { type: "list-item" } as any, {
+              at: blockPath,
+            });
+            Transforms.wrapNodes(
+              editor,
+              { type: "paragraph", children: [] } as any,
+              { at: blockPath, match: (n) => Text.isText(n) },
+            );
+            Transforms.wrapNodes(
+              editor,
+              { type: listType, children: [] } as any,
+              { at: blockPath },
+            );
+          }
+          break;
+        }
+        case "task": {
+          const entry = Editor.above(editor, {
+            match: (n) =>
+              SlateElement.isElement(n) && (n as any).type === "paragraph",
+          });
+          if (entry) {
+            const [, blockPath] = entry;
+            Transforms.setNodes(
+              editor,
+              { type: "list-item", checked: false } as any,
+              { at: blockPath },
+            );
+            Transforms.wrapNodes(
+              editor,
+              { type: "paragraph", children: [] } as any,
+              { at: blockPath, match: (n) => Text.isText(n) },
+            );
+            Transforms.wrapNodes(
+              editor,
+              { type: "bulleted-list", children: [] } as any,
+              { at: blockPath },
+            );
+          }
+          break;
+        }
+        case "quote": {
+          const entry = Editor.above(editor, {
+            match: (n) =>
+              SlateElement.isElement(n) && (n as any).type === "paragraph",
+          });
+          if (entry) {
+            Transforms.wrapNodes(
+              editor,
+              { type: "blockquote", children: [] } as any,
+              { at: entry[1] },
+            );
+          }
+          break;
+        }
+        case "code": {
+          const entry = Editor.above(editor, {
+            match: (n) =>
+              SlateElement.isElement(n) && (n as any).type === "paragraph",
+          });
+          if (entry) {
+            const [, blockPath] = entry;
+            Transforms.removeNodes(editor, { at: blockPath });
+            Transforms.insertNodes(
+              editor,
+              { type: "code-block", children: [{ text: "" }] } as any,
+              { at: blockPath },
+            );
+            Transforms.select(editor, {
+              anchor: { path: [...blockPath, 0], offset: 0 },
+              focus: { path: [...blockPath, 0], offset: 0 },
+            });
+          }
+          break;
+        }
+        case "divider": {
+          const entry = Editor.above(editor, {
+            match: (n) =>
+              SlateElement.isElement(n) && (n as any).type === "paragraph",
+          });
+          if (entry) {
+            const [, blockPath] = entry;
+            Transforms.removeNodes(editor, { at: blockPath });
+            Transforms.insertNodes(
+              editor,
+              {
+                type: "thematic-break",
+                children: [{ text: "" }],
+              } as any,
+              { at: blockPath },
+            );
+            const nextPath = Path.next(blockPath);
+            Transforms.insertNodes(
+              editor,
+              { type: "paragraph", children: [{ text: "" }] } as any,
+              { at: nextPath },
+            );
+            Transforms.select(editor, {
+              anchor: { path: [...nextPath, 0], offset: 0 },
+              focus: { path: [...nextPath, 0], offset: 0 },
+            });
+          }
+          break;
+        }
+      }
+      setSlashTrigger(null);
+    },
+    [slashTrigger, editor],
+  );
+
+  const dismissSlash = useCallback(() => {
+    if (!slashTrigger) return;
+    const { selection } = editor;
+    if (selection) {
+      Transforms.delete(editor, {
+        at: { anchor: slashTrigger.anchor, focus: selection.focus },
+      });
+    }
+    setSlashTrigger(null);
+  }, [slashTrigger, editor]);
+
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (wikilinkTrigger || blockRefTrigger) {
-      if (["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(event.key)) {
+    if (wikilinkTrigger || blockRefTrigger || slashTrigger) {
+      if (
+        ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)
+      ) {
         event.preventDefault();
         return;
       }
@@ -261,6 +484,16 @@ export function SlateEditor({
           }
           return;
         }
+        case "d": {
+          event.preventDefault();
+          const marks = Editor.marks(editor);
+          if (marks?.strikethrough) {
+            Editor.removeMark(editor, "strikethrough");
+          } else {
+            Editor.addMark(editor, "strikethrough", true);
+          }
+          return;
+        }
       }
     }
   };
@@ -298,6 +531,16 @@ export function SlateEditor({
           reference={createSelectionReference(editor)}
           onSelect={insertBlockRef}
           onClose={() => setBlockRefTrigger(null)}
+        />
+      )}
+
+      {slashTrigger && (
+        <SlashCombobox
+          commands={slashCommands}
+          query={slashTrigger.query}
+          reference={createSelectionReference(editor)}
+          onSelect={executeSlashCommand}
+          onClose={dismissSlash}
         />
       )}
     </div>

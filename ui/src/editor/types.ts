@@ -97,6 +97,7 @@ export interface CustomText {
   bold?: true;
   italic?: true;
   code?: true;
+  strikethrough?: true;
 }
 
 // --- Editor type ---
