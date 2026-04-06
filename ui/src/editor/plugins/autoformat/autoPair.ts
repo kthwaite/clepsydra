@@ -1,4 +1,10 @@
-import { Editor, Element as SlateElement, Range, Text, Transforms } from "slate";
+import {
+  Editor,
+  Element as SlateElement,
+  Range,
+  Text,
+  Transforms,
+} from "slate";
 import { HistoryEditor } from "slate-history";
 import type { CustomElement } from "#/editor/types";
 
@@ -38,7 +44,8 @@ export function tryAutoPair(editor: Editor, ch: string): boolean {
   if (!Text.isText(node)) return false;
 
   if (Range.isCollapsed(selection)) {
-    if (anchor.offset < node.text.length && node.text[anchor.offset] === ch) return false;
+    if (anchor.offset < node.text.length && node.text[anchor.offset] === ch)
+      return false;
     if (anchor.offset > 0) {
       const prev = node.text[anchor.offset - 1];
       if (prev !== " " && prev !== "\t" && prev !== "\n") {
@@ -48,7 +55,11 @@ export function tryAutoPair(editor: Editor, ch: string): boolean {
     }
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
       Transforms.insertText(editor, ch + ch);
-      Transforms.move(editor, { distance: 1, unit: "character", reverse: true });
+      Transforms.move(editor, {
+        distance: 1,
+        unit: "character",
+        reverse: true,
+      });
     });
     return true;
   }

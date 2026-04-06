@@ -56,6 +56,7 @@ export function WikilinkCombobox({
           e.preventDefault();
           setSelectedIndex((i) => Math.max(i - 1, 0));
           break;
+        case "Tab":
         case "Enter":
           e.preventDefault();
           if (filtered[selectedIndex]) {

@@ -1,5 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { BookOpen, FilePlus, FolderPlus, ListChecks, Settings } from "lucide-react";
+import {
+  BookOpen,
+  FilePlus,
+  FolderPlus,
+  ListChecks,
+  Settings,
+} from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { useTags } from "#/api/index";

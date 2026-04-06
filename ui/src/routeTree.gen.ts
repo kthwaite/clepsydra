@@ -8,138 +8,144 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as WorkspaceRouteImport } from './routes/workspace'
-import { Route as JournalRouteImport } from './routes/journal'
-import { Route as GraphRouteImport } from './routes/graph'
-import { Route as AgendaRouteImport } from './routes/agenda'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as PagesSplatRouteImport } from './routes/pages/$'
+import { Route as rootRouteImport } from "./routes/__root";
+import { Route as WorkspaceRouteImport } from "./routes/workspace";
+import { Route as JournalRouteImport } from "./routes/journal";
+import { Route as GraphRouteImport } from "./routes/graph";
+import { Route as AgendaRouteImport } from "./routes/agenda";
+import { Route as IndexRouteImport } from "./routes/index";
+import { Route as PagesSplatRouteImport } from "./routes/pages/$";
 
 const WorkspaceRoute = WorkspaceRouteImport.update({
-  id: '/workspace',
-  path: '/workspace',
+  id: "/workspace",
+  path: "/workspace",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const JournalRoute = JournalRouteImport.update({
-  id: '/journal',
-  path: '/journal',
+  id: "/journal",
+  path: "/journal",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const GraphRoute = GraphRouteImport.update({
-  id: '/graph',
-  path: '/graph',
+  id: "/graph",
+  path: "/graph",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const AgendaRoute = AgendaRouteImport.update({
-  id: '/agenda',
-  path: '/agenda',
+  id: "/agenda",
+  path: "/agenda",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const PagesSplatRoute = PagesSplatRouteImport.update({
-  id: '/pages/$',
-  path: '/pages/$',
+  id: "/pages/$",
+  path: "/pages/$",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/agenda': typeof AgendaRoute
-  '/graph': typeof GraphRoute
-  '/journal': typeof JournalRoute
-  '/workspace': typeof WorkspaceRoute
-  '/pages/$': typeof PagesSplatRoute
+  "/": typeof IndexRoute;
+  "/agenda": typeof AgendaRoute;
+  "/graph": typeof GraphRoute;
+  "/journal": typeof JournalRoute;
+  "/workspace": typeof WorkspaceRoute;
+  "/pages/$": typeof PagesSplatRoute;
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/agenda': typeof AgendaRoute
-  '/graph': typeof GraphRoute
-  '/journal': typeof JournalRoute
-  '/workspace': typeof WorkspaceRoute
-  '/pages/$': typeof PagesSplatRoute
+  "/": typeof IndexRoute;
+  "/agenda": typeof AgendaRoute;
+  "/graph": typeof GraphRoute;
+  "/journal": typeof JournalRoute;
+  "/workspace": typeof WorkspaceRoute;
+  "/pages/$": typeof PagesSplatRoute;
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/agenda': typeof AgendaRoute
-  '/graph': typeof GraphRoute
-  '/journal': typeof JournalRoute
-  '/workspace': typeof WorkspaceRoute
-  '/pages/$': typeof PagesSplatRoute
+  __root__: typeof rootRouteImport;
+  "/": typeof IndexRoute;
+  "/agenda": typeof AgendaRoute;
+  "/graph": typeof GraphRoute;
+  "/journal": typeof JournalRoute;
+  "/workspace": typeof WorkspaceRoute;
+  "/pages/$": typeof PagesSplatRoute;
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/agenda' | '/graph' | '/journal' | '/workspace' | '/pages/$'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/agenda' | '/graph' | '/journal' | '/workspace' | '/pages/$'
+  fileRoutesByFullPath: FileRoutesByFullPath;
+  fullPaths:
+    | "/"
+    | "/agenda"
+    | "/graph"
+    | "/journal"
+    | "/workspace"
+    | "/pages/$";
+  fileRoutesByTo: FileRoutesByTo;
+  to: "/" | "/agenda" | "/graph" | "/journal" | "/workspace" | "/pages/$";
   id:
-    | '__root__'
-    | '/'
-    | '/agenda'
-    | '/graph'
-    | '/journal'
-    | '/workspace'
-    | '/pages/$'
-  fileRoutesById: FileRoutesById
+    | "__root__"
+    | "/"
+    | "/agenda"
+    | "/graph"
+    | "/journal"
+    | "/workspace"
+    | "/pages/$";
+  fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AgendaRoute: typeof AgendaRoute
-  GraphRoute: typeof GraphRoute
-  JournalRoute: typeof JournalRoute
-  WorkspaceRoute: typeof WorkspaceRoute
-  PagesSplatRoute: typeof PagesSplatRoute
+  IndexRoute: typeof IndexRoute;
+  AgendaRoute: typeof AgendaRoute;
+  GraphRoute: typeof GraphRoute;
+  JournalRoute: typeof JournalRoute;
+  WorkspaceRoute: typeof WorkspaceRoute;
+  PagesSplatRoute: typeof PagesSplatRoute;
 }
 
-declare module '@tanstack/react-router' {
+declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    '/workspace': {
-      id: '/workspace'
-      path: '/workspace'
-      fullPath: '/workspace'
-      preLoaderRoute: typeof WorkspaceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/journal': {
-      id: '/journal'
-      path: '/journal'
-      fullPath: '/journal'
-      preLoaderRoute: typeof JournalRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/graph': {
-      id: '/graph'
-      path: '/graph'
-      fullPath: '/graph'
-      preLoaderRoute: typeof GraphRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agenda': {
-      id: '/agenda'
-      path: '/agenda'
-      fullPath: '/agenda'
-      preLoaderRoute: typeof AgendaRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/pages/$': {
-      id: '/pages/$'
-      path: '/pages/$'
-      fullPath: '/pages/$'
-      preLoaderRoute: typeof PagesSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+    "/workspace": {
+      id: "/workspace";
+      path: "/workspace";
+      fullPath: "/workspace";
+      preLoaderRoute: typeof WorkspaceRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/journal": {
+      id: "/journal";
+      path: "/journal";
+      fullPath: "/journal";
+      preLoaderRoute: typeof JournalRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/graph": {
+      id: "/graph";
+      path: "/graph";
+      fullPath: "/graph";
+      preLoaderRoute: typeof GraphRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/agenda": {
+      id: "/agenda";
+      path: "/agenda";
+      fullPath: "/agenda";
+      preLoaderRoute: typeof AgendaRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/": {
+      id: "/";
+      path: "/";
+      fullPath: "/";
+      preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/pages/$": {
+      id: "/pages/$";
+      path: "/pages/$";
+      fullPath: "/pages/$";
+      preLoaderRoute: typeof PagesSplatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
   }
 }
 
@@ -150,7 +156,7 @@ const rootRouteChildren: RootRouteChildren = {
   JournalRoute: JournalRoute,
   WorkspaceRoute: WorkspaceRoute,
   PagesSplatRoute: PagesSplatRoute,
-}
+};
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+  ._addFileTypes<FileRouteTypes>();

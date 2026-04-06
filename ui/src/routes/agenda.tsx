@@ -83,10 +83,7 @@ function TodayPanel() {
       )}
       <section>
         <SectionHeading>Due Today</SectionHeading>
-        <TaskList
-          tasks={todayTasks}
-          emptyMessage="Nothing due today."
-        />
+        <TaskList tasks={todayTasks} emptyMessage="Nothing due today." />
       </section>
     </div>
   );
@@ -114,10 +111,7 @@ function UpcomingPanel() {
       {days.map((day) => (
         <section key={day.date}>
           <SectionHeading>{formatWeekDate(day.date)}</SectionHeading>
-          <TaskList
-            tasks={day.tasks}
-            emptyMessage="No tasks."
-          />
+          <TaskList tasks={day.tasks} emptyMessage="No tasks." />
         </section>
       ))}
     </div>
@@ -125,10 +119,7 @@ function UpcomingPanel() {
 }
 
 function InboxPanel() {
-  const params = useMemo(
-    () => ({ has_no_date: "true", status: "todo" }),
-    [],
-  );
+  const params = useMemo(() => ({ has_no_date: "true", status: "todo" }), []);
   const { data, isLoading } = useTasks(params);
 
   if (isLoading) {
@@ -159,9 +150,7 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 }
 
 function LoadingIndicator() {
-  return (
-    <p className="py-4 text-xs text-muted-foreground">Loading...</p>
-  );
+  return <p className="py-4 text-xs text-muted-foreground">Loading...</p>;
 }
 
 /** Format YYYY-MM-DD as a readable weekday + date label. */

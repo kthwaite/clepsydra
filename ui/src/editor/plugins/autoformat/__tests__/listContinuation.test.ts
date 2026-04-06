@@ -100,9 +100,7 @@ describe("tryListContinuation", () => {
                 children: [
                   {
                     type: "list-item",
-                    children: [
-                      { type: "paragraph", children: [{ text: "" }] },
-                    ],
+                    children: [{ type: "paragraph", children: [{ text: "" }] }],
                   },
                 ],
               },
@@ -125,9 +123,7 @@ describe("tryListContinuation", () => {
     const editor = makeListEditor([
       {
         type: "list-item",
-        children: [
-          { type: "paragraph", children: [{ text: "hello world" }] },
-        ],
+        children: [{ type: "paragraph", children: [{ text: "hello world" }] }],
       },
     ]);
     Transforms.select(editor, {

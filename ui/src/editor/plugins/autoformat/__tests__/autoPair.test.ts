@@ -5,9 +5,7 @@ import { tryOvertype, tryAutoPair } from "../autoPair";
 
 function editorWith(text: string, offset: number) {
   const editor = withHistory(createEditor());
-  editor.children = [
-    { type: "paragraph", children: [{ text }] },
-  ];
+  editor.children = [{ type: "paragraph", children: [{ text }] }];
   Transforms.select(editor, {
     anchor: { path: [0, 0], offset },
     focus: { path: [0, 0], offset },
@@ -15,11 +13,13 @@ function editorWith(text: string, offset: number) {
   return editor;
 }
 
-function editorWithSelection(text: string, anchorOffset: number, focusOffset: number) {
+function editorWithSelection(
+  text: string,
+  anchorOffset: number,
+  focusOffset: number,
+) {
   const editor = withHistory(createEditor());
-  editor.children = [
-    { type: "paragraph", children: [{ text }] },
-  ];
+  editor.children = [{ type: "paragraph", children: [{ text }] }];
   Transforms.select(editor, {
     anchor: { path: [0, 0], offset: anchorOffset },
     focus: { path: [0, 0], offset: focusOffset },

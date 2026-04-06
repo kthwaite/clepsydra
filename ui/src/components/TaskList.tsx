@@ -43,10 +43,7 @@ interface TaskListProps {
   emptyMessage?: string;
 }
 
-export function TaskList({
-  tasks,
-  emptyMessage = "No tasks.",
-}: TaskListProps) {
+export function TaskList({ tasks, emptyMessage = "No tasks." }: TaskListProps) {
   const toggle = useToggleTaskStatus();
   const openTab = useOpenTab();
 

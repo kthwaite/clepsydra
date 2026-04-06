@@ -157,9 +157,7 @@ describe("list merge policy", () => {
         children: [
           {
             type: "list-item",
-            children: [
-              { type: "paragraph", children: [{ text: "existing" }] },
-            ],
+            children: [{ type: "paragraph", children: [{ text: "existing" }] }],
           },
         ],
       },

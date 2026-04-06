@@ -33,9 +33,7 @@ function isBlock(node: unknown): node is SlateElement {
  * Get the current block entry where the cursor sits.
  * Returns [element, path] or undefined.
  */
-function getCurrentBlock(
-  editor: Editor,
-): [SlateElement, Path] | undefined {
+function getCurrentBlock(editor: Editor): [SlateElement, Path] | undefined {
   const { selection } = editor;
   if (!selection || !Range.isCollapsed(selection)) return undefined;
 
@@ -167,11 +165,9 @@ export function tryBlockTransform(editor: Editor): boolean {
         },
       });
       // Convert paragraph to heading
-      Transforms.setNodes(
-        editor,
-        { type: "heading", level } as any,
-        { at: blockPath },
-      );
+      Transforms.setNodes(editor, { type: "heading", level } as any, {
+        at: blockPath,
+      });
     });
     return true;
   }
@@ -232,17 +228,13 @@ function applyListTransform(
     });
     // Wrap paragraph in list-item, then in list
     // Step 1: wrap paragraph in list-item
-    Transforms.wrapNodes(
-      editor,
-      { type: "list-item", children: [] } as any,
-      { at: blockPath },
-    );
+    Transforms.wrapNodes(editor, { type: "list-item", children: [] } as any, {
+      at: blockPath,
+    });
     // Step 2: wrap list-item in list
-    Transforms.wrapNodes(
-      editor,
-      { type: listType, children: [] } as any,
-      { at: blockPath },
-    );
+    Transforms.wrapNodes(editor, { type: listType, children: [] } as any, {
+      at: blockPath,
+    });
 
     // Merge with adjacent same-type list
     mergeWithAdjacentList(editor, blockPath, listType);
@@ -311,11 +303,9 @@ export function tryThematicBreak(editor: Editor): boolean {
       },
     });
     // Convert to thematic-break
-    Transforms.setNodes(
-      editor,
-      { type: "thematic-break" } as any,
-      { at: blockPath },
-    );
+    Transforms.setNodes(editor, { type: "thematic-break" } as any, {
+      at: blockPath,
+    });
     // Insert a trailing paragraph after
     Transforms.insertNodes(
       editor,
@@ -365,11 +355,9 @@ export function tryCodeFence(editor: Editor): boolean {
       },
     });
     // Convert to code-block
-    Transforms.setNodes(
-      editor,
-      { type: "code-block", language } as any,
-      { at: blockPath },
-    );
+    Transforms.setNodes(editor, { type: "code-block", language } as any, {
+      at: blockPath,
+    });
   });
 
   return true;

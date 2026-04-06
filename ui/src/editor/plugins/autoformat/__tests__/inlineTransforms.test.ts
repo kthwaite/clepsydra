@@ -5,9 +5,7 @@ import { tryInlineTransform } from "../inlineTransforms";
 
 function editorWith(text: string, offset: number) {
   const editor = withHistory(createEditor());
-  editor.children = [
-    { type: "paragraph", children: [{ text }] },
-  ];
+  editor.children = [{ type: "paragraph", children: [{ text }] }];
   Transforms.select(editor, {
     anchor: { path: [0, 0], offset },
     focus: { path: [0, 0], offset },
@@ -26,7 +24,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "*");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.italic === true && l.text === "a")).toBe(true);
+    expect(leaves.some((l: any) => l.italic === true && l.text === "a")).toBe(
+      true,
+    );
   });
 
   it("IT-02: **a** → bold", () => {
@@ -34,7 +34,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "*");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.bold === true && l.text === "a")).toBe(true);
+    expect(leaves.some((l: any) => l.bold === true && l.text === "a")).toBe(
+      true,
+    );
   });
 
   it("IT-03: _a_ → italic", () => {
@@ -42,7 +44,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "_");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.italic === true && l.text === "a")).toBe(true);
+    expect(leaves.some((l: any) => l.italic === true && l.text === "a")).toBe(
+      true,
+    );
   });
 
   it("IT-03: __a__ → bold", () => {
@@ -50,7 +54,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "_");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.bold === true && l.text === "a")).toBe(true);
+    expect(leaves.some((l: any) => l.bold === true && l.text === "a")).toBe(
+      true,
+    );
   });
 
   it("IT-04: ~a~ → strikethrough", () => {
@@ -58,7 +64,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "~");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.strikethrough === true && l.text === "a")).toBe(true);
+    expect(
+      leaves.some((l: any) => l.strikethrough === true && l.text === "a"),
+    ).toBe(true);
   });
 
   it("IT-05: backtick a backtick → code", () => {
@@ -66,7 +74,9 @@ describe("tryInlineTransform", () => {
     const result = tryInlineTransform(editor, "`");
     expect(result).toBe(true);
     const leaves = getLeaves(editor);
-    expect(leaves.some((l: any) => l.code === true && l.text === "a")).toBe(true);
+    expect(leaves.some((l: any) => l.code === true && l.text === "a")).toBe(
+      true,
+    );
   });
 
   it("IT-06: [text](url) → link element", () => {
@@ -94,9 +104,7 @@ describe("tryInlineTransform", () => {
 
   it("does not transform in code-block context", () => {
     const editor = withHistory(createEditor());
-    editor.children = [
-      { type: "code-block", children: [{ text: "*a" }] },
-    ];
+    editor.children = [{ type: "code-block", children: [{ text: "*a" }] }];
     Transforms.select(editor, {
       anchor: { path: [0, 0], offset: 2 },
       focus: { path: [0, 0], offset: 2 },

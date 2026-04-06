@@ -139,10 +139,7 @@ export function tryListContinuation(editor: Editor): boolean {
           // Clean up empty parent list
           try {
             const remaining = Node.get(editor, parentListPath);
-            if (
-              isListElement(remaining) &&
-              remaining.children.length === 0
-            ) {
+            if (isListElement(remaining) && remaining.children.length === 0) {
               Transforms.removeNodes(editor, { at: parentListPath });
             }
           } catch {
@@ -179,10 +176,7 @@ export function tryListContinuation(editor: Editor): boolean {
         // If the list is now empty, remove it
         try {
           const remaining = Node.get(editor, parentListPath);
-          if (
-            isListElement(remaining) &&
-            remaining.children.length === 0
-          ) {
+          if (isListElement(remaining) && remaining.children.length === 0) {
             Transforms.removeNodes(editor, { at: parentListPath });
           }
         } catch {
@@ -195,8 +189,7 @@ export function tryListContinuation(editor: Editor): boolean {
 
   // Non-empty item: find the paragraph and cursor position
   const paragraphEntry = Editor.above(editor, {
-    match: (n) =>
-      SlateElement.isElement(n) && n.type === "paragraph",
+    match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
   });
   if (!paragraphEntry) return false;
 

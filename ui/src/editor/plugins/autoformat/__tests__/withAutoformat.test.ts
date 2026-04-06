@@ -5,12 +5,8 @@ import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
 
 function makeEditor(value?: any[]) {
-  const editor = withAutoformat(
-    withOutliner(withHistory(createEditor())),
-  );
-  editor.children = value ?? [
-    { type: "paragraph", children: [{ text: "" }] },
-  ];
+  const editor = withAutoformat(withOutliner(withHistory(createEditor())));
+  editor.children = value ?? [{ type: "paragraph", children: [{ text: "" }] }];
   Transforms.select(editor, {
     anchor: { path: [0, 0], offset: 0 },
     focus: { path: [0, 0], offset: 0 },
@@ -65,7 +61,9 @@ describe("withAutoformat integration", () => {
       type(editor, "*hello*");
       const para = editor.children[0] as any;
       const leaves = para.children;
-      expect(leaves.some((l: any) => l.italic && l.text === "hello")).toBe(true);
+      expect(leaves.some((l: any) => l.italic && l.text === "hello")).toBe(
+        true,
+      );
     });
 
     it("~text~ applies strikethrough", () => {
@@ -73,7 +71,9 @@ describe("withAutoformat integration", () => {
       type(editor, "~hello~");
       const para = editor.children[0] as any;
       const leaves = para.children;
-      expect(leaves.some((l: any) => l.strikethrough && l.text === "hello")).toBe(true);
+      expect(
+        leaves.some((l: any) => l.strikethrough && l.text === "hello"),
+      ).toBe(true);
     });
 
     it("`text` applies code mark", () => {
