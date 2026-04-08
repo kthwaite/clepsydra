@@ -41,6 +41,24 @@ fn strips_leading_dot_slash() {
 }
 
 #[test]
+fn normalizes_internal_dot_components() {
+    let p = VaultPath::new("notes/./drafts/./hello.md").unwrap();
+    assert_eq!(p.as_str(), "notes/drafts/hello.md");
+}
+
+#[test]
+fn normalizes_duplicate_separators() {
+    let p = VaultPath::new("notes//sub///hello.md").unwrap();
+    assert_eq!(p.as_str(), "notes/sub/hello.md");
+}
+
+#[test]
+fn rejects_dot_only_path_after_normalization() {
+    let err = VaultPath::new("././").unwrap_err();
+    assert!(err.to_string().contains("empty"));
+}
+
+#[test]
 fn nfc_normalizes_path() {
     // NFD: e + combining acute accent (U+0065 U+0301)
     let nfd = "not\u{0065}\u{0301}s/hello.md";

@@ -24,6 +24,7 @@ pub enum PathError {
 /// - No leading slash (not absolute)
 /// - No backslashes
 /// - No `..` components (no traversal)
+/// - `.` and empty components are normalized away
 /// - Non-empty after cleanup
 /// - NFC-normalized Unicode
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -38,7 +39,7 @@ impl VaultPath {
     /// 2. Reject backslashes
     /// 3. Reject absolute paths (starts with `/`)
     /// 4. NFC normalize
-    /// 5. Strip leading `./`
+    /// 5. Normalize `.` and duplicate `/` components
     /// 6. Reject `..` components
     /// 7. Reject if empty after cleanup
     pub fn new(raw: &str) -> Result<Self, PathError> {
@@ -60,23 +61,23 @@ impl VaultPath {
         // 4. NFC normalize
         let normalized: String = raw.nfc().collect();
 
-        // 5. Strip leading `./`
-        let stripped = normalized.strip_prefix("./").unwrap_or(&normalized);
-
-        // 6. Reject `..` components
-        for component in stripped.split('/') {
-            if component == ".." {
-                return Err(PathError::Traversal(raw.to_string()));
+        // 5. Normalize away `.` and duplicate `/` components.
+        let mut components: Vec<&str> = Vec::new();
+        for component in normalized.split('/') {
+            match component {
+                "" | "." => continue,
+                ".." => return Err(PathError::Traversal(raw.to_string())),
+                _ => components.push(component),
             }
         }
 
-        // 7. Reject if empty after cleanup
-        if stripped.is_empty() {
+        // 6/7. Reject if empty after cleanup
+        if components.is_empty() {
             return Err(PathError::Empty);
         }
 
         Ok(Self {
-            inner: stripped.to_string(),
+            inner: components.join("/"),
         })
     }
 
