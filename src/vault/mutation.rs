@@ -137,6 +137,8 @@ pub struct MutationPlan {
     pub index_events: Vec<ChangeEvent>,
     #[serde(skip)]
     pub staged_writes: Vec<(PathBuf, String)>,
+    #[serde(skip)]
+    pub moved_pages: Vec<(VaultPath, VaultPath)>,
 }
 
 impl MutationPlan {
@@ -146,6 +148,7 @@ impl MutationPlan {
             text_edits: Vec::new(),
             index_events: Vec::new(),
             staged_writes: Vec::new(),
+            moved_pages: Vec::new(),
         }
     }
 
@@ -193,24 +196,18 @@ impl MutationPlan {
             }
         }
 
-        // Call post-move hooks for each Rename operation
-        for op in &self.file_ops {
-            if let FileOpKind::Rename = op.kind
-                && let Some(ref dest) = op.destination
+        // Call post-move hooks for each moved markdown page.
+        for (old_vp, new_vp) in &self.moved_pages {
+            // Page paths still use old path in DB at this point.
+            if let Ok(page_id_str) = index.connection().query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                rusqlite::params![old_vp.as_str()],
+                |row| row.get::<_, String>(0),
+            ) && let Ok(page_id) = page_id_str.parse::<uuid::Uuid>()
             {
-                let old_vp = VaultPath::new(&op.path).map_err(vp_err)?;
-                let new_vp = VaultPath::new(dest).map_err(vp_err)?;
-                // Look up page UUID from the index (page path still uses old path in DB at this point)
-                if let Ok(page_id_str) = index.connection().query_row(
-                    "SELECT id FROM pages WHERE path = ?1",
-                    rusqlite::params![op.path],
-                    |row| row.get::<_, String>(0),
-                ) && let Ok(page_id) = page_id_str.parse::<uuid::Uuid>()
-                {
-                    for hook in hooks {
-                        hook.on_page_moved(&old_vp, &new_vp, &page_id, vault, index)
-                            .map_err(|e| IndexError::Other(e.to_string()))?;
-                    }
+                for hook in hooks {
+                    hook.on_page_moved(old_vp, new_vp, &page_id, vault, index)
+                        .map_err(|e| IndexError::Other(e.to_string()))?;
                 }
             }
         }
@@ -281,6 +278,7 @@ impl<'a> MutationPlanner<'a> {
             path: source.to_string(),
             destination: Some(destination.to_string()),
         });
+        plan.moved_pages.push((source_vp.clone(), dest_vp.clone()));
 
         // 2. Find backlink pages
         let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
@@ -504,6 +502,7 @@ impl<'a> MutationPlanner<'a> {
             let old_stem = old_vp.stem().to_string();
             let new_stem = new_vp.stem().to_string();
             let old_abs = self.vault.resolve(old_vp);
+            plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
 
             // Index events for the moved file
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));

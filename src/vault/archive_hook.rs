@@ -23,20 +23,29 @@ impl PostDeleteHook for ArchiveDeleteHook {
             _ => return Ok(()), // not an archive page, nothing to do
         };
 
-        let cas = self.cas.lock();
+        let mut unique_hashes = std::collections::HashSet::new();
 
-        // Decrement snapshot_hash ref
+        // Collect snapshot_hash
         if let Some(serde_yaml::Value::String(hash)) = archive.get("snapshot_hash") {
-            let _ = cas.decrement_ref(hash); // ignore error if blob already gone
+            unique_hashes.insert(hash.clone());
         }
 
-        // Decrement blob hashes (stored under "blobs" key by ingest_archive)
+        // Collect blob hashes
         if let Some(serde_yaml::Value::Sequence(hashes)) = archive.get("blobs") {
             for h in hashes {
                 if let serde_yaml::Value::String(hash) = h {
-                    let _ = cas.decrement_ref(hash);
+                    unique_hashes.insert(hash.clone());
                 }
             }
+        }
+
+        if unique_hashes.is_empty() {
+            return Ok(());
+        }
+
+        let cas = self.cas.lock();
+        for hash in unique_hashes {
+            let _ = cas.decrement_ref(&hash);
         }
 
         Ok(())

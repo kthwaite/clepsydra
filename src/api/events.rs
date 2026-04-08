@@ -4,9 +4,9 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use serde::Serialize;
-use utoipa::ToSchema;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
+use utoipa::ToSchema;
 
 use super::AppState;
 

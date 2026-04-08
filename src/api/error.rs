@@ -59,6 +59,15 @@ impl ApiError {
         }
     }
 
+    pub fn forbidden(msg: impl Into<String>) -> Self {
+        Self {
+            status: 403,
+            error: msg.into(),
+            detail: None,
+            hint: None,
+        }
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self {
             status: 500,

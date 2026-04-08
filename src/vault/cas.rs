@@ -76,31 +76,44 @@ impl ContentStore {
         content_type: &str,
     ) -> Result<StoreResult, Box<dyn std::error::Error>> {
         let hash = Self::hash_bytes(data);
-
-        if self.exists(&hash)? {
-            self.increment_ref(&hash)?;
-            return Ok(StoreResult {
-                hash,
-                already_existed: true,
-            });
-        }
-
-        let path = self.blob_path(&hash)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&path, data)?;
-
         let now = chrono::Utc::now().to_rfc3339();
-        self.db.execute(
-            "INSERT INTO blobs (hash, size, content_type, created_at, ref_count) VALUES (?1, ?2, ?3, ?4, 1)",
+
+        // Use a transaction to ensure database consistency
+        // Note: we don't use a full transaction here because we also interact with the filesystem.
+        // Instead, we use the primary key constraint to detect existence.
+
+        let res = self.db.execute(
+            "INSERT OR IGNORE INTO blobs (hash, size, content_type, created_at, ref_count) VALUES (?1, ?2, ?3, ?4, 1)",
             params![hash, data.len() as i64, content_type, now],
         )?;
 
-        Ok(StoreResult {
-            hash,
-            already_existed: false,
-        })
+        if res == 0 {
+            // Already existed in DB, just increment ref count
+            self.db.execute(
+                "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
+                params![hash],
+            )?;
+            Ok(StoreResult {
+                hash,
+                already_existed: true,
+            })
+        } else {
+            // New blob, write to filesystem
+            let path = self.blob_path(&hash)?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            if let Err(e) = fs::write(&path, data) {
+                // Roll back DB insert if filesystem write fails
+                self.db.execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
+                return Err(e.into());
+            }
+
+            Ok(StoreResult {
+                hash,
+                already_existed: false,
+            })
+        }
     }
 
     /// Retrieve a blob's data and content type.
@@ -237,15 +250,19 @@ mod tests {
         // Too short
         assert!(store.retrieve("sha256:ab").is_err());
         // Non-hex characters
-        assert!(store
-            .retrieve("sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
-            .is_err());
+        assert!(
+            store
+                .retrieve("sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+                .is_err()
+        );
         // Missing prefix
         assert!(store.retrieve("abcdef").is_err());
         // Valid format but doesn't exist — different error (not found, not validation)
-        assert!(store
-            .retrieve("sha256:0000000000000000000000000000000000000000000000000000000000000000")
-            .is_err());
+        assert!(
+            store
+                .retrieve("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+                .is_err()
+        );
     }
 
     #[test]
@@ -299,9 +316,8 @@ mod tests {
     #[test]
     fn retrieve_nonexistent_returns_error() {
         let (store, _tmp) = test_store();
-        let result = store.retrieve(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        );
+        let result = store
+            .retrieve("sha256:0000000000000000000000000000000000000000000000000000000000000000");
         assert!(result.is_err());
     }
 
