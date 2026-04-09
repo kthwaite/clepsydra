@@ -1,5 +1,6 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useState } from "react";
+import { Button } from "#/components/ui/button";
 
 type ResponseDetails = {
   status: number | null;
@@ -171,27 +172,23 @@ export function RouteError({
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={reset}
-            className="border border-border bg-background px-3 py-1 text-sm font-medium hover:bg-accent"
-          >
+          <Button variant="secondary" size="sm" onPress={reset}>
             Try again
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowDetails((prev) => !prev)}
-            className="border border-border bg-background px-3 py-1 text-sm font-medium hover:bg-accent"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onPress={() => setShowDetails((prev) => !prev)}
           >
             {showDetails ? "Hide technical details" : "Show technical details"}
-          </button>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="border border-border bg-background px-3 py-1 text-sm font-medium hover:bg-accent"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onPress={() => window.location.reload()}
           >
             Reload app
-          </button>
+          </Button>
         </div>
       </section>
 
