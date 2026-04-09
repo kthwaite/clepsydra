@@ -9,6 +9,8 @@ import {
   useQuickCapture,
 } from "#/api/journal";
 import { BacklinksPanel } from "#/components/BacklinksPanel";
+import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
@@ -254,22 +256,16 @@ function JournalNav({
 
   return (
     <div className="flex items-center gap-3 border-b border-border px-4 py-2">
-      <button
-        type="button"
-        onClick={onPrev}
-        className="inline-flex h-7 w-7 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+      <IconButton
+        variant="secondary"
+        onPress={onPrev}
         aria-label="Previous day"
       >
-        <ChevronLeft className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onNext}
-        className="inline-flex h-7 w-7 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-        aria-label="Next day"
-      >
-        <ChevronRight className="h-4 w-4" />
-      </button>
+        <ChevronLeft />
+      </IconButton>
+      <IconButton variant="secondary" onPress={onNext} aria-label="Next day">
+        <ChevronRight />
+      </IconButton>
 
       <h1 className="font-heading text-lg font-bold">
         {dateLabel(date)}
@@ -279,13 +275,14 @@ function JournalNav({
       </h1>
 
       {!isToday && (
-        <button
-          type="button"
-          onClick={onToday}
-          className="ml-auto border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        <Button
+          variant="secondary"
+          size="sm"
+          onPress={onToday}
+          className="ml-auto"
         >
           Today
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -313,13 +310,13 @@ function QuickCaptureBar({
           disabled={isPending}
           className="flex-1 border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <button
+        <Button
+          variant="primary"
           type="submit"
-          disabled={isPending || !value.trim()}
-          className="border border-border bg-primary px-4 py-2 text-xs uppercase tracking-wider text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          isDisabled={isPending || !value.trim()}
         >
           {isPending ? "Saving..." : "Capture"}
-        </button>
+        </Button>
       </form>
     </div>
   );
