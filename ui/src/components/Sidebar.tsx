@@ -11,7 +11,9 @@ import { useState } from "react";
 import { useTags } from "#/api/index";
 import { useCreateFolder, useCreatePage } from "#/api/pages";
 import { FileTree } from "#/components/FileTree";
-import { ModalDialog } from "#/components/ModalDialog";
+import { Button } from "#/components/ui/button";
+import { Dialog } from "#/components/ui/dialog";
+import { TextField } from "#/components/ui/text-field";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useUiStore } from "#/store/ui";
 
@@ -105,59 +107,51 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-64 flex-col border-r border-border bg-card">
-      <ModalDialog
+      <Dialog
         isOpen={isDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) closeCreateDialog();
+        }}
         title={dialogTitle}
         description={dialogDescription}
-        onClose={closeCreateDialog}
         footer={
           <>
-            <button
-              type="button"
-              onClick={closeCreateDialog}
-              disabled={isSubmitting}
-              className="border border-border px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              variant="secondary"
+              onPress={closeCreateDialog}
+              isDisabled={isSubmitting}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               type="submit"
               form="create-item-form"
-              disabled={isSubmitting}
-              className="border border-border bg-primary px-3 py-1.5 text-xs uppercase tracking-wider text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              isDisabled={isSubmitting}
             >
               {isSubmitting
                 ? "Creating..."
                 : isCreatingNote
                   ? "Create Note"
                   : "Create Folder"}
-            </button>
+            </Button>
           </>
         }
       >
         <form id="create-item-form" onSubmit={handleCreateSubmit}>
-          <label
-            htmlFor="create-item-path"
-            className="block text-xs font-bold uppercase tracking-widest text-muted-foreground"
-          >
-            Path
-          </label>
-          <input
-            id="create-item-path"
-            type="text"
+          <TextField
+            label="Path"
             value={pathInput}
-            onChange={(event) => setPathInput(event.target.value)}
+            onChange={setPathInput}
             placeholder={pathPlaceholder}
             autoFocus
-            disabled={isSubmitting}
-            className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring disabled:cursor-not-allowed disabled:opacity-50"
+            isDisabled={isSubmitting}
+            description={pathHint}
+            isInvalid={!!dialogError}
+            errorMessage={dialogError ?? undefined}
           />
-          <p className="mt-2 text-xs text-muted-foreground">{pathHint}</p>
-          {dialogError && (
-            <p className="mt-2 text-xs text-destructive">{dialogError}</p>
-          )}
         </form>
-      </ModalDialog>
+      </Dialog>
 
       <div className="border-b border-border px-4 py-3">
         <Link
@@ -186,22 +180,22 @@ export function Sidebar() {
         </div>
         <FileTree />
         <div className="mt-2 space-y-px border-t border-border pt-2">
-          <button
-            type="button"
-            onClick={() => openCreateDialog("note")}
-            className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          <Button
+            variant="ghost"
+            onPress={() => openCreateDialog("note")}
+            className="w-full justify-start gap-1.5 px-2 py-1"
           >
             <FilePlus className="h-3.5 w-3.5" />
             New Note
-          </button>
-          <button
-            type="button"
-            onClick={() => openCreateDialog("folder")}
-            className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          </Button>
+          <Button
+            variant="ghost"
+            onPress={() => openCreateDialog("folder")}
+            className="w-full justify-start gap-1.5 px-2 py-1"
           >
             <FolderPlus className="h-3.5 w-3.5" />
             New Folder
-          </button>
+          </Button>
         </div>
       </nav>
       <div className="border-t border-border px-2 py-2">
@@ -225,14 +219,14 @@ export function Sidebar() {
         )}
       </div>
       <div className="border-t border-border">
-        <button
-          type="button"
-          onClick={() => openSettings()}
-          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        <Button
+          variant="ghost"
+          onPress={() => openSettings()}
+          className="w-full justify-start gap-1.5 px-3 py-2"
         >
           <Settings className="h-3.5 w-3.5" />
           Settings
-        </button>
+        </Button>
       </div>
     </aside>
   );
