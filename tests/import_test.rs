@@ -353,7 +353,7 @@ fn cite_key_multiple_collisions() {
 use clepsydra::vault::import_zotero::{
     open_zotero_db, query_items, map_to_import_entry, resolve_attachment_path,
     find_existing_by_zotero_key, normalize_since, ZoteroAuthor, ZoteroPdf, ZoteroItem,
-    compute_field_diffs,
+    compute_field_diffs, ConflictPolicy,
 };
 
 /// Create a minimal Zotero-schema SQLite DB for testing.
@@ -762,4 +762,41 @@ fn query_items_with_iso_since_after_normalize() {
     assert_eq!(items.len(), 2, "2 items modified after 2024-05-01");
     assert!(items.iter().all(|i| i.zotero_key != "DEF67890"),
         "book was modified 2024-03-01, should be excluded");
+}
+
+#[test]
+fn compute_diffs_detects_year_change() {
+    let item = make_article_item();
+    let entry = map_to_import_entry(&item);
+
+    let mut local_meta = clepsydra::vault::page::PageMeta::default();
+    local_meta.title = Some("Attention Is All You Need".to_string());
+    local_meta.extra.insert(
+        "year".to_string(),
+        serde_yaml::Value::Number(2016.into()),
+    );
+
+    let diffs = compute_field_diffs(&entry, &local_meta);
+    let year_diff = diffs.iter().find(|d| d.field == "year").unwrap();
+    assert_eq!(year_diff.local_value.as_deref(), Some("2016"));
+    assert_eq!(year_diff.source_value.as_deref(), Some("2017"));
+}
+
+#[test]
+fn compute_diffs_detects_doi_change() {
+    let item = make_article_item();
+    let entry = map_to_import_entry(&item);
+
+    let local_meta = clepsydra::vault::page::PageMeta::default();
+
+    let diffs = compute_field_diffs(&entry, &local_meta);
+    let doi_diff = diffs.iter().find(|d| d.field == "doi").unwrap();
+    assert!(doi_diff.local_value.is_none());
+    assert_eq!(doi_diff.source_value.as_deref(), Some("10.48550/arXiv.1706.03762"));
+}
+
+#[test]
+fn conflict_policy_default_is_skip() {
+    let policy = ConflictPolicy::default();
+    assert!(matches!(policy, ConflictPolicy::Skip));
 }
