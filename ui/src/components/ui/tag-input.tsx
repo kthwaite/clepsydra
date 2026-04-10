@@ -110,6 +110,7 @@ export function TagInput({
         onBlur={() => {
           if (inputValue.trim()) addValue(inputValue);
         }}
+        aria-label={`Add ${label.toLowerCase()}`}
         placeholder={values.length === 0 ? placeholder : undefined}
         className="min-w-[80px] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
       />

@@ -77,7 +77,7 @@ describe("TagInput", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<TagInput label="Tags" values={[]} onChange={onChange} />);
-    screen.getByRole("textbox");
+    await user.click(screen.getByRole("textbox"));
     await user.keyboard("{Enter}");
     expect(onChange).not.toHaveBeenCalled();
   });

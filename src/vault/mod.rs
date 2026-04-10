@@ -5,6 +5,7 @@ pub mod block;
 pub mod block_id;
 pub mod canonical;
 pub mod cas;
+pub mod checkpoint;
 pub mod config;
 pub mod context;
 pub mod derivation;
