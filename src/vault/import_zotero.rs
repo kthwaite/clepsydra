@@ -455,6 +455,91 @@ pub fn normalize_since(since: &str) -> String {
 
 // ── Deduplication query ────────────────────────────────────────────────────
 
+/// Compare a source import entry against local page metadata.
+/// Returns a list of fields where the source and local values differ.
+/// Only compares mapped metadata fields (title, year, venue, publisher, doi, isbn).
+pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::PageMeta) -> Vec<FieldDiff> {
+    let mut diffs = Vec::new();
+
+    // Title
+    let local_title = local.title.as_deref().unwrap_or("");
+    if local_title != source.title {
+        diffs.push(FieldDiff {
+            field: "title".to_string(),
+            local_value: Some(local_title.to_string()),
+            source_value: Some(source.title.clone()),
+        });
+    }
+
+    // Year — compare via extra.year
+    let local_year = local.extra.get("year")
+        .and_then(|v| match v {
+            serde_yaml::Value::Number(n) => n.as_i64().map(|i| i as i32),
+            _ => None,
+        });
+    if local_year != source.year {
+        diffs.push(FieldDiff {
+            field: "year".to_string(),
+            local_value: local_year.map(|y| y.to_string()),
+            source_value: source.year.map(|y| y.to_string()),
+        });
+    }
+
+    // Venue
+    let local_venue = local.extra.get("venue")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    if local_venue != source.venue {
+        diffs.push(FieldDiff {
+            field: "venue".to_string(),
+            local_value: local_venue,
+            source_value: source.venue.clone(),
+        });
+    }
+
+    // Publisher
+    let local_publisher = local.extra.get("publisher")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    if local_publisher != source.publisher {
+        diffs.push(FieldDiff {
+            field: "publisher".to_string(),
+            local_value: local_publisher,
+            source_value: source.publisher.clone(),
+        });
+    }
+
+    // DOI — nested in external_ids
+    let local_doi = local.extra.get("external_ids")
+        .and_then(|v| v.as_mapping())
+        .and_then(|m| m.get(serde_yaml::Value::String("doi".to_string())))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    if local_doi != source.doi {
+        diffs.push(FieldDiff {
+            field: "doi".to_string(),
+            local_value: local_doi,
+            source_value: source.doi.clone(),
+        });
+    }
+
+    // ISBN — nested in external_ids
+    let local_isbn = local.extra.get("external_ids")
+        .and_then(|v| v.as_mapping())
+        .and_then(|m| m.get(serde_yaml::Value::String("isbn".to_string())))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    if local_isbn != source.isbn {
+        diffs.push(FieldDiff {
+            field: "isbn".to_string(),
+            local_value: local_isbn,
+            source_value: source.isbn.clone(),
+        });
+    }
+
+    diffs
+}
+
 /// Check if a work was previously imported from Zotero by its item key.
 /// Returns Some(vault_path) if found, None otherwise.
 pub fn find_existing_by_zotero_key(conn: &rusqlite::Connection, zotero_key: &str) -> Option<String> {

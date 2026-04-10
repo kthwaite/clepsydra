@@ -353,6 +353,7 @@ fn cite_key_multiple_collisions() {
 use clepsydra::vault::import_zotero::{
     open_zotero_db, query_items, map_to_import_entry, resolve_attachment_path,
     find_existing_by_zotero_key, normalize_since, ZoteroAuthor, ZoteroPdf, ZoteroItem,
+    compute_field_diffs,
 };
 
 /// Create a minimal Zotero-schema SQLite DB for testing.
@@ -710,6 +711,39 @@ fn cite_key_pool_not_poisoned_by_skipped_items() {
     // But since first item DID reserve it, this correctly gets -b.
     let key3 = derive_cite_key(None, &["Smith".to_string()], Some(2023), "Results", &pool);
     assert_eq!(key3, "smith2023results-b");
+}
+
+// ── compute_field_diffs tests ─────────────────────────────────────────────
+
+#[test]
+fn compute_diffs_detects_changed_title() {
+    let item = make_article_item();
+    let entry = map_to_import_entry(&item);
+
+    let local_meta = clepsydra::vault::page::PageMeta {
+        title: Some("Old Title".to_string()),
+        tags: vec!["local-tag".to_string()],
+        ..Default::default()
+    };
+
+    let diffs = compute_field_diffs(&entry, &local_meta);
+    assert!(diffs.iter().any(|d| d.field == "title"
+        && d.local_value.as_deref() == Some("Old Title")
+        && d.source_value.as_deref() == Some("Attention Is All You Need")));
+}
+
+#[test]
+fn compute_diffs_empty_when_identical() {
+    let item = make_article_item();
+    let entry = map_to_import_entry(&item);
+
+    let local_meta = clepsydra::vault::page::PageMeta {
+        title: Some("Attention Is All You Need".to_string()),
+        ..Default::default()
+    };
+
+    let diffs = compute_field_diffs(&entry, &local_meta);
+    assert!(diffs.iter().all(|d| d.field != "title"), "title should not diff when identical");
 }
 
 // ── ISO since filter with Zotero DB ─────────────────────────────────────
