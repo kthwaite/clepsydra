@@ -1,30 +1,11 @@
-import { Check, Circle, Loader2, X } from "lucide-react";
 import type { TaskItem } from "#/api/tasks";
 import { useToggleTaskStatus } from "#/api/tasks";
 import { Badge } from "#/components/ui/badge";
+import {
+  nextStatus,
+  TaskStatusButton,
+} from "#/components/ui/task-status-button";
 import { useOpenTab } from "#/hooks/useOpenTab";
-
-const STATUS_ICONS: Record<string, typeof Circle> = {
-  todo: Circle,
-  doing: Loader2,
-  done: Check,
-  cancelled: X,
-};
-
-function nextStatus(current: string): string {
-  switch (current) {
-    case "todo":
-      return "done";
-    case "doing":
-      return "done";
-    case "done":
-      return "todo";
-    case "cancelled":
-      return "todo";
-    default:
-      return "done";
-  }
-}
 
 function priorityLabel(p: string): string {
   switch (p) {
@@ -58,7 +39,6 @@ export function TaskList({ tasks, emptyMessage = "No tasks." }: TaskListProps) {
     <ul className="divide-y divide-border border-y border-border">
       {tasks.map((task) => {
         const isDone = task.status === "done" || task.status === "cancelled";
-        const Icon = STATUS_ICONS[task.status] ?? Circle;
         const due = task.properties.due;
         const priority = task.properties.priority;
 
@@ -67,21 +47,17 @@ export function TaskList({ tasks, emptyMessage = "No tasks." }: TaskListProps) {
             key={`${task.page_path}:${task.span_start}`}
             className="flex items-start gap-2 px-2 py-2"
           >
-            <button
-              type="button"
-              onClick={() =>
+            <TaskStatusButton
+              status={task.status}
+              onToggle={() =>
                 toggle.mutate({
                   pagePath: task.page_path,
                   spanStart: task.span_start,
                   status: nextStatus(task.status),
                 })
               }
-              disabled={toggle.isPending}
-              className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-              aria-label={`Mark task ${nextStatus(task.status)}`}
-            >
-              <Icon className="h-3 w-3" />
-            </button>
+              isDisabled={toggle.isPending}
+            />
 
             <div className="min-w-0 flex-1">
               <span
