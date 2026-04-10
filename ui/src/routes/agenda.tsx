@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   useAgendaOverdue,
   useAgendaToday,
@@ -7,53 +7,40 @@ import {
   useTasks,
 } from "#/api/tasks";
 import { TaskList } from "#/components/TaskList";
+import { SectionHeading } from "#/components/ui/section-heading";
+import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 
 export const Route = createFileRoute("/agenda")({
   component: AgendaPage,
 });
 
-type Tab = "today" | "upcoming" | "inbox";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "upcoming", label: "Upcoming" },
-  { id: "inbox", label: "Inbox" },
-];
-
 function AgendaPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("today");
-
   return (
     <div className="flex h-full flex-col">
-      {/* Header + tab bar */}
-      <div className="border-b border-border px-4 py-2">
-        <h1 className="font-heading text-lg font-bold">Agenda</h1>
-        <nav className="mt-2 flex gap-4">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`pb-1 text-xs uppercase tracking-wider ${
-                activeTab === tab.id
-                  ? "border-b-2 border-foreground font-bold text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-8 py-6">
-          {activeTab === "today" && <TodayPanel />}
-          {activeTab === "upcoming" && <UpcomingPanel />}
-          {activeTab === "inbox" && <InboxPanel />}
+      <Tabs defaultSelectedKey="today" className="flex h-full flex-col">
+        <div className="border-b border-border px-4 py-2">
+          <h1 className="font-heading text-lg font-bold">Agenda</h1>
+          <TabList aria-label="Agenda sections" className="mt-2">
+            <Tab id="today">Today</Tab>
+            <Tab id="upcoming">Upcoming</Tab>
+            <Tab id="inbox">Inbox</Tab>
+          </TabList>
         </div>
-      </div>
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-3xl px-8 py-6">
+            <TabPanel id="today">
+              <TodayPanel />
+            </TabPanel>
+            <TabPanel id="upcoming">
+              <UpcomingPanel />
+            </TabPanel>
+            <TabPanel id="inbox">
+              <InboxPanel />
+            </TabPanel>
+          </div>
+        </div>
+      </Tabs>
     </div>
   );
 }
@@ -140,14 +127,6 @@ function InboxPanel() {
 // ---------------------------------------------------------------------------
 // Shared sub-components
 // ---------------------------------------------------------------------------
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-      {children}
-    </h2>
-  );
-}
 
 function LoadingIndicator() {
   return <p className="py-4 text-xs text-muted-foreground">Loading...</p>;
