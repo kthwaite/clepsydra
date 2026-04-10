@@ -1,3 +1,4 @@
+import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { type NavigationMode, useWorkspaceStore } from "#/store/workspace";
 
 const modes: { value: NavigationMode; label: string }[] = [
@@ -11,16 +12,16 @@ export function NavigationModeSelector() {
   const setNavigationMode = useWorkspaceStore((s) => s.setNavigationMode);
 
   return (
-    <select
+    <RadioGroup
       value={navigationMode}
-      onChange={(e) => setNavigationMode(e.target.value as NavigationMode)}
-      className="border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+      onChange={(value) => setNavigationMode(value as NavigationMode)}
+      aria-label="Tab opening mode"
     >
       {modes.map((m) => (
-        <option key={m.value} value={m.value}>
+        <Radio key={m.value} value={m.value}>
           {m.label}
-        </option>
+        </Radio>
       ))}
-    </select>
+    </RadioGroup>
   );
 }
