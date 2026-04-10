@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
+import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
 import { type SettingsSection, useUiStore } from "#/store/ui";
 
@@ -191,8 +192,8 @@ function SettingsCard({
 
 function ComingSoonBadge() {
   return (
-    <span className="border border-border px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+    <Badge size="sm" className="tracking-widest">
       Coming Soon
-    </span>
+    </Badge>
   );
 }

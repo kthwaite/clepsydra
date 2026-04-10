@@ -3,6 +3,7 @@ import { useStats, useTags } from "#/api/index";
 import { usePages } from "#/api/pages";
 import { StatCard } from "#/components/StatCard";
 import { TagCloud } from "#/components/TagCloud";
+import { SectionHeading } from "#/components/ui/section-heading";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 export const Route = createFileRoute("/")({
@@ -39,18 +40,16 @@ function Dashboard() {
 
       {tags && tags.length > 0 && (
         <section className="mb-8">
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Tags
-          </h2>
+          <SectionHeading className="mb-3 text-sm">Tags</SectionHeading>
           <TagCloud tags={tags} />
         </section>
       )}
 
       {pages && pages.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-muted-foreground">
+          <SectionHeading className="mb-3 text-sm">
             All Pages ({pagesData.total})
-          </h2>
+          </SectionHeading>
           <ul className="space-y-px">
             {pages.slice(0, 20).map((p) => (
               <li key={p.id}>
