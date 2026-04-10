@@ -1,4 +1,5 @@
 import type { TagCount } from "#/api/types";
+import { Badge } from "#/components/ui/badge";
 
 interface TagCloudProps {
   tags: TagCount[];
@@ -10,10 +11,10 @@ export function TagCloud({ tags }: TagCloudProps) {
   return (
     <div className="flex flex-wrap gap-1">
       {tags.map((t) => (
-        <span key={t.tag} className="border border-border px-2 py-0.5 text-xs">
+        <Badge key={t.tag} className="font-sans tracking-normal normal-case">
           {t.tag}
           <span className="ml-1 text-muted-foreground">{t.count}</span>
-        </span>
+        </Badge>
       ))}
     </div>
   );
