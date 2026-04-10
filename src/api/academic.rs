@@ -154,11 +154,13 @@ pub struct AnnotationDetail {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ImportResult {
     pub cite_key: String,
-    pub status: String, // "created" | "skipped" | "error"
+    pub status: String, // "created" | "skipped" | "updated" | "conflict" | "error"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conflict_detail: Option<crate::vault::import_zotero::ConflictDetail>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -453,6 +455,7 @@ pub async fn import_bibtex(
                 status: "skipped".to_string(),
                 page_path: Some(path),
                 error: None,
+                conflict_detail: None,
             });
             continue;
         }
@@ -490,6 +493,7 @@ pub async fn import_bibtex(
                     status: "created".to_string(),
                     page_path: Some(detail.path),
                     error: None,
+                    conflict_detail: None,
                 });
             }
             Err(e) => {
@@ -498,6 +502,7 @@ pub async fn import_bibtex(
                     status: "error".to_string(),
                     page_path: None,
                     error: Some(e.error),
+                    conflict_detail: None,
                 });
             }
         }
@@ -541,6 +546,7 @@ pub async fn import_doi(
                     status: "skipped".to_string(),
                     page_path: Some(path),
                     error: None,
+                    conflict_detail: None,
                 }),
             )
                 .into_response());
@@ -589,6 +595,7 @@ pub async fn import_doi(
             status: "created".to_string(),
             page_path: Some(detail.path),
             error: None,
+            conflict_detail: None,
         }),
     )
         .into_response())
@@ -634,6 +641,7 @@ pub async fn import_isbn_handler(
                     status: "skipped".to_string(),
                     page_path: Some(path),
                     error: None,
+                    conflict_detail: None,
                 }),
             )
                 .into_response());
@@ -683,6 +691,7 @@ pub async fn import_isbn_handler(
             status: "created".to_string(),
             page_path: Some(detail.path),
             error: None,
+            conflict_detail: None,
         }),
     )
         .into_response())
@@ -799,6 +808,7 @@ pub async fn import_zotero_handler(
                 status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
                 page_path: Some(path),
                 error: None,
+                conflict_detail: None,
             });
             continue;
         }
@@ -844,6 +854,7 @@ pub async fn import_zotero_handler(
                 status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
                 page_path: Some(path),
                 error: None,
+                conflict_detail: None,
             });
             continue;
         }
@@ -858,6 +869,7 @@ pub async fn import_zotero_handler(
                 status: "would_create".to_string(),
                 page_path: None,
                 error: None,
+                conflict_detail: None,
             });
             continue;
         }
@@ -974,6 +986,7 @@ pub async fn import_zotero_handler(
                     status: "created".to_string(),
                     page_path: Some(detail.path),
                     error: None,
+                    conflict_detail: None,
                 });
             }
             Err(e) => {
@@ -982,6 +995,7 @@ pub async fn import_zotero_handler(
                     status: "error".to_string(),
                     page_path: None,
                     error: Some(e.error),
+                    conflict_detail: None,
                 });
             }
         }

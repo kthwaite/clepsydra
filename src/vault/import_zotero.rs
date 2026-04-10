@@ -23,6 +23,44 @@ pub struct ImportZoteroRequest {
     pub since: Option<String>,
     #[serde(default)]
     pub dry_run: bool,
+    /// When true (default), automatically use the last checkpoint as `since`
+    /// if no explicit `since` is provided, and save a new checkpoint after
+    /// a successful import.
+    #[serde(default = "default_true")]
+    pub auto_checkpoint: bool,
+    #[serde(default)]
+    pub conflict_policy: ConflictPolicy,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// How to handle items that already exist locally.
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictPolicy {
+    /// Skip items that already exist (current behavior).
+    #[default]
+    Skip,
+    /// Overwrite mapped metadata fields from Zotero, preserving local-only content.
+    SourceWins,
+    /// Report conflicts without modifying anything.
+    Manual,
+}
+
+/// A single field-level difference between local and source metadata.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct FieldDiff {
+    pub field: String,
+    pub local_value: Option<String>,
+    pub source_value: Option<String>,
+}
+
+/// Conflict detail returned for `Manual` conflict policy.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct ConflictDetail {
+    pub fields: Vec<FieldDiff>,
 }
 
 // ── Zotero database types and query functions ──────────────────────────────
