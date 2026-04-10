@@ -697,6 +697,82 @@ pub async fn import_isbn_handler(
         .into_response())
 }
 
+/// Apply source-wins merge: overwrite mapped metadata fields from the import entry,
+/// preserving the page body and local-only frontmatter fields.
+fn apply_source_wins(
+    state: &AppState,
+    page_path: &str,
+    entry: &crate::vault::import::BibImportEntry,
+) -> Result<(), ApiError> {
+    let vp = VaultPath::new(page_path)
+        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+    let abs_path = state.vault.resolve(&vp);
+
+    let mut page = Page::from_file(&abs_path, vp.clone())
+        .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
+
+    // Overwrite mapped fields
+    page.meta.title = Some(entry.title.clone());
+
+    // Update work_meta fields via extra
+    if let Some(year) = entry.year {
+        page.meta.extra.insert("year".to_string(), serde_yaml::Value::Number(year.into()));
+    }
+    if let Some(ref venue) = entry.venue {
+        page.meta.extra.insert("venue".to_string(), serde_yaml::Value::String(venue.clone()));
+    }
+    if let Some(ref publisher) = entry.publisher {
+        page.meta.extra.insert("publisher".to_string(), serde_yaml::Value::String(publisher.clone()));
+    }
+
+    // Update authors
+    let authors_val: Vec<serde_yaml::Value> = entry.authors.iter()
+        .map(|a| serde_yaml::Value::String(a.clone()))
+        .collect();
+    page.meta.extra.insert("authors".to_string(), serde_yaml::Value::Sequence(authors_val));
+
+    // Update external_ids
+    let mut ext_ids = serde_yaml::Mapping::new();
+    if let Some(ref doi) = entry.doi {
+        ext_ids.insert(
+            serde_yaml::Value::String("doi".to_string()),
+            serde_yaml::Value::String(doi.clone()),
+        );
+    }
+    if let Some(ref isbn) = entry.isbn {
+        ext_ids.insert(
+            serde_yaml::Value::String("isbn".to_string()),
+            serde_yaml::Value::String(isbn.clone()),
+        );
+    }
+    if let Some(ref arxiv) = entry.arxiv {
+        ext_ids.insert(
+            serde_yaml::Value::String("arxiv".to_string()),
+            serde_yaml::Value::String(arxiv.clone()),
+        );
+    }
+    if !ext_ids.is_empty() {
+        page.meta.extra.insert("external_ids".to_string(), serde_yaml::Value::Mapping(ext_ids));
+    }
+
+    // Update import.imported_at timestamp
+    if let Some(import_val) = page.meta.extra.get_mut("import") {
+        if let serde_yaml::Value::Mapping(import_map) = import_val {
+            import_map.insert(
+                serde_yaml::Value::String("imported_at".to_string()),
+                serde_yaml::Value::String(Utc::now().to_rfc3339()),
+            );
+        }
+    }
+
+    // Write back (preserves body)
+    let content = write_page_content(&page.meta, &page.body);
+    fs::write(&abs_path, content)
+        .map_err(|e| ApiError::internal(format!("Failed to write page: {e}")))?;
+
+    Ok(())
+}
+
 #[utoipa::path(
     post,
     path = "/academic/import/zotero",
@@ -803,13 +879,82 @@ pub async fn import_zotero_handler(
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if let Some(path) = existing_by_zk {
-            results.push(ImportResult {
-                cite_key: format!("zotero:{}", item.zotero_key),
-                status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
-                page_path: Some(path),
-                error: None,
-                conflict_detail: None,
-            });
+            match req.conflict_policy {
+                crate::vault::import_zotero::ConflictPolicy::Skip => {
+                    results.push(ImportResult {
+                        cite_key: format!("zotero:{}", item.zotero_key),
+                        status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
+                        page_path: Some(path),
+                        error: None,
+                        conflict_detail: None,
+                    });
+                }
+                crate::vault::import_zotero::ConflictPolicy::SourceWins => {
+                    let mut entry = crate::vault::import_zotero::map_to_import_entry(item);
+                    let formatted_authors: Vec<String> = item.authors.iter()
+                        .map(crate::vault::import_zotero::format_author)
+                        .collect();
+                    entry.cite_key = crate::vault::import_zotero::derive_cite_key(
+                        item.extra_field.as_deref(), &formatted_authors,
+                        entry.year, &item.title, &used_cite_keys,
+                    );
+
+                    if req.dry_run {
+                        results.push(ImportResult {
+                            cite_key: entry.cite_key,
+                            status: "would_update".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: None,
+                        });
+                    } else {
+                        apply_source_wins(&state, &path, &entry)?;
+                        // Re-index
+                        let vp = VaultPath::new(&path)
+                            .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+                        state.index.with_index(move |index, vault| {
+                            index.index_page(vault, &vp)
+                        }).await
+                        .map_err(|e| ApiError::internal(e.to_string()))?
+                        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+                        results.push(ImportResult {
+                            cite_key: entry.cite_key,
+                            status: "updated".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: None,
+                        });
+                    }
+                }
+                crate::vault::import_zotero::ConflictPolicy::Manual => {
+                    let entry = crate::vault::import_zotero::map_to_import_entry(item);
+                    let vp = VaultPath::new(&path)
+                        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+                    let abs_path = state.vault.resolve(&vp);
+                    let page = Page::from_file(&abs_path, vp)
+                        .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
+                    let diffs = crate::vault::import_zotero::compute_field_diffs(&entry, &page.meta);
+
+                    if diffs.is_empty() {
+                        results.push(ImportResult {
+                            cite_key: format!("zotero:{}", item.zotero_key),
+                            status: "skipped".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: None,
+                        });
+                    } else {
+                        results.push(ImportResult {
+                            cite_key: format!("zotero:{}", item.zotero_key),
+                            status: "conflict".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: Some(crate::vault::import_zotero::ConflictDetail { fields: diffs }),
+                        });
+                    }
+                }
+            }
             continue;
         }
 
@@ -849,13 +994,72 @@ pub async fn import_zotero_handler(
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if let Some(path) = existing {
-            results.push(ImportResult {
-                cite_key: entry.cite_key.clone(),
-                status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
-                page_path: Some(path),
-                error: None,
-                conflict_detail: None,
-            });
+            match req.conflict_policy {
+                crate::vault::import_zotero::ConflictPolicy::Skip => {
+                    results.push(ImportResult {
+                        cite_key: entry.cite_key.clone(),
+                        status: if req.dry_run { "would_skip".to_string() } else { "skipped".to_string() },
+                        page_path: Some(path),
+                        error: None,
+                        conflict_detail: None,
+                    });
+                }
+                crate::vault::import_zotero::ConflictPolicy::SourceWins => {
+                    if req.dry_run {
+                        results.push(ImportResult {
+                            cite_key: entry.cite_key.clone(),
+                            status: "would_update".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: None,
+                        });
+                    } else {
+                        apply_source_wins(&state, &path, &entry)?;
+                        // Re-index
+                        let vp = VaultPath::new(&path)
+                            .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+                        state.index.with_index(move |index, vault| {
+                            index.index_page(vault, &vp)
+                        }).await
+                        .map_err(|e| ApiError::internal(e.to_string()))?
+                        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+                        results.push(ImportResult {
+                            cite_key: entry.cite_key.clone(),
+                            status: "updated".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: None,
+                        });
+                    }
+                }
+                crate::vault::import_zotero::ConflictPolicy::Manual => {
+                    let vp = VaultPath::new(&path)
+                        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+                    let abs_path = state.vault.resolve(&vp);
+                    let page = Page::from_file(&abs_path, vp)
+                        .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
+                    let diffs = crate::vault::import_zotero::compute_field_diffs(&entry, &page.meta);
+
+                    if diffs.is_empty() {
+                        results.push(ImportResult {
+                            cite_key: entry.cite_key.clone(),
+                            status: "skipped".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: None,
+                        });
+                    } else {
+                        results.push(ImportResult {
+                            cite_key: entry.cite_key.clone(),
+                            status: "conflict".to_string(),
+                            page_path: Some(path),
+                            error: None,
+                            conflict_detail: Some(crate::vault::import_zotero::ConflictDetail { fields: diffs }),
+                        });
+                    }
+                }
+            }
             continue;
         }
 
