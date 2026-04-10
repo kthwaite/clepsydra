@@ -2547,11 +2547,12 @@ async fn import_zotero_is_idempotent() {
     let zotero_db_path = tmp.path().join("zotero.sqlite");
     create_mock_zotero_db_for_api(&zotero_db_path);
 
-    // First import
+    // First import (disable checkpoint so second import sees all items)
     let res = server
         .post("/api/vault/academic/import/zotero")
         .json(&serde_json::json!({
-            "database_path": zotero_db_path.to_string_lossy()
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
         }))
         .await;
     res.assert_status_ok();
@@ -2559,11 +2560,12 @@ async fn import_zotero_is_idempotent() {
     let results = body["results"].as_array().unwrap();
     assert!(results.iter().all(|r| r["status"] == "created"));
 
-    // Second import — should skip all
+    // Second import — should skip all (dedup by zotero_key)
     let res = server
         .post("/api/vault/academic/import/zotero")
         .json(&serde_json::json!({
-            "database_path": zotero_db_path.to_string_lossy()
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
         }))
         .await;
     res.assert_status_ok();

@@ -829,15 +829,26 @@ pub async fn import_zotero_handler(
         )));
     }
 
+    // 1b. Load checkpoint for auto-since
+    let checkpoint_since = if req.auto_checkpoint && req.since.is_none() {
+        crate::vault::checkpoint::ImportCheckpoint::load(state.vault.root(), "zotero")
+            .map(|cp| cp.last_synced)
+    } else {
+        None
+    };
+
+    let effective_since = req.since.as_deref()
+        .map(crate::vault::import_zotero::normalize_since)
+        .or(checkpoint_since);
+
     // 2. Open DB and query items
     let conn = crate::vault::import_zotero::open_zotero_db(&db_path)
         .map_err(ApiError::internal)?;
 
-    let normalized_since = req.since.as_deref().map(crate::vault::import_zotero::normalize_since);
     let items = crate::vault::import_zotero::query_items(
         &conn,
         req.collection.as_deref(),
-        normalized_since.as_deref(),
+        effective_since.as_deref(),
     )
     .map_err(ApiError::internal)?;
 
@@ -1201,6 +1212,25 @@ pub async fn import_zotero_handler(
                     error: Some(e.error),
                     conflict_detail: None,
                 });
+            }
+        }
+    }
+
+    // Save checkpoint after successful import (not on dry_run)
+    if req.auto_checkpoint && !req.dry_run {
+        let created_count = results.iter()
+            .filter(|r| r.status == "created")
+            .count() as u64;
+        if created_count > 0 || results.iter().any(|r| r.status == "skipped") {
+            let now = chrono::Utc::now()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+            let cp = crate::vault::checkpoint::ImportCheckpoint {
+                last_synced: now,
+                items_imported: created_count,
+            };
+            if let Err(e) = cp.save(state.vault.root(), "zotero") {
+                tracing::warn!("Failed to save Zotero checkpoint: {e}");
             }
         }
     }
