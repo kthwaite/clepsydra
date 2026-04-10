@@ -1,6 +1,7 @@
 import { Check, Circle, Loader2, X } from "lucide-react";
 import type { TaskItem } from "#/api/tasks";
 import { useToggleTaskStatus } from "#/api/tasks";
+import { Badge } from "#/components/ui/badge";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 const STATUS_ICONS: Record<string, typeof Circle> = {
@@ -90,16 +91,8 @@ export function TaskList({ tasks, emptyMessage = "No tasks." }: TaskListProps) {
               </span>
 
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                {due && (
-                  <span className="border border-border px-1 py-px font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {due}
-                  </span>
-                )}
-                {priority && (
-                  <span className="border border-border px-1 py-px font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {priorityLabel(priority)}
-                  </span>
-                )}
+                {due && <Badge size="sm">{due}</Badge>}
+                {priority && <Badge size="sm">{priorityLabel(priority)}</Badge>}
                 <button
                   type="button"
                   onClick={() => openTab("page", task.page_path)}
