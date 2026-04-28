@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { $api, invalidateByPathPrefix } from "./client";
+import { $api } from "./client";
+import { invalidateByPath, queryKeys } from "./keys";
 
 export function usePages() {
   return $api.useQuery("get", "/api/vault/pages");
@@ -23,9 +24,9 @@ export function useCreatePage() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/vault/pages/{path}", {
     onSuccess: () => {
-      invalidateByPathPrefix(qc, "/api/vault/pages");
-      invalidateByPathPrefix(qc, "/api/vault/folders");
-      invalidateByPathPrefix(qc, "/api/vault/index");
+      invalidateByPath(qc, queryKeys.pages.pathPrefix);
+      invalidateByPath(qc, queryKeys.folders.pathPrefix);
+      invalidateByPath(qc, queryKeys.index.pathPrefix);
     },
   });
 }
@@ -34,8 +35,8 @@ export function useCreateFolder() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/vault/folders/{path}", {
     onSuccess: () => {
-      invalidateByPathPrefix(qc, "/api/vault/pages");
-      invalidateByPathPrefix(qc, "/api/vault/folders");
+      invalidateByPath(qc, queryKeys.pages.pathPrefix);
+      invalidateByPath(qc, queryKeys.folders.pathPrefix);
     },
   });
 }
@@ -44,8 +45,8 @@ export function useUpdatePage() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/vault/pages/{path}", {
     onSuccess: () => {
-      invalidateByPathPrefix(qc, "/api/vault/pages");
-      invalidateByPathPrefix(qc, "/api/vault/index");
+      invalidateByPath(qc, queryKeys.pages.pathPrefix);
+      invalidateByPath(qc, queryKeys.index.pathPrefix);
     },
   });
 }

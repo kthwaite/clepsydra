@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "./keys";
 
 const API_BASE = "/api/vault/journal";
 
@@ -26,7 +27,7 @@ export interface JournalSummary {
 
 export function useJournalToday() {
   return useQuery<JournalDetail>({
-    queryKey: ["journal", "today"],
+    queryKey: queryKeys.journal.today,
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/today`);
       if (!res.ok) throw new Error("Failed to fetch journal");
@@ -37,7 +38,7 @@ export function useJournalToday() {
 
 export function useJournalByDate(date: string) {
   return useQuery<JournalDetail>({
-    queryKey: ["journal", date],
+    queryKey: queryKeys.journal.byDate(date),
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/${date}`);
       if (!res.ok) throw new Error("Failed to fetch journal");
@@ -49,7 +50,7 @@ export function useJournalByDate(date: string) {
 
 export function useJournalRecent(days = 7) {
   return useQuery<JournalSummary[]>({
-    queryKey: ["journal", "recent", days],
+    queryKey: queryKeys.journal.recent(days),
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/recent?days=${days}`);
       if (!res.ok) throw new Error("Failed to fetch recent journals");
@@ -71,7 +72,7 @@ export function useQuickCapture() {
       return res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["journal"] });
+      qc.invalidateQueries({ queryKey: queryKeys.journal.all });
     },
   });
 }

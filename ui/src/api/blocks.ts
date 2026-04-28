@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "./keys";
 
 const API_BASE = "/api/vault/blocks";
 
@@ -15,7 +16,7 @@ export interface BlockResponse {
 
 export function useBlock(blockId: string) {
   return useQuery({
-    queryKey: ["blocks", blockId],
+    queryKey: queryKeys.blocks.detail(blockId),
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/${blockId}`);
       if (!res.ok) throw new Error("Block not found");
@@ -27,7 +28,7 @@ export function useBlock(blockId: string) {
 
 export function useSearchBlocks(query: string, limit = 8) {
   return useQuery({
-    queryKey: ["blocks", "search", query, limit],
+    queryKey: queryKeys.blocks.search(query, limit),
     queryFn: async () => {
       const res = await fetch(
         `${API_BASE}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
@@ -52,7 +53,7 @@ export function useAssignBlockId() {
       return res.json() as Promise<{ block_id: string }>;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["blocks"] });
+      qc.invalidateQueries({ queryKey: queryKeys.blocks.all });
     },
   });
 }

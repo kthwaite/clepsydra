@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { invalidateByPathPrefix } from "#/api/client";
+import { invalidateByPath, queryKeys } from "#/api/keys";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -32,9 +32,9 @@ export function useVaultEvents(): ConnectionStatus {
         try {
           const data: SyncNotification = JSON.parse(event.data);
           if (data.type === "index_changed") {
-            invalidateByPathPrefix(queryClient, "/api/vault/pages");
-            invalidateByPathPrefix(queryClient, "/api/vault/folders");
-            invalidateByPathPrefix(queryClient, "/api/vault/index");
+            invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
+            invalidateByPath(queryClient, queryKeys.folders.pathPrefix);
+            invalidateByPath(queryClient, queryKeys.index.pathPrefix);
           }
         } catch {
           // ignore malformed events

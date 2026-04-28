@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "./keys";
 
 const API_BASE = "/api/vault";
 
@@ -32,7 +33,7 @@ export interface TaskListResponse {
 
 export function useAgendaToday() {
   return useQuery<AgendaTodayResponse>({
-    queryKey: ["agenda", "today"],
+    queryKey: queryKeys.agenda.today,
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/agenda/today`);
       if (!res.ok) throw new Error("Failed to fetch agenda");
@@ -43,7 +44,7 @@ export function useAgendaToday() {
 
 export function useAgendaWeek() {
   return useQuery<AgendaWeekResponse>({
-    queryKey: ["agenda", "week"],
+    queryKey: queryKeys.agenda.week,
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/agenda/week`);
       if (!res.ok) throw new Error("Failed to fetch weekly agenda");
@@ -54,7 +55,7 @@ export function useAgendaWeek() {
 
 export function useAgendaOverdue() {
   return useQuery<AgendaOverdueResponse>({
-    queryKey: ["agenda", "overdue"],
+    queryKey: queryKeys.agenda.overdue,
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/agenda/overdue`);
       if (!res.ok) throw new Error("Failed to fetch overdue tasks");
@@ -66,7 +67,7 @@ export function useAgendaOverdue() {
 export function useTasks(params: Record<string, string>) {
   const search = new URLSearchParams(params).toString();
   return useQuery<TaskListResponse>({
-    queryKey: ["tasks", params],
+    queryKey: queryKeys.tasks.list(params),
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/tasks?${search}`);
       if (!res.ok) throw new Error("Failed to fetch tasks");
@@ -96,8 +97,8 @@ export function useToggleTaskStatus() {
       return res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["tasks"] });
-      qc.invalidateQueries({ queryKey: ["agenda"] });
+      qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      qc.invalidateQueries({ queryKey: queryKeys.agenda.all });
     },
   });
 }
