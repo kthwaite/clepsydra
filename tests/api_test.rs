@@ -1423,6 +1423,98 @@ async fn content_index_returns_page_details() {
     );
 }
 
+#[tokio::test]
+async fn content_index_groups_tags_and_links_per_page() {
+    // Multiple pages with distinct tags and a wikilink graph. The handler must
+    // attribute each tag and outbound link to the correct source page; a
+    // misgrouped bulk-query refactor would corrupt these per-entry sets.
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/page-a.md")
+        .json(&serde_json::json!({
+            "title": "Page A",
+            "tags": ["alpha", "shared"],
+            "body": "Links to [[Page B]] and [[Page C]]."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/page-b.md")
+        .json(&serde_json::json!({
+            "title": "Page B",
+            "tags": ["beta"],
+            "body": "Mentions [[Page C]]."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/page-c.md")
+        .json(&serde_json::json!({
+            "title": "Page C",
+            "tags": ["gamma", "shared"],
+            "body": "Has no outbound links."
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/content-index").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().unwrap();
+
+    let by_path: std::collections::HashMap<&str, &serde_json::Value> = items
+        .iter()
+        .filter_map(|e| e["path"].as_str().map(|p| (p, e)))
+        .collect();
+
+    let tags_of = |p: &str| -> Vec<String> {
+        by_path
+            .get(p)
+            .unwrap_or_else(|| panic!("missing {p}"))["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect()
+    };
+    let mut a_tags = tags_of("page-a.md");
+    a_tags.sort();
+    assert_eq!(a_tags, vec!["alpha".to_string(), "shared".to_string()]);
+    assert_eq!(tags_of("page-b.md"), vec!["beta".to_string()]);
+    let mut c_tags = tags_of("page-c.md");
+    c_tags.sort();
+    assert_eq!(c_tags, vec!["gamma".to_string(), "shared".to_string()]);
+
+    let links_of = |p: &str| -> Vec<String> {
+        by_path[p]["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.as_str().map(String::from))
+            .collect()
+    };
+    assert!(
+        !links_of("page-a.md").is_empty(),
+        "page-a has outbound links"
+    );
+    assert!(
+        !links_of("page-b.md").is_empty(),
+        "page-b has outbound links"
+    );
+    assert!(
+        links_of("page-c.md").is_empty(),
+        "page-c has no outbound links"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // delete_folder re-resolves affected links
 // ---------------------------------------------------------------------------

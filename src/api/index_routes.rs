@@ -807,32 +807,47 @@ pub async fn content_index(
         .with_index(move |index, vault| {
             let conn = index.connection();
 
-            let mut page_stmt = conn
-                .prepare("SELECT id, path, title FROM pages")?;
+            let mut page_stmt = conn.prepare("SELECT id, path, title FROM pages")?;
 
             let pages: Vec<(String, String, Option<String>)> = page_stmt
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
                 .filter_map(|r| r.ok())
                 .collect();
 
+            // Bulk-load tags grouped by page_id (was N+1 per page).
+            let mut tags_by_page: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::with_capacity(pages.len());
+            {
+                let mut stmt = conn.prepare("SELECT page_id, tag FROM tags")?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for (pid, tag) in rows.flatten() {
+                    tags_by_page.entry(pid).or_default().push(tag);
+                }
+            }
+
+            // Bulk-load distinct outbound links grouped by source_id (was N+1 per page).
+            let mut links_by_page: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::with_capacity(pages.len());
+            {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT source_id, target_path FROM links \
+                     WHERE target_path IS NOT NULL",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for (sid, target) in rows.flatten() {
+                    links_by_page.entry(sid).or_default().push(target);
+                }
+            }
+
             let mut entries = Vec::with_capacity(pages.len());
 
             for (page_id, path, title) in &pages {
-                let mut tag_stmt = conn
-                    .prepare_cached("SELECT tag FROM tags WHERE page_id = ?1")?;
-                let tags: Vec<String> = tag_stmt
-                    .query_map(params![page_id], |row| row.get(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
-
-                let mut link_stmt = conn
-                    .prepare_cached(
-                        "SELECT DISTINCT target_path FROM links WHERE source_id = ?1 AND target_path IS NOT NULL",
-                    )?;
-                let links: Vec<String> = link_stmt
-                    .query_map(params![page_id], |row| row.get(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
+                let tags = tags_by_page.remove(page_id).unwrap_or_default();
+                let links = links_by_page.remove(page_id).unwrap_or_default();
 
                 let vault_path = match VaultPath::new(path) {
                     Ok(vp) => vp,
