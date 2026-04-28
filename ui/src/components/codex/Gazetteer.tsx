@@ -21,12 +21,14 @@ export function Gazetteer({ initialTag }: Props) {
     return items.filter((n) => (n.tags ?? []).includes(tag));
   }, [items, tag]);
 
+  const now = useMemo(() => new Date(), []);
+
   return (
     <div className="px-5 py-[14px]">
       <div className="flex items-baseline justify-between">
         <div className="cl-cap cl-cap-wide text-[14px]">GAZETTEER · INDEX RERUM</div>
         <div className="cl-mono text-[10px] text-ink-mute">
-          {filtered.length} entries · {tag ? `subject: #${tag}` : "subjects: all"} · IV · MMXXVI
+          {filtered.length} entries · {tag ? `subject: #${tag}` : "subjects: all"} · {monthRoman(now)} · {yearRoman(now.getFullYear())}
         </div>
       </div>
       <hr className="cl-rule-double mb-2" />
@@ -104,4 +106,16 @@ export function Gazetteer({ initialTag }: Props) {
       </div>
     </div>
   );
+}
+
+const MONTH_ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+function monthRoman(d: Date): string {
+  return MONTH_ROMAN[d.getMonth()];
+}
+
+const ROMAN_ONES = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"];
+function yearRoman(y: number): string {
+  const tens = Math.floor((y - 2000) / 10);
+  const ones = (y - 2000) % 10;
+  return `MM${"X".repeat(tens)}${ones === 0 ? "" : ROMAN_ONES[ones - 1]}`;
 }
