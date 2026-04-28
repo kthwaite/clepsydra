@@ -191,19 +191,13 @@ function tryLinkTransform(editor: Editor): boolean {
   const rangeStart: Point = { path: path as any, offset: openBracketIdx };
   const rangeEnd: Point = { path: path as any, offset: textBefore.length };
 
-  // Ensure the editor recognises link elements as inline so that
-  // Transforms.insertNodes places them inside the paragraph.
-  const origIsInline = editor.isInline;
-  editor.isInline = (element: any) =>
-    element.type === "link" ? true : origIsInline(element);
-
   HistoryEditor.withNewBatch(editor as any, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown link syntax
       Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
       Transforms.delete(editor);
 
-      // Insert link element
+      // Insert link element. withLinks marks link elements as inline.
       const linkNode = {
         type: "link",
         url,
@@ -212,8 +206,6 @@ function tryLinkTransform(editor: Editor): boolean {
       Transforms.insertNodes(editor, linkNode as any);
     });
   });
-
-  editor.isInline = origIsInline;
 
   return true;
 }
