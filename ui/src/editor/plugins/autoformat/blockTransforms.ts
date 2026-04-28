@@ -7,6 +7,7 @@ import {
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
+import type { ListType } from "#/editor/plugins/listUtils";
 
 // ---------------------------------------------------------------------------
 // Pattern definitions
@@ -22,8 +23,6 @@ const CODE_FENCE_RE = /^```(\w*)$/;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-type ListType = "bulleted-list" | "numbered-list";
 
 function isBlock(node: unknown): node is SlateElement {
   return SlateElement.isElement(node) && !Editor.isEditor(node as any);
@@ -219,6 +218,8 @@ function applyListTransform(
   if (text === undefined) return false;
 
   applyWithBatch(editor, () => {
+    const listPathRef = Editor.pathRef(editor, blockPath);
+
     // Delete the trigger text
     Transforms.delete(editor, {
       at: {
@@ -236,8 +237,11 @@ function applyListTransform(
       at: blockPath,
     });
 
-    // Merge with adjacent same-type list
-    mergeWithAdjacentList(editor, blockPath, listType);
+    // Merge with adjacent same-type list at the transformed wrapper path.
+    const listPath = listPathRef.unref();
+    if (listPath) {
+      mergeWithAdjacentList(editor, listPath, listType);
+    }
   });
 
   return true;
