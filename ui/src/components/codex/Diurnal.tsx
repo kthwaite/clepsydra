@@ -141,7 +141,7 @@ export function Diurnal() {
         <div className="mb-3 flex items-baseline justify-between border-b border-rule border-t-2 border-t-rule py-[5px]">
           <div className="cl-serif text-[28px] font-semibold leading-none">{dayLabel}</div>
           <div className="cl-mono text-[11px]">
-            MMXXVI · day {dayOfYear(parseDate(selectedDate))}
+            {yearRoman(parseDate(selectedDate).getFullYear())} · day {dayOfYear(parseDate(selectedDate))}
           </div>
         </div>
 
@@ -267,4 +267,13 @@ function dayOfYear(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0);
   const diff = d.getTime() - start.getTime();
   return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+const ROMAN_ONES = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"];
+
+function yearRoman(year: number): string {
+  // Years 2000+: MM followed by tens and ones. Renders 2000-2099 cleanly.
+  const tens = Math.floor((year - 2000) / 10);
+  const ones = (year - 2000) % 10;
+  return `MM${"X".repeat(tens)}${ones === 0 ? "" : ROMAN_ONES[ones - 1]}`;
 }
