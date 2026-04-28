@@ -47,6 +47,7 @@ fn setup_server() -> (TestServer, TempDir) {
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
 
     let app: Router = Router::new()
@@ -55,6 +56,17 @@ fn setup_server() -> (TestServer, TempDir) {
 
     let server = TestServer::new(app).unwrap();
     (server, tmp)
+}
+
+#[tokio::test]
+async fn bcl_endpoint_returns_nulls_when_unconfigured() {
+    let (server, _tmp) = setup_server();
+    let res = server.get("/api/vault/bcl").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert!(body["birth_date"].is_null());
+    assert!(body["bcl_date"].is_null());
+    assert!(body["remaining_seconds"].is_null());
 }
 
 #[tokio::test]
@@ -685,6 +697,7 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
 
     let app: Router = Router::new()
@@ -921,6 +934,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1211,6 +1225,7 @@ async fn sse_events_endpoint_returns_stream() {
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
 
     let app: Router = Router::new()
@@ -1350,6 +1365,7 @@ async fn create_page_emits_sync_notification() {
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
 
     let app: Router = Router::new()

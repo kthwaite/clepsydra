@@ -280,6 +280,9 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
             cas: Arc::clone(&cas_arc),
         })]);
 
+    // Load BCL config (lookaside cache: vault file, then ~/.config/bcl).
+    let bcl = vault::bcl::load_or_seed(vault.root());
+
     // Build shared state
     let state = Arc::new(AppState {
         vault,
@@ -290,6 +293,7 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
         hooks,
         delete_hooks,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl,
     });
 
     // Optionally start LSP on stdio

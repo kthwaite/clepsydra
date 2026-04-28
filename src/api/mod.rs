@@ -2,6 +2,7 @@ pub mod academic;
 pub mod agenda;
 pub mod archive;
 pub mod attachments;
+pub mod bcl;
 pub mod blocks;
 pub mod error;
 pub mod events;
@@ -36,6 +37,10 @@ pub struct AppState {
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,
+    /// Optional Brimley-Cocoon Line birth date, loaded once at startup from
+    /// `<vault>/.clepsydra/bcl` (with a one-time copy from `~/.config/bcl`
+    /// when the vault file is absent). `None` means the feature is hidden.
+    pub bcl: Option<chrono::NaiveDate>,
 }
 
 /// Build the API router mounted at `/api/vault`.
@@ -63,4 +68,5 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/tasks", tasks::router())
         .nest("/agenda", agenda::router())
         .nest("/blocks", blocks::router())
+        .route("/bcl", axum::routing::get(bcl::get_bcl))
 }

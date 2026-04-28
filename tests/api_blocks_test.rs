@@ -48,6 +48,7 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
 
     let app: Router = Router::new()

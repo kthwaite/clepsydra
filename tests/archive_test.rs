@@ -55,6 +55,7 @@ fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
         hooks: production_hooks(),
         delete_hooks: Arc::new(delete_hooks),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        bcl: None,
     });
 
     let app: Router = Router::new()

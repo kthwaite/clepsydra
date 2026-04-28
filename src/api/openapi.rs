@@ -16,7 +16,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Attachments", description = "Attachment upload and retrieval"),
         (name = "Index", description = "Index, graph, tags and search"),
         (name = "Academic", description = "Academic works, annotations and importers"),
-        (name = "Events", description = "Server-sent events stream")
+        (name = "Events", description = "Server-sent events stream"),
+        (name = "BCL", description = "Brimley-Cocoon Line countdown")
     ),
     paths(
         // Pages
@@ -65,7 +66,9 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::academic::import_bibtex,
         crate::api::academic::import_doi,
         crate::api::academic::import_isbn_handler,
-        crate::api::academic::import_zotero_handler
+        crate::api::academic::import_zotero_handler,
+        // BCL
+        crate::api::bcl::get_bcl
     ),
     components(
         schemas(
@@ -123,7 +126,9 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::vault::academic::ExternalIds,
             crate::vault::academic::WorkUrls,
             crate::vault::academic::SourceLocation,
-            crate::vault::import_zotero::ImportZoteroRequest
+            crate::vault::import_zotero::ImportZoteroRequest,
+            // BCL
+            crate::api::bcl::BclResponse
         )
     )
 )]
