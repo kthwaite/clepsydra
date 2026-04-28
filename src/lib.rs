@@ -109,7 +109,21 @@ impl Settings {
     }
 }
 
+fn expand_tilde(p: &str) -> Option<PathBuf> {
+    if p == "~" {
+        dirs::home_dir()
+    } else if let Some(rest) = p.strip_prefix("~/") {
+        dirs::home_dir().map(|h| h.join(rest))
+    } else {
+        None
+    }
+}
+
 fn resolve_vault_root(root: &str, config_path: &Path, cwd: &Path) -> PathBuf {
+    if let Some(expanded) = expand_tilde(root) {
+        return expanded;
+    }
+
     let root_path = PathBuf::from(root);
 
     if root_path.is_absolute() {
@@ -228,13 +242,7 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
 
     // Open CAS
     let cas_path_raw = &vault.config().archive.cas_path;
-    let cas_path = if let Some(stripped) = cas_path_raw.strip_prefix("~/") {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(stripped)
-    } else {
-        PathBuf::from(cas_path_raw)
-    };
+    let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
     let cas = vault::cas::ContentStore::open(&cas_path)?;
 
     // Open index
@@ -440,5 +448,26 @@ mod tests {
         let config = PathBuf::from("/tmp/config-dir/config.toml");
         let resolved = resolve_vault_root("/var/data/vault", &config, &cwd);
         assert_eq!(resolved, PathBuf::from("/var/data/vault"));
+    }
+
+    #[test]
+    fn resolve_vault_root_expands_tilde() {
+        let cwd = PathBuf::from("/tmp/cwd");
+        let config = PathBuf::from("/tmp/config-dir/config.toml");
+        let resolved = resolve_vault_root("~/Documents/vault", &config, &cwd);
+        let home = dirs::home_dir().expect("home dir must exist for test");
+        assert_eq!(resolved, home.join("Documents/vault"));
+    }
+
+    #[test]
+    fn expand_tilde_bare() {
+        let expanded = expand_tilde("~").expect("should expand bare ~");
+        assert_eq!(expanded, dirs::home_dir().unwrap());
+    }
+
+    #[test]
+    fn expand_tilde_returns_none_for_non_tilde() {
+        assert!(expand_tilde("./vault").is_none());
+        assert!(expand_tilde("/absolute/path").is_none());
     }
 }

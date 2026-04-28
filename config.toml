@@ -1,6 +1,12 @@
 [server]
-host = "127.0.0.1"
+host = "localhost"
 port = 3000
+dev_mode = true
+
+[server.tls]
+enabled = false
+# cert_path = "certs/cert.pem"
+# key_path = "certs/key.pem"
 
 [vault]
-root = "./vault"
+root = "~/Documents/vault"
