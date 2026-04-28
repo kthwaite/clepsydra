@@ -89,7 +89,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           ~/codex/<span className="text-accent-deep">{pathLabel}</span>
         </div>
         <div className="hidden border-r border-rule-soft px-3 py-1 text-ink-mute md:block">
-          vol. iv · clean · {totalEntries} ent.
+          vol. {volumeRoman()} · {totalEntries} ent.
         </div>
         <div className="flex-1" />
         <div className="hidden border-l border-rule-soft px-3 py-1 text-ink-mute sm:block">
@@ -232,4 +232,12 @@ function useClock(): string {
 function fmtClock(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+const ROMAN_UPPER = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+function volumeRoman(): string {
+  // Volume = current calendar year - 2022 (project inception year), clamped 1..12 then numeric.
+  const year = new Date().getFullYear();
+  const idx = Math.max(1, year - 2022);
+  return ROMAN_UPPER[idx - 1] ?? String(idx);
 }
