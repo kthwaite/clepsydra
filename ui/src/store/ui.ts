@@ -10,17 +10,27 @@ export type SettingsSection =
 interface UiState {
   isSettingsOpen: boolean;
   activeSettingsSection: SettingsSection;
+  isSearchOpen: boolean;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
+  openSearch: () => void;
+  closeSearch: () => void;
+  toggleSearch: () => void;
+  setSearchOpen: (open: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   isSettingsOpen: false,
   activeSettingsSection: "general",
+  isSearchOpen: false,
   openSettings: (section = "general") =>
     set({ isSettingsOpen: true, activeSettingsSection: section }),
   closeSettings: () => set({ isSettingsOpen: false }),
   setActiveSettingsSection: (section) =>
     set({ activeSettingsSection: section }),
+  openSearch: () => set({ isSearchOpen: true }),
+  closeSearch: () => set({ isSearchOpen: false }),
+  toggleSearch: () => set((state) => ({ isSearchOpen: !state.isSearchOpen })),
+  setSearchOpen: (open) => set({ isSearchOpen: open }),
 }));

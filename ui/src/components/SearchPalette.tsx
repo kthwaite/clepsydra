@@ -6,9 +6,12 @@ import {
 } from "#/components/ui/command-palette";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useUiStore } from "#/store/ui";
 
 export function SearchPalette() {
-  const [open, setOpen] = useState(false);
+  const open = useUiStore((s) => s.isSearchOpen);
+  const setOpen = useUiStore((s) => s.setSearchOpen);
+  const toggleSearch = useUiStore((s) => s.toggleSearch);
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(open ? query : "", 200);
   const { data: results } = useSearch(open ? debouncedQuery : "", 10);
@@ -19,12 +22,12 @@ export function SearchPalette() {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setOpen((prev) => !prev);
+        toggleSearch();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [toggleSearch]);
 
   // Reset query when opened
   useEffect(() => {

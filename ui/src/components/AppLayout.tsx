@@ -6,8 +6,11 @@ import { Sidebar } from "#/components/Sidebar";
 import { SyncIndicator } from "#/components/SyncIndicator";
 import { ThemeToggle } from "#/components/ThemeToggle";
 import { Button } from "#/components/ui/button";
+import { useUiStore } from "#/store/ui";
 
 export function AppLayout({ children }: { children: ReactNode }) {
+  const openSearch = useUiStore((s) => s.openSearch);
+
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <SearchPalette />
@@ -17,11 +20,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Button
             variant="ghost"
             size="sm"
-            onPress={() =>
-              window.dispatchEvent(
-                new KeyboardEvent("keydown", { key: "k", metaKey: true }),
-              )
-            }
+            onPress={openSearch}
             className="gap-2"
           >
             <Search className="h-3 w-3" />
