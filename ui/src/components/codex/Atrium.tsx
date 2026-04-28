@@ -140,7 +140,7 @@ export function Atrium() {
         <div className="cl-cap mb-1 flex items-baseline justify-between text-[10px]">
           <span>§ Recently Inscribed</span>
           <span className="text-[9px] text-ink-mute">
-            vii of {romanLower(totalEntries)}
+            {romanLower(Math.min(recent.length, totalEntries))} of {romanLower(totalEntries)}
           </span>
         </div>
         <hr className="cl-rule-soft mt-1" />
