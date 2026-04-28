@@ -84,6 +84,11 @@ bun run openapi
 
 This updates `ui/src/api/schema.d.ts`.
 
+## Architecture notes
+
+- UI component audit: [../docs/design-notes/react-aria-component-audit.md](../docs/design-notes/react-aria-component-audit.md)
+- UI migration plan: [../docs/plans/2026-04-09-react-aria-ui-migration.md](../docs/plans/2026-04-09-react-aria-ui-migration.md)
+
 ## Troubleshooting
 
 - **UI shows API errors / no data**
