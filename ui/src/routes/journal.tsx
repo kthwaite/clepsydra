@@ -172,7 +172,7 @@ function JournalPage() {
 
                 <article className="mt-6">
                   <SlateEditor
-                    key={journalPath}
+                    key={`${journalPath}:${editor.editorRevision}`}
                     initialValue={editor.initialValue}
                     onChange={editor.onSlateChange}
                     onSaveNow={editor.saveNow}

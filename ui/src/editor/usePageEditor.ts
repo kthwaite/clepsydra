@@ -11,6 +11,7 @@ interface PageEditorState {
   isLoading: boolean;
   error: unknown;
   initialValue: Descendant[];
+  editorRevision: number;
   title: string;
   setTitle: (t: string) => void;
   tags: string[];
@@ -73,6 +74,7 @@ export function usePageEditor(path: string): PageEditorState {
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [editorRevision, setEditorRevision] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -97,10 +99,16 @@ export function usePageEditor(path: string): PageEditorState {
     setTitleState(t);
     setTagsState(tg);
     setAliasesState(al);
+    const shouldResetEditor =
+      editorValueRef.current.length === 0 || savedRef.current.body !== page.body;
+    const nextValue = markdownToSlate(page.body);
     savedRef.current = { title: t, tags: tg, aliases: al, body: page.body };
-    editorValueRef.current = initialValue;
+    editorValueRef.current = nextValue;
+    if (shouldResetEditor) {
+      setEditorRevision((revision) => revision + 1);
+    }
     setSaveStatus("saved");
-  }, [page, initialValue]);
+  }, [page]);
 
   const doSave = useCallback(() => {
     if (timerRef.current) {
@@ -256,6 +264,7 @@ export function usePageEditor(path: string): PageEditorState {
     isLoading,
     error,
     initialValue,
+    editorRevision,
     title,
     setTitle,
     tags,

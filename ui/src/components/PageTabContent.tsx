@@ -48,6 +48,7 @@ export function PageTabContent({ tabId, path }: PageTabContentProps) {
 
       <article className="mt-6">
         <SlateEditor
+          key={`${path}:${editor.editorRevision}`}
           initialValue={editor.initialValue}
           onChange={editor.onSlateChange}
           onSaveNow={editor.saveNow}
