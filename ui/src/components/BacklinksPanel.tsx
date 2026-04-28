@@ -16,8 +16,11 @@ export function BacklinksPanel({ backlinks }: BacklinksPanelProps) {
         Backlinks ({backlinks.length})
       </h2>
       <ul className="space-y-3">
-        {backlinks.map((bl, i) => (
-          <li key={`${bl.source_id}-${i}`} className="border border-border p-3">
+        {backlinks.map((bl) => (
+          <li
+            key={`${bl.source_id}-${bl.kind}-${bl.target_raw}-${bl.context}`}
+            className="border border-border p-3"
+          >
             <a
               href={`/pages/${bl.source_path}`}
               onClick={(e) => {
