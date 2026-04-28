@@ -211,7 +211,7 @@ export function CommandPalette() {
         </div>
         {/* footer */}
         <div className="cl-mono flex justify-between border-t border-ink px-[10px] py-1 text-[9px] tracking-[0.05em] text-ink-mute">
-          <span>console.clepsydra · v0.4.1</span>
+          <span>console.clepsydra · v{__APP_VERSION__}</span>
           <span>idx loaded {indexed} entries</span>
         </div>
       </div>
