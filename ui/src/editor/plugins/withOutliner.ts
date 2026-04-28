@@ -1,18 +1,5 @@
 import { Editor, Node, Path, Element as SlateElement, Transforms } from "slate";
-
-const LIST_TYPES = new Set(["bulleted-list", "numbered-list"]);
-
-function isListElement(
-  node: unknown,
-): node is SlateElement & { type: "bulleted-list" | "numbered-list" } {
-  return SlateElement.isElement(node) && LIST_TYPES.has(node.type as string);
-}
-
-function isListItem(
-  node: unknown,
-): node is SlateElement & { type: "list-item" } {
-  return SlateElement.isElement(node) && node.type === "list-item";
-}
+import { isListElement, isListItem } from "#/editor/plugins/listUtils";
 
 /**
  * Slate plugin that allows list-items to contain mixed content (text + nested
