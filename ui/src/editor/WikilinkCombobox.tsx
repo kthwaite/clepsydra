@@ -1,4 +1,5 @@
 import type { VirtualElement } from "@floating-ui/react";
+import { useMemo } from "react";
 import type { PageSummary } from "#/api/types";
 import { EditorSuggestionPopover } from "#/components/ui/editor-suggestion-popover";
 
@@ -18,14 +19,18 @@ export function WikilinkCombobox({
   onClose,
 }: WikilinkComboboxProps) {
   const lowerQuery = query.toLowerCase();
-  const filtered = pages
-    .filter(
-      (p) =>
-        (p.title?.toLowerCase().includes(lowerQuery) ?? false) ||
-        p.canonical_name.toLowerCase().includes(lowerQuery) ||
-        p.path.toLowerCase().includes(lowerQuery),
-    )
-    .slice(0, 8);
+  const filtered = useMemo(
+    () =>
+      pages
+        .filter(
+          (p) =>
+            (p.title?.toLowerCase().includes(lowerQuery) ?? false) ||
+            p.canonical_name.toLowerCase().includes(lowerQuery) ||
+            p.path.toLowerCase().includes(lowerQuery),
+        )
+        .slice(0, 8),
+    [pages, lowerQuery],
+  );
 
   return (
     <EditorSuggestionPopover
