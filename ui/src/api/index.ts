@@ -29,3 +29,9 @@ export function useSearch(query: string, limit?: number) {
     { enabled: query.length > 0 },
   );
 }
+
+export function useContentIndex(limit?: number, offset?: number) {
+  return $api.useQuery("get", "/api/vault/index/content-index", {
+    params: { query: { limit, offset } },
+  });
+}

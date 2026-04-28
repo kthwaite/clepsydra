@@ -1,126 +1,440 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Cormorant+SC:wght@500;600;700&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=Zilla+Slab:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 
 /* =============================================================================
-   Style Tokens System
-
-   Aesthetic: Brutalist / High Modernist
-   - Sharp geometry, no rounded corners
-   - Hard-edged offset shadows
-   - Monumental weight, decisive contrast
+   CLEPSYDRA — Codex tokens (A·ii merged)
+   Retro-futurist expeditionary brutalism: cyan ink on cream, gilt on deep green.
    ============================================================================= */
 
 @theme {
-  /* --------------------------------------------------------------------------
-     Typography
-     -------------------------------------------------------------------------- */
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code",
-    "Source Code Pro", monospace;
-  --font-heading: "JetBrains Mono Variable", ui-monospace, monospace;
-  /* --------------------------------------------------------------------------
-     Light Mode (Default)
-     -------------------------------------------------------------------------- */
+    /* Typography stacks */
+    --font-sans: "Spectral", "Cormorant Garamond", Georgia, serif;
+    --font-body: "Spectral", "Cormorant Garamond", Georgia, serif;
+    --font-serif: "Cormorant Garamond", "EB Garamond", Georgia, serif;
+    --font-serif-sc: "Cormorant SC", "Cormorant Garamond", Georgia, serif;
+    --font-slab: "Zilla Slab", "Roboto Slab", Georgia, serif;
+    --font-mono: "JetBrains Mono Variable", ui-monospace, "Menlo", monospace;
+    --font-heading: "Cormorant SC", "Cormorant Garamond", Georgia, serif;
 
-  /* Page */
-  --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.145 0 0);
+    /* Codex (light) — cyan ink on cream */
+    --color-paper: #f1ebdd;
+    --color-paper-2: #e8e0cc;
+    --color-paper-edge: #d8cdaf;
+    --color-ink: #0f2a3d;
+    --color-ink-2: #1a4060;
+    --color-ink-mute: #5a6470;
+    --color-accent: #0c6cad;
+    --color-accent-deep: #0a4d7e;
+    --color-hot: #b03a2e;
+    --color-rule: rgba(15, 42, 61, 0.85);
+    --color-rule-soft: rgba(15, 42, 61, 0.22);
+    --color-highlight: rgba(12, 108, 173, 0.10);
+    --color-bar-bg: #0f2a3d;
+    --color-bar-fg: #f1ebdd;
+    --color-bar-rule: rgba(241, 235, 221, 0.30);
 
-  /* Surfaces */
-  --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.145 0 0);
-  --color-popover: oklch(1 0 0);
-  --color-popover-foreground: oklch(0.145 0 0);
+    /* Tailwind semantic aliases — mapped to codex tokens */
+    --color-background: #f1ebdd;
+    --color-foreground: #0f2a3d;
+    --color-card: #e8e0cc;
+    --color-card-foreground: #0f2a3d;
+    --color-popover: #f1ebdd;
+    --color-popover-foreground: #0f2a3d;
+    --color-primary: #0f2a3d;
+    --color-primary-foreground: #f1ebdd;
+    --color-secondary: #e8e0cc;
+    --color-secondary-foreground: #0f2a3d;
+    --color-muted: #e8e0cc;
+    --color-muted-foreground: #5a6470;
+    --color-accent-foreground: #f1ebdd;
+    --color-destructive: #b03a2e;
+    --color-destructive-foreground: #f1ebdd;
+    --color-border: rgba(15, 42, 61, 0.22);
+    --color-input: rgba(15, 42, 61, 0.22);
+    --color-ring: rgba(15, 42, 61, 0.85);
 
-  /* Primary */
-  --color-primary: oklch(0.205 0 0);
-  --color-primary-foreground: oklch(0.985 0 0);
+    /* Radius: zero, always */
+    --radius: 0;
 
-  /* Secondary */
-  --color-secondary: oklch(0.96 0 0);
-  --color-secondary-foreground: oklch(0.205 0 0);
-
-  /* Muted */
-  --color-muted: oklch(0.96 0 0);
-  --color-muted-foreground: oklch(0.45 0 0);
-
-  /* Accent */
-  --color-accent: oklch(0.96 0 0);
-  --color-accent-foreground: oklch(0.205 0 0);
-
-  /* Destructive */
-  --color-destructive: oklch(0.55 0.2 25);
-  --color-destructive-foreground: oklch(0.985 0 0);
-
-  /* Utilities */
-  --color-border: oklch(0.90 0 0);
-  --color-input: oklch(0.90 0 0);
-  --color-ring: oklch(0.70 0 0);
-
-  /* Radius: banned */
-  --radius: 0;
-
-  /* Shadows: hard-edged, bottom-right offset */
-  --shadow-sm: 2px 2px 0 0 oklch(0 0 0 / 0.15);
-  --shadow-md: 4px 4px 0 0 oklch(0 0 0 / 0.2);
-  --shadow-lg: 6px 6px 0 0 oklch(0 0 0 / 0.25);
-  --shadow-xl: 8px 8px 0 0 oklch(0 0 0 / 0.3);
+    /* Shadows: hard-edged, bottom-right offset, ink-coloured */
+    --shadow-sm: 2px 2px 0 0 rgba(15, 42, 61, 0.18);
+    --shadow-md: 4px 4px 0 0 rgba(15, 42, 61, 0.25);
+    --shadow-lg: 6px 6px 0 0 rgba(15, 42, 61, 0.35);
+    --shadow-xl: 8px 8px 0 0 rgba(15, 42, 61, 0.5);
 }
 
+/* Codex CSS custom properties used by .cl-* primitives — these mirror the
+   tokens above so legacy component code can address them with var(--ink) etc. */
 :root {
-  color-scheme: light;
+    color-scheme: light;
+    --paper: #f1ebdd;
+    --paper-2: #e8e0cc;
+    --paper-edge: #d8cdaf;
+    --ink: #0f2a3d;
+    --ink-2: #1a4060;
+    --ink-mute: #5a6470;
+    --accent: #0c6cad;
+    --accent-deep: #0a4d7e;
+    --hot: #b03a2e;
+    --rule: rgba(15, 42, 61, 0.85);
+    --rule-soft: rgba(15, 42, 61, 0.22);
+    --grid: rgba(15, 42, 61, 0.08);
+    --highlight: rgba(12, 108, 173, 0.10);
+    /* Status bars: always darker than the surrounding paper. */
+    --bar-bg: #0f2a3d;
+    /* = ink */
+    --bar-fg: #f1ebdd;
+    /* = paper */
+    --bar-rule: rgba(241, 235, 221, 0.30);
 }
 
 .dark {
-  color-scheme: dark;
+    color-scheme: dark;
 
-  /* --------------------------------------------------------------------------
-     Dark Mode
-     -------------------------------------------------------------------------- */
+    /* Codex (dark) — gilt on deep green */
+    --paper: #0d1f1a;
+    --paper-2: #0a1814;
+    --paper-edge: #1a3329;
+    --ink: #ede4c8;
+    --ink-2: #f4ecd2;
+    --ink-mute: #8a9a8a;
+    --accent: #d9b04a;
+    --accent-deep: #b8902f;
+    --hot: #d35a4a;
+    --rule: rgba(237, 228, 200, 0.78);
+    --rule-soft: rgba(237, 228, 200, 0.20);
+    --grid: rgba(237, 228, 200, 0.07);
+    --highlight: rgba(217, 176, 74, 0.12);
+    /* Status bars: stay darker than the page in dark mode too. */
+    --bar-bg: #050d0a;
+    /* deeper than --paper */
+    --bar-fg: #ede4c8;
+    /* = ink (gilt) */
+    --bar-rule: rgba(237, 228, 200, 0.22);
 
-  /* Page */
-  --color-background: oklch(0.145 0 0);
-  --color-foreground: oklch(0.985 0 0);
+    /* Re-bind Tailwind semantic aliases for dark mode */
+    --color-paper: #0d1f1a;
+    --color-paper-2: #0a1814;
+    --color-paper-edge: #1a3329;
+    --color-ink: #ede4c8;
+    --color-ink-2: #f4ecd2;
+    --color-ink-mute: #8a9a8a;
+    --color-accent: #d9b04a;
+    --color-accent-deep: #b8902f;
+    --color-hot: #d35a4a;
+    --color-rule: rgba(237, 228, 200, 0.78);
+    --color-rule-soft: rgba(237, 228, 200, 0.20);
+    --color-highlight: rgba(217, 176, 74, 0.12);
+    --color-bar-bg: #050d0a;
+    --color-bar-fg: #ede4c8;
+    --color-bar-rule: rgba(237, 228, 200, 0.22);
 
-  /* Surfaces (slightly elevated from background) */
-  --color-card: oklch(0.17 0 0);
-  --color-card-foreground: oklch(0.985 0 0);
-  --color-popover: oklch(0.17 0 0);
-  --color-popover-foreground: oklch(0.985 0 0);
+    --color-background: #0d1f1a;
+    --color-foreground: #ede4c8;
+    --color-card: #0a1814;
+    --color-card-foreground: #ede4c8;
+    --color-popover: #0d1f1a;
+    --color-popover-foreground: #ede4c8;
+    --color-primary: #ede4c8;
+    --color-primary-foreground: #0d1f1a;
+    --color-secondary: #1a3329;
+    --color-secondary-foreground: #ede4c8;
+    --color-muted: #1a3329;
+    --color-muted-foreground: #8a9a8a;
+    --color-accent-foreground: #0d1f1a;
+    --color-destructive: #d35a4a;
+    --color-destructive-foreground: #0d1f1a;
+    --color-border: rgba(237, 228, 200, 0.20);
+    --color-input: rgba(237, 228, 200, 0.20);
+    --color-ring: rgba(237, 228, 200, 0.78);
 
-  /* Primary */
-  --color-primary: oklch(0.985 0 0);
-  --color-primary-foreground: oklch(0.205 0 0);
-
-  /* Secondary */
-  --color-secondary: oklch(0.22 0 0);
-  --color-secondary-foreground: oklch(0.985 0 0);
-
-  /* Muted */
-  --color-muted: oklch(0.22 0 0);
-  --color-muted-foreground: oklch(0.65 0 0);
-
-  /* Accent */
-  --color-accent: oklch(0.22 0 0);
-  --color-accent-foreground: oklch(0.985 0 0);
-
-  /* Destructive */
-  --color-destructive: oklch(0.55 0.2 25);
-  --color-destructive-foreground: oklch(0.985 0 0);
-
-  /* Utilities */
-  --color-border: oklch(0.25 0 0);
-  --color-input: oklch(0.25 0 0);
-  --color-ring: oklch(0.55 0 0);
-
-  /* Shadows: stronger opacity for dark backgrounds */
-  --shadow-sm: 2px 2px 0 0 oklch(0 0 0 / 0.4);
-  --shadow-md: 4px 4px 0 0 oklch(0 0 0 / 0.5);
-  --shadow-lg: 6px 6px 0 0 oklch(0 0 0 / 0.6);
-  --shadow-xl: 8px 8px 0 0 oklch(0 0 0 / 0.7);
+    --shadow-sm: 2px 2px 0 0 rgba(0, 0, 0, 0.45);
+    --shadow-md: 4px 4px 0 0 rgba(0, 0, 0, 0.55);
+    --shadow-lg: 6px 6px 0 0 rgba(0, 0, 0, 0.65);
+    --shadow-xl: 8px 8px 0 0 rgba(0, 0, 0, 0.75);
 }
 
 body {
-  @apply bg-background font-sans text-foreground antialiased;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    letter-spacing: 0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+}
+
+/* =============================================================================
+   .cl-* primitives — codex utility classes
+   ============================================================================= */
+
+.cl-root {
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    letter-spacing: 0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+}
+
+.cl-root *::selection {
+    background: var(--accent);
+    color: var(--paper);
+}
+
+/* Tracked-out small caps — hairline section labels */
+.cl-cap {
+    font-family: var(--font-serif-sc);
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-weight: 600;
+    font-feature-settings: "kern" 1;
+}
+
+.cl-cap-tight {
+    letter-spacing: 0.14em;
+}
+
+.cl-cap-wide {
+    letter-spacing: 0.34em;
+}
+
+.cl-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "calt" 0, "liga" 0;
+}
+
+.cl-slab {
+    font-family: var(--font-slab);
+}
+
+.cl-serif {
+    font-family: var(--font-serif);
+}
+
+/* Hairline rules */
+.cl-rule {
+    border: 0;
+    border-top: 1px solid var(--rule);
+}
+
+.cl-rule-soft {
+    border: 0;
+    border-top: 1px solid var(--rule-soft);
+}
+
+.cl-rule-double {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    box-shadow: 0 3px 0 -2px var(--rule);
+    height: 4px;
+}
+
+/* Paper grain + grids */
+.cl-paper {
+    background:
+        radial-gradient(circle at 20% 30%, var(--grid) 0.5px, transparent 1px) 0 0/12px 12px,
+        radial-gradient(circle at 70% 65%, var(--grid) 0.5px, transparent 1px) 4px 6px/14px 14px,
+        var(--paper);
+}
+
+.cl-grid {
+    background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+
+.cl-grid-fine {
+    background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 8px 8px;
+}
+
+/* Dossier frames */
+.cl-frame {
+    border: 1.5px solid var(--rule);
+}
+
+.cl-frame-double {
+    border: 1px solid var(--rule);
+    box-shadow: 0 0 0 3px var(--paper), 0 0 0 4px var(--rule);
+}
+
+/* Stamp — institutional cachet */
+.cl-stamp {
+    display: inline-block;
+    border: 2px solid var(--hot);
+    color: var(--hot);
+    padding: 4px 10px;
+    font-family: var(--font-serif-sc);
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-weight: 700;
+    transform: rotate(-3deg);
+    font-size: 11px;
+}
+
+/* Dingbats */
+.cl-fleuron::before {
+    content: "❦";
+}
+
+.cl-asterism::before {
+    content: "⁂";
+}
+
+.cl-section-mark::before {
+    content: "§";
+}
+
+.cl-pilcrow::before {
+    content: "¶";
+}
+
+/* Numeric / coordinate inline */
+.cl-coord {
+    font-family: var(--font-mono);
+    font-size: 0.78em;
+    letter-spacing: 0.04em;
+    color: var(--ink-mute);
+}
+
+/* Margin notes */
+.cl-marg {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+    line-height: 1.4;
+}
+
+/* Underlined link */
+.cl-link {
+    color: var(--accent-deep);
+    text-decoration: none;
+    border-bottom: 1px solid var(--accent);
+    cursor: pointer;
+}
+
+.cl-link:hover {
+    background: var(--highlight);
+}
+
+/* Button — neo-brutalist hard rect */
+.cl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1.5px solid var(--rule);
+    background: var(--paper-2);
+    color: var(--ink);
+    font-family: var(--font-serif-sc);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+}
+
+.cl-btn:hover {
+    background: var(--ink);
+    color: var(--paper);
+}
+
+.cl-btn-hot {
+    border-color: var(--hot);
+    color: var(--hot);
+}
+
+.cl-btn-hot:hover {
+    background: var(--hot);
+    color: var(--paper);
+}
+
+/* Scrollbar suppression */
+.cl-noscroll::-webkit-scrollbar {
+    display: none;
+}
+
+.cl-noscroll {
+    scrollbar-width: none;
+}
+
+/* Blink cursor */
+@keyframes cl-blink {
+
+    0%,
+    49% {
+        opacity: 1;
+    }
+
+    50%,
+    100% {
+        opacity: 0;
+    }
+}
+
+.cl-cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1em;
+    background: currentColor;
+    vertical-align: text-bottom;
+    animation: cl-blink 1s steps(1) infinite;
+}
+
+/* ASCII engraving */
+.cl-ascii {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    line-height: 1;
+    white-space: pre;
+    letter-spacing: 0;
+    color: var(--ink);
+    opacity: 0.55;
+    user-select: none;
+}
+
+.cl-ascii-faint {
+    opacity: 0.32;
+}
+
+/* Dot-leader for table-of-contents lines */
+.cl-leader {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+
+.cl-leader> :first-child {
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 0;
+}
+
+.cl-leader-dots {
+    flex: 1 1 12px;
+    min-width: 12px;
+    border-bottom: 1px dotted var(--rule-soft);
+    transform: translateY(-3px);
+}
+
+.cl-leader> :last-child {
+    flex-shrink: 0;
+}
+
+/* Page corner stamp */
+.cl-folio {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
 }

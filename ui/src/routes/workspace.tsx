@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { TabBar } from "#/components/TabBar";
 import { TabContent } from "#/components/TabContent";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -14,16 +13,12 @@ function Workspace() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      // Ctrl+W / Cmd+W — close active tab
       if ((e.ctrlKey || e.metaKey) && e.key === "w") {
         e.preventDefault();
         const { activeTabId } = useWorkspaceStore.getState();
-        if (activeTabId) {
-          closeTab(activeTabId);
-        }
+        if (activeTabId) closeTab(activeTabId);
       }
 
-      // Ctrl+Tab — cycle forward, Ctrl+Shift+Tab — cycle backward
       if (e.ctrlKey && e.key === "Tab") {
         e.preventDefault();
         const { tabs, activeTabId } = useWorkspaceStore.getState();
@@ -40,12 +35,5 @@ function Workspace() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeTab, activateTab]);
 
-  return (
-    <div className="flex h-full flex-col">
-      <TabBar />
-      <div className="flex-1 overflow-y-auto">
-        <TabContent />
-      </div>
-    </div>
-  );
+  return <TabContent />;
 }

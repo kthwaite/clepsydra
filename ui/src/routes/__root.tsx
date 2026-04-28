@@ -1,9 +1,14 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
-import { AppLayout } from "#/components/AppLayout";
+import { CodexFrame } from "#/components/codex/CodexFrame";
+import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
+import { CommandPalette } from "#/components/codex/CommandPalette";
 import { RouteError } from "#/components/RouteError";
+import { SettingsModal } from "#/components/SettingsModal";
 
 export const Route = createRootRoute({
-  notFoundComponent: () => <div className="p-8">404 - Not Found</div>,
+  notFoundComponent: () => (
+    <div className="cl-cap p-8 text-[var(--ink-mute)]">404 · folio missing</div>
+  ),
   errorComponent: RouteError,
   head: () => ({
     meta: [{ title: "clepsydra" }],
@@ -11,9 +16,13 @@ export const Route = createRootRoute({
   component: () => (
     <>
       <HeadContent />
-      <AppLayout>
-        <Outlet />
-      </AppLayout>
+      <ReadingProgressProvider>
+        <CodexFrame>
+          <Outlet />
+        </CodexFrame>
+        <CommandPalette />
+        <SettingsModal />
+      </ReadingProgressProvider>
     </>
   ),
 });

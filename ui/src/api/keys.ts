@@ -27,6 +27,10 @@ export const queryKeys = {
     recent: (days: number) => ["journal", "recent", days] as const,
   },
 
+  bcl: {
+    current: ["bcl"] as const,
+  },
+
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },
   index: { pathPrefix: "/api/vault/index" },

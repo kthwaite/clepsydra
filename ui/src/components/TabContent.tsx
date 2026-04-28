@@ -1,5 +1,5 @@
-import { GraphTabContent } from "#/components/GraphTabContent";
-import { PageTabContent } from "#/components/PageTabContent";
+import { Constellation } from "#/components/codex/Constellation";
+import { Folio } from "#/components/codex/Folio";
 import { useWorkspaceStore } from "#/store/workspace";
 
 export function TabContent() {
@@ -11,26 +11,22 @@ export function TabContent() {
   if (!activeTab) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">
-          No tabs open. Use the sidebar or{" "}
-          <kbd className="border border-border px-1.5 py-0.5 text-xs">⌘K</kbd>{" "}
-          to open a page.
+        <p className="cl-marg">
+          No folios open. Use{" "}
+          <kbd className="cl-mono border border-[var(--rule-soft)] px-1 py-[1px] text-[10px]">⌘K</kbd>{" "}
+          to invoke the console.
         </p>
       </div>
     );
   }
 
   if (activeTab.type === "graph") {
-    return <GraphTabContent />;
+    return <Constellation tabId={activeTab.id} />;
   }
 
   if (activeTab.type === "page" && activeTab.path) {
     return (
-      <PageTabContent
-        key={activeTab.path}
-        tabId={activeTab.id}
-        path={activeTab.path}
-      />
+      <Folio key={activeTab.path} tabId={activeTab.id} path={activeTab.path} />
     );
   }
 
