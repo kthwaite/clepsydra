@@ -114,7 +114,7 @@ describe("countWordsFromSlate", () => {
       { type: "paragraph", children: [{ text: "the kettle has " }, { text: "stopped twice" }] },
       { type: "paragraph", children: [{ text: "outside, a pigeon" }] },
     ];
-    expect(countWordsFromSlate(value)).toBe(7);
+    expect(countWordsFromSlate(value)).toBe(8);
   });
 
   it("ignores empty leaves and whitespace-only text", () => {
