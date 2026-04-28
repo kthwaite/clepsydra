@@ -1,7 +1,7 @@
 import {
   Editor,
-  Element as SlateElement,
   Range,
+  Element as SlateElement,
   Text,
   Transforms,
 } from "slate";

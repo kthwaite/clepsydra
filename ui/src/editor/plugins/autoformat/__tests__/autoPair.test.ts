@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
 import { createEditor, Editor, Transforms } from "slate";
 import { withHistory } from "slate-history";
-import { tryOvertype, tryAutoPair } from "../autoPair";
+import { describe, expect, it } from "vitest";
+import { tryAutoPair, tryOvertype } from "../autoPair";
 
 function editorWith(text: string, offset: number) {
   const editor = withHistory(createEditor());

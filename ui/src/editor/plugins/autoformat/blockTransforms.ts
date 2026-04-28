@@ -3,8 +3,8 @@ import {
   Node,
   Path,
   Range,
-  Transforms,
   Element as SlateElement,
+  Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
 

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { createEditor, type Editor, Transforms } from "slate";
 import { withHistory } from "slate-history";
+import { describe, expect, it } from "vitest";
 import { tryInlineTransform } from "../inlineTransforms";
 
 function editorWith(text: string, offset: number) {

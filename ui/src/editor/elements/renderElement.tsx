@@ -1,7 +1,7 @@
 import { type Element, Transforms } from "slate";
 import {
-  type RenderElementProps,
   ReactEditor,
+  type RenderElementProps,
   useSlateStatic,
 } from "slate-react";
 import type { ListItemElement } from "#/editor/types";

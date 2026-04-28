@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { createEditor, Editor, Node, Transforms } from "slate";
 import { withHistory } from "slate-history";
+import { describe, expect, it } from "vitest";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
 
