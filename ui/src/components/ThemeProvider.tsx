@@ -1,6 +1,7 @@
 import {
   createContext,
   type PropsWithChildren,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -29,14 +30,14 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     resolveTheme(readStoredTheme()),
   );
 
-  const setMode = (next: ThemeMode) => {
+  const setMode = useCallback((next: ThemeMode) => {
     setModeState(next);
     storeTheme(next);
-  };
+  }, []);
 
-  const toggle = () => {
+  const toggle = useCallback(() => {
     setMode(resolvedTheme === "dark" ? "light" : "dark");
-  };
+  }, [resolvedTheme, setMode]);
 
   useEffect(() => {
     const resolved = resolveTheme(mode);
@@ -70,7 +71,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   const value = useMemo<ThemeContextValue>(
     () => ({ mode, resolvedTheme, setMode, toggle }),
-    [mode, resolvedTheme],
+    [mode, resolvedTheme, setMode, toggle],
   );
 
   return (
