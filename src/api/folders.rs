@@ -16,6 +16,7 @@ use super::error::ApiError;
 use super::pages::PageSummary;
 use crate::api::events::SyncNotification;
 use crate::vault::mutation::{MutationOp, MutationPlanner};
+use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -346,15 +347,23 @@ pub async fn delete_folder(
         return Err(ApiError::not_found(format!("folder not found: {path}")));
     }
 
+    // Collect page metadata BEFORE deletion so post-delete hooks can run.
+    // Pages with unparseable frontmatter are skipped — matches the best-effort
+    // semantics used by `delete_page`.
+    let hook_targets: Vec<(VaultPath, PageMeta)> = if query.recursive {
+        collect_pages_for_hooks(&state, &abs_path)
+    } else {
+        Vec::new()
+    };
+
     if query.recursive {
         fs::remove_dir_all(&abs_path)
             .map_err(|e| ApiError::internal(format!("failed to delete folder: {e}")))?;
     } else {
         fs::remove_dir(&abs_path).map_err(|e| {
-            if e.to_string().contains("not empty")
+            if matches!(e.raw_os_error(), Some(66) | Some(39))
+                || e.to_string().contains("not empty")
                 || e.to_string().contains("Directory not empty")
-                || e.raw_os_error() == Some(66)
-            // ENOTEMPTY on macOS
             {
                 ApiError::conflict("folder is not empty; use recursive=true to delete")
             } else {
@@ -405,7 +414,49 @@ pub async fn delete_folder(
         }
     }
 
+    // Fire post-delete hooks for each page that was under the folder.
+    // Hook errors are logged but do not fail the request (matches `delete_page`).
+    for (vp, meta) in &hook_targets {
+        for hook in state.delete_hooks.iter() {
+            if let Err(e) = hook.on_page_deleted(vp, &meta.id, meta) {
+                tracing::warn!("delete hook error for {}: {e}", vp.as_str());
+            }
+        }
+    }
+
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Walk a folder and parse markdown frontmatter for each `.md` file, returning
+/// `(VaultPath, PageMeta)` pairs suitable for invoking `PostDeleteHook`s.
+fn collect_pages_for_hooks(
+    state: &AppState,
+    folder_abs: &std::path::Path,
+) -> Vec<(VaultPath, PageMeta)> {
+    let root = state.vault.root();
+    let mut targets = Vec::new();
+    for entry in walkdir::WalkDir::new(folder_abs)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Ok(rel) = p.strip_prefix(root) else {
+            continue;
+        };
+        let Ok(child_vp) = VaultPath::new(&rel.to_string_lossy()) else {
+            continue;
+        };
+        if let Ok(page) = Page::from_file(p, child_vp.clone()) {
+            targets.push((child_vp, page.meta));
+        }
+    }
+    targets
 }
 
 // ---------------------------------------------------------------------------

@@ -392,3 +392,67 @@ async fn archive_delete_decrements_cas_ref_count() {
         );
     }
 }
+
+#[tokio::test]
+async fn delete_folder_recursive_runs_delete_hooks() {
+    // Recursive folder delete must invoke `PostDeleteHook` for each archived
+    // page under the folder so that CAS ref counts are decremented. Otherwise
+    // blobs become permanently orphaned with ref_count > 0 and ineligible for
+    // GC, even after the parent page is gone.
+    let (server, _tmp, state) = setup_server();
+
+    let blob_data = b"image for folder-delete test";
+    let blob_hash = sha256_hash(blob_data);
+    let blob_b64 = BASE64.encode(blob_data);
+    let md_body = "# Folder Delete Test\n\nIn a folder.";
+
+    let payload = serde_json::json!({
+        "url": "https://example.com/folder-delete",
+        "domain": "example.com",
+        "title": "Folder Delete Test",
+        "captured_at": "2026-04-28T12:00:00Z",
+        "content_hash": content_hash(md_body),
+        "snapshot_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "markdown_body": md_body,
+        "tags": ["archive"],
+        "blobs": [{
+            "hash": blob_hash.clone(),
+            "content_type": "image/png",
+            "data": blob_b64,
+        }],
+    });
+
+    let res = server.post("/api/vault/archive").json(&payload).await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    let vault_path = body["vault_path"].as_str().unwrap().to_string();
+
+    {
+        let cas = state.cas.lock();
+        assert!(cas.exists(&blob_hash).unwrap());
+    }
+
+    let parent_folder = vault_path
+        .rsplit_once('/')
+        .map(|(parent, _)| parent.to_string())
+        .expect("ingested vault path should have a parent folder");
+
+    let del_url = format!("/api/vault/folders/{}?recursive=true", parent_folder);
+    let del_res = server.delete(&del_url).await;
+    del_res.assert_status(StatusCode::NO_CONTENT);
+
+    // gc(ZERO) prunes blobs whose ref_count <= 0. If hooks never fired, the
+    // blob still has ref_count = 1 and the assertions below will fail.
+    {
+        let cas = state.cas.lock();
+        let pruned = cas.gc(std::time::Duration::ZERO).unwrap();
+        assert!(
+            pruned >= 1,
+            "expected at least the archived blob to be GC'd after recursive folder delete"
+        );
+        assert!(
+            !cas.exists(&blob_hash).unwrap(),
+            "blob should be gone from CAS after recursive folder delete + GC"
+        );
+    }
+}
