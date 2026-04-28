@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks } from "#/api/index";
 import { CLink } from "#/components/codex/CLink";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
-import { countWords, shortFolio } from "#/components/codex/folio-utils";
+import { countWordsFromSlate, shortFolio } from "#/components/codex/folio-utils";
 import { Sheaf } from "#/components/codex/Sheaf";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
@@ -39,9 +39,10 @@ export function Folio({ tabId, path }: FolioProps) {
   };
 
   const folioCode = shortFolio(path);
-  const wordCount = useMemo(() => {
-    return editor.title ? countWords(`${editor.title} ${editor.tags.join(" ")}`) : 0;
-  }, [editor.title, editor.tags]);
+  const wordCount = useMemo(
+    () => countWordsFromSlate(editor.initialValue),
+    [editor.initialValue],
+  );
 
   const toc = useMemo(() => buildToc(editor.initialValue), [editor.initialValue]);
 

@@ -24,3 +24,21 @@ export function countWords(body: string): number {
   const stripped = body.replace(/^---\n[\s\S]*?\n---\n/, "");
   return stripped.split(/\s+/).filter(Boolean).length;
 }
+
+type SlateLike = { text?: string; children?: SlateLike[] };
+
+/** Count words in a Slate value by walking all text leaves recursively. */
+export function countWordsFromSlate(value: unknown): number {
+  if (!Array.isArray(value)) return 0;
+  let count = 0;
+  const walk = (n: SlateLike) => {
+    if (typeof n.text === "string") {
+      const words = n.text.trim().split(/\s+/).filter(Boolean);
+      count += words.length;
+      return;
+    }
+    if (Array.isArray(n.children)) n.children.forEach(walk);
+  };
+  (value as SlateLike[]).forEach(walk);
+  return count;
+}
