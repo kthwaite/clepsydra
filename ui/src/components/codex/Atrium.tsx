@@ -4,6 +4,7 @@ import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { ASCII_COMPASS, ASCII_FRONTISPIECE } from "#/components/codex/ascii";
 import { CLink } from "#/components/codex/CLink";
+import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
@@ -181,7 +182,7 @@ export function Atrium() {
                   {n.links?.length ?? 0}
                 </td>
                 <td className="cl-mono px-1 py-1 text-right text-[10px] text-ink-mute">
-                  {fmtRelative(n.updated_at)}
+                  {formatRelativeTime(n.updated_at)}
                 </td>
               </tr>
             ))}
@@ -393,21 +394,6 @@ function fmtBclDate(yyyymmdd: string): string {
   });
 }
 
-function fmtRelative(iso?: string | null): string {
-  if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "—";
-  const diffMs = Date.now() - t;
-  const m = Math.floor(diffMs / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
-  if (d < 30) return `${Math.floor(d / 7)}w ago`;
-  return `${Math.floor(d / 30)}mo ago`;
-}
 
 const LOWERS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
 function romanLower(n: number): string {

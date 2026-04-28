@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks } from "#/api/index";
 import { CLink } from "#/components/codex/CLink";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
+import { formatAbsoluteDate, formatRelativeTime } from "#/components/codex/codex-time";
 import { countWordsFromSlate, shortFolio } from "#/components/codex/folio-utils";
 import { Sheaf } from "#/components/codex/Sheaf";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
@@ -47,11 +48,11 @@ export function Folio({ tabId, path }: FolioProps) {
   const toc = useMemo(() => buildToc(editor.initialValue), [editor.initialValue]);
 
   const draftedAt = useMemo(
-    () => fmtAbsoluteDate(editor.createdAt),
+    () => formatAbsoluteDate(editor.createdAt),
     [editor.createdAt],
   );
   const updatedAt = useMemo(
-    () => fmtRelativeTime(editor.updatedAt),
+    () => formatRelativeTime(editor.updatedAt),
     [editor.updatedAt],
   );
 
@@ -250,26 +251,6 @@ export function Folio({ tabId, path }: FolioProps) {
       </div>
     </div>
   );
-}
-
-/* --- Timestamp formatters --------------------------------------------------- */
-
-function fmtAbsoluteDate(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
-}
-
-function fmtRelativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "—";
-  const diff = Math.floor((Date.now() - t) / 1000);
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 /* --- TOC extraction from initial Slate value -------------------------------- */
