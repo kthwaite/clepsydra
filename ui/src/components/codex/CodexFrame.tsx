@@ -32,7 +32,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const { resolvedTheme, toggle } = useTheme();
   const dark = resolvedTheme === "dark";
   const { tabs: workspaceTabs, activeTabId, openTab } = useWorkspaceStore();
-  const { data: stats } = useStats();
+  const { data: stats, isError: statsError } = useStats();
   const syncStatus = useVaultEvents();
 
   const view: View = useMemo(() => {
@@ -165,9 +165,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           </>
         ) : (
           <span className="px-3 py-[2px] opacity-70">
-            idx ✓ · sync{" "}
-            {syncStatus === "connected" ? "✓" : syncStatus === "connecting" ? "…" : "✗"} · agent ·
-            idle
+            idx {statsError ? "✗" : stats ? "✓" : "…"} · sync{" "}
+            {syncStatus === "connected" ? "✓" : syncStatus === "connecting" ? "…" : "✗"}
           </span>
         )}
         <span className="flex-1" />
