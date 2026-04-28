@@ -22,6 +22,8 @@ interface PageEditorState {
   saveError: string | null;
   onSlateChange: (value: Descendant[], editor: Editor) => void;
   saveNow: () => void;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export function usePageEditor(path: string): PageEditorState {
@@ -275,5 +277,7 @@ export function usePageEditor(path: string): PageEditorState {
     saveError,
     onSlateChange,
     saveNow: doSave,
+    createdAt: page?.meta?.created_at ?? null,
+    updatedAt: page?.meta?.updated_at ?? null,
   };
 }
