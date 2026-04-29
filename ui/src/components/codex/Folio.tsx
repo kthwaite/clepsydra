@@ -3,6 +3,7 @@ import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { CLink } from "#/components/codex/CLink";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { formatAbsoluteDate, formatRelativeTime } from "#/components/codex/codex-time";
+import { extractFootnoteDefinitions } from "#/components/codex/footnotes";
 import { countWordsFromSlate, shortFolio } from "#/components/codex/folio-utils";
 import { Sheaf } from "#/components/codex/Sheaf";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
@@ -56,6 +57,11 @@ export function Folio({ tabId, path }: FolioProps) {
   const updatedAt = useMemo(
     () => formatRelativeTime(editor.updatedAt),
     [editor.updatedAt],
+  );
+
+  const footnotes = useMemo(
+    () => extractFootnoteDefinitions(editor.bodyMarkdown),
+    [editor.bodyMarkdown],
   );
 
   if (editor.isLoading) {
@@ -234,13 +240,27 @@ export function Folio({ tabId, path }: FolioProps) {
             ))}
           </div>
 
-          <div className="cl-cap mb-1 mt-4 text-[9px]">§ Marginalia</div>
+          <div className="cl-cap mt-4 mb-1" style={{ fontSize: 9 }}>
+            § Marginalia · {footnotes.length}
+          </div>
           <hr className="cl-rule-soft" />
-          <p className="cl-marg m-0 mt-1">
-            Sidenotes attach to footnote markers in the prose. Add{" "}
-            <span className="cl-mono">[^1]</span> in the body and a definition{" "}
-            <span className="cl-mono">[^1]: …</span> at the bottom.
-          </p>
+          {footnotes.length === 0 ? (
+            <p className="cl-marg mt-1" style={{ margin: 0 }}>
+              No sidenotes — add <span className="cl-mono">[^1]</span> in the body and a definition
+              <span className="cl-mono"> [^1]: …</span> below to populate this rail.
+            </p>
+          ) : (
+            <ol className="cl-serif mt-1" style={{ paddingLeft: 18, margin: 0, fontSize: 11 }}>
+              {footnotes.map((f, i) => (
+                <li key={f.id} style={{ marginBottom: 4 }}>
+                  <span className="cl-mono" style={{ color: "var(--accent-deep)", marginRight: 4 }}>
+                    {i + 1}.
+                  </span>
+                  {f.text}
+                </li>
+              ))}
+            </ol>
+          )}
 
           <div className="cl-cap mb-1 mt-4 text-[9px]">⌥ Aliases</div>
           <hr className="cl-rule-soft" />

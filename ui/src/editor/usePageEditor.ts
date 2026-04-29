@@ -24,6 +24,7 @@ interface PageEditorState {
   saveNow: () => void;
   createdAt: string | null;
   updatedAt: string | null;
+  bodyMarkdown: string;
 }
 
 export function usePageEditor(path: string): PageEditorState {
@@ -279,5 +280,6 @@ export function usePageEditor(path: string): PageEditorState {
     saveNow: doSave,
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
+    bodyMarkdown: page?.body ?? "",
   };
 }
