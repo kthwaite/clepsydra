@@ -1,16 +1,18 @@
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { ASCII_COMPASS, ASCII_FRONTISPIECE } from "#/components/codex/ascii";
 import { CLink } from "#/components/codex/CLink";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { InscribeModal } from "#/components/codex/InscribeModal";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 export function Atrium() {
   const navigate = useNavigate();
   const openTab = useOpenTab();
+  const [inscribeOpen, setInscribeOpen] = useState(false);
   const { data: stats } = useStats();
   const { data: tags } = useTags();
   const { data: content } = useContentIndex(40);
@@ -99,7 +101,7 @@ export function Atrium() {
                     Resume Folio {shortFolio(recent[0].path)}
                   </button>
                 )}
-                <button type="button" className="cl-btn cl-btn-hot">
+                <button type="button" className="cl-btn cl-btn-hot" onClick={() => setInscribeOpen(true)}>
                   + Inscribe
                 </button>
               </div>
@@ -334,6 +336,7 @@ export function Atrium() {
           <span className="italic">compass rose, after Mercator —</span>
         </p>
       </div>
+      {inscribeOpen && <InscribeModal onClose={() => setInscribeOpen(false)} />}
     </div>
   );
 }
