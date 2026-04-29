@@ -85,6 +85,15 @@ pub struct BacklinkWithContext {
     pub span_end: i64,
 }
 
+/// A similar-page result ranked by tag Jaccard similarity.
+#[derive(Debug, Clone)]
+pub struct SimilarRow {
+    pub path: String,
+    pub title: Option<String>,
+    pub shared_tags: Vec<String>,
+    pub score: f64,
+}
+
 /// A single full-text search result.
 #[derive(Debug)]
 pub struct SearchResult {
@@ -1427,6 +1436,113 @@ impl VaultIndex {
             .collect();
 
         Ok(results)
+    }
+
+    /// Find pages similar to `target` ranked by Jaccard similarity of tag sets.
+    ///
+    /// Pages that share no tags with `target` are excluded. Results are sorted
+    /// descending by score, then by shared-tag count, then alphabetically by
+    /// path as a tiebreaker.
+    pub fn similar_by_tags(
+        &self,
+        target: &VaultPath,
+        limit: usize,
+    ) -> Result<Vec<SimilarRow>, IndexError> {
+        // Look up target page id.
+        let target_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![target.as_str()],
+                |r| r.get(0),
+            )
+            .ok();
+        let Some(target_id) = target_id else {
+            return Ok(Vec::new());
+        };
+
+        // Collect the target's tag set.
+        let target_tags: Vec<String> = self
+            .conn
+            .prepare("SELECT tag FROM tags WHERE page_id = ?1")?
+            .query_map(params![target_id], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if target_tags.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build a query that finds candidate pages sharing at least one tag.
+        // We use GROUP_CONCAT with ASCII unit-separator (0x1F) to retrieve
+        // all tags for each candidate in a single pass.
+        let placeholders = std::iter::repeat_n("?", target_tags.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let q = format!(
+            "SELECT p.id, p.path, p.title, GROUP_CONCAT(pt.tag, char(31)) \
+             FROM pages p \
+             JOIN tags pt ON pt.page_id = p.id \
+             WHERE p.id != ?1 AND p.id IN ( \
+                 SELECT page_id FROM tags WHERE tag IN ({placeholders}) \
+             ) \
+             GROUP BY p.id"
+        );
+
+        let mut stmt = self.conn.prepare(&q)?;
+
+        // Bind params: target_id first, then each tag.
+        let mut bind_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        bind_params.push(Box::new(target_id));
+        for t in &target_tags {
+            bind_params.push(Box::new(t.clone()));
+        }
+
+        let target_set: HashSet<&str> = target_tags.iter().map(String::as_str).collect();
+
+        let rows_iter = stmt.query_map(
+            rusqlite::params_from_iter(bind_params.iter().map(|b| b.as_ref())),
+            |r| {
+                let path: String = r.get(1)?;
+                let title: Option<String> = r.get(2)?;
+                let tags_concat: Option<String> = r.get(3)?;
+                let other_tags: Vec<String> = match tags_concat {
+                    Some(s) => s.split('\u{001f}').map(|x| x.to_string()).collect(),
+                    None => Vec::new(),
+                };
+                Ok((path, title, other_tags))
+            },
+        )?;
+
+        let mut rows: Vec<SimilarRow> = Vec::new();
+        for r in rows_iter {
+            let (path, title, other_tags) = r?;
+            let shared: Vec<String> = other_tags
+                .iter()
+                .filter(|t| target_set.contains(t.as_str()))
+                .cloned()
+                .collect();
+            let union_size = target_set.len() + other_tags.len() - shared.len();
+            let score = if union_size == 0 {
+                0.0
+            } else {
+                shared.len() as f64 / union_size as f64
+            };
+            rows.push(SimilarRow {
+                path,
+                title,
+                shared_tags: shared,
+                score,
+            });
+        }
+
+        rows.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.shared_tags.len().cmp(&a.shared_tags.len()))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        rows.truncate(limit);
+        Ok(rows)
     }
 
     /// Find an existing archive page by its original URL.

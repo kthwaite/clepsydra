@@ -157,6 +157,19 @@ pub struct SearchResultEntry {
     pub snippet: String,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SimilarEntry {
+    pub path: String,
+    pub title: Option<String>,
+    pub shared_tags: Vec<String>,
+    pub score: f64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SimilarResponse {
+    pub items: Vec<SimilarEntry>,
+}
+
 fn default_rewrite_mode() -> String {
     "plain_text".to_string()
 }
@@ -168,6 +181,7 @@ fn default_rewrite_mode() -> String {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/backlinks/{*path}", get(backlinks))
+        .route("/similar/{*path}", get(similar))
         .route("/outlinks/{*path}", get(outlinks))
         .route("/unresolved", get(unresolved))
         .route("/ambiguous", get(ambiguous))
@@ -224,6 +238,40 @@ pub async fn backlinks(
         .collect();
 
     Ok(Json(entries))
+}
+
+#[utoipa::path(
+    get,
+    path = "/index/similar/{path}",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(("path" = String, Path, description = "Vault-relative page path")),
+    responses(
+        (status = 200, description = "Similar pages by tag overlap", body = SimilarResponse),
+        (status = 400, description = "Invalid path", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn similar(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+) -> Result<Json<SimilarResponse>, ApiError> {
+    let vault_path =
+        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let items = state
+        .index
+        .similar_by_tags(vault_path, 12)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .into_iter()
+        .map(|s| SimilarEntry {
+            path: s.path,
+            title: s.title,
+            shared_tags: s.shared_tags,
+            score: s.score,
+        })
+        .collect();
+    Ok(Json(SimilarResponse { items }))
 }
 
 #[utoipa::path(

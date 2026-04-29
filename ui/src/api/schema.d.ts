@@ -409,6 +409,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/index/similar/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["similar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/index/stats": {
         parameters: {
             query?: never;
@@ -799,6 +815,16 @@ export interface components {
             path: string;
             snippet: string;
             title?: string | null;
+        };
+        SimilarEntry: {
+            path: string;
+            /** Format: double */
+            score: number;
+            shared_tags: string[];
+            title?: string | null;
+        };
+        SimilarResponse: {
+            items: components["schemas"]["SimilarEntry"][];
         };
         /** @description Location within a source document (page, quote, bounding rect). */
         SourceLocation: {
@@ -2237,6 +2263,47 @@ export interface operations {
                 };
             };
             /** @description Invalid query */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    similar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Vault-relative page path */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Similar pages by tag overlap */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarResponse"];
+                };
+            };
+            /** @description Invalid path */
             400: {
                 headers: {
                     [name: string]: unknown;

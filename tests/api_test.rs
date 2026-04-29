@@ -588,6 +588,72 @@ async fn stats_returns_null_last_indexed_at_for_empty_vault() {
 }
 
 #[tokio::test]
+async fn similar_returns_pages_sharing_tags() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A", "tags": ["foo", "bar"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B", "tags": ["foo", "bar", "baz"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/c.md")
+        .json(&serde_json::json!({"title": "C", "tags": ["foo"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/d.md")
+        .json(&serde_json::json!({"title": "D", "tags": ["unrelated"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+
+    let res = server.get("/api/vault/index/similar/a.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let items = body["items"].as_array().expect("items array");
+    let paths: Vec<&str> = items
+        .iter()
+        .map(|i| i["path"].as_str().unwrap())
+        .collect();
+
+    assert_eq!(paths, vec!["b.md", "c.md"], "expected b then c (more shared tags first); got {paths:?}");
+    assert!(!paths.contains(&"d.md"), "d has no shared tags and must not appear");
+}
+
+#[tokio::test]
+async fn similar_returns_empty_for_untagged_page() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/a.md")
+        .json(&serde_json::json!({"title": "A"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/b.md")
+        .json(&serde_json::json!({"title": "B", "tags": ["foo"]}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+
+    let res = server.get("/api/vault/index/similar/a.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["items"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+        "expected empty items for untagged page; got {body:?}",
+    );
+}
+
+#[tokio::test]
 async fn index_rebuild() {
     let (server, _tmp) = setup_server();
 

@@ -56,6 +56,7 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::index_routes::graph,
         crate::api::index_routes::content_index,
         crate::api::index_routes::search,
+        crate::api::index_routes::similar,
         // Academic
         crate::api::academic::list_works,
         crate::api::academic::create_work,
@@ -108,6 +109,8 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::index_routes::ContentEntry,
             crate::api::index_routes::ContentIndexResponse,
             crate::api::index_routes::SearchResultEntry,
+            crate::api::index_routes::SimilarEntry,
+            crate::api::index_routes::SimilarResponse,
             // Academic
             crate::api::academic::CreateWorkRequest,
             crate::api::academic::UpdateWorkRequest,

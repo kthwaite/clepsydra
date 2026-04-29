@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 
 use super::Vault;
-use super::index::{BacklinkWithContext, BuildStats, IndexError, SearchResult, VaultIndex};
+use super::index::{BacklinkWithContext, BuildStats, IndexError, SearchResult, SimilarRow, VaultIndex};
 use super::path::VaultPath;
 use super::sync::{ChangeEvent, SyncEngine, SyncStats};
 
@@ -138,6 +138,16 @@ impl IndexHandle {
         limit: usize,
     ) -> Result<Vec<SearchResult>, IndexError> {
         self.with_index(move |index, _vault| index.search(&query, limit))
+            .await?
+    }
+
+    /// Find pages similar to the target by tag overlap (Jaccard).
+    pub async fn similar_by_tags(
+        &self,
+        vp: VaultPath,
+        limit: usize,
+    ) -> Result<Vec<SimilarRow>, IndexError> {
+        self.with_index(move |index, _vault| index.similar_by_tags(&vp, limit))
             .await?
     }
 
