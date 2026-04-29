@@ -220,17 +220,7 @@ export function Diurnal() {
       <div className="border-l border-rule-soft pl-3">
         <div className="cl-cap mb-1 text-[9px]">§ Habits, this day</div>
         <hr className="cl-rule-soft" />
-        {[
-          ["Morning page", "◉◉◉◉◉ ◉◉◉○○"],
-          ["Read · 30 min", "◉◉◉◉◉ ◉◉○○○"],
-          ["Walk", "◉◉◉○○ ○○○○○"],
-          ["No screens 22→", "◉◉◉◉◉ ◉◉◉◉◉"],
-        ].map(([k, v]) => (
-          <div key={k} className="mb-1">
-            <div className="cl-serif text-[11px] italic">{k}</div>
-            <div className="cl-mono text-[9px] tracking-[0.05em] text-accent-deep">{v}</div>
-          </div>
-        ))}
+        <p className="cl-marg mt-1">— no habits configured —</p>
 
         <div className="cl-cap mb-1 mt-4 text-[9px]">§ Et cetera</div>
         <hr className="cl-rule-soft" />

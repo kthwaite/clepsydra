@@ -46,6 +46,8 @@ export function Atrium() {
     };
   }, []);
 
+  const showProspective = import.meta.env.VITE_ENABLE_PROSPECTIVE_PANELS === "1";
+
   return (
     <div className="grid gap-4 px-5 py-4 lg:grid-cols-[2fr_1fr]">
       {/* LEFT */}
@@ -199,84 +201,88 @@ export function Atrium() {
         </table>
 
         {/* Reading + Inquiry */}
-        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <div>
-            <div className="cl-cap mb-1 text-[10px]">§ Reading Continues</div>
-            <hr className="cl-rule-soft" />
-            <div className="mt-1 space-y-[2px]">
-              <Leader
-                left={
-                  <span className="cl-serif italic">
-                    Calvino · Invisible Cities
+        {showProspective && (
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div>
+              <div className="cl-cap mb-1 text-[10px]">§ Reading Continues</div>
+              <hr className="cl-rule-soft" />
+              <div className="mt-1 space-y-[2px]">
+                <Leader
+                  left={
+                    <span className="cl-serif italic">
+                      Calvino · Invisible Cities
+                    </span>
+                  }
+                  right="p. 84/165"
+                />
+                <Leader
+                  left={
+                    <span className="cl-serif italic">Borges · Ficciones</span>
+                  }
+                  right="p. 142/220"
+                />
+                <Leader
+                  left={
+                    <span className="cl-serif italic">
+                      Murray · APL — interactive approach
+                    </span>
+                  }
+                  right="p. 28/318"
+                />
+              </div>
+            </div>
+            <div>
+              <div className="cl-cap mb-1 text-[10px]">§ Inquiry, open</div>
+              <hr className="cl-rule-soft" />
+              <ul className="cl-serif m-0 list-none p-0 text-[12px]">
+                <li className="mb-[2px]">
+                  ◇{" "}
+                  <span className="italic">
+                    Why does Polars surprise on string ops?
                   </span>
-                }
-                right="p. 84/165"
-              />
-              <Leader
-                left={
-                  <span className="cl-serif italic">Borges · Ficciones</span>
-                }
-                right="p. 142/220"
-              />
-              <Leader
-                left={
-                  <span className="cl-serif italic">
-                    Murray · APL — interactive approach
+                </li>
+                <li className="mb-[2px]">
+                  ◇ Test Maillard at 130°C against 150°C, same beef
+                </li>
+                <li className="mb-[2px]">
+                  ◆{" "}
+                  <span className="italic">
+                    What does Weil mean by "decreation"?
                   </span>
-                }
-                right="p. 28/318"
-              />
+                </li>
+                <li>◇ Re-read the Babel piece; index by character</li>
+              </ul>
             </div>
           </div>
-          <div>
-            <div className="cl-cap mb-1 text-[10px]">§ Inquiry, open</div>
-            <hr className="cl-rule-soft" />
-            <ul className="cl-serif m-0 list-none p-0 text-[12px]">
-              <li className="mb-[2px]">
-                ◇{" "}
-                <span className="italic">
-                  Why does Polars surprise on string ops?
-                </span>
-              </li>
-              <li className="mb-[2px]">
-                ◇ Test Maillard at 130°C against 150°C, same beef
-              </li>
-              <li className="mb-[2px]">
-                ◆{" "}
-                <span className="italic">
-                  What does Weil mean by "decreation"?
-                </span>
-              </li>
-              <li>◇ Re-read the Babel piece; index by character</li>
-            </ul>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* RIGHT — marginalia */}
       <div className="border-l border-rule-soft pl-4">
         {/* Horologe */}
-        <div className="cl-frame mb-3 bg-paper-2 px-3 py-2">
-          <div className="cl-cap mb-1 text-[9px] text-ink-mute">HOROLOGE</div>
-          <div className="flex items-center gap-3">
-            <div className="relative h-[60px] w-[42px]">
-              {/* Hourglass silhouette via clipPath — keep inline (no utility for this). */}
-              <div
-                className="absolute inset-0 border-[1.5px] border-ink"
-                style={{
-                  clipPath:
-                    "polygon(0 0, 100% 0, 50% 50%, 100% 100%, 0 100%, 50% 50%)",
-                }}
-              />
-              <div className="absolute inset-x-0 top-0 h-[18%] bg-paper" />
-              <div className="absolute inset-x-0 bottom-0 h-[56%] bg-accent opacity-80" />
-            </div>
-            <div>
-              <div className="cl-mono text-[18px]">{horoLabel.time}</div>
-              <div className="cl-marg">{horoLabel.remaining}</div>
+        {showProspective && (
+          <div className="cl-frame mb-3 bg-paper-2 px-3 py-2">
+            <div className="cl-cap mb-1 text-[9px] text-ink-mute">HOROLOGE</div>
+            <div className="flex items-center gap-3">
+              <div className="relative h-[60px] w-[42px]">
+                {/* Hourglass silhouette via clipPath — keep inline (no utility for this). */}
+                <div
+                  className="absolute inset-0 border-[1.5px] border-ink"
+                  style={{
+                    clipPath:
+                      "polygon(0 0, 100% 0, 50% 50%, 100% 100%, 0 100%, 50% 50%)",
+                  }}
+                />
+                <div className="absolute inset-x-0 top-0 h-[18%] bg-paper" />
+                <div className="absolute inset-x-0 bottom-0 h-[56%] bg-accent opacity-80" />
+              </div>
+              <div>
+                <div className="cl-mono text-[18px]">{horoLabel.time}</div>
+                <div className="cl-marg">{horoLabel.remaining}</div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div className="cl-cap mb-1 text-[9px]">§ The Codex Contains</div>
         <hr className="cl-rule" />
