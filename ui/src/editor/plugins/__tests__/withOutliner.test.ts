@@ -599,6 +599,56 @@ describe("deleteBackward at start of list-item", () => {
     expect(normalizeUnchanged(editor)).toBe(true);
   });
 
+  it("preserves nested children when unwrapping a top-level parent item", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              { type: "paragraph", children: [{ text: "Parent" }] },
+              {
+                type: "bulleted-list",
+                children: [canonicalItem("Child")],
+              },
+            ],
+          },
+          canonicalItem("Sibling"),
+        ],
+      },
+    ]);
+    // Cursor at start of "Parent" — paragraph path [0, 0, 0, 0].
+    selectAt(editor, [0, 0, 0, 0]);
+    editor.deleteBackward("character");
+
+    expect(editor.children.length).toBe(3);
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("Parent");
+
+    const liftedChildren = editor.children[1] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(liftedChildren.type).toBe("bulleted-list");
+    const childPara = (liftedChildren.children[0] as SlateElement)
+      .children[0] as SlateElement & { children: { text: string }[] };
+    expect(childPara.children[0].text).toBe("Child");
+
+    const trailing = editor.children[2] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(trailing.type).toBe("bulleted-list");
+    const siblingPara = (trailing.children[0] as SlateElement)
+      .children[0] as SlateElement & { children: { text: string }[] };
+    expect(siblingPara.children[0].text).toBe("Sibling");
+
+    expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 0 });
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
   it("inserts a paragraph and preserves the trailing list when no items precede", () => {
     // Mid-list with siblings AFTER only.
     const editor = makeEditor([

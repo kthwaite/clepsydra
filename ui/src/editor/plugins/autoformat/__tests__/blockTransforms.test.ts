@@ -171,6 +171,33 @@ describe("tryBlockTransform (paragraph -> task list)", () => {
     expect(list.type).toBe("bulleted-list");
     expect(list.children[0].checked).toBe(true);
   });
+
+  it("appends task shortcut to previous bulleted list", () => {
+    const editor = withOutliner(withHistory(createEditor()));
+    editor.children = [
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [{ type: "paragraph", children: [{ text: "existing" }] }],
+          },
+        ],
+      },
+      { type: "paragraph", children: [{ text: "[]" }] },
+    ];
+    Transforms.select(editor, {
+      anchor: { path: [1, 0], offset: 2 },
+      focus: { path: [1, 0], offset: 2 },
+    });
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    expect(editor.children.length).toBe(1);
+    const list = editor.children[0] as any;
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children.length).toBe(2);
+    expect(list.children[1].checked).toBe(false);
+  });
 });
 
 describe("tryThematicBreak", () => {

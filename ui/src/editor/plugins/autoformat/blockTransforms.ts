@@ -226,7 +226,8 @@ function applyListTransform(
   if (text === undefined) return false;
 
   applyWithBatch(editor, () => {
-    const listPathRef = Editor.pathRef(editor, blockPath);
+    // The outer list wrapper is inserted at the original paragraph path.
+    const listPath = [...blockPath];
 
     // Delete the trigger text
     Transforms.delete(editor, {
@@ -246,10 +247,7 @@ function applyListTransform(
     });
 
     // Merge with adjacent same-type list at the transformed wrapper path.
-    const listPath = listPathRef.unref();
-    if (listPath) {
-      mergeWithAdjacentList(editor, listPath, listType);
-    }
+    mergeWithAdjacentList(editor, listPath, listType);
   });
 
   return true;
@@ -269,7 +267,8 @@ function applyTaskListTransform(
   if (text === undefined) return false;
 
   applyWithBatch(editor, () => {
-    const listPathRef = Editor.pathRef(editor, blockPath);
+    // The outer list wrapper is inserted at the original paragraph path.
+    const listPath = [...blockPath];
 
     // Delete the trigger text
     Transforms.delete(editor, {
@@ -290,10 +289,7 @@ function applyTaskListTransform(
       { at: blockPath },
     );
 
-    const listPath = listPathRef.unref();
-    if (listPath) {
-      mergeWithAdjacentList(editor, listPath, "bulleted-list");
-    }
+    mergeWithAdjacentList(editor, listPath, "bulleted-list");
   });
 
   return true;

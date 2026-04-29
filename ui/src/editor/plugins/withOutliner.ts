@@ -100,9 +100,8 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
   const siblingCount = parentList.children.length;
 
   // Snapshot the inline children of the item's first paragraph (these become
-  // the new paragraph's children). Nested lists inside the item are dropped —
-  // an alternative would be to lift them, but the common case is no nesting
-  // and dropping keeps the operation predictable.
+  // the new paragraph's children). Nested lists are lifted after the new
+  // paragraph so Backspace never silently deletes child items.
   const itemNode = Node.get(editor, itemPath);
   if (!SlateElement.isElement(itemNode)) return;
   let paragraphChildren: any[] = [{ text: "" }];
@@ -123,6 +122,9 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
       paragraphChildren = JSON.parse(JSON.stringify(inline));
     }
   }
+  const nestedLists = itemNode.children
+    .filter((child) => SlateElement.isElement(child) && isListElement(child))
+    .map((child) => JSON.parse(JSON.stringify(child)) as SlateElement);
 
   Editor.withoutNormalizing(editor, () => {
     // Capture trailing siblings before mutation so we can rebuild a list below.
@@ -162,11 +164,17 @@ function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
       { at: insertAt },
     );
 
+    let nextInsertAt = Path.next(insertAt);
+    for (const nestedList of nestedLists) {
+      Transforms.insertNodes(editor, nestedList as any, { at: nextInsertAt });
+      nextInsertAt = Path.next(nextInsertAt);
+    }
+
     if (trailingItems.length > 0) {
       Transforms.insertNodes(
         editor,
         { type: parentList.type, children: trailingItems } as any,
-        { at: Path.next(insertAt) },
+        { at: nextInsertAt },
       );
     }
 
