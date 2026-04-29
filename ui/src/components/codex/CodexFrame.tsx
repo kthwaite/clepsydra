@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useStats } from "#/api/index";
+import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useTheme } from "#/components/ThemeProvider";
@@ -174,7 +175,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           {totalEntries} ent · {totalLinks} xref
         </span>
         <span className="border-l border-bar-rule px-3 py-[2px]">
-          last collated {clock} GMT
+          last collated {formatRelativeTime(stats?.last_indexed_at)}
         </span>
       </div>
     </div>
