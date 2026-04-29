@@ -547,6 +547,47 @@ async fn index_stats() {
 }
 
 #[tokio::test]
+async fn stats_returns_last_indexed_at_when_pages_exist() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({"title": "Alpha"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/beta.md")
+        .json(&serde_json::json!({"title": "Beta"}))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+
+    let res = server.get("/api/vault/index/stats").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["last_indexed_at"].is_string(),
+        "expected last_indexed_at to be set when pages exist; got {body:?}",
+    );
+}
+
+#[tokio::test]
+async fn stats_returns_null_last_indexed_at_for_empty_vault() {
+    let (server, _tmp) = setup_server();
+    let res = server.get("/api/vault/index/stats").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["last_indexed_at"].is_null(),
+        "expected last_indexed_at to be null on empty vault; got {body:?}",
+    );
+}
+
+#[tokio::test]
 async fn index_rebuild() {
     let (server, _tmp) = setup_server();
 

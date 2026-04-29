@@ -99,6 +99,8 @@ pub struct VaultStats {
     links_unresolved: i64,
     tags: i64,
     attachments: i64,
+    /// RFC3339 timestamp of the most recent `pages.updated_at`, or null on empty vault.
+    last_indexed_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -478,7 +480,7 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
         0
     };
 
-    let (pages, links_total, links_resolved, links_unresolved, tags_count) = state
+    let (pages, links_total, links_resolved, links_unresolved, tags_count, last_indexed_at) = state
         .index
         .with_index(move |index, _vault| {
             let conn = index.connection();
@@ -506,7 +508,16 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
             let tags_count: i64 = conn
                 .query_row("SELECT COUNT(DISTINCT tag) FROM tags", [], |row| row.get(0))?;
 
-            Ok::<_, rusqlite::Error>((pages, links_total, links_resolved, links_unresolved, tags_count))
+            let last_indexed_at: Option<String> = conn
+                .query_row(
+                    "SELECT MAX(updated_at) FROM pages",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten();
+
+            Ok::<_, rusqlite::Error>((pages, links_total, links_resolved, links_unresolved, tags_count, last_indexed_at))
         })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
@@ -519,6 +530,7 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
         links_unresolved,
         tags: tags_count,
         attachments,
+        last_indexed_at,
     }))
 }
 
