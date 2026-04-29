@@ -162,6 +162,15 @@ describe("tryBlockTransform (paragraph -> task list)", () => {
     expect(list.type).toBe("bulleted-list");
     expect(list.children[0].checked).toBe(true);
   });
+
+  it("[X] + space in paragraph -> task list (checked:true, uppercase)", () => {
+    const editor = editorWithParagraph("[X]", 3);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const list = editor.children[0] as any;
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children[0].checked).toBe(true);
+  });
 });
 
 describe("tryThematicBreak", () => {

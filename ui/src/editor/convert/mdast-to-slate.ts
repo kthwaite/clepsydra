@@ -138,8 +138,27 @@ function convertBlockNode(
         children: [{ text: "" }],
       };
 
+    case "html": {
+      // CommonMark may emit a block-level `html` node when an HTML tag opens on
+      // a line of its own (e.g. `<u>\nfoo\n</u>`). The inline-html path that
+      // strips `<u>` / `</u>` doesn't see these, so the content would otherwise
+      // be silently dropped. Recognise an isolated `<u>...</u>` block and
+      // re-emit it as a paragraph with the underline mark applied. Anything
+      // else falls through to `null` (existing behaviour).
+      const value = (node as { value: string }).value.trim();
+      const underlineMatch = value.match(/^<u\s*>([\s\S]*?)<\/u\s*>$/i);
+      if (underlineMatch) {
+        const inner = underlineMatch[1];
+        const el = {
+          type: "paragraph" as const,
+          children: [{ text: inner, underline: true } as CustomText],
+        };
+        return el;
+      }
+      return null;
+    }
+
     // Node types we intentionally skip
-    case "html":
     case "definition":
     case "footnoteDefinition":
     case "yaml":
