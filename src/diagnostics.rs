@@ -1,0 +1,805 @@
+//! `clepsydra doctor` diagnostics.
+//!
+//! Each `check_*` function appends one or more [`CheckResult`]s to a
+//! [`Report`]. Checks are read-only and never panic: failures inside a check
+//! become `Status::Err` results so the rest of the report still runs.
+
+use std::fmt::Write as _;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use rusqlite::Connection;
+use serde::Serialize;
+
+use crate::Settings;
+use crate::app_config;
+use crate::expand_tilde;
+use crate::resolve_vault_root;
+use crate::vault::Vault;
+use crate::vault::config::VaultConfig;
+
+/// Status of a single check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    Ok,
+    Warn,
+    Err,
+    Info,
+    Skip,
+}
+
+/// Result of a single check.
+#[derive(Debug, Clone, Serialize)]
+pub struct CheckResult {
+    pub section: &'static str,
+    pub name: &'static str,
+    pub status: Status,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+impl CheckResult {
+    fn new(section: &'static str, name: &'static str, status: Status, detail: String) -> Self {
+        Self {
+            section,
+            name,
+            status,
+            detail,
+            hint: None,
+        }
+    }
+
+    fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+}
+
+/// Aggregate diagnostic report.
+#[derive(Debug, Default, Serialize)]
+pub struct Report {
+    pub results: Vec<CheckResult>,
+    pub summary: Summary,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct Summary {
+    pub ok: usize,
+    pub warn: usize,
+    pub err: usize,
+    pub info: usize,
+    pub skip: usize,
+}
+
+impl Report {
+    fn push(&mut self, result: CheckResult) {
+        match result.status {
+            Status::Ok => self.summary.ok += 1,
+            Status::Warn => self.summary.warn += 1,
+            Status::Err => self.summary.err += 1,
+            Status::Info => self.summary.info += 1,
+            Status::Skip => self.summary.skip += 1,
+        }
+        self.results.push(result);
+    }
+
+    /// Exit code for the overall report.
+    ///
+    /// `0` when there are no errors (and, under `strict`, no warnings either).
+    /// `1` otherwise.
+    pub fn exit_code(&self, strict: bool) -> i32 {
+        if self.summary.err > 0 {
+            return 1;
+        }
+        if strict && self.summary.warn > 0 {
+            return 1;
+        }
+        0
+    }
+
+    pub fn render_human(&self, w: &mut impl io::Write) -> io::Result<()> {
+        let mut current_section: Option<&'static str> = None;
+        for r in &self.results {
+            if Some(r.section) != current_section {
+                if current_section.is_some() {
+                    writeln!(w)?;
+                }
+                writeln!(w, "{}", r.section)?;
+                current_section = Some(r.section);
+            }
+            let tag = match r.status {
+                Status::Ok => "[OK]  ",
+                Status::Warn => "[WARN]",
+                Status::Err => "[ERR] ",
+                Status::Info => "[INFO]",
+                Status::Skip => "[SKIP]",
+            };
+            writeln!(w, "  {} {:<22} {}", tag, r.name, r.detail)?;
+            if let Some(hint) = &r.hint {
+                writeln!(w, "         hint: {hint}")?;
+            }
+        }
+        writeln!(w)?;
+        writeln!(
+            w,
+            "Summary: {} ok, {} warn, {} err ({} info, {} skip)",
+            self.summary.ok,
+            self.summary.warn,
+            self.summary.err,
+            self.summary.info,
+            self.summary.skip,
+        )?;
+        Ok(())
+    }
+
+    pub fn render_json(&self, w: &mut impl io::Write) -> io::Result<()> {
+        serde_json::to_writer_pretty(&mut *w, self).map_err(io::Error::other)?;
+        writeln!(w)?;
+        Ok(())
+    }
+}
+
+/// Options passed to [`run`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DoctorOpts {
+    /// Enable expensive checks (e.g. CAS stats).
+    pub full: bool,
+}
+
+/// Run all diagnostic checks against the current process environment.
+pub async fn run(opts: DoctorOpts) -> Report {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    run_with_cwd(&cwd, opts).await
+}
+
+/// Run all diagnostic checks rooted at `cwd` (used for tests).
+pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
+    let mut report = Report::default();
+
+    let loaded = check_top_level_config(cwd, &mut report);
+
+    if let Some(settings) = loaded.as_ref().map(|(s, _)| s) {
+        check_server_address(settings, &mut report).await;
+    } else {
+        report.push(skip("server", "address", "skipped — config did not load"));
+    }
+
+    let vault = match loaded.as_ref() {
+        Some((settings, config_path)) => check_vault(settings, config_path, cwd, &mut report),
+        None => {
+            report.push(skip("vault", "root", "skipped — config did not load"));
+            None
+        }
+    };
+
+    if let Some(v) = vault.as_ref() {
+        check_index(v, &mut report);
+        check_cas(v, opts.full, &mut report);
+    } else {
+        report.push(skip("index", "cache.db", "skipped — vault unavailable"));
+        report.push(skip("cas", "store", "skipped — vault unavailable"));
+    }
+
+    check_runtime(&mut report);
+
+    report
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn ok(section: &'static str, name: &'static str, detail: impl Into<String>) -> CheckResult {
+    CheckResult::new(section, name, Status::Ok, detail.into())
+}
+fn warn(section: &'static str, name: &'static str, detail: impl Into<String>) -> CheckResult {
+    CheckResult::new(section, name, Status::Warn, detail.into())
+}
+fn err(section: &'static str, name: &'static str, detail: impl Into<String>) -> CheckResult {
+    CheckResult::new(section, name, Status::Err, detail.into())
+}
+fn info(section: &'static str, name: &'static str, detail: impl Into<String>) -> CheckResult {
+    CheckResult::new(section, name, Status::Info, detail.into())
+}
+fn skip(section: &'static str, name: &'static str, detail: impl Into<String>) -> CheckResult {
+    CheckResult::new(section, name, Status::Skip, detail.into())
+}
+
+fn is_dir_writable(path: &Path) -> bool {
+    let probe = path.join(".clepsydra-doctor-write-probe");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Check 1: top-level config
+// ---------------------------------------------------------------------------
+
+fn check_top_level_config(cwd: &Path, report: &mut Report) -> Option<(Settings, PathBuf)> {
+    const SECTION: &str = "server config";
+
+    let candidates = app_config::config_candidates(cwd);
+    let candidate_list = candidates
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let config_path = match app_config::find_config_path(cwd) {
+        Some(p) => p,
+        None => {
+            report.push(
+                err(
+                    SECTION,
+                    "config.toml",
+                    format!("not found in any of: {candidate_list}"),
+                )
+                .with_hint("create config.toml in CWD or $XDG_CONFIG_HOME/clepsydra/"),
+            );
+            return None;
+        }
+    };
+
+    report.push(ok(
+        SECTION,
+        "config.toml",
+        format!("loaded from {}", config_path.display()),
+    ));
+
+    let settings = match Settings::load_from(&config_path) {
+        Ok(s) => s,
+        Err(e) => {
+            report.push(err(SECTION, "parse", format!("{e}")));
+            return None;
+        }
+    };
+
+    let mut env_overrides: Vec<String> = std::env::vars_os()
+        .filter_map(|(k, _)| k.into_string().ok())
+        .filter(|k| k.starts_with("CLEPSYDRA__"))
+        .collect();
+    env_overrides.sort();
+    if env_overrides.is_empty() {
+        report.push(info(SECTION, "env overrides", "none".to_string()));
+    } else {
+        report.push(info(SECTION, "env overrides", env_overrides.join(", ")));
+    }
+
+    let tls_state = if settings.server.tls.enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    report.push(info(
+        SECTION,
+        "effective",
+        format!(
+            "host={} port={} dev_mode={} tls={}",
+            settings.server.host, settings.server.port, settings.server.dev_mode, tls_state
+        ),
+    ));
+
+    Some((settings, config_path))
+}
+
+// ---------------------------------------------------------------------------
+// Check 2: server address
+// ---------------------------------------------------------------------------
+
+async fn check_server_address(settings: &Settings, report: &mut Report) {
+    const SECTION: &str = "server";
+    let host_port = format!("{}:{}", settings.server.host, settings.server.port);
+
+    let resolved = match tokio::net::lookup_host(&host_port).await {
+        Ok(mut iter) => iter.next(),
+        Err(e) => {
+            report.push(err(
+                SECTION,
+                "address",
+                format!("cannot resolve {host_port:?}: {e}"),
+            ));
+            return;
+        }
+    };
+
+    let addr = match resolved {
+        Some(a) => a,
+        None => {
+            report.push(err(
+                SECTION,
+                "address",
+                format!("{host_port:?} resolved to no addresses"),
+            ));
+            return;
+        }
+    };
+
+    report.push(ok(SECTION, "address", format!("{host_port} -> {addr}")));
+
+    match std::net::TcpListener::bind(addr) {
+        Ok(listener) => {
+            drop(listener);
+            report.push(ok(SECTION, "bind", format!("{addr} is bindable")));
+        }
+        Err(e) => {
+            report.push(
+                warn(SECTION, "bind", format!("{addr} not bindable: {e}"))
+                    .with_hint("another process may already be using this port"),
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Check 4: vault
+// ---------------------------------------------------------------------------
+
+fn check_vault(
+    settings: &Settings,
+    config_path: &Path,
+    cwd: &Path,
+    report: &mut Report,
+) -> Option<Vault> {
+    const SECTION: &str = "vault";
+
+    let vault_root = resolve_vault_root(&settings.vault.root, config_path, cwd);
+
+    if !vault_root.exists() {
+        report.push(
+            err(
+                SECTION,
+                "root",
+                format!("{} does not exist", vault_root.display()),
+            )
+            .with_hint(format!(
+                "run `clepsydra init {}` or fix vault.root",
+                vault_root.display()
+            )),
+        );
+        return None;
+    }
+    if !vault_root.is_dir() {
+        report.push(err(
+            SECTION,
+            "root",
+            format!("{} is not a directory", vault_root.display()),
+        ));
+        return None;
+    }
+
+    let writable = is_dir_writable(&vault_root);
+    if writable {
+        report.push(ok(
+            SECTION,
+            "root",
+            format!("{} (read+write)", vault_root.display()),
+        ));
+    } else {
+        report.push(warn(
+            SECTION,
+            "root",
+            format!("{} is not writable", vault_root.display()),
+        ));
+    }
+
+    let dot_dir = vault_root.join(".clepsydra");
+    if !dot_dir.is_dir() {
+        report.push(
+            err(
+                SECTION,
+                "initialized",
+                format!("{} missing", dot_dir.display()),
+            )
+            .with_hint(format!("run `clepsydra init {}`", vault_root.display())),
+        );
+        return None;
+    }
+    report.push(ok(
+        SECTION,
+        "initialized",
+        ".clepsydra/ present".to_string(),
+    ));
+
+    let vault_config = match VaultConfig::load(&vault_root) {
+        Ok(c) => c,
+        Err(e) => {
+            report.push(err(
+                SECTION,
+                "config",
+                format!(".clepsydra/config.toml: {e}"),
+            ));
+            return None;
+        }
+    };
+    report.push(ok(SECTION, "config", "parsed .clepsydra/config.toml"));
+
+    let mut bad_globs: Vec<String> = Vec::new();
+    for pat in &vault_config.vault.excluded_patterns {
+        if glob::Pattern::new(pat).is_err() {
+            bad_globs.push(pat.clone());
+        }
+    }
+    if bad_globs.is_empty() {
+        report.push(ok(
+            SECTION,
+            "excluded patterns",
+            format!("{} valid", vault_config.vault.excluded_patterns.len()),
+        ));
+    } else {
+        report.push(err(
+            SECTION,
+            "excluded patterns",
+            format!("invalid glob(s): {}", bad_globs.join(", ")),
+        ));
+    }
+
+    let attach = vault_root.join(&vault_config.vault.attachment_folder);
+    if attach.is_dir() {
+        report.push(ok(
+            SECTION,
+            "attachments",
+            format!("{} present", vault_config.vault.attachment_folder),
+        ));
+    } else {
+        report.push(warn(
+            SECTION,
+            "attachments",
+            format!(
+                "{} missing (will be created on first use)",
+                attach.display()
+            ),
+        ));
+    }
+
+    if vault_config.vault.default_page_folder.is_empty() {
+        report.push(info(
+            SECTION,
+            "default folder",
+            "vault root (default_page_folder = \"\")",
+        ));
+    } else {
+        let folder = vault_root.join(&vault_config.vault.default_page_folder);
+        if folder.is_dir() {
+            report.push(ok(
+                SECTION,
+                "default folder",
+                vault_config.vault.default_page_folder.clone(),
+            ));
+        } else {
+            report.push(warn(
+                SECTION,
+                "default folder",
+                format!("{} missing — `clepsydra new` will fail", folder.display()),
+            ));
+        }
+    }
+
+    match Vault::open(&vault_root) {
+        Ok(vault) => Some(vault),
+        Err(e) => {
+            report.push(err(SECTION, "open", format!("Vault::open: {e}")));
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Check 5: index DB
+// ---------------------------------------------------------------------------
+
+const REQUIRED_TABLES: &[&str] = &[
+    "pages",
+    "links",
+    "tags",
+    "blocks",
+    "block_properties",
+    "canonical_names",
+    "pages_fts",
+];
+
+fn check_index(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "index";
+    let db_path = vault.root().join(".clepsydra/cache.db");
+
+    if !db_path.exists() {
+        report.push(
+            warn(
+                SECTION,
+                "cache.db",
+                format!("{} missing", db_path.display()),
+            )
+            .with_hint("run `clepsydra serve` once to build the index"),
+        );
+        return;
+    }
+
+    let conn = match Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            report.push(err(
+                SECTION,
+                "cache.db",
+                format!("cannot open {}: {e}", db_path.display()),
+            ));
+            return;
+        }
+    };
+    report.push(ok(
+        SECTION,
+        "cache.db",
+        format!("opened {}", db_path.display()),
+    ));
+
+    let mut missing: Vec<&str> = Vec::new();
+    for tbl in REQUIRED_TABLES {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                [tbl],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if exists == 0 {
+            missing.push(tbl);
+        }
+    }
+    if missing.is_empty() {
+        report.push(ok(
+            SECTION,
+            "schema",
+            format!("{} tables present", REQUIRED_TABLES.len()),
+        ));
+    } else {
+        report.push(
+            err(
+                SECTION,
+                "schema",
+                format!("missing tables: {}", missing.join(", ")),
+            )
+            .with_hint("delete .clepsydra/cache.db and rebuild"),
+        );
+        return;
+    }
+
+    let pages: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+        .unwrap_or(-1);
+    let unresolved: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(-1);
+    let fts: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pages_fts", [], |row| row.get(0))
+        .unwrap_or(-1);
+
+    let mut detail = String::new();
+    let _ = write!(
+        &mut detail,
+        "{pages} pages, {unresolved} unresolved links, {fts} fts rows"
+    );
+    report.push(ok(SECTION, "counts", detail));
+
+    if pages == 0 && vault_has_markdown(vault.root()) {
+        report.push(
+            warn(SECTION, "stale", "index empty but vault contains markdown")
+                .with_hint("delete .clepsydra/cache.db and rebuild"),
+        );
+    }
+}
+
+fn vault_has_markdown(root: &Path) -> bool {
+    walkdir::WalkDir::new(root)
+        .max_depth(3)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.file_type().is_file() && e.path().extension().and_then(|s| s.to_str()) == Some("md")
+        })
+}
+
+// ---------------------------------------------------------------------------
+// Check 6: CAS
+// ---------------------------------------------------------------------------
+
+fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
+    const SECTION: &str = "cas";
+    let archive = &vault.config().archive;
+
+    if !archive.enabled {
+        report.push(warn(SECTION, "enabled", "archive disabled in vault config"));
+        return;
+    }
+
+    let raw = &archive.cas_path;
+    let path = expand_tilde(raw).unwrap_or_else(|| PathBuf::from(raw));
+    report.push(info(SECTION, "path", path.display().to_string()));
+
+    if let Err(e) = std::fs::create_dir_all(&path) {
+        report.push(err(
+            SECTION,
+            "directory",
+            format!("cannot create {}: {e}", path.display()),
+        ));
+        return;
+    }
+    if !is_dir_writable(&path) {
+        report.push(err(
+            SECTION,
+            "directory",
+            format!("{} not writable", path.display()),
+        ));
+        return;
+    }
+    report.push(ok(SECTION, "directory", "writable"));
+
+    match crate::vault::cas::ContentStore::open(&path) {
+        Ok(store) => {
+            report.push(ok(SECTION, "open", "cas.db opened"));
+            if full {
+                match store.stats() {
+                    Ok(s) => report.push(ok(
+                        SECTION,
+                        "stats",
+                        format!("{} blobs, {} bytes", s.blob_count, s.total_size_bytes),
+                    )),
+                    Err(e) => report.push(warn(SECTION, "stats", format!("{e}"))),
+                }
+            }
+        }
+        Err(e) => report.push(err(SECTION, "open", format!("ContentStore::open: {e}"))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Check 9: runtime / build info
+// ---------------------------------------------------------------------------
+
+fn check_runtime(report: &mut Report) {
+    const SECTION: &str = "runtime";
+    report.push(info(
+        SECTION,
+        "version",
+        env!("CARGO_PKG_VERSION").to_string(),
+    ));
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "(unset)".to_string());
+    report.push(info(SECTION, "RUST_LOG", rust_log));
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write_top_level_config(dir: &Path, vault_root: &Path) {
+        fs::write(
+            dir.join("config.toml"),
+            format!(
+                "[server]\nhost = \"localhost\"\nport = 0\n\n[vault]\nroot = \"{}\"\n",
+                vault_root.display()
+            ),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn report_for_initialized_vault_is_clean() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        assert_eq!(report.summary.err, 0, "errors: {:#?}", report.results);
+        assert!(report.results.iter().any(|r| r.section == "server config"));
+        assert!(report.results.iter().any(|r| r.section == "vault"));
+        assert!(report.results.iter().any(|r| r.section == "runtime"));
+    }
+
+    #[tokio::test]
+    async fn missing_config_reports_error_and_keeps_going() {
+        let tmp = TempDir::new().unwrap();
+        // Override XDG so the doctor doesn't accidentally pick up a real user config.
+        // SAFETY: tests are sequential within a single binary; this env var is only
+        // read during this test's lifetime via app_config::find_config_path.
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("xdg-empty"));
+            std::env::set_var("HOME", tmp.path().join("home-empty"));
+        }
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert!(report.summary.err > 0);
+        // Runtime info should still appear.
+        assert!(report.results.iter().any(|r| r.section == "runtime"));
+        // Vault should be skipped.
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|r| r.section == "vault" && r.status == Status::Skip)
+        );
+    }
+
+    #[tokio::test]
+    async fn uninitialized_vault_reports_init_hint() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        fs::create_dir_all(&vault_root).unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let init = report
+            .results
+            .iter()
+            .find(|r| r.section == "vault" && r.name == "initialized")
+            .expect("expected vault initialized check");
+        assert_eq!(init.status, Status::Err);
+        assert!(init.hint.as_ref().unwrap().contains("clepsydra init"));
+    }
+
+    #[tokio::test]
+    async fn renderers_round_trip() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let mut human = Vec::new();
+        report.render_human(&mut human).unwrap();
+        let human = String::from_utf8(human).unwrap();
+        assert!(human.contains("server config"));
+        assert!(human.contains("Summary:"));
+
+        let mut json = Vec::new();
+        report.render_json(&mut json).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert!(v.get("results").unwrap().is_array());
+        assert!(v.get("summary").unwrap().is_object());
+    }
+
+    #[test]
+    fn exit_code_strict_promotes_warnings() {
+        let mut report = Report::default();
+        report.push(warn("x", "y", "z"));
+        assert_eq!(report.exit_code(false), 0);
+        assert_eq!(report.exit_code(true), 1);
+    }
+
+    #[test]
+    fn exit_code_errors_always_fail() {
+        let mut report = Report::default();
+        report.push(err("x", "y", "z"));
+        assert_eq!(report.exit_code(false), 1);
+        assert_eq!(report.exit_code(true), 1);
+    }
+}

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use clepsydra::diagnostics::{self, DoctorOpts};
 use clepsydra::run_server;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::new_note::create_new_note;
@@ -55,9 +56,19 @@ enum Commands {
     Env,
     #[command(
         about = "Run health checks",
-        long_about = "Run health checks for configuration, vault accessibility, and runtime dependencies.\n\nStatus: not implemented yet."
+        long_about = "Run health checks for configuration, vault accessibility, and runtime dependencies.\n\nThe report groups checks by section (server config, server, vault, index, cas, runtime). Each check is OK / WARN / ERR / INFO / SKIP. Exit code is 0 unless any check fails (or any warning fires under --strict)."
     )]
-    Doctor,
+    Doctor {
+        /// Emit the report as JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+        /// Treat warnings as errors when computing the exit code
+        #[arg(long)]
+        strict: bool,
+        /// Run expensive checks (e.g. CAS stats)
+        #[arg(long)]
+        full: bool,
+    },
     #[command(
         about = "Start the API server",
         long_about = "Start the Clepsydra HTTP API server.\n\nRequires a config file discovered via:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\nVault root is read from [vault].root."
@@ -95,8 +106,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Env => {
             println!("env command not implemented yet");
         }
-        Commands::Doctor => {
-            println!("doctor command not implemented yet");
+        Commands::Doctor { json, strict, full } => {
+            let report = diagnostics::run(DoctorOpts { full }).await;
+            let mut stdout = std::io::stdout().lock();
+            if json {
+                report.render_json(&mut stdout)?;
+            } else {
+                report.render_human(&mut stdout)?;
+            }
+            std::process::exit(report.exit_code(strict));
         }
         Commands::Serve { lsp } => {
             run_server(lsp).await?;
