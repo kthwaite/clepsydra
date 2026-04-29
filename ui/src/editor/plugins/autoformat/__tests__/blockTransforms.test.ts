@@ -123,6 +123,45 @@ describe("tryBlockTransform (list-item task promotion)", () => {
     expect(result).toBe(true);
     expect((editor.children[0] as any).children[0].checked).toBe(true);
   });
+
+  it("[] + space in list-item -> checked:false (empty brackets)", () => {
+    const editor = editorWithListItem("[]", 2);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const li = (editor.children[0] as any).children[0];
+    expect(li.checked).toBe(false);
+    expect(li.children[0].children[0].text).toBe("");
+  });
+});
+
+describe("tryBlockTransform (paragraph -> task list)", () => {
+  it("[] + space in paragraph -> bulleted-list with checked:false item", () => {
+    const editor = editorWithParagraph("[]", 2);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const list = editor.children[0] as any;
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children[0].type).toBe("list-item");
+    expect(list.children[0].checked).toBe(false);
+  });
+
+  it("[ ] + space in paragraph -> task list (checked:false)", () => {
+    const editor = editorWithParagraph("[ ]", 3);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const list = editor.children[0] as any;
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children[0].checked).toBe(false);
+  });
+
+  it("[x] + space in paragraph -> task list (checked:true)", () => {
+    const editor = editorWithParagraph("[x]", 3);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const list = editor.children[0] as any;
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children[0].checked).toBe(true);
+  });
 });
 
 describe("tryThematicBreak", () => {
