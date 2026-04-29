@@ -1,13 +1,36 @@
+import { useMemo, useState } from "react";
 import { useGraph } from "#/api/index";
 import type { GraphNode } from "#/api/types";
 import { ASCII_COMPASS } from "#/components/codex/ascii";
+import { applyFilters } from "#/components/codex/constellation-filters";
 import { Sheaf } from "#/components/codex/Sheaf";
 import { ForceGraph } from "#/components/ForceGraph";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useWorkspaceStore } from "#/store/workspace";
 
 export function Constellation({ tabId }: { tabId: string }) {
   const { data: graph, isLoading } = useGraph();
   const openTab = useOpenTab();
+
+  const [orphansVisible, setOrphansVisible] = useState(true);
+  const [hideDaily, setHideDaily] = useState(false);
+  const [depth, setDepth] = useState<number | null>(null);
+
+  const activeTabId2 = useWorkspaceStore((s) => s.activeTabId);
+  const wsTabs = useWorkspaceStore((s) => s.tabs);
+  const anchorPath = wsTabs.find((t) => t.id === activeTabId2 && t.type === "page")?.path;
+  const anchorId = useMemo(
+    () => graph?.nodes.find((n) => n.path === anchorPath)?.id ?? null,
+    [graph, anchorPath],
+  );
+
+  const filtered = useMemo(
+    () =>
+      graph
+        ? applyFilters(graph, { orphansVisible, hideDaily, depth, anchorId })
+        : { nodes: [], edges: [] },
+    [graph, orphansVisible, hideDaily, depth, anchorId],
+  );
 
   if (isLoading || !graph) {
     return <div className="cl-marg p-6">… plotting the constellation …</div>;
@@ -17,11 +40,11 @@ export function Constellation({ tabId }: { tabId: string }) {
   }
 
   const handle = (node: GraphNode) => openTab("page", node.path, node.title || node.path);
-  const orphans = graph.nodes.filter(
-    (n) => !graph.edges.some((e) => e.source === n.id || e.target === n.id),
+  const orphans = filtered.nodes.filter(
+    (n) => !filtered.edges.some((e) => e.source === n.id || e.target === n.id),
   );
-  const degrees = countDegrees(graph.edges);
-  const hubs = [...graph.nodes]
+  const degrees = countDegrees(filtered.edges);
+  const hubs = [...filtered.nodes]
     .map((n) => ({ ...n, degree: degrees.get(n.id) ?? 0 }))
     .sort((a, b) => b.degree - a.degree)
     .slice(0, 6);
@@ -38,7 +61,7 @@ export function Constellation({ tabId }: { tabId: string }) {
               <div className="cl-marg">— a map of one's mind, drawn from the connexions —</div>
             </div>
             <div className="cl-mono text-[10px] text-ink-mute">
-              fig. v · {graph.nodes.length} nodes · {graph.edges.length} vertices
+              fig. v · {filtered.nodes.length} nodes · {filtered.edges.length} vertices
             </div>
           </div>
           <hr className="cl-rule-double" />
@@ -60,7 +83,7 @@ export function Constellation({ tabId }: { tabId: string }) {
               <pre className="cl-ascii cl-ascii-faint text-[6px]">{ASCII_COMPASS}</pre>
             </div>
 
-            <ForceGraph nodes={graph.nodes} edges={graph.edges} onNodeClick={handle} />
+            <ForceGraph nodes={filtered.nodes} edges={filtered.edges} onNodeClick={handle} />
           </div>
         </div>
 
@@ -98,11 +121,47 @@ export function Constellation({ tabId }: { tabId: string }) {
           <div className="cl-cap mb-1 mt-4 text-[9px]">§ Filters</div>
           <hr className="cl-rule-soft" />
           <div className="cl-mono mt-1 text-[11px]">
-            <div>◉ subjects · all</div>
-            <div>○ depth · 2</div>
-            <div>◉ orphans visible</div>
-            <div>○ daily nodes hidden</div>
-            <div>○ time-window · all</div>
+            <label style={{ display: "block", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={orphansVisible}
+                onChange={(e) => setOrphansVisible(e.target.checked)}
+                style={{ marginRight: 4 }}
+              />
+              orphans visible
+            </label>
+            <label style={{ display: "block", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={hideDaily}
+                onChange={(e) => setHideDaily(e.target.checked)}
+                style={{ marginRight: 4 }}
+              />
+              daily nodes hidden
+            </label>
+            <div style={{ marginTop: 4 }}>
+              depth ·{" "}
+              {[1, 2, null].map((d) => (
+                <button
+                  key={String(d)}
+                  type="button"
+                  onClick={() => setDepth(d)}
+                  style={{
+                    marginRight: 4,
+                    padding: "0 4px",
+                    background: depth === d ? "var(--accent)" : "transparent",
+                    color: depth === d ? "var(--paper)" : "var(--ink)",
+                    border: "1px solid var(--rule-soft)",
+                    cursor: anchorId || d == null ? "pointer" : "not-allowed",
+                    opacity: d != null && !anchorId ? 0.4 : 1,
+                  }}
+                  disabled={d != null && !anchorId}
+                  title={d != null && !anchorId ? "open a page tab to use depth" : undefined}
+                >
+                  {d ?? "all"}
+                </button>
+              ))}
+            </div>
           </div>
         </aside>
       </div>
