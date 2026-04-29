@@ -35,3 +35,5 @@ export function useContentIndex(limit?: number, offset?: number) {
     params: { query: { limit, offset } },
   });
 }
+
+export { useOutlinks } from "./outlinks";

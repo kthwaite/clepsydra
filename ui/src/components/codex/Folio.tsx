@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useBacklinks } from "#/api/index";
+import { useBacklinks, useOutlinks } from "#/api/index";
 import { CLink } from "#/components/codex/CLink";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { formatAbsoluteDate, formatRelativeTime } from "#/components/codex/codex-time";
@@ -19,6 +19,7 @@ type FolioProps = {
 export function Folio({ tabId, path }: FolioProps) {
   const editor = usePageEditor(path);
   const { data: backlinks } = useBacklinks(path);
+  const { data: outlinks } = useOutlinks(path);
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const { setProgress } = useReadingProgress();
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -182,8 +183,8 @@ export function Folio({ tabId, path }: FolioProps) {
               ↘ backlinks · {backlinks?.length ?? 0}
             </span>
             <span className="cursor-pointer border-b border-dotted border-ink">≈ similar · —</span>
-            <span className="cursor-pointer border-b border-dotted border-ink">
-              ⌥ bibliography · —
+            <span style={{ borderBottom: "1px dotted var(--ink)", cursor: "pointer" }}>
+              ⌥ bibliography · {outlinks?.length ?? 0}
             </span>
           </div>
 
