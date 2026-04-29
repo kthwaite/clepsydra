@@ -196,16 +196,31 @@ use axum_server::tls_rustls::RustlsConfig;
 /// Returns `(cert_path, key_path, paths_were_explicit)`. When the paths are
 /// the auto-discovered defaults under `dirs::data_dir()`, the third element
 /// is `false`.
-pub fn default_tls_paths(tls: &TlsSettings) -> Option<(PathBuf, PathBuf, bool)> {
-    if let (Some(cert), Some(key)) = (&tls.cert_path, &tls.key_path) {
-        return Some((cert.clone(), key.clone(), true));
+///
+/// Returns `Err` when exactly one of `cert_path`/`key_path` is set (a
+/// half-configured cert pair, which is almost certainly a typo); the caller
+/// is expected to surface the message as a configuration error rather than
+/// silently falling back to auto-discovered paths.
+pub fn default_tls_paths(tls: &TlsSettings) -> Result<Option<(PathBuf, PathBuf, bool)>, String> {
+    match (&tls.cert_path, &tls.key_path) {
+        (Some(cert), Some(key)) => Ok(Some((cert.clone(), key.clone(), true))),
+        (Some(_), None) => {
+            Err("tls.cert_path is set but tls.key_path is not — set both or neither".to_string())
+        }
+        (None, Some(_)) => {
+            Err("tls.key_path is set but tls.cert_path is not — set both or neither".to_string())
+        }
+        (None, None) => {
+            let Some(data_dir) = dirs::data_dir().map(|d| d.join("clepsydra")) else {
+                return Ok(None);
+            };
+            Ok(Some((
+                data_dir.join("localhost.pem"),
+                data_dir.join("localhost-key.pem"),
+                false,
+            )))
+        }
     }
-    let data_dir = dirs::data_dir()?.join("clepsydra");
-    Some((
-        data_dir.join("localhost.pem"),
-        data_dir.join("localhost-key.pem"),
-        false,
-    ))
 }
 
 async fn ensure_certificates(

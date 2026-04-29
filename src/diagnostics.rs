@@ -179,7 +179,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
     };
 
     if let Some(v) = vault.as_ref() {
-        check_index(v, opts.full, &mut report);
+        check_index(v, opts.full, &mut report).await;
         check_cas(v, opts.full, &mut report);
         check_academic(v, &mut report);
         check_bcl(v, &mut report);
@@ -215,18 +215,16 @@ fn skip(section: &'static str, name: &'static str, detail: impl Into<String>) ->
     CheckResult::new(section, name, Status::Skip, detail.into())
 }
 
+/// Read-only writability check.
+///
+/// Uses metadata permission bits rather than a write probe so the doctor
+/// never leaves stray files behind, even if the process is killed mid-check.
+/// This is coarser than an actual write attempt (a directory whose mode bits
+/// say writable may still fail to write, e.g. read-only filesystem mounts),
+/// but the trade-off matches the read-only contract of `clepsydra doctor`.
 fn is_dir_writable(path: &Path) -> bool {
-    let probe = path.join(".clepsydra-doctor-write-probe");
-    match std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&probe)
-    {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            true
-        }
+    match std::fs::metadata(path) {
+        Ok(m) => !m.permissions().readonly(),
         Err(_) => false,
     }
 }
@@ -344,7 +342,7 @@ async fn check_server_address(settings: &Settings, report: &mut Report) {
         Err(e) => {
             report.push(
                 warn(SECTION, "bind", format!("{addr} not bindable: {e}"))
-                    .with_hint("another process may already be using this port"),
+                    .with_hint("port already in use"),
             );
         }
     }
@@ -363,13 +361,20 @@ async fn check_tls(settings: &Settings, report: &mut Report) {
     }
 
     let (cert_path, key_path, explicit) = match default_tls_paths(&settings.server.tls) {
-        Some(t) => t,
-        None => {
+        Ok(Some(t)) => t,
+        Ok(None) => {
             report.push(err(
                 SECTION,
                 "paths",
                 "no cert paths configured and dirs::data_dir() is unavailable",
             ));
+            return;
+        }
+        Err(msg) => {
+            report.push(
+                err(SECTION, "paths", msg)
+                    .with_hint("set both server.tls.cert_path and server.tls.key_path"),
+            );
             return;
         }
     };
@@ -628,7 +633,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "pages_fts",
 ];
 
-fn check_index(vault: &Vault, full: bool, report: &mut Report) {
+async fn check_index(vault: &Vault, full: bool, report: &mut Report) {
     const SECTION: &str = "index";
     let db_path = vault.root().join(".clepsydra/cache.db");
 
@@ -642,7 +647,7 @@ fn check_index(vault: &Vault, full: bool, report: &mut Report) {
             .with_hint("run `clepsydra serve` once to build the index"),
         );
         if full {
-            run_index_dry_build(vault, report);
+            run_index_dry_build(vault, report).await;
         }
         return;
     }
@@ -727,14 +732,38 @@ fn check_index(vault: &Vault, full: bool, report: &mut Report) {
     }
 
     if full {
-        run_index_dry_build(vault, report);
+        run_index_dry_build(vault, report).await;
     }
 }
 
-fn run_index_dry_build(vault: &Vault, report: &mut Report) {
+/// RAII guard that removes a temporary directory when dropped.
+///
+/// We avoid pulling `tempfile` into the runtime dependency graph — it's only
+/// needed by tests now — by allocating a uniquely-named directory under
+/// `std::env::temp_dir()` and cleaning it up ourselves.
+struct TempDirGuard(PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn make_doctor_tempdir() -> std::io::Result<TempDirGuard> {
+    let dir = std::env::temp_dir().join(format!(
+        "clepsydra-doctor-{}-{}",
+        std::process::id(),
+        uuid::Uuid::now_v7().simple()
+    ));
+    std::fs::create_dir_all(&dir)?;
+    Ok(TempDirGuard(dir))
+}
+
+async fn run_index_dry_build(vault: &Vault, report: &mut Report) {
     const SECTION: &str = "index";
-    let tmp = match tempfile::tempdir() {
-        Ok(t) => t,
+
+    let guard = match make_doctor_tempdir() {
+        Ok(g) => g,
         Err(e) => {
             report.push(warn(
                 SECTION,
@@ -744,40 +773,55 @@ fn run_index_dry_build(vault: &Vault, report: &mut Report) {
             return;
         }
     };
-    let tmp_db = tmp.path().join("doctor-cache.db");
-    let mut index = match crate::vault::index::VaultIndex::open(&tmp_db) {
-        Ok(i) => i,
-        Err(e) => {
-            report.push(warn(SECTION, "dry-build", format!("VaultIndex::open: {e}")));
+    let tmp_db = guard.0.join("doctor-cache.db");
+
+    // `VaultIndex::build` walks the entire vault and parses every markdown
+    // file synchronously. Run it under `spawn_blocking` so we don't stall
+    // the tokio runtime on large vaults.
+    let vault = vault.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let mut index =
+            crate::vault::index::VaultIndex::open(&tmp_db).map_err(|e| format!("open: {e}"))?;
+        index.build(&vault).map_err(|e| format!("build: {e}"))
+    })
+    .await;
+    drop(guard);
+
+    let stats = match result {
+        Ok(Ok(stats)) => stats,
+        Ok(Err(msg)) => {
+            report.push(err(SECTION, "dry-build", format!("VaultIndex::{msg}")));
+            return;
+        }
+        Err(join_err) => {
+            report.push(err(
+                SECTION,
+                "dry-build",
+                format!("blocking task panicked: {join_err}"),
+            ));
             return;
         }
     };
-    match index.build(vault) {
-        Ok(stats) => {
-            report.push(ok(
-                SECTION,
-                "dry-build",
-                format!(
-                    "{} indexed, {} skipped, {} removed",
-                    stats.pages_indexed, stats.pages_skipped, stats.pages_removed
-                ),
-            ));
-            if stats.warnings.is_empty() {
-                report.push(ok(SECTION, "build warnings", "none"));
-            } else {
-                let preview: Vec<String> = stats.warnings.iter().take(5).cloned().collect();
-                let extra = stats.warnings.len().saturating_sub(preview.len());
-                let detail = if extra == 0 {
-                    preview.join("; ")
-                } else {
-                    format!("{} (+{extra} more)", preview.join("; "))
-                };
-                report.push(warn(SECTION, "build warnings", detail));
-            }
-        }
-        Err(e) => {
-            report.push(err(SECTION, "dry-build", format!("VaultIndex::build: {e}")));
-        }
+
+    report.push(ok(
+        SECTION,
+        "dry-build",
+        format!(
+            "{} indexed, {} skipped, {} removed",
+            stats.pages_indexed, stats.pages_skipped, stats.pages_removed
+        ),
+    ));
+    if stats.warnings.is_empty() {
+        report.push(ok(SECTION, "build warnings", "none"));
+    } else {
+        let preview: Vec<String> = stats.warnings.iter().take(5).cloned().collect();
+        let extra = stats.warnings.len().saturating_sub(preview.len());
+        let detail = if extra == 0 {
+            preview.join("; ")
+        } else {
+            format!("{} (+{extra} more)", preview.join("; "))
+        };
+        report.push(warn(SECTION, "build warnings", detail));
     }
 }
 
@@ -808,11 +852,22 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
     let path = expand_tilde(raw).unwrap_or_else(|| PathBuf::from(raw));
     report.push(info(SECTION, "path", path.display().to_string()));
 
-    if let Err(e) = std::fs::create_dir_all(&path) {
+    if !path.exists() {
+        report.push(
+            warn(
+                SECTION,
+                "directory",
+                format!("{} does not exist", path.display()),
+            )
+            .with_hint("`clepsydra serve` will create it on first run"),
+        );
+        return;
+    }
+    if !path.is_dir() {
         report.push(err(
             SECTION,
             "directory",
-            format!("cannot create {}: {e}", path.display()),
+            format!("{} exists but is not a directory", path.display()),
         ));
         return;
     }
@@ -968,6 +1023,37 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    /// RAII guard that records the prior value of an env var on construction
+    /// and restores it on drop. Required because tokio's default test runtime
+    /// runs tests on a multi-threaded executor where process-wide env state is
+    /// shared, and `find_config_path`/`dirs::home_dir` read these values.
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prior = std::env::var_os(key);
+            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
+            // so no other thread is racing on the same variable.
+            unsafe { std::env::set_var(key, value) }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: see `set`.
+            unsafe {
+                match self.prior.take() {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     fn write_top_level_config(dir: &Path, vault_root: &Path) {
         fs::write(
             dir.join("config.toml"),
@@ -980,6 +1066,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn report_for_initialized_vault_is_clean() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -996,15 +1083,14 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn missing_config_reports_error_and_keeps_going() {
         let tmp = TempDir::new().unwrap();
-        // Override XDG so the doctor doesn't accidentally pick up a real user config.
-        // SAFETY: tests are sequential within a single binary; this env var is only
-        // read during this test's lifetime via app_config::find_config_path.
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("xdg-empty"));
-            std::env::set_var("HOME", tmp.path().join("home-empty"));
-        }
+        // Override XDG/HOME so the doctor doesn't accidentally pick up a real
+        // user config. The guards restore the prior values on drop, even if
+        // the test panics, so they cannot leak into sibling tests.
+        let _xdg = EnvGuard::set("XDG_CONFIG_HOME", tmp.path().join("xdg-empty"));
+        let _home = EnvGuard::set("HOME", tmp.path().join("home-empty"));
 
         let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
 
@@ -1021,6 +1107,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn uninitialized_vault_reports_init_hint() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1040,6 +1127,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn renderers_round_trip() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1079,6 +1167,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn tls_disabled_emits_info_only() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1097,6 +1186,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn tls_enabled_with_missing_explicit_certs_errors() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1132,6 +1222,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn academic_folders_warn_when_missing() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1152,6 +1243,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn zotero_missing_db_path_is_err() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1182,6 +1274,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn bcl_vault_file_parsed() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1202,6 +1295,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn bcl_malformed_file_warns() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1220,6 +1314,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn full_index_dry_build_runs_when_requested() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
