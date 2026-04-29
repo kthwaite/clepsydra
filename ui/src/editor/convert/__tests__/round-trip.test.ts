@@ -129,4 +129,168 @@ See [[Other Page]] for more.`;
     const input = "Some ~deleted~ text";
     expect(normalize(roundTrip(input))).toBe(normalize(input));
   });
+
+  it("preserves underline as inline <u> HTML", () => {
+    const input = "Some <u>underlined</u> text";
+    const result = normalize(roundTrip(input));
+    expect(result).toContain("<u>");
+    expect(result).toContain("underlined");
+    expect(result).toContain("</u>");
+  });
+
+  it("round-trips an underline mark added in slate", () => {
+    // Simulate what the editor produces when Cmd+U is pressed: a CustomText
+    // with `underline: true`. Slate → md → slate must preserve the mark.
+    const slate = [
+      {
+        type: "paragraph",
+        children: [
+          { text: "before " },
+          { text: "marked", underline: true },
+          { text: " after" },
+        ],
+      },
+    ] as Parameters<typeof slateToMarkdown>[0];
+    const md = slateToMarkdown(slate);
+    expect(md).toContain("<u>");
+    expect(md).toContain("marked");
+    expect(md).toContain("</u>");
+
+    const back = markdownToSlate(md);
+    const para = back[0] as { children: { text: string; underline?: true }[] };
+    const marked = para.children.find((c) => c.text === "marked");
+    expect(marked?.underline).toBe(true);
+  });
+
+  it("round-trips slate paragraph with underline-only text node", () => {
+    // The simplest case: a paragraph whose entire content is a single
+    // underlined text node. slate → md → slate must preserve text + mark.
+    const slate = [
+      {
+        type: "paragraph",
+        children: [{ text: "foo", underline: true }],
+      },
+    ] as Parameters<typeof slateToMarkdown>[0];
+
+    const md = slateToMarkdown(slate);
+    expect(md).toContain("<u>");
+    expect(md).toContain("foo");
+    expect(md).toContain("</u>");
+
+    const back = markdownToSlate(md);
+    const para = back[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para.type).toBe("paragraph");
+    // Find the text node carrying "foo" — it must still have underline:true.
+    const fooNode = para.children.find((c) => c.text === "foo");
+    expect(fooNode).toBeDefined();
+    expect(fooNode?.underline).toBe(true);
+  });
+
+  it("round-trips markdown <u>foo</u> as a line on its own", () => {
+    // Markdown → Slate → markdown → Slate. A bare `<u>foo</u>` line is parsed
+    // by remark as inline html inside a paragraph, but the content must be
+    // preserved with the underline mark across the round trip.
+    const input = "<u>foo</u>";
+
+    const slate1 = markdownToSlate(input);
+    const para1 = slate1[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para1.type).toBe("paragraph");
+    const foo1 = para1.children.find((c) => c.text === "foo");
+    expect(foo1).toBeDefined();
+    expect(foo1?.underline).toBe(true);
+
+    const md = slateToMarkdown(slate1);
+    expect(md).toContain("<u>");
+    expect(md).toContain("foo");
+    expect(md).toContain("</u>");
+
+    const slate2 = markdownToSlate(md);
+    const para2 = slate2[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para2.type).toBe("paragraph");
+    const foo2 = para2.children.find((c) => c.text === "foo");
+    expect(foo2?.underline).toBe(true);
+  });
+
+  it("round-trips markdown <u>foo</u> emitted as a block-level html node", () => {
+    // When the opening tag is on a line by itself, remark/micromark emits a
+    // top-level `html` node (HTML block type 7) instead of an inline-html
+    // pair inside a paragraph. The mdast-to-slate converter must still
+    // surface the content with the underline mark; it used to be dropped.
+    const input = "<u>\nfoo\n</u>";
+
+    const slate1 = markdownToSlate(input);
+    expect(slate1.length).toBeGreaterThan(0);
+    const para1 = slate1[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para1.type).toBe("paragraph");
+    // The inner text may include surrounding newlines; just check it contains
+    // "foo" and that the carrier text node has underline:true.
+    const underlined = para1.children.find((c) => c.underline === true);
+    expect(underlined).toBeDefined();
+    expect(underlined?.text).toContain("foo");
+
+    const md = slateToMarkdown(slate1);
+    expect(md).toContain("<u>");
+    expect(md).toContain("foo");
+    expect(md).toContain("</u>");
+
+    const slate2 = markdownToSlate(md);
+    const para2 = slate2[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para2.type).toBe("paragraph");
+    const underlined2 = para2.children.find((c) => c.underline === true);
+    expect(underlined2).toBeDefined();
+    expect(underlined2?.text).toContain("foo");
+  });
+
+  it("round-trips inline <u>mid</u> within a paragraph", () => {
+    // Locks in the inline path: surrounding plain text plus an underlined
+    // segment. Markdown → Slate → markdown → Slate must keep all three runs
+    // and the underline mark on the middle run.
+    const input = "before <u>mid</u> after";
+
+    const slate1 = markdownToSlate(input);
+    const para1 = slate1[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para1.type).toBe("paragraph");
+    const mid1 = para1.children.find((c) => c.text === "mid");
+    expect(mid1?.underline).toBe(true);
+    expect(
+      para1.children.some((c) => c.text === "before " && !c.underline),
+    ).toBe(true);
+    expect(
+      para1.children.some((c) => c.text === " after" && !c.underline),
+    ).toBe(true);
+
+    const md = slateToMarkdown(slate1);
+    expect(md).toContain("before");
+    expect(md).toContain("<u>");
+    expect(md).toContain("mid");
+    expect(md).toContain("</u>");
+    expect(md).toContain("after");
+
+    const slate2 = markdownToSlate(md);
+    const para2 = slate2[0] as {
+      type: string;
+      children: { text: string; underline?: true }[];
+    };
+    expect(para2.type).toBe("paragraph");
+    const mid2 = para2.children.find((c) => c.text === "mid");
+    expect(mid2?.underline).toBe(true);
+  });
 });

@@ -471,3 +471,333 @@ describe("withOutliner empty-children fallback", () => {
     expect((firstChild as any).type).toBe("paragraph");
   });
 });
+
+// ---------------------------------------------------------------------------
+// deleteBackward at start of list-item
+// ---------------------------------------------------------------------------
+
+/**
+ * Snapshot the editor's children, run normalization, and return whether the
+ * tree changed. Used to assert that a transform leaves a normalized tree.
+ */
+function normalizeUnchanged(editor: Editor): boolean {
+  const before = JSON.stringify(editor.children);
+  Editor.normalize(editor, { force: true });
+  const after = JSON.stringify(editor.children);
+  return before === after;
+}
+
+/** Build a canonical list-item: list-item > paragraph > text. */
+function canonicalItem(text: string, extra: object = {}) {
+  return {
+    type: "list-item" as const,
+    ...extra,
+    children: [{ type: "paragraph" as const, children: [{ text }] }],
+  };
+}
+
+describe("deleteBackward at start of list-item", () => {
+  it("unwraps a sole top-level item to a single paragraph, preserving text and shape", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("Hello")],
+      },
+    ]);
+    // Path: bulleted-list[0] > list-item[0] > paragraph[0] > text[0]
+    selectAt(editor, [0, 0, 0, 0]);
+    editor.deleteBackward("character");
+
+    // (a) Tree shape: a single paragraph at top level with "Hello".
+    expect(editor.children.length).toBe(1);
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children.length).toBe(1);
+    expect(para.children[0].text).toBe("Hello");
+
+    // (b) Cursor sits at the start of the new paragraph.
+    expect(editor.selection).not.toBeNull();
+    expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 0 });
+    expect(editor.selection?.focus).toEqual({ path: [0, 0], offset: 0 });
+
+    // (c) Normalize is satisfied — tree unchanged after force-normalize.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("outdents a nested list-item one level, preserving canonical shape", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              { type: "paragraph", children: [{ text: "Parent" }] },
+              {
+                type: "bulleted-list",
+                children: [canonicalItem("Child")],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    // Cursor at start of "Child":
+    // root-list[0] > parent-li[0] > nested-list[1] > child-li[0] > paragraph[0] > text[0]
+    selectAt(editor, [0, 0, 1, 0, 0, 0]);
+    editor.deleteBackward("character");
+
+    const list = topList(editor);
+    // Two top-level items: Parent (now without its nested list), then Child.
+    expect(list.children.length).toBe(2);
+    const second = list.children[1] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(second.type).toBe("list-item");
+    // Canonical shape preserved: list-item > paragraph > text.
+    const innerPara = second.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(innerPara.type).toBe("paragraph");
+    expect(innerPara.children[0].text).toBe("Child");
+
+    // Normalize is satisfied.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("preserves list-above and inserts a paragraph after when no items follow", () => {
+    // Mid-list with siblings BEFORE only.
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("A"), canonicalItem("B"), canonicalItem("C")],
+      },
+    ]);
+    // Cursor at start of "C" (last item) — paragraph path [0, 2, 0, 0].
+    selectAt(editor, [0, 2, 0, 0]);
+    editor.deleteBackward("character");
+
+    // Shape: list[A, B] + paragraph(C). No trailing list.
+    expect(editor.children.length).toBe(2);
+    const list = editor.children[0] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children.length).toBe(2);
+    const para = editor.children[1] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("C");
+
+    // Cursor at start of new paragraph.
+    expect(editor.selection?.anchor).toEqual({ path: [1, 0], offset: 0 });
+
+    // Normalize is satisfied.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("preserves nested children when unwrapping a top-level parent item", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              { type: "paragraph", children: [{ text: "Parent" }] },
+              {
+                type: "bulleted-list",
+                children: [canonicalItem("Child")],
+              },
+            ],
+          },
+          canonicalItem("Sibling"),
+        ],
+      },
+    ]);
+    // Cursor at start of "Parent" — paragraph path [0, 0, 0, 0].
+    selectAt(editor, [0, 0, 0, 0]);
+    editor.deleteBackward("character");
+
+    expect(editor.children.length).toBe(3);
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("Parent");
+
+    const liftedChildren = editor.children[1] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(liftedChildren.type).toBe("bulleted-list");
+    const childPara = (liftedChildren.children[0] as SlateElement)
+      .children[0] as SlateElement & { children: { text: string }[] };
+    expect(childPara.children[0].text).toBe("Child");
+
+    const trailing = editor.children[2] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(trailing.type).toBe("bulleted-list");
+    const siblingPara = (trailing.children[0] as SlateElement)
+      .children[0] as SlateElement & { children: { text: string }[] };
+    expect(siblingPara.children[0].text).toBe("Sibling");
+
+    expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 0 });
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("inserts a paragraph and preserves the trailing list when no items precede", () => {
+    // Mid-list with siblings AFTER only.
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("A"), canonicalItem("B"), canonicalItem("C")],
+      },
+    ]);
+    // Cursor at start of "A" (first item) — paragraph path [0, 0, 0, 0].
+    selectAt(editor, [0, 0, 0, 0]);
+    editor.deleteBackward("character");
+
+    // Shape: paragraph(A) + list[B, C].
+    expect(editor.children.length).toBe(2);
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("A");
+    const trailing = editor.children[1] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(trailing.type).toBe("bulleted-list");
+    expect(trailing.children.length).toBe(2);
+    const bItem = trailing.children[0] as SlateElement & {
+      children: SlateElement[];
+    };
+    const bPara = bItem.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(bPara.type).toBe("paragraph");
+    expect(bPara.children[0].text).toBe("B");
+
+    // Cursor at start of new paragraph (which replaced the old list at [0]).
+    expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 0 });
+
+    // Normalize is satisfied.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("splits the list when a true mid-list item is unwrapped (siblings BOTH sides)", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("A"), canonicalItem("B"), canonicalItem("C")],
+      },
+    ]);
+    // Cursor at start of "B" — paragraph path [0, 1, 0, 0].
+    selectAt(editor, [0, 1, 0, 0]);
+    editor.deleteBackward("character");
+
+    // Shape: list[A] + paragraph(B) + list[C].
+    expect(editor.children.length).toBe(3);
+    const above = editor.children[0] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(above.type).toBe("bulleted-list");
+    expect(above.children.length).toBe(1);
+    const aPara = (above.children[0] as SlateElement)
+      .children[0] as SlateElement & { children: { text: string }[] };
+    expect(aPara.type).toBe("paragraph");
+    expect(aPara.children[0].text).toBe("A");
+
+    const para = editor.children[1] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("B");
+
+    const below = editor.children[2] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(below.type).toBe("bulleted-list");
+    expect(below.children.length).toBe(1);
+    const cPara = (below.children[0] as SlateElement)
+      .children[0] as SlateElement & { children: { text: string }[] };
+    expect(cPara.type).toBe("paragraph");
+    expect(cPara.children[0].text).toBe("C");
+
+    // Cursor lives in the inserted paragraph at [1].
+    expect(editor.selection?.anchor).toEqual({ path: [1, 0], offset: 0 });
+
+    // Normalize is satisfied.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("unwraps an empty list-item cleanly to a paragraph with a text child", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("")],
+      },
+    ]);
+    // Cursor inside the empty paragraph: [0, 0, 0, 0].
+    selectAt(editor, [0, 0, 0, 0]);
+    editor.deleteBackward("character");
+
+    expect(editor.children.length).toBe(1);
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    // Slate invariant: at least one text child.
+    expect(para.children.length).toBeGreaterThanOrEqual(1);
+    expect(para.children[0].text).toBe("");
+
+    // Normalize is satisfied.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("falls through to default behaviour when cursor is mid-text in a list-item", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [canonicalItem("Hello")],
+      },
+    ]);
+    // Cursor at offset 3 (after "Hel"), path [0, 0, 0, 0].
+    Transforms.select(editor, { path: [0, 0, 0, 0], offset: 3 });
+    editor.deleteBackward("character");
+
+    // Default behaviour: deletes one char, list structure preserved.
+    const list = topList(editor);
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children.length).toBe(1);
+    const item = list.children[0] as SlateElement & {
+      children: SlateElement[];
+    };
+    expect(item.type).toBe("list-item");
+    const para = item.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("Helo");
+
+    // Normalize is satisfied.
+    expect(normalizeUnchanged(editor)).toBe(true);
+  });
+
+  it("does nothing special when cursor is in a paragraph (not a list)", () => {
+    const editor = makeEditor([
+      { type: "paragraph", children: [{ text: "Hello" }] },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 1 });
+    editor.deleteBackward("character");
+
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.children[0].text).toBe("ello");
+  });
+});

@@ -22,6 +22,7 @@ export type { Descendant };
 interface Marks {
   bold?: true;
   italic?: true;
+  underline?: true;
   code?: true;
   strikethrough?: true;
 }
@@ -137,8 +138,27 @@ function convertBlockNode(
         children: [{ text: "" }],
       };
 
+    case "html": {
+      // CommonMark may emit a block-level `html` node when an HTML tag opens on
+      // a line of its own (e.g. `<u>\nfoo\n</u>`). The inline-html path that
+      // strips `<u>` / `</u>` doesn't see these, so the content would otherwise
+      // be silently dropped. Recognise an isolated `<u>...</u>` block and
+      // re-emit it as a paragraph with the underline mark applied. Anything
+      // else falls through to `null` (existing behaviour).
+      const value = (node as { value: string }).value.trim();
+      const underlineMatch = value.match(/^<u\s*>([\s\S]*?)<\/u\s*>$/i);
+      if (underlineMatch) {
+        const inner = underlineMatch[1];
+        const el = {
+          type: "paragraph" as const,
+          children: [{ text: inner, underline: true } as CustomText],
+        };
+        return el;
+      }
+      return null;
+    }
+
     // Node types we intentionally skip
-    case "html":
     case "definition":
     case "footnoteDefinition":
     case "yaml":
@@ -184,14 +204,33 @@ function convertListItem(node: {
  * The `marks` parameter accumulates formatting (bold, italic, code) as we
  * recurse through strong/emphasis/inlineCode wrappers.
  */
+/** Match an isolated <u> opening tag (case-insensitive, optional whitespace). */
+const U_OPEN_RE = /^<u\s*>$/i;
+/** Match an isolated </u> closing tag (case-insensitive, optional whitespace). */
+const U_CLOSE_RE = /^<\/u\s*>$/i;
+
 function convertPhrasingContent(
   nodes: readonly (RootContent | WikiLinkMdastNode)[],
   marks: Marks,
 ): Descendant[] {
   const result: Descendant[] = [];
+  let underlineDepth = 0;
 
   for (const node of nodes) {
-    const converted = convertPhrasingNode(node, marks);
+    if (node.type === "html") {
+      const value = (node as { value: string }).value.trim();
+      if (U_OPEN_RE.test(value)) {
+        underlineDepth++;
+        continue;
+      }
+      if (U_CLOSE_RE.test(value)) {
+        if (underlineDepth > 0) underlineDepth--;
+        continue;
+      }
+    }
+    const effectiveMarks: Marks =
+      underlineDepth > 0 ? { ...marks, underline: true } : marks;
+    const converted = convertPhrasingNode(node, effectiveMarks);
     for (const item of converted) {
       result.push(item);
     }
@@ -294,6 +333,7 @@ function textNode(text: string, marks: Marks): CustomText {
   const node: CustomText = { text };
   if (marks.bold) node.bold = true;
   if (marks.italic) node.italic = true;
+  if (marks.underline) node.underline = true;
   if (marks.code) node.code = true;
   if (marks.strikethrough) node.strikethrough = true;
   return node;

@@ -78,7 +78,7 @@ function singleTildeStrikethroughExtension(): Options {
 // Text leaf → mdast phrasing content
 // ---------------------------------------------------------------------------
 
-function textToMdast(leaf: CustomText): PhrasingContent {
+function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
   // Inline code takes absolute precedence — markdown cannot nest marks inside code spans
   if (leaf.code) {
     const node: InlineCode = { type: "inlineCode", value: leaf.text };
@@ -97,6 +97,16 @@ function textToMdast(leaf: CustomText): PhrasingContent {
     node = { type: "delete", children: [node] };
   }
 
+  // Underline has no native markdown representation; emit as inline HTML
+  // <u>…</u> so it roundtrips through save/reload.
+  if (leaf.underline) {
+    return [
+      { type: "html", value: "<u>" } as unknown as PhrasingContent,
+      node,
+      { type: "html", value: "</u>" } as unknown as PhrasingContent,
+    ];
+  }
+
   return node;
 }
 
@@ -108,7 +118,12 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
   const result: PhrasingContent[] = [];
   for (const child of children) {
     if (SlateText.isText(child)) {
-      result.push(textToMdast(child as CustomText));
+      const converted = textToMdast(child as CustomText);
+      if (Array.isArray(converted)) {
+        result.push(...converted);
+      } else {
+        result.push(converted);
+      }
     } else {
       const el = child as CustomElement;
       switch (el.type) {
@@ -364,9 +379,10 @@ function convertBlockChildren(children: Descendant[]): Array<BlockContent> {
       // Stray text at block level — wrap in paragraph
       const leaf = child as CustomText;
       if (leaf.text !== "") {
+        const converted = textToMdast(leaf);
         result.push({
           type: "paragraph",
-          children: [textToMdast(leaf)],
+          children: Array.isArray(converted) ? converted : [converted],
         });
       }
     } else {

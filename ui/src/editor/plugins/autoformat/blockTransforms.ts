@@ -17,7 +17,7 @@ const HEADING_RE = /^(#{1,6})$/;
 const NUMBERED_LIST_RE = /^(\d+)\.$/;
 const BULLETED_LIST_RE = /^[-*]$/;
 const BLOCKQUOTE_RE = /^>$/;
-const TASK_RE = /^\[([ xX])\]$/;
+const TASK_RE = /^\[([ xX]?)\]$/;
 const CODE_FENCE_RE = /^```(\w*)$/;
 
 // ---------------------------------------------------------------------------
@@ -181,6 +181,14 @@ export function tryBlockTransform(editor: Editor): boolean {
     return applyListTransform(editor, blockEntry, "bulleted-list");
   }
 
+  // Task list: [], [ ], [x], [X] — wraps the paragraph in a new task list-item.
+  const taskMatch = text.match(TASK_RE);
+  if (taskMatch) {
+    const inner = taskMatch[1];
+    const checked = inner === "x" || inner === "X";
+    return applyTaskListTransform(editor, blockEntry, checked);
+  }
+
   // Blockquote: >
   if (BLOCKQUOTE_RE.test(text)) {
     applyWithBatch(editor, () => {
@@ -218,7 +226,8 @@ function applyListTransform(
   if (text === undefined) return false;
 
   applyWithBatch(editor, () => {
-    const listPathRef = Editor.pathRef(editor, blockPath);
+    // The outer list wrapper is inserted at the original paragraph path.
+    const listPath = [...blockPath];
 
     // Delete the trigger text
     Transforms.delete(editor, {
@@ -238,10 +247,49 @@ function applyListTransform(
     });
 
     // Merge with adjacent same-type list at the transformed wrapper path.
-    const listPath = listPathRef.unref();
-    if (listPath) {
-      mergeWithAdjacentList(editor, listPath, listType);
-    }
+    mergeWithAdjacentList(editor, listPath, listType);
+  });
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Task list transform — fresh paragraph -> bulleted-list with checked item
+// ---------------------------------------------------------------------------
+
+function applyTaskListTransform(
+  editor: Editor,
+  blockEntry: [SlateElement, Path],
+  checked: boolean,
+): boolean {
+  const [, blockPath] = blockEntry;
+  const text = getBlockTriggerText(editor, blockEntry);
+  if (text === undefined) return false;
+
+  applyWithBatch(editor, () => {
+    // The outer list wrapper is inserted at the original paragraph path.
+    const listPath = [...blockPath];
+
+    // Delete the trigger text
+    Transforms.delete(editor, {
+      at: {
+        anchor: { path: [...blockPath, 0], offset: 0 },
+        focus: { path: [...blockPath, 0], offset: text.length },
+      },
+    });
+    // Wrap paragraph in list-item with checked state, then in bulleted-list
+    Transforms.wrapNodes(
+      editor,
+      { type: "list-item", checked, children: [] } as any,
+      { at: blockPath },
+    );
+    Transforms.wrapNodes(
+      editor,
+      { type: "bulleted-list", children: [] } as any,
+      { at: blockPath },
+    );
+
+    mergeWithAdjacentList(editor, listPath, "bulleted-list");
   });
 
   return true;
@@ -262,7 +310,8 @@ function tryTaskPromotion(
   const taskMatch = text.match(TASK_RE);
   if (!taskMatch) return false;
 
-  const checked = taskMatch[1] !== " ";
+  const inner = taskMatch[1];
+  const checked = inner === "x" || inner === "X";
   const [, blockPath] = blockEntry;
 
   applyWithBatch(editor, () => {
