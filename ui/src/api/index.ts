@@ -37,3 +37,4 @@ export function useContentIndex(limit?: number, offset?: number) {
 }
 
 export { useOutlinks } from "./outlinks";
+export { useSimilar } from "./similar";
