@@ -22,6 +22,7 @@ export type { Descendant };
 interface Marks {
   bold?: true;
   italic?: true;
+  underline?: true;
   code?: true;
   strikethrough?: true;
 }
@@ -184,14 +185,33 @@ function convertListItem(node: {
  * The `marks` parameter accumulates formatting (bold, italic, code) as we
  * recurse through strong/emphasis/inlineCode wrappers.
  */
+/** Match an isolated <u> opening tag (case-insensitive, optional whitespace). */
+const U_OPEN_RE = /^<u\s*>$/i;
+/** Match an isolated </u> closing tag (case-insensitive, optional whitespace). */
+const U_CLOSE_RE = /^<\/u\s*>$/i;
+
 function convertPhrasingContent(
   nodes: readonly (RootContent | WikiLinkMdastNode)[],
   marks: Marks,
 ): Descendant[] {
   const result: Descendant[] = [];
+  let underlineDepth = 0;
 
   for (const node of nodes) {
-    const converted = convertPhrasingNode(node, marks);
+    if (node.type === "html") {
+      const value = (node as { value: string }).value.trim();
+      if (U_OPEN_RE.test(value)) {
+        underlineDepth++;
+        continue;
+      }
+      if (U_CLOSE_RE.test(value)) {
+        if (underlineDepth > 0) underlineDepth--;
+        continue;
+      }
+    }
+    const effectiveMarks: Marks =
+      underlineDepth > 0 ? { ...marks, underline: true } : marks;
+    const converted = convertPhrasingNode(node, effectiveMarks);
     for (const item of converted) {
       result.push(item);
     }
@@ -294,6 +314,7 @@ function textNode(text: string, marks: Marks): CustomText {
   const node: CustomText = { text };
   if (marks.bold) node.bold = true;
   if (marks.italic) node.italic = true;
+  if (marks.underline) node.underline = true;
   if (marks.code) node.code = true;
   if (marks.strikethrough) node.strikethrough = true;
   return node;

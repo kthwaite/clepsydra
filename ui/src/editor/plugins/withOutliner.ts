@@ -1,4 +1,12 @@
-import { Editor, Node, Path, Element as SlateElement, Transforms } from "slate";
+import {
+  Editor,
+  Node,
+  Path,
+  Point,
+  Range,
+  Element as SlateElement,
+  Transforms,
+} from "slate";
 import { isListElement, isListItem } from "#/editor/plugins/listUtils";
 
 /**
@@ -7,7 +15,7 @@ import { isListElement, isListItem } from "#/editor/plugins/listUtils";
  * children into adjacent text nodes, destroying nested list structure.
  */
 export function withOutliner(editor: Editor): Editor {
-  const { normalizeNode } = editor;
+  const { normalizeNode, deleteBackward } = editor;
 
   editor.normalizeNode = (entry, options) => {
     const [node, path] = entry;
@@ -33,7 +41,138 @@ export function withOutliner(editor: Editor): Editor {
     normalizeNode(entry, options);
   };
 
+  editor.deleteBackward = (unit) => {
+    const { selection } = editor;
+    if (selection && Range.isCollapsed(selection)) {
+      const itemEntry = Editor.above(editor, {
+        match: (n) => isListItem(n),
+      });
+      if (itemEntry) {
+        const [, itemPath] = itemEntry;
+        const itemStart = Editor.start(editor, itemPath);
+        if (Point.equals(selection.anchor, itemStart)) {
+          if (isItemNested(editor, itemPath)) {
+            outdentListItem(editor);
+          } else {
+            unwrapListItemToParagraph(editor, itemPath);
+          }
+          return;
+        }
+      }
+    }
+    deleteBackward(unit);
+  };
+
   return editor;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the given list-item is nested inside another list-item.
+ * Structure: list-item > list > list-item.
+ */
+function isItemNested(editor: Editor, itemPath: Path): boolean {
+  const parentListPath = Path.parent(itemPath);
+  if (parentListPath.length === 0) return false;
+  const grandparentPath = Path.parent(parentListPath);
+  try {
+    const grandparent = Node.get(editor, grandparentPath);
+    return isListItem(grandparent);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert a top-level list-item into a paragraph at the same depth as the
+ * containing list, preserving its text content. Splits the list if the item
+ * is in the middle, so items above and below remain in valid lists.
+ */
+function unwrapListItemToParagraph(editor: Editor, itemPath: Path): void {
+  const parentListPath = Path.parent(itemPath);
+  const parentList = Node.get(editor, parentListPath);
+  if (!isListElement(parentList)) return;
+
+  const itemIndex = itemPath[itemPath.length - 1];
+  const siblingCount = parentList.children.length;
+
+  // Snapshot the inline children of the item's first paragraph (these become
+  // the new paragraph's children). Nested lists inside the item are dropped —
+  // an alternative would be to lift them, but the common case is no nesting
+  // and dropping keeps the operation predictable.
+  const itemNode = Node.get(editor, itemPath);
+  if (!SlateElement.isElement(itemNode)) return;
+  let paragraphChildren: any[] = [{ text: "" }];
+  let foundParagraph = false;
+  for (const child of itemNode.children) {
+    if (SlateElement.isElement(child) && child.type === "paragraph") {
+      paragraphChildren = JSON.parse(JSON.stringify(child.children));
+      foundParagraph = true;
+      break;
+    }
+  }
+  if (!foundParagraph) {
+    // Fall back to the item's own inline children, skipping nested lists.
+    const inline = itemNode.children.filter(
+      (c) => !(SlateElement.isElement(c) && isListElement(c)),
+    );
+    if (inline.length > 0) {
+      paragraphChildren = JSON.parse(JSON.stringify(inline));
+    }
+  }
+
+  Editor.withoutNormalizing(editor, () => {
+    // Capture trailing siblings before mutation so we can rebuild a list below.
+    const trailingItems: SlateElement[] = [];
+    for (let i = itemIndex + 1; i < siblingCount; i++) {
+      const sibPath = [...parentListPath, i];
+      trailingItems.push(
+        JSON.parse(JSON.stringify(Node.get(editor, sibPath))) as SlateElement,
+      );
+    }
+
+    // Remove trailing siblings (back-to-front to keep paths stable) and the item itself.
+    for (let i = siblingCount - 1; i >= itemIndex; i--) {
+      Transforms.removeNodes(editor, { at: [...parentListPath, i] });
+    }
+
+    let insertAt: Path;
+    if (itemIndex === 0) {
+      // The item was first — replace the now-empty list with the paragraph.
+      try {
+        const remaining = Node.get(editor, parentListPath);
+        if (isListElement(remaining) && remaining.children.length === 0) {
+          Transforms.removeNodes(editor, { at: parentListPath });
+        }
+      } catch {
+        // Already removed
+      }
+      insertAt = parentListPath;
+    } else {
+      // Items remain above; place the paragraph after the (shrunken) list.
+      insertAt = Path.next(parentListPath);
+    }
+
+    Transforms.insertNodes(
+      editor,
+      { type: "paragraph", children: paragraphChildren } as any,
+      { at: insertAt },
+    );
+
+    if (trailingItems.length > 0) {
+      Transforms.insertNodes(
+        editor,
+        { type: parentList.type, children: trailingItems } as any,
+        { at: Path.next(insertAt) },
+      );
+    }
+
+    // Place the cursor at the start of the new paragraph.
+    Transforms.select(editor, Editor.start(editor, insertAt));
+  });
 }
 
 // ---------------------------------------------------------------------------

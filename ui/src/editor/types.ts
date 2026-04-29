@@ -96,6 +96,7 @@ export interface CustomText {
   text: string;
   bold?: true;
   italic?: true;
+  underline?: true;
   code?: true;
   strikethrough?: true;
 }

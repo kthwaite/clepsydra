@@ -474,6 +474,16 @@ export function SlateEditor({
           }
           return;
         }
+        case "u": {
+          event.preventDefault();
+          const marks = Editor.marks(editor);
+          if (marks?.underline) {
+            Editor.removeMark(editor, "underline");
+          } else {
+            Editor.addMark(editor, "underline", true);
+          }
+          return;
+        }
         case "e": {
           event.preventDefault();
           const marks = Editor.marks(editor);

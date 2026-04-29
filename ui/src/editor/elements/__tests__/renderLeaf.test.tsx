@@ -30,4 +30,16 @@ describe("renderLeaf", () => {
     expect(container.querySelector("code")).not.toBeNull();
     expect(container.querySelector("del")).not.toBeNull();
   });
+
+  it("renders underline with u tag", () => {
+    const { container } = render(leaf({ underline: true }));
+    expect(container.querySelector("u")).not.toBeNull();
+    expect(container.textContent).toBe("hello");
+  });
+
+  it("renders combined bold + underline", () => {
+    const { container } = render(leaf({ bold: true, underline: true }));
+    expect(container.querySelector("strong")).not.toBeNull();
+    expect(container.querySelector("u")).not.toBeNull();
+  });
 });

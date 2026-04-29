@@ -129,4 +129,36 @@ See [[Other Page]] for more.`;
     const input = "Some ~deleted~ text";
     expect(normalize(roundTrip(input))).toBe(normalize(input));
   });
+
+  it("preserves underline as inline <u> HTML", () => {
+    const input = "Some <u>underlined</u> text";
+    const result = normalize(roundTrip(input));
+    expect(result).toContain("<u>");
+    expect(result).toContain("underlined");
+    expect(result).toContain("</u>");
+  });
+
+  it("round-trips an underline mark added in slate", () => {
+    // Simulate what the editor produces when Cmd+U is pressed: a CustomText
+    // with `underline: true`. Slate → md → slate must preserve the mark.
+    const slate = [
+      {
+        type: "paragraph",
+        children: [
+          { text: "before " },
+          { text: "marked", underline: true },
+          { text: " after" },
+        ],
+      },
+    ] as Parameters<typeof slateToMarkdown>[0];
+    const md = slateToMarkdown(slate);
+    expect(md).toContain("<u>");
+    expect(md).toContain("marked");
+    expect(md).toContain("</u>");
+
+    const back = markdownToSlate(md);
+    const para = back[0] as { children: { text: string; underline?: true }[] };
+    const marked = para.children.find((c) => c.text === "marked");
+    expect(marked?.underline).toBe(true);
+  });
 });

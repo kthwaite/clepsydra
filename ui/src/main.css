@@ -184,6 +184,16 @@ body {
     color: var(--paper);
 }
 
+/* Slate placeholder must not appear selected (Cmd/Ctrl+A still paints
+   the highlight even though the span is contentEditable=false). */
+[data-slate-placeholder],
+[data-slate-placeholder] *,
+[data-slate-placeholder]::selection,
+[data-slate-placeholder] *::selection {
+    background: transparent !important;
+    color: inherit;
+}
+
 /* Tracked-out small caps — hairline section labels */
 .cl-cap {
     font-family: var(--font-serif-sc);

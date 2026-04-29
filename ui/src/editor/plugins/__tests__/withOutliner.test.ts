@@ -471,3 +471,126 @@ describe("withOutliner empty-children fallback", () => {
     expect((firstChild as any).type).toBe("paragraph");
   });
 });
+
+// ---------------------------------------------------------------------------
+// deleteBackward at start of list-item
+// ---------------------------------------------------------------------------
+
+describe("deleteBackward at start of list-item", () => {
+  it("unwraps a top-level item to a paragraph, preserving text", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [{ type: "list-item", children: [{ text: "Hello" }] }],
+      },
+    ]);
+    selectAt(editor, [0, 0, 0]);
+    editor.deleteBackward("character");
+
+    expect(editor.children.length).toBe(1);
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.type).toBe("paragraph");
+    expect(para.children[0].text).toBe("Hello");
+  });
+
+  it("unwraps an empty top-level item to an empty paragraph", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [{ type: "list-item", children: [{ text: "" }] }],
+      },
+    ]);
+    selectAt(editor, [0, 0, 0]);
+    editor.deleteBackward("character");
+
+    const para = editor.children[0] as SlateElement;
+    expect(para.type).toBe("paragraph");
+  });
+
+  it("outdents a nested item instead of unwrapping", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              { text: "Parent" },
+              {
+                type: "bulleted-list",
+                children: [
+                  { type: "list-item", children: [{ text: "Child" }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    // Cursor at start of "Child" — path [0, 0, 1, 0, 0]
+    selectAt(editor, [0, 0, 1, 0, 0]);
+    editor.deleteBackward("character");
+
+    const list = topList(editor);
+    expect(list.children.length).toBe(2);
+    // Child is now a top-level sibling, not inside the parent
+    const second = list.children[1] as SlateElement;
+    expect(second.type).toBe("list-item");
+  });
+
+  it("splits the list when a middle item is unwrapped", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [
+          { type: "list-item", children: [{ text: "A" }] },
+          { type: "list-item", children: [{ text: "B" }] },
+          { type: "list-item", children: [{ text: "C" }] },
+        ],
+      },
+    ]);
+    // Cursor at start of "B"
+    selectAt(editor, [0, 1, 0]);
+    editor.deleteBackward("character");
+
+    // Should produce: list[A] + paragraph(B) + list[C]
+    expect(editor.children.length).toBe(3);
+    expect((editor.children[0] as SlateElement).type).toBe("bulleted-list");
+    expect((editor.children[1] as SlateElement).type).toBe("paragraph");
+    expect((editor.children[2] as SlateElement).type).toBe("bulleted-list");
+  });
+
+  it("falls through to default behavior when not at item start", () => {
+    const editor = makeEditor([
+      {
+        type: "bulleted-list",
+        children: [{ type: "list-item", children: [{ text: "Hello" }] }],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0, 0], offset: 3 });
+    editor.deleteBackward("character");
+
+    // Just deletes the previous character — list structure preserved
+    const list = topList(editor);
+    expect(list.type).toBe("bulleted-list");
+    const item = list.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(item.children[0].text).toBe("Helo");
+  });
+
+  it("does nothing special when cursor is in a paragraph (not a list)", () => {
+    const editor = makeEditor([
+      { type: "paragraph", children: [{ text: "Hello" }] },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 1 });
+    editor.deleteBackward("character");
+
+    const para = editor.children[0] as SlateElement & {
+      children: { text: string }[];
+    };
+    expect(para.children[0].text).toBe("ello");
+  });
+});
