@@ -62,6 +62,7 @@ impl CheckResult {
 /// Aggregate diagnostic report.
 #[derive(Debug, Default, Serialize)]
 pub struct Report {
+    #[serde(rename = "checks")]
     pub results: Vec<CheckResult>,
     pub summary: Summary,
 }
@@ -844,8 +845,11 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
     let archive = &vault.config().archive;
 
     if !archive.enabled {
-        report.push(warn(SECTION, "enabled", "archive disabled in vault config"));
-        return;
+        report.push(warn(
+            SECTION,
+            "enabled",
+            "archive disabled in vault config; validating configured CAS path because serve still opens it",
+        ));
     }
 
     let raw = &archive.cas_path;
@@ -881,21 +885,65 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
     }
     report.push(ok(SECTION, "directory", "writable"));
 
-    match crate::vault::cas::ContentStore::open(&path) {
-        Ok(store) => {
-            report.push(ok(SECTION, "open", "cas.db opened"));
+    let db_path = path.join("cas.db");
+    if !db_path.exists() {
+        report.push(
+            warn(SECTION, "open", format!("{} missing", db_path.display()))
+                .with_hint("`clepsydra serve` will create it on first run"),
+        );
+        return;
+    }
+    if !db_path.is_file() {
+        report.push(err(
+            SECTION,
+            "open",
+            format!("{} exists but is not a file", db_path.display()),
+        ));
+        return;
+    }
+
+    match Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    ) {
+        Ok(conn) => {
+            let blobs_table: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'blobs'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if blobs_table == 0 {
+                report.push(err(SECTION, "schema", "missing blobs table"));
+                return;
+            }
+
+            report.push(ok(SECTION, "open", "cas.db opened read-only"));
             if full {
-                match store.stats() {
-                    Ok(s) => report.push(ok(
+                let blob_count: rusqlite::Result<i64> =
+                    conn.query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0));
+                let total_size: rusqlite::Result<i64> =
+                    conn.query_row("SELECT COALESCE(SUM(size), 0) FROM blobs", [], |row| {
+                        row.get(0)
+                    });
+                match (blob_count, total_size) {
+                    (Ok(blob_count), Ok(total_size)) => report.push(ok(
                         SECTION,
                         "stats",
-                        format!("{} blobs, {} bytes", s.blob_count, s.total_size_bytes),
+                        format!("{} blobs, {} bytes", blob_count, total_size),
                     )),
-                    Err(e) => report.push(warn(SECTION, "stats", format!("{e}"))),
+                    (Err(e), _) | (_, Err(e)) => {
+                        report.push(warn(SECTION, "stats", format!("{e}")))
+                    }
                 }
             }
         }
-        Err(e) => report.push(err(SECTION, "open", format!("ContentStore::open: {e}"))),
+        Err(e) => report.push(err(
+            SECTION,
+            "open",
+            format!("cannot open {} read-only: {e}", db_path.display()),
+        )),
     }
 }
 
@@ -1146,8 +1194,66 @@ mod tests {
         let mut json = Vec::new();
         report.render_json(&mut json).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
-        assert!(v.get("results").unwrap().is_array());
+        assert!(v.get("checks").unwrap().is_array());
         assert!(v.get("summary").unwrap().is_object());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn cas_check_does_not_create_missing_db() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        let cas_path = tmp.path().join("cas");
+        fs::create_dir_all(&cas_path).unwrap();
+        fs::write(
+            vault_root.join(".clepsydra/config.toml"),
+            format!(
+                "[vault]\nattachment_folder = \"_attachments\"\n\n[archive]\nenabled = true\ncas_path = \"{}\"\n",
+                cas_path.display()
+            ),
+        )
+        .unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        assert!(!cas_path.join("cas.db").exists());
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|r| { r.section == "cas" && r.name == "open" && r.status == Status::Warn })
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn cas_check_validates_path_even_when_archive_disabled() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        let cas_path = tmp.path().join("not-a-directory");
+        fs::write(&cas_path, "not a directory").unwrap();
+        fs::write(
+            vault_root.join(".clepsydra/config.toml"),
+            format!(
+                "[vault]\nattachment_folder = \"_attachments\"\n\n[archive]\nenabled = false\ncas_path = \"{}\"\n",
+                cas_path.display()
+            ),
+        )
+        .unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        assert!(
+            report.results.iter().any(|r| {
+                r.section == "cas" && r.name == "directory" && r.status == Status::Err
+            })
+        );
     }
 
     #[test]
