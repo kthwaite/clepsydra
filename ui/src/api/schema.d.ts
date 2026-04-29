@@ -633,6 +633,8 @@ export interface components {
             tags: string[];
             title?: string | null;
             updated_at?: string | null;
+            /** Format: int64 */
+            word_count?: number | null;
         };
         ContentIndexResponse: {
             items: components["schemas"]["ContentEntry"][];

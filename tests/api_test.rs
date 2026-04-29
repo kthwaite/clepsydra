@@ -2604,6 +2604,34 @@ async fn content_index_pagination() {
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
 }
 
+#[tokio::test]
+async fn content_index_includes_word_count() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "the quick brown fox jumps"
+        }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+
+    let res = server.get("/api/vault/index/content-index").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let alpha = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|i| i["path"] == "alpha.md"))
+        .expect("alpha entry");
+    assert_eq!(
+        alpha["word_count"], 5,
+        "expected 5 words for body 'the quick brown fox jumps'; got {alpha:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Zotero import tests
 // ---------------------------------------------------------------------------

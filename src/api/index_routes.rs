@@ -842,6 +842,8 @@ pub struct ContentEntry {
     created_at: Option<String>,
     updated_at: Option<String>,
     description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    word_count: Option<i64>,
 }
 
 #[utoipa::path(
@@ -914,18 +916,19 @@ pub async fn content_index(
                     Err(_) => continue,
                 };
                 let abs_path = vault.resolve(&vault_path);
-                let (created_at, updated_at, description) = if abs_path.exists() {
+                let (created_at, updated_at, description, word_count) = if abs_path.exists() {
                     match Page::from_file(&abs_path, vault_path) {
                         Ok(page) => {
                             let desc = page.body.chars().take(200).collect::<String>();
                             let created = page.meta.created_at.map(|d| d.to_rfc3339());
                             let updated = page.meta.updated_at.map(|d| d.to_rfc3339());
-                            (created, updated, desc)
+                            let words = page.body.split_whitespace().count() as i64;
+                            (created, updated, desc, Some(words))
                         }
-                        Err(_) => (None, None, String::new()),
+                        Err(_) => (None, None, String::new(), None),
                     }
                 } else {
-                    (None, None, String::new())
+                    (None, None, String::new(), None)
                 };
 
                 entries.push(ContentEntry {
@@ -936,6 +939,7 @@ pub async fn content_index(
                     created_at,
                     updated_at,
                     description,
+                    word_count,
                 });
             }
 

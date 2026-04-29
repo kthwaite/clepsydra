@@ -75,9 +75,7 @@ export function Gazetteer({ initialTag }: Props) {
                   {shortFolio(n.path)}
                 </div>
                 <div className="cl-mono text-[8px] tracking-[0.04em] text-ink-mute">
-                  {n.description
-                    ? `${n.description.split(/\s+/).filter(Boolean).length} wd`
-                    : "—"}
+                  {n.word_count != null ? `${n.word_count} wd` : "—"}
                 </div>
                 <div className="cl-mono text-[8px] text-ink-mute">↗ {n.links?.length ?? 0} xref</div>
               </div>
