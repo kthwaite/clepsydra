@@ -1,5 +1,6 @@
 pub mod api;
 pub mod app_config;
+pub mod diagnostics;
 pub mod lsp;
 pub mod vault;
 
@@ -24,20 +25,20 @@ use vault::sync::ChangeEvent;
 use vault::sync::watcher::VaultWatcher;
 
 #[derive(Debug, Deserialize)]
-struct Settings {
-    server: ServerSettings,
+pub struct Settings {
+    pub server: ServerSettings,
     #[serde(default)]
-    vault: VaultSettings,
+    pub vault: VaultSettings,
 }
 
 #[derive(Debug, Deserialize)]
-struct ServerSettings {
-    host: String,
-    port: u16,
+pub struct ServerSettings {
+    pub host: String,
+    pub port: u16,
     #[serde(default)]
-    dev_mode: bool,
+    pub dev_mode: bool,
     #[serde(default)]
-    tls: TlsSettings,
+    pub tls: TlsSettings,
 }
 
 impl Default for ServerSettings {
@@ -52,17 +53,17 @@ impl Default for ServerSettings {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct TlsSettings {
+pub struct TlsSettings {
     #[serde(default)]
-    enabled: bool,
-    cert_path: Option<PathBuf>,
-    key_path: Option<PathBuf>,
+    pub enabled: bool,
+    pub cert_path: Option<PathBuf>,
+    pub key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
-struct VaultSettings {
+pub struct VaultSettings {
     #[serde(default = "default_vault_root")]
-    root: String,
+    pub root: String,
 }
 
 fn default_vault_root() -> String {
@@ -93,6 +94,13 @@ impl Settings {
             )
         })?;
 
+        let settings = Self::load_from(&config_path)?;
+        Ok((settings, config_path))
+    }
+
+    /// Load settings from a known `config.toml` path, layering defaults and
+    /// environment variables on top.
+    pub fn load_from(config_path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         // Precedence (later wins): defaults < config file < env vars
         let settings = Config::builder()
             .set_default("server.host", "localhost")?
@@ -100,16 +108,18 @@ impl Settings {
             .set_default("server.dev_mode", false)?
             .set_default("server.tls.enabled", false)?
             .set_default("vault.root", "./vault")?
-            .add_source(File::from(config_path.clone()))
+            .add_source(File::from(config_path.to_path_buf()))
             .add_source(Environment::with_prefix("CLEPSYDRA").separator("__"))
             .build()?
             .try_deserialize()?;
-
-        Ok((settings, config_path))
+        Ok(settings)
     }
 }
 
-fn expand_tilde(p: &str) -> Option<PathBuf> {
+/// Expand a leading `~` or `~/` in `p` to the user's home directory.
+///
+/// Returns `None` for paths that do not start with `~`.
+pub fn expand_tilde(p: &str) -> Option<PathBuf> {
     if p == "~" {
         dirs::home_dir()
     } else if let Some(rest) = p.strip_prefix("~/") {
@@ -119,7 +129,12 @@ fn expand_tilde(p: &str) -> Option<PathBuf> {
     }
 }
 
-fn resolve_vault_root(root: &str, config_path: &Path, cwd: &Path) -> PathBuf {
+/// Resolve the vault root string from config into an absolute filesystem path.
+///
+/// Order: tilde expansion, absolute passthrough, env-supplied roots resolved
+/// against `cwd`, and finally relative roots resolved against the config file's
+/// parent directory.
+pub fn resolve_vault_root(root: &str, config_path: &Path, cwd: &Path) -> PathBuf {
     if let Some(expanded) = expand_tilde(root) {
         return expanded;
     }
@@ -174,6 +189,39 @@ fn notification_from_batch(batch: &[ChangeEvent]) -> Option<api::events::SyncNot
 }
 
 use axum_server::tls_rustls::RustlsConfig;
+
+/// Resolve the on-disk cert + key paths for the given TLS settings, without
+/// generating any new certificates.
+///
+/// Returns `(cert_path, key_path, paths_were_explicit)`. When the paths are
+/// the auto-discovered defaults under `dirs::data_dir()`, the third element
+/// is `false`.
+///
+/// Returns `Err` when exactly one of `cert_path`/`key_path` is set (a
+/// half-configured cert pair, which is almost certainly a typo); the caller
+/// is expected to surface the message as a configuration error rather than
+/// silently falling back to auto-discovered paths.
+pub fn default_tls_paths(tls: &TlsSettings) -> Result<Option<(PathBuf, PathBuf, bool)>, String> {
+    match (&tls.cert_path, &tls.key_path) {
+        (Some(cert), Some(key)) => Ok(Some((cert.clone(), key.clone(), true))),
+        (Some(_), None) => {
+            Err("tls.cert_path is set but tls.key_path is not — set both or neither".to_string())
+        }
+        (None, Some(_)) => {
+            Err("tls.key_path is set but tls.cert_path is not — set both or neither".to_string())
+        }
+        (None, None) => {
+            let Some(data_dir) = dirs::data_dir().map(|d| d.join("clepsydra")) else {
+                return Ok(None);
+            };
+            Ok(Some((
+                data_dir.join("localhost.pem"),
+                data_dir.join("localhost-key.pem"),
+                false,
+            )))
+        }
+    }
+}
 
 async fn ensure_certificates(
     tls: &TlsSettings,
