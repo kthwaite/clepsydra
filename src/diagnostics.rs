@@ -8,11 +8,13 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use axum_server::tls_rustls::RustlsConfig;
 use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::Settings;
 use crate::app_config;
+use crate::default_tls_paths;
 use crate::expand_tilde;
 use crate::resolve_vault_root;
 use crate::vault::Vault;
@@ -162,8 +164,10 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
 
     if let Some(settings) = loaded.as_ref().map(|(s, _)| s) {
         check_server_address(settings, &mut report).await;
+        check_tls(settings, &mut report).await;
     } else {
         report.push(skip("server", "address", "skipped — config did not load"));
+        report.push(skip("tls", "certs", "skipped — config did not load"));
     }
 
     let vault = match loaded.as_ref() {
@@ -175,11 +179,15 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
     };
 
     if let Some(v) = vault.as_ref() {
-        check_index(v, &mut report);
+        check_index(v, opts.full, &mut report);
         check_cas(v, opts.full, &mut report);
+        check_academic(v, &mut report);
+        check_bcl(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
         report.push(skip("cas", "store", "skipped — vault unavailable"));
+        report.push(skip("academic", "folders", "skipped — vault unavailable"));
+        report.push(skip("bcl", "config", "skipped — vault unavailable"));
     }
 
     check_runtime(&mut report);
@@ -340,6 +348,117 @@ async fn check_server_address(settings: &Settings, report: &mut Report) {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Check 3: TLS
+// ---------------------------------------------------------------------------
+
+async fn check_tls(settings: &Settings, report: &mut Report) {
+    const SECTION: &str = "tls";
+
+    if !settings.server.tls.enabled {
+        report.push(info(SECTION, "enabled", "disabled in config"));
+        return;
+    }
+
+    let (cert_path, key_path, explicit) = match default_tls_paths(&settings.server.tls) {
+        Some(t) => t,
+        None => {
+            report.push(err(
+                SECTION,
+                "paths",
+                "no cert paths configured and dirs::data_dir() is unavailable",
+            ));
+            return;
+        }
+    };
+
+    let source = if explicit {
+        "explicit"
+    } else {
+        "auto-discovered"
+    };
+    report.push(info(
+        SECTION,
+        "paths",
+        format!(
+            "cert={} key={} ({source})",
+            cert_path.display(),
+            key_path.display()
+        ),
+    ));
+
+    let cert_exists = cert_path.is_file();
+    let key_exists = key_path.is_file();
+
+    if cert_exists && key_exists {
+        match RustlsConfig::from_pem_file(&cert_path, &key_path).await {
+            Ok(_) => {
+                report.push(ok(SECTION, "certs", "loaded and parsed"));
+            }
+            Err(e) => {
+                report.push(err(
+                    SECTION,
+                    "certs",
+                    format!("PEM files present but failed to parse: {e}"),
+                ));
+            }
+        }
+        return;
+    }
+
+    let mut missing = Vec::new();
+    if !cert_exists {
+        missing.push(cert_path.display().to_string());
+    }
+    if !key_exists {
+        missing.push(key_path.display().to_string());
+    }
+
+    if explicit {
+        report.push(err(
+            SECTION,
+            "certs",
+            format!("missing: {}", missing.join(", ")),
+        ));
+        return;
+    }
+
+    if has_executable_on_path("mkcert") {
+        report.push(
+            warn(
+                SECTION,
+                "certs",
+                format!("missing {} — mkcert available on PATH", missing.join(", ")),
+            )
+            .with_hint("run `clepsydra serve` once to generate via mkcert"),
+        );
+    } else {
+        report.push(
+            err(
+                SECTION,
+                "certs",
+                format!("missing {} and mkcert not on PATH", missing.join(", ")),
+            )
+            .with_hint(
+                "install mkcert (https://github.com/FiloSottile/mkcert) or set tls.cert_path/tls.key_path",
+            ),
+        );
+    }
+}
+
+fn has_executable_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return true;
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +628,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "pages_fts",
 ];
 
-fn check_index(vault: &Vault, report: &mut Report) {
+fn check_index(vault: &Vault, full: bool, report: &mut Report) {
     const SECTION: &str = "index";
     let db_path = vault.root().join(".clepsydra/cache.db");
 
@@ -522,6 +641,9 @@ fn check_index(vault: &Vault, report: &mut Report) {
             )
             .with_hint("run `clepsydra serve` once to build the index"),
         );
+        if full {
+            run_index_dry_build(vault, report);
+        }
         return;
     }
 
@@ -603,6 +725,60 @@ fn check_index(vault: &Vault, report: &mut Report) {
                 .with_hint("delete .clepsydra/cache.db and rebuild"),
         );
     }
+
+    if full {
+        run_index_dry_build(vault, report);
+    }
+}
+
+fn run_index_dry_build(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "index";
+    let tmp = match tempfile::tempdir() {
+        Ok(t) => t,
+        Err(e) => {
+            report.push(warn(
+                SECTION,
+                "dry-build",
+                format!("could not create tempdir: {e}"),
+            ));
+            return;
+        }
+    };
+    let tmp_db = tmp.path().join("doctor-cache.db");
+    let mut index = match crate::vault::index::VaultIndex::open(&tmp_db) {
+        Ok(i) => i,
+        Err(e) => {
+            report.push(warn(SECTION, "dry-build", format!("VaultIndex::open: {e}")));
+            return;
+        }
+    };
+    match index.build(vault) {
+        Ok(stats) => {
+            report.push(ok(
+                SECTION,
+                "dry-build",
+                format!(
+                    "{} indexed, {} skipped, {} removed",
+                    stats.pages_indexed, stats.pages_skipped, stats.pages_removed
+                ),
+            ));
+            if stats.warnings.is_empty() {
+                report.push(ok(SECTION, "build warnings", "none"));
+            } else {
+                let preview: Vec<String> = stats.warnings.iter().take(5).cloned().collect();
+                let extra = stats.warnings.len().saturating_sub(preview.len());
+                let detail = if extra == 0 {
+                    preview.join("; ")
+                } else {
+                    format!("{} (+{extra} more)", preview.join("; "))
+                };
+                report.push(warn(SECTION, "build warnings", detail));
+            }
+        }
+        Err(e) => {
+            report.push(err(SECTION, "dry-build", format!("VaultIndex::build: {e}")));
+        }
+    }
 }
 
 fn vault_has_markdown(root: &Path) -> bool {
@@ -666,6 +842,105 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
         }
         Err(e) => report.push(err(SECTION, "open", format!("ContentStore::open: {e}"))),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Check 7: academic / Zotero
+// ---------------------------------------------------------------------------
+
+fn check_academic(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "academic";
+    let cfg = &vault.config().academic;
+
+    let folders: [(&'static str, &str); 4] = [
+        ("library", &cfg.library_folder),
+        ("papers", &cfg.papers_folder),
+        ("books", &cfg.books_folder),
+        ("annotations", &cfg.annotations_folder),
+    ];
+
+    for (name, rel) in folders {
+        let path = vault.root().join(rel);
+        if path.is_dir() {
+            report.push(ok(SECTION, name, rel.to_string()));
+        } else {
+            report.push(warn(
+                SECTION,
+                name,
+                format!("{} missing (created on first use)", path.display()),
+            ));
+        }
+    }
+
+    match &cfg.zotero.database_path {
+        Some(p) => {
+            let path = expand_tilde(p).unwrap_or_else(|| PathBuf::from(p));
+            if path.is_file() {
+                report.push(ok(SECTION, "zotero db", path.display().to_string()));
+            } else {
+                report.push(err(
+                    SECTION,
+                    "zotero db",
+                    format!("{} does not exist", path.display()),
+                ));
+            }
+        }
+        None => {
+            report.push(info(
+                SECTION,
+                "zotero db",
+                "unset (auto-detected at runtime)",
+            ));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Check 8: BCL
+// ---------------------------------------------------------------------------
+
+fn check_bcl(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "bcl";
+
+    let vault_file = vault.root().join(".clepsydra/bcl");
+    let home_file = dirs::home_dir().map(|h| h.join(".config/bcl"));
+
+    if vault_file.is_file() {
+        match read_bcl_date(&vault_file) {
+            Some(date) => report.push(ok(SECTION, "config", format!(".clepsydra/bcl -> {date}"))),
+            None => report.push(warn(
+                SECTION,
+                "config",
+                ".clepsydra/bcl present but not a valid YYYY-MM-DD date".to_string(),
+            )),
+        }
+        return;
+    }
+
+    match home_file.as_ref().filter(|p| p.is_file()) {
+        Some(p) => {
+            report.push(info(
+                SECTION,
+                "config",
+                format!(
+                    "vault file absent; will seed from {} on next serve",
+                    p.display()
+                ),
+            ));
+        }
+        None => {
+            report.push(info(
+                SECTION,
+                "config",
+                "no bcl file in vault or ~/.config/bcl",
+            ));
+        }
+    }
+}
+
+fn read_bcl_date(path: &Path) -> Option<chrono::NaiveDate> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -801,5 +1076,175 @@ mod tests {
         report.push(err("x", "y", "z"));
         assert_eq!(report.exit_code(false), 1);
         assert_eq!(report.exit_code(true), 1);
+    }
+
+    #[tokio::test]
+    async fn tls_disabled_emits_info_only() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let tls = report
+            .results
+            .iter()
+            .find(|r| r.section == "tls" && r.name == "enabled")
+            .expect("expected tls.enabled");
+        assert_eq!(tls.status, Status::Info);
+    }
+
+    #[tokio::test]
+    async fn tls_enabled_with_missing_explicit_certs_errors() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+
+        let cert = tmp.path().join("cert.pem");
+        let key = tmp.path().join("key.pem");
+        fs::write(
+            cwd.join("config.toml"),
+            format!(
+                concat!(
+                    "[server]\nhost = \"localhost\"\nport = 0\n\n",
+                    "[server.tls]\nenabled = true\ncert_path = \"{}\"\nkey_path = \"{}\"\n\n",
+                    "[vault]\nroot = \"{}\"\n",
+                ),
+                cert.display(),
+                key.display(),
+                vault_root.display(),
+            ),
+        )
+        .unwrap();
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let tls = report
+            .results
+            .iter()
+            .find(|r| r.section == "tls" && r.name == "certs")
+            .expect("expected tls.certs");
+        assert_eq!(tls.status, Status::Err, "{:#?}", tls);
+        assert!(tls.detail.contains("missing"));
+    }
+
+    #[tokio::test]
+    async fn academic_folders_warn_when_missing() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        for name in ["library", "papers", "books", "annotations"] {
+            let r = report
+                .results
+                .iter()
+                .find(|r| r.section == "academic" && r.name == name)
+                .unwrap_or_else(|| panic!("expected academic.{name}"));
+            assert_eq!(r.status, Status::Warn);
+        }
+    }
+
+    #[tokio::test]
+    async fn zotero_missing_db_path_is_err() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+
+        // Append a zotero config block pointing at a missing file.
+        let vault_cfg = vault_root.join(".clepsydra/config.toml");
+        let extant = fs::read_to_string(&vault_cfg).unwrap();
+        let bogus = tmp.path().join("nope.sqlite");
+        fs::write(
+            &vault_cfg,
+            format!(
+                "{extant}\n[academic.zotero]\ndatabase_path = \"{}\"\n",
+                bogus.display()
+            ),
+        )
+        .unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "academic" && r.name == "zotero db")
+            .expect("zotero db check");
+        assert_eq!(r.status, Status::Err);
+    }
+
+    #[tokio::test]
+    async fn bcl_vault_file_parsed() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        fs::write(vault_root.join(".clepsydra/bcl"), "1990-01-15\n").unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "bcl" && r.name == "config")
+            .expect("bcl.config");
+        assert_eq!(r.status, Status::Ok);
+        assert!(r.detail.contains("1990-01-15"));
+    }
+
+    #[tokio::test]
+    async fn bcl_malformed_file_warns() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        fs::write(vault_root.join(".clepsydra/bcl"), "garbage").unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "bcl" && r.name == "config")
+            .expect("bcl.config");
+        assert_eq!(r.status, Status::Warn);
+    }
+
+    #[tokio::test]
+    async fn full_index_dry_build_runs_when_requested() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        // Add a markdown page so the build has something to index.
+        fs::write(
+            vault_root.join("hello.md"),
+            "---\ntitle: Hello\n---\n\nworld\n",
+        )
+        .unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts { full: true }).await;
+
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "index" && r.name == "dry-build")
+            .expect("expected index.dry-build under --full");
+        assert_eq!(r.status, Status::Ok, "{:#?}", r);
+        assert!(
+            r.detail.contains("indexed"),
+            "expected detail to mention indexed pages: {}",
+            r.detail
+        );
     }
 }

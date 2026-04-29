@@ -190,6 +190,24 @@ fn notification_from_batch(batch: &[ChangeEvent]) -> Option<api::events::SyncNot
 
 use axum_server::tls_rustls::RustlsConfig;
 
+/// Resolve the on-disk cert + key paths for the given TLS settings, without
+/// generating any new certificates.
+///
+/// Returns `(cert_path, key_path, paths_were_explicit)`. When the paths are
+/// the auto-discovered defaults under `dirs::data_dir()`, the third element
+/// is `false`.
+pub fn default_tls_paths(tls: &TlsSettings) -> Option<(PathBuf, PathBuf, bool)> {
+    if let (Some(cert), Some(key)) = (&tls.cert_path, &tls.key_path) {
+        return Some((cert.clone(), key.clone(), true));
+    }
+    let data_dir = dirs::data_dir()?.join("clepsydra");
+    Some((
+        data_dir.join("localhost.pem"),
+        data_dir.join("localhost-key.pem"),
+        false,
+    ))
+}
+
 async fn ensure_certificates(
     tls: &TlsSettings,
 ) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {

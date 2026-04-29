@@ -33,6 +33,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
+tempfile = "3"
 thiserror = "2"
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -50,4 +51,3 @@ walkdir = "2"
 
 [dev-dependencies]
 axum-test = "18"
-tempfile = "3"
