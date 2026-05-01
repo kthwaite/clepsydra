@@ -10,6 +10,7 @@ pub mod folders;
 pub mod frontend;
 pub mod index_routes;
 pub mod journal;
+pub mod location;
 pub mod openapi;
 pub mod pages;
 pub mod pagination;
@@ -41,6 +42,11 @@ pub struct AppState {
     /// `<vault>/.clepsydra/bcl` (with a one-time copy from `~/.config/bcl`
     /// when the vault file is absent). `None` means the feature is hidden.
     pub bcl: Option<chrono::NaiveDate>,
+    /// Optional vault location, loaded once at startup from
+    /// `<vault>/.clepsydra/location.toml` (with a one-time copy from
+    /// `~/.config/clepsydra/location.toml` when the vault file is absent).
+    /// `None` means the feature is hidden.
+    pub location: Option<crate::vault::location::Location>,
 }
 
 /// Build the API router mounted at `/api/vault`.
@@ -69,4 +75,5 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/agenda", agenda::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))
+        .route("/location", axum::routing::get(location::get_location))
 }

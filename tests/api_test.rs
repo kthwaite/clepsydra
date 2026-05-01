@@ -48,6 +48,7 @@ fn setup_server() -> (TestServer, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
+        location: None,
     });
 
     let app: Router = Router::new()
@@ -805,6 +806,7 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
+        location: None,
     });
 
     let app: Router = Router::new()
@@ -1042,6 +1044,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
+        location: None,
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1333,6 +1336,7 @@ async fn sse_events_endpoint_returns_stream() {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
+        location: None,
     });
 
     let app: Router = Router::new()
@@ -1473,6 +1477,7 @@ async fn create_page_emits_sync_notification() {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
+        location: None,
     });
 
     let app: Router = Router::new()

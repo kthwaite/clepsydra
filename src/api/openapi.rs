@@ -17,7 +17,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Index", description = "Index, graph, tags and search"),
         (name = "Academic", description = "Academic works, annotations and importers"),
         (name = "Events", description = "Server-sent events stream"),
-        (name = "BCL", description = "Brimley-Cocoon Line countdown")
+        (name = "BCL", description = "Brimley-Cocoon Line countdown"),
+        (name = "Location", description = "Vault geographic location")
     ),
     paths(
         // Pages
@@ -69,7 +70,9 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::academic::import_isbn_handler,
         crate::api::academic::import_zotero_handler,
         // BCL
-        crate::api::bcl::get_bcl
+        crate::api::bcl::get_bcl,
+        // Location
+        crate::api::location::get_location
     ),
     components(
         schemas(
@@ -131,7 +134,9 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::vault::academic::SourceLocation,
             crate::vault::import_zotero::ImportZoteroRequest,
             // BCL
-            crate::api::bcl::BclResponse
+            crate::api::bcl::BclResponse,
+            // Location
+            crate::api::location::LocationResponse
         )
     )
 )]

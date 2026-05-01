@@ -331,6 +331,9 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
     // Load BCL config (lookaside cache: vault file, then ~/.config/bcl).
     let bcl = vault::bcl::load_or_seed(vault.root());
 
+    // Load vault location (lookaside cache: vault file, then ~/.config/clepsydra).
+    let location = vault::location::load_or_seed(vault.root());
+
     // Build shared state
     let state = Arc::new(AppState {
         vault,
@@ -342,6 +345,7 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
         delete_hooks,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,
+        location,
     });
 
     // Optionally start LSP on stdio

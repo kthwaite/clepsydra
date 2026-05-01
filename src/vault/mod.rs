@@ -20,6 +20,7 @@ pub mod index;
 pub mod index_handle;
 pub mod init;
 pub mod link;
+pub mod location;
 pub mod mutation;
 pub mod new_note;
 pub mod page;
