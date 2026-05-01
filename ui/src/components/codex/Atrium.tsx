@@ -1,10 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useLocation } from "#/api/location";
-import { ASCII_COMPASS, ASCII_FRONTISPIECE } from "#/components/codex/ascii";
+import { ASCII_COMPASS, MiniAsciiAnimation } from "#/components/codex/ascii";
 import { CLink } from "#/components/codex/CLink";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
@@ -72,9 +72,7 @@ export function Atrium() {
             PL. I
           </div>
           <div className="grid grid-cols-[auto_1fr] gap-6 pt-3">
-            <pre className="cl-ascii text-[7px] leading-none text-accent">
-              {ASCII_FRONTISPIECE}
-            </pre>
+            <FrontispieceAnimation />
             <div>
               <div className="cl-cap cl-cap-wide text-[34px] font-bold leading-none">
                 WELCOME,
@@ -361,7 +359,42 @@ export function Atrium() {
   );
 }
 
+function FrontispieceAnimation() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const rootStyles = getComputedStyle(document.documentElement);
+    const animation = new MiniAsciiAnimation(canvas, {
+      background: cssVar(rootStyles, "--paper-2", "#e8e0cc"),
+      textColor: cssVar(rootStyles, "--accent", "#0c6cad"),
+      fontFamily: cssVar(rootStyles, "--font-mono", "monospace"),
+    });
+
+    animation.start();
+
+    return () => animation.stop();
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="block h-[190px] w-[190px] border border-rule-soft bg-paper-2"
+      aria-label="Animated ASCII frontispiece made from codex text"
+    />
+  );
+}
+
 /* helpers --------------------------------------------------------------- */
+
+function cssVar(styles: CSSStyleDeclaration, name: string, fallback: string) {
+  return styles.getPropertyValue(name).trim() || fallback;
+}
 
 function Th({
   children,
