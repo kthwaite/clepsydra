@@ -31,6 +31,10 @@ export const queryKeys = {
     current: ["bcl"] as const,
   },
 
+  location: {
+    current: ["location"] as const,
+  },
+
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },
   index: { pathPrefix: "/api/vault/index" },

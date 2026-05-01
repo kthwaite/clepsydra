@@ -1,7 +1,9 @@
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
+import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
+import { useLocation } from "#/api/location";
 import { ASCII_COMPASS, ASCII_FRONTISPIECE } from "#/components/codex/ascii";
 import { CLink } from "#/components/codex/CLink";
 import { formatRelativeTime } from "#/components/codex/codex-time";
@@ -17,6 +19,7 @@ export function Atrium() {
   const { data: tags } = useTags();
   const { data: content } = useContentIndex(40);
   const { data: bcl } = useBcl();
+  const { data: location } = useLocation();
 
   const recent = useMemo(() => {
     const items = content?.items ?? [];
@@ -35,16 +38,24 @@ export function Atrium() {
 
   const horoLabel = useMemo(() => {
     const now = new Date();
-    const minutes = now.getHours() * 60 + now.getMinutes();
-    const sunset = 19 * 60;
-    const remaining = Math.max(0, sunset - minutes);
-    const h = Math.floor(remaining / 60);
-    const m = remaining % 60;
+    const lat = location?.latitude ?? null;
+    const lon = location?.longitude ?? null;
+    const sunsetMs =
+      lat !== null && lon !== null
+        ? SunCalc.getTimes(now, lat, lon).sunset.getTime()
+        : new Date(now).setHours(19, 0, 0, 0);
+    const remainingMin = Math.max(
+      0,
+      Math.floor((sunsetMs - now.getTime()) / 60_000),
+    );
+    const h = Math.floor(remainingMin / 60);
+    const m = remainingMin % 60;
     return {
       time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
       remaining: `${h}h ${pad(m)}m of light remaining`,
+      place: location?.label ?? null,
     };
-  }, []);
+  }, [location?.latitude, location?.longitude, location?.label]);
 
   const showProspective = import.meta.env.VITE_ENABLE_PROSPECTIVE_PANELS === "1";
 
@@ -279,6 +290,9 @@ export function Atrium() {
               <div>
                 <div className="cl-mono text-[18px]">{horoLabel.time}</div>
                 <div className="cl-marg">{horoLabel.remaining}</div>
+                {horoLabel.place && (
+                  <div className="cl-marg italic">at {horoLabel.place}</div>
+                )}
               </div>
             </div>
           </div>
