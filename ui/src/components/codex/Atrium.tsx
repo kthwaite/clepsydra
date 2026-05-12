@@ -57,7 +57,8 @@ export function Atrium() {
     };
   }, [location?.latitude, location?.longitude, location?.label]);
 
-  const showProspective = import.meta.env.VITE_ENABLE_PROSPECTIVE_PANELS === "1";
+  const showProspective =
+    import.meta.env.VITE_ENABLE_PROSPECTIVE_PANELS === "1";
 
   return (
     <div className="grid gap-4 px-5 py-4 lg:grid-cols-[2fr_1fr]">
@@ -112,7 +113,11 @@ export function Atrium() {
                     Resume Folio {shortFolio(recent[0].path)}
                   </button>
                 )}
-                <button type="button" className="cl-btn cl-btn-hot" onClick={() => setInscribeOpen(true)}>
+                <button
+                  type="button"
+                  className="cl-btn cl-btn-hot"
+                  onClick={() => setInscribeOpen(true)}
+                >
                   + Inscribe
                 </button>
               </div>
@@ -153,7 +158,8 @@ export function Atrium() {
         <div className="cl-cap mb-1 flex items-baseline justify-between text-[10px]">
           <span>§ Recently Inscribed</span>
           <span className="text-[9px] text-ink-mute">
-            {romanLower(Math.min(recent.length, totalEntries))} of {romanLower(totalEntries)}
+            {romanLower(Math.min(recent.length, totalEntries))} of{" "}
+            {romanLower(totalEntries)}
           </span>
         </div>
         <hr className="cl-rule-soft mt-1" />
@@ -449,7 +455,6 @@ function fmtBclDate(yyyymmdd: string): string {
     year: "numeric",
   });
 }
-
 
 const LOWERS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
 function romanLower(n: number): string {
