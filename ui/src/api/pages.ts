@@ -1,6 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "./client";
-import { invalidateByPath, queryKeys } from "./keys";
+import {
+  invalidateByPath,
+  invalidatePageContent,
+  invalidatePageStructure,
+  queryKeys,
+} from "./keys";
 
 export function usePages() {
   return $api.useQuery("get", "/api/vault/pages");
@@ -23,11 +28,7 @@ export function useFolderTreePaths() {
 export function useCreatePage() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/vault/pages/{path}", {
-    onSuccess: () => {
-      invalidateByPath(qc, queryKeys.pages.pathPrefix);
-      invalidateByPath(qc, queryKeys.folders.pathPrefix);
-      invalidateByPath(qc, queryKeys.index.pathPrefix);
-    },
+    onSuccess: () => invalidatePageStructure(qc),
   });
 }
 
@@ -44,9 +45,6 @@ export function useCreateFolder() {
 export function useUpdatePage() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/vault/pages/{path}", {
-    onSuccess: () => {
-      invalidateByPath(qc, queryKeys.pages.pathPrefix);
-      invalidateByPath(qc, queryKeys.index.pathPrefix);
-    },
+    onSuccess: () => invalidatePageContent(qc),
   });
 }

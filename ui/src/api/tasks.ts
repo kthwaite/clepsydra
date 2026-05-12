@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "./keys";
+import { invalidatePageContent, queryKeys } from "./keys";
 
 const API_BASE = "/api/vault";
 
@@ -96,9 +96,6 @@ export function useToggleTaskStatus() {
       if (!res.ok) throw new Error("Failed to update task");
       return res.json();
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      qc.invalidateQueries({ queryKey: queryKeys.agenda.all });
-    },
+    onSuccess: () => invalidatePageContent(qc),
   });
 }

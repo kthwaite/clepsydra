@@ -49,3 +49,23 @@ export function invalidateByPath(qc: QueryClient, prefix: string) {
     },
   });
 }
+
+/**
+ * Invalidate every cache derived from a page body — both openapi-react-query
+ * paths (pages, index) and the hand-rolled key trees (blocks, tasks, agenda,
+ * journal). Use after any mutation that edits page content.
+ */
+export function invalidatePageContent(qc: QueryClient) {
+  invalidateByPath(qc, queryKeys.pages.pathPrefix);
+  invalidateByPath(qc, queryKeys.index.pathPrefix);
+  qc.invalidateQueries({ queryKey: queryKeys.blocks.all });
+  qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
+  qc.invalidateQueries({ queryKey: queryKeys.agenda.all });
+  qc.invalidateQueries({ queryKey: queryKeys.journal.all });
+}
+
+/** Same as `invalidatePageContent` plus folder listings — for create/move/delete. */
+export function invalidatePageStructure(qc: QueryClient) {
+  invalidatePageContent(qc);
+  invalidateByPath(qc, queryKeys.folders.pathPrefix);
+}

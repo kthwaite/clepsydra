@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "./keys";
+import { invalidatePageContent, queryKeys } from "./keys";
 
 const API_BASE = "/api/vault/journal";
 
@@ -71,8 +71,6 @@ export function useQuickCapture() {
       if (!res.ok) throw new Error("Capture failed");
       return res.json();
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.journal.all });
-    },
+    onSuccess: () => invalidatePageContent(qc),
   });
 }

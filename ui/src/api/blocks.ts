@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "./keys";
+import { invalidatePageContent, queryKeys } from "./keys";
 
 const API_BASE = "/api/vault/blocks";
 
@@ -52,8 +52,6 @@ export function useAssignBlockId() {
       if (!res.ok) throw new Error("Failed to assign block ID");
       return res.json() as Promise<{ block_id: string }>;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.blocks.all });
-    },
+    onSuccess: () => invalidatePageContent(qc),
   });
 }
