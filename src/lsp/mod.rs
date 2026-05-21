@@ -1287,10 +1287,7 @@ impl LspBackend {
         {
             let docs = self.documents.lock().await;
             if let Some(doc) = docs.get(source_uri) {
-                return Range {
-                    start: doc.byte_offset_to_position(start),
-                    end: doc.byte_offset_to_position(end),
-                };
+                return doc.body_span_to_range(start, end);
             }
         }
         // Fall back: read from disk, build throwaway Document
@@ -1298,10 +1295,7 @@ impl LspBackend {
             let abs_path = self.state.vault.resolve(&vp);
             if let Ok(content) = tokio::fs::read_to_string(&abs_path).await {
                 let doc = document::Document::from_text(&content, 0);
-                return Range {
-                    start: doc.byte_offset_to_position(start),
-                    end: doc.byte_offset_to_position(end),
-                };
+                return doc.body_span_to_range(start, end);
             }
         }
         Range::default()
@@ -1462,5 +1456,26 @@ mod tests {
         backend.did_save(params).await; // drives index_page + resolve_links + republish
         let docs = backend.documents.lock().await;
         assert!(!docs.get(&uri).unwrap().dirty);
+    }
+
+    #[tokio::test]
+    async fn backlink_to_range_used_in_references() {
+        let (backend, _tmp) = make_backend(&[
+            ("Target.md", "# Target\n"),
+            ("Other.md", "# Other\n\nlink to [[Target]]\n"),
+        ]);
+        let uri = uri_for(&backend, "Target.md");
+        open_doc(&backend, &uri, "# Target\n").await;
+        let params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 0, character: 2 },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext { include_declaration: false },
+        };
+        let refs = backend.references(params).await.unwrap().unwrap_or_default();
+        assert!(refs.iter().any(|l| l.uri.path().ends_with("Other.md")));
     }
 }

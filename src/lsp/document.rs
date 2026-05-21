@@ -103,4 +103,25 @@ impl Document {
         let end = self.byte_offset_to_position(link.span.end);
         Range { start, end }
     }
+
+    /// Convert a pair of body byte offsets to an LSP [`Range`].
+    pub fn body_span_to_range(&self, start: usize, end: usize) -> Range {
+        Range {
+            start: self.byte_offset_to_position(start),
+            end: self.byte_offset_to_position(end),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_span_to_range_maps_offsets() {
+        let doc = Document::from_text("line one\nline two\n", 1);
+        let r = doc.body_span_to_range(0, 4);
+        assert_eq!(r.start, Position { line: 0, character: 0 });
+        assert_eq!(r.end, Position { line: 0, character: 4 });
+    }
 }

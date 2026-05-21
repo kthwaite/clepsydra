@@ -51,6 +51,9 @@ pub fn extract_context(body: &str, span: Range<usize>, max_chars: usize) -> Stri
         paragraph.len()
     };
 
+    // Guard against degenerate snapping (e.g. max_chars == 0 or no word boundaries).
+    let snapped_end = snapped_end.max(snapped_start);
+
     let mut result = String::new();
     if snapped_start > 0 {
         result.push('\u{2026}');
