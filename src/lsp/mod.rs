@@ -1,7 +1,15 @@
+pub mod code_action;
 pub mod completion;
+pub mod diagnostics;
 pub mod document;
+pub mod hover;
+pub mod queries;
+pub mod references;
 pub mod rename;
 pub mod symbols;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1163,7 +1171,7 @@ impl LanguageServer for LspBackend {
 
 impl LspBackend {
     /// Convert an LSP URI to a vault-relative path.
-    fn uri_to_vault_path(&self, uri: &Url) -> Option<crate::vault::path::VaultPath> {
+    pub(crate) fn uri_to_vault_path(&self, uri: &Url) -> Option<crate::vault::path::VaultPath> {
         let file_path = uri.to_file_path().ok()?;
         let rel = file_path.strip_prefix(self.state.vault.root()).ok()?;
         let rel_str = rel.to_string_lossy().replace('\\', "/");
@@ -1174,7 +1182,7 @@ impl LspBackend {
     ///
     /// Builds a map from canonical name to all page paths that share it,
     /// enabling both unresolved-link and ambiguous-link diagnostics.
-    async fn refresh_canonical_names(&self) {
+    pub(crate) async fn refresh_canonical_names(&self) {
         let result = self
             .state
             .index
@@ -1428,4 +1436,18 @@ pub async fn run_lsp(state: Arc<AppState>) {
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+
+    #[tokio::test]
+    async fn backend_constructs_and_opens_a_document() {
+        let (backend, _tmp) = make_backend(&[("Note.md", "# Note\n\nbody\n")]);
+        let uri = uri_for(&backend, "Note.md");
+        open_doc(&backend, &uri, "# Note\n\nbody\n").await;
+        let docs = backend.documents.lock().await;
+        assert!(docs.contains_key(&uri));
+    }
 }
