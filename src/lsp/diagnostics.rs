@@ -8,19 +8,17 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::lsp::document::Document;
-use crate::vault::link::Link;
 
 /// Compute LSP diagnostics for a document's links given a snapshot of the
 /// canonical-name → paths map and the vault root. Pure: no I/O, no `self`.
 pub fn compute_link_diagnostics(
-    links: &[Link],
+    doc: &Document,
     canonical_names: &HashMap<String, Vec<String>>,
     vault_root: &Path,
-    doc: &Document,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    for link in links {
+    for link in &doc.links {
         if link.span.start == 0 && link.span.end == 0 {
             continue; // skip property ref links
         }
@@ -93,8 +91,13 @@ mod tests {
     fn unresolved_link_yields_a_diagnostic() {
         let doc = Document::from_text("# A\n\n[[Ghost]]\n", 1);
         let names: HashMap<String, Vec<String>> = HashMap::new();
-        let diags = compute_link_diagnostics(&doc.links, &names, Path::new("/v"), &doc);
+        let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
         assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("unresolved-link".into()))
+        );
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
     }
 
     #[test]
@@ -102,7 +105,7 @@ mod tests {
         let doc = Document::from_text("# A\n\n[[Target]]\n", 1);
         let mut names = HashMap::new();
         names.insert("target".to_string(), vec!["Target.md".to_string()]);
-        let diags = compute_link_diagnostics(&doc.links, &names, Path::new("/v"), &doc);
+        let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
         assert!(diags.is_empty());
     }
 
@@ -114,7 +117,18 @@ mod tests {
             "dup".to_string(),
             vec!["a/Dup.md".to_string(), "b/Dup.md".to_string()],
         );
-        let diags = compute_link_diagnostics(&doc.links, &names, Path::new("/v"), &doc);
+        let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
         assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("ambiguous-link".into()))
+        );
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::INFORMATION));
+        assert!(
+            diags[0]
+                .related_information
+                .as_ref()
+                .is_some_and(|r| r.len() == 2)
+        );
     }
 }

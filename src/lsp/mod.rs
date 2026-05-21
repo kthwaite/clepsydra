@@ -1314,12 +1314,8 @@ impl LspBackend {
     /// (multiple matches) as informational diagnostics with related locations.
     async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
         let names = self.canonical_names.read().await;
-        let diagnostics = crate::lsp::diagnostics::compute_link_diagnostics(
-            &doc.links,
-            &names,
-            self.state.vault.root(),
-            doc,
-        );
+        let diagnostics =
+            crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, self.state.vault.root());
         drop(names);
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
