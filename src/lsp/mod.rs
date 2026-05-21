@@ -320,26 +320,9 @@ impl LanguageServer for LspBackend {
 
             if let Some(target_raw) = link_target {
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
-                let path: Option<String> = self
-                    .state
-                    .index
-                    .with_index({
-                        let cn = canonical.as_str().to_string();
-                        move |index, _| {
-                            index
-                                .connection()
-                                .query_row(
-                                    "SELECT p.path FROM canonical_names cn \
-                                     JOIN pages p ON p.id = cn.page_id \
-                                     WHERE cn.canonical_name = ?1 LIMIT 1",
-                                    rusqlite::params![cn],
-                                    |row| row.get(0),
-                                )
-                                .ok()
-                        }
-                    })
-                    .await
-                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                let path =
+                    crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
+                        .await;
 
                 match path {
                     Some(p) => match crate::vault::path::VaultPath::new(&p) {
@@ -363,17 +346,20 @@ impl LanguageServer for LspBackend {
             .await
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-        let vault_root = self.state.vault.root().to_path_buf();
+        let vault_root = self.state.vault.root();
         let mut locations = Vec::new();
         for bl in &backlinks {
             let source_vp = match crate::vault::path::VaultPath::new(&bl.source_path) {
                 Ok(vp) => vp,
                 Err(_) => continue,
             };
-            let abs_path = vault_root.join(source_vp.as_str());
-            let source_uri = match Url::from_file_path(&abs_path) {
-                Ok(u) => u,
-                Err(_) => continue,
+            let source_uri = match crate::lsp::references::vault_path_to_location(
+                vault_root,
+                &source_vp,
+                Range::default(),
+            ) {
+                Some(loc) => loc.uri,
+                None => continue,
             };
             let range = self.backlink_to_range(&source_uri, bl).await;
             locations.push(Location {
@@ -1477,5 +1463,27 @@ mod tests {
         };
         let refs = backend.references(params).await.unwrap().unwrap_or_default();
         assert!(refs.iter().any(|l| l.uri.path().ends_with("Other.md")));
+    }
+
+    #[tokio::test]
+    async fn references_from_link_under_cursor() {
+        let (backend, _tmp) = make_backend(&[
+            ("A.md", "# A\n\n[[Target]]\n"),
+            ("Target.md", "# Target\n"),
+            ("B.md", "# B\n\n[[Target]]\n"),
+        ]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, "# A\n\n[[Target]]\n").await;
+        let params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 4 },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext { include_declaration: false },
+        };
+        let refs = backend.references(params).await.unwrap().unwrap_or_default();
+        assert!(refs.iter().any(|l| l.uri.path().ends_with("B.md")));
     }
 }

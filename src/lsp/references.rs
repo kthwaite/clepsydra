@@ -1,1 +1,27 @@
-//! Placeholder; populated in a later task.
+//! Pure helpers for the `references` request.
+use std::path::Path;
+
+use tower_lsp::lsp_types::{Location, Range, Url};
+
+use crate::vault::path::VaultPath;
+
+/// Build a `Location` for a vault path + range, resolving the path against the
+/// vault root. Returns `None` if the absolute path is not representable as a
+/// `file://` URL.
+pub fn vault_path_to_location(vault_root: &Path, vp: &VaultPath, range: Range) -> Option<Location> {
+    let abs = vault_root.join(vp.as_str());
+    let uri = Url::from_file_path(abs).ok()?;
+    Some(Location { uri, range })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_location_for_relative_path() {
+        let vp = VaultPath::new("notes/A.md").unwrap();
+        let loc = vault_path_to_location(Path::new("/vault"), &vp, Range::default()).unwrap();
+        assert!(loc.uri.path().ends_with("notes/A.md"));
+    }
+}
