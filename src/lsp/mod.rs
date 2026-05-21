@@ -236,51 +236,30 @@ impl LanguageServer for LspBackend {
         };
 
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
-        let target_info: Option<(String, Option<String>)> = self
-            .state
-            .index
-            .with_index({
-                let cn = canonical.as_str().to_string();
-                move |index, _| {
-                    index
-                        .connection()
-                        .query_row(
-                            "SELECT p.path, p.title FROM canonical_names cn \
-                             JOIN pages p ON p.id = cn.page_id \
-                             WHERE cn.canonical_name = ?1 LIMIT 1",
-                            rusqlite::params![cn],
-                            |row| {
-                                Ok((
-                                    row.get::<_, String>(0)?,
-                                    row.get::<_, Option<String>>(1)?,
-                                ))
-                            },
-                        )
-                        .ok()
-                }
-            })
-            .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let path =
+            crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
+                .await;
 
-        let content = match target_info {
-            Some((path, title)) => {
+        let content = match path {
+            Some(path) => {
                 let vault_path = crate::vault::path::VaultPath::new(&path)
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
                 let abs_path = self.state.vault.resolve(&vault_path);
-                let preview = match tokio::fs::read_to_string(&abs_path).await {
-                    Ok(content) => {
-                        let body = match crate::vault::page::parse_frontmatter(&content) {
-                            Ok((_meta, body)) => body,
-                            Err(_) => content,
-                        };
-                        body.lines().take(10).collect::<Vec<_>>().join("\n")
+                let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
+                    Ok(file_content) => {
+                        let (title, body) =
+                            match crate::vault::page::parse_frontmatter(&file_content) {
+                                Ok((meta, body)) => (meta.title, body),
+                                Err(_) => (None, file_content),
+                            };
+                        let preview = crate::lsp::hover::extract_preview(&body, 10);
+                        (title, preview)
                     }
-                    Err(_) => String::new(),
+                    Err(_) => (None, String::new()),
                 };
-                let display_title = title.as_deref().unwrap_or(&path);
-                format!("**{display_title}**\n`{path}`\n\n---\n\n{preview}")
+                crate::lsp::hover::format_hover_resolved(&path, title.as_deref(), &preview)
             }
-            None => format!("*Unresolved link:* `{}`", link.target_raw),
+            None => crate::lsp::hover::format_hover_unresolved(&link.target_raw),
         };
 
         Ok(Some(Hover {
@@ -1457,5 +1436,27 @@ mod tests {
             panic!("expected a scalar location, got {resp:?}");
         };
         assert!(loc.uri.path().ends_with("Target.md"));
+    }
+
+    #[tokio::test]
+    async fn hover_renders_resolved_target_title() {
+        let (backend, _tmp) = make_backend(&[
+            ("Src.md", "# Src\n\n[[Target]]\n"),
+            ("Target.md", "---\ntitle: Target Page\n---\nhello world\n"),
+        ]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\n[[Target]]\n").await;
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 4 },
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let hover = backend.hover(params).await.unwrap().expect("hover present");
+        let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
+            panic!("expected markup hover");
+        };
+        assert!(value.contains("Target Page"));
     }
 }
