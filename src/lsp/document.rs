@@ -124,4 +124,14 @@ mod tests {
         assert_eq!(r.start, Position { line: 0, character: 0 });
         assert_eq!(r.end, Position { line: 0, character: 4 });
     }
+
+    #[test]
+    fn body_span_to_range_accounts_for_frontmatter_offset() {
+        // Body offsets are relative to the body; the returned Range must be in
+        // absolute document coordinates (frontmatter pushes the body down).
+        let doc = Document::from_text("---\ntitle: T\n---\nfoo\n", 1);
+        let r = doc.body_span_to_range(0, 3);
+        assert_eq!(r.start, Position { line: 3, character: 0 });
+        assert_eq!(r.end, Position { line: 3, character: 3 });
+    }
 }

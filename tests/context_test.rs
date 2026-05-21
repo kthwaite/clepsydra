@@ -39,3 +39,14 @@ fn handles_link_at_end_of_body() {
     let snippet = extract_context(body, link_start..link_end, 100);
     assert!(snippet.ends_with("[[Alpha]]"));
 }
+
+#[test]
+fn zero_max_chars_does_not_panic() {
+    // Regression: with max_chars == 0, word-boundary snapping could drive
+    // snapped_end below snapped_start, panicking on a reversed slice. The LSP
+    // `references` path calls this with max_context_chars == 0.
+    let body = "word one two three\n\nlink to [[X]] here\n";
+    let link_start = body.find("[[X]]").unwrap();
+    let link_end = link_start + "[[X]]".len();
+    let _ = extract_context(body, link_start..link_end, 0);
+}
