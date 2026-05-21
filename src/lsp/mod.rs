@@ -1439,6 +1439,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_suggests_wikilink_targets() {
+        let (backend, _tmp) = make_backend(&[
+            ("Src.md", "# Src\n\n[[Tar\n"),
+            ("Target.md", "# Target\n"),
+        ]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\n[[Tar\n").await;
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 5 },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        let resp = backend.completion(params).await.unwrap();
+        let items = match resp {
+            Some(CompletionResponse::Array(v)) => v,
+            Some(CompletionResponse::List(l)) => l.items,
+            None => panic!("expected completions"),
+        };
+        assert!(items.iter().any(|i| i.label.contains("Target")));
+    }
+
+    #[tokio::test]
+    async fn completion_returns_none_off_a_prefix() {
+        let (backend, _tmp) = make_backend(&[("Src.md", "# Src\n\nplain text\n")]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\nplain text\n").await;
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 3 },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        assert!(backend.completion(params).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn hover_renders_resolved_target_title() {
         let (backend, _tmp) = make_backend(&[
             ("Src.md", "# Src\n\n[[Target]]\n"),
