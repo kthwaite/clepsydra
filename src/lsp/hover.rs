@@ -2,7 +2,8 @@
 
 /// Markdown shown when hovering a link that resolves to a page.
 ///
-/// Produces: `**{display_title}**\n`{path}`\n\n---\n\n{preview}`
+/// Produces a bold title line, a code-span path line, a `---` rule, then the
+/// preview (see the `resolved_format_exact` test for the byte-exact layout).
 pub fn format_hover_resolved(path: &str, title: Option<&str>, preview: &str) -> String {
     let display_title = title.unwrap_or(path);
     format!("**{display_title}**\n`{path}`\n\n---\n\n{preview}")
@@ -15,7 +16,8 @@ pub fn format_hover_unresolved(target_raw: &str) -> String {
     format!("*Unresolved link:* `{target_raw}`")
 }
 
-/// First `max_lines` non-frontmatter body lines, joined with newlines.
+/// Returns the first `max_lines` lines of `body`, joined with `\n`.
+/// Callers are responsible for stripping any frontmatter before calling.
 pub fn extract_preview(body: &str, max_lines: usize) -> String {
     body.lines().take(max_lines).collect::<Vec<_>>().join("\n")
 }
