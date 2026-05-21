@@ -1313,70 +1313,14 @@ impl LspBackend {
     /// Reports unresolved links (no match) as warnings and ambiguous links
     /// (multiple matches) as informational diagnostics with related locations.
     async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
-        let mut diagnostics = Vec::new();
         let names = self.canonical_names.read().await;
-
-        for link in &doc.links {
-            if link.span.start == 0 && link.span.end == 0 {
-                continue; // skip property ref links
-            }
-            let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
-            let cn_str = canonical.as_str();
-
-            match names.get(cn_str) {
-                None => {
-                    // Unresolved link
-                    diagnostics.push(Diagnostic {
-                        range: doc.link_to_range(link),
-                        severity: Some(DiagnosticSeverity::WARNING),
-                        code: Some(NumberOrString::String("unresolved-link".into())),
-                        source: Some("clepsydra".into()),
-                        message: format!("Unresolved link: \"{}\"", link.target_raw),
-                        ..Default::default()
-                    });
-                }
-                Some(paths) if paths.len() > 1 => {
-                    // Ambiguous link — multiple pages share this canonical name
-                    let vault_root = self.state.vault.root();
-                    let related: Vec<DiagnosticRelatedInformation> = paths
-                        .iter()
-                        .filter_map(|p| {
-                            let vp = crate::vault::path::VaultPath::new(p).ok()?;
-                            let abs = vault_root.join(vp.as_str());
-                            let file_uri = Url::from_file_path(&abs).ok()?;
-                            Some(DiagnosticRelatedInformation {
-                                location: Location {
-                                    uri: file_uri,
-                                    range: Range::default(),
-                                },
-                                message: p.clone(),
-                            })
-                        })
-                        .collect();
-
-                    diagnostics.push(Diagnostic {
-                        range: doc.link_to_range(link),
-                        severity: Some(DiagnosticSeverity::INFORMATION),
-                        code: Some(NumberOrString::String("ambiguous-link".into())),
-                        source: Some("clepsydra".into()),
-                        message: format!(
-                            "Ambiguous link: \"{}\" matches {} pages",
-                            link.target_raw,
-                            paths.len()
-                        ),
-                        related_information: if related.is_empty() {
-                            None
-                        } else {
-                            Some(related)
-                        },
-                        ..Default::default()
-                    });
-                }
-                Some(_) => {
-                    // Single match — resolved, no diagnostic
-                }
-            }
-        }
+        let diagnostics = crate::lsp::diagnostics::compute_link_diagnostics(
+            &doc.links,
+            &names,
+            self.state.vault.root(),
+            doc,
+        );
+        drop(names);
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
             .await;
@@ -1501,5 +1445,26 @@ mod tests {
             panic!("expected markup hover");
         };
         assert!(value.contains("Target Page"));
+    }
+
+    #[tokio::test]
+    async fn did_save_reindexes_and_clears_dirty() {
+        let (backend, _tmp) = make_backend(&[("Note.md", "# Note\n\n[[Note]]\n")]);
+        let uri = uri_for(&backend, "Note.md");
+        open_doc(&backend, &uri, "# Note\n\n[[Note]]\n").await;
+        // mark dirty to verify did_save clears it
+        {
+            let mut docs = backend.documents.lock().await;
+            if let Some(d) = docs.get_mut(&uri) {
+                d.dirty = true;
+            }
+        }
+        let params = DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text: None,
+        };
+        backend.did_save(params).await; // drives index_page + resolve_links + republish
+        let docs = backend.documents.lock().await;
+        assert!(!docs.get(&uri).unwrap().dirty);
     }
 }
