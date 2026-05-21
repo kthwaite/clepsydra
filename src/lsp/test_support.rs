@@ -36,6 +36,11 @@ impl LanguageServer for ClientHolder {
 
 /// Construct a live `Client` for tests. tower-lsp does not expose a public
 /// `Client` constructor, so we capture it from a throwaway service.
+///
+/// Note: the returned `Client`'s transport is immediately closed, so outbound
+/// notifications (`publish_diagnostics`, `log_message`) silently drop. Tests
+/// that need to assert on *sent* notifications require a recording transport,
+/// not this helper.
 pub(crate) fn test_client() -> Client {
     let slot: Arc<OnceLock<Client>> = Arc::new(OnceLock::new());
     let slot2 = slot.clone();
@@ -95,9 +100,22 @@ pub(crate) fn uri_for(backend: &LspBackend, rel: &str) -> Url {
     Url::from_file_path(backend.state.vault.root().join(rel)).unwrap()
 }
 
-/// Open `text` as a document at `uri` and refresh the canonical-name cache.
+/// Open `text` as a document at `uri` (version 1) and refresh the
+/// canonical-name cache.
 pub(crate) async fn open_doc(backend: &LspBackend, uri: &Url, text: &str) {
+    open_doc_at_version(backend, uri, text, 1).await;
+}
+
+/// Open `text` as a document at `uri` with an explicit `version` and refresh
+/// the canonical-name cache.
+#[allow(dead_code)]
+pub(crate) async fn open_doc_at_version(
+    backend: &LspBackend,
+    uri: &Url,
+    text: &str,
+    version: i32,
+) {
     backend.refresh_canonical_names().await;
     let mut docs = backend.documents.lock().await;
-    docs.insert(uri.clone(), Document::from_text(text, 1));
+    docs.insert(uri.clone(), Document::from_text(text, version));
 }
