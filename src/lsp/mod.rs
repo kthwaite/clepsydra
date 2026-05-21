@@ -197,26 +197,9 @@ impl LanguageServer for LspBackend {
         };
 
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
-        let target_path: Option<String> = self
-            .state
-            .index
-            .with_index({
-                let cn = canonical.as_str().to_string();
-                move |index, _vault| {
-                    index
-                        .connection()
-                        .query_row(
-                            "SELECT p.path FROM canonical_names cn \
-                             JOIN pages p ON p.id = cn.page_id \
-                             WHERE cn.canonical_name = ?1 LIMIT 1",
-                            rusqlite::params![cn],
-                            |row| row.get(0),
-                        )
-                        .ok()
-                }
-            })
-            .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let target_path =
+            crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
+                .await;
 
         let target_path = match target_path {
             Some(p) => p,
@@ -1441,6 +1424,8 @@ pub async fn run_lsp(state: Arc<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::test_support::*;
+    use tower_lsp::lsp_types::*;
+    use tower_lsp::LanguageServer;
 
     #[tokio::test]
     async fn backend_constructs_and_opens_a_document() {
@@ -1449,5 +1434,28 @@ mod tests {
         open_doc(&backend, &uri, "# Note\n\nbody\n").await;
         let docs = backend.documents.lock().await;
         assert!(docs.contains_key(&uri));
+    }
+
+    #[tokio::test]
+    async fn goto_definition_resolves_wikilink() {
+        let (backend, _tmp) = make_backend(&[
+            ("Source.md", "# Source\n\nsee [[Target]]\n"),
+            ("Target.md", "# Target\n"),
+        ]);
+        let uri = uri_for(&backend, "Source.md");
+        open_doc(&backend, &uri, "# Source\n\nsee [[Target]]\n").await;
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 8 },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        let resp = backend.goto_definition(params).await.unwrap();
+        let Some(GotoDefinitionResponse::Scalar(loc)) = resp else {
+            panic!("expected a scalar location, got {resp:?}");
+        };
+        assert!(loc.uri.path().ends_with("Target.md"));
     }
 }
