@@ -12,7 +12,7 @@ pub async fn canonical_to_vault_path(index: &IndexHandle, canonical: &str) -> Op
                 .query_row(
                     "SELECT p.path FROM canonical_names cn \
                      JOIN pages p ON cn.page_id = p.id \
-                     WHERE cn.canonical_name = ?1",
+                     WHERE cn.canonical_name = ?1 LIMIT 1",
                     rusqlite::params![canonical],
                     |row| row.get::<_, String>(0),
                 )
