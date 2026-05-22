@@ -1387,6 +1387,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rename_from_frontmatter_renames_current_page() {
+        // Cursor in the frontmatter `title:` line renames the current page
+        // (Case B in resolve_rename_target) and rewrites referrers.
+        let text = "---\ntitle: Old Note\n---\nbody\n";
+        let (backend, _tmp) = make_backend(&[
+            ("Old Note.md", text),
+            ("A.md", "# A\n\n[[Old Note]]\n"),
+        ]);
+        let uri = uri_for(&backend, "Old Note.md");
+        open_doc(&backend, &uri, text).await;
+        let params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 1,
+                    character: 9,
+                }, // inside "title: Old Note" (frontmatter)
+            },
+            new_name: "New Note".to_string(),
+            work_done_progress_params: Default::default(),
+        };
+        let edit = backend
+            .rename(params)
+            .await
+            .unwrap()
+            .expect("workspace edit");
+        assert!(edit.document_changes.is_some());
+    }
+
+    #[tokio::test]
     async fn code_action_offers_create_page_for_unresolved_link() {
         let (backend, _tmp) = make_backend(&[("A.md", "# A\n\n[[Ghost]]\n")]);
         let uri = uri_for(&backend, "A.md");
