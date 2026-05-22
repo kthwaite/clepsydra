@@ -550,3 +550,116 @@ pub fn find_existing_by_zotero_key(conn: &rusqlite::Connection, zotero_key: &str
     )
     .ok()
 }
+
+/// Apply "source wins" field overwrites from a bibliographic entry onto an
+/// already-loaded page's metadata, in place. Pure: no filesystem I/O.
+pub fn apply_source_wins_to_meta(
+    meta: &mut crate::vault::page::PageMeta,
+    entry: &crate::vault::import::BibImportEntry,
+) {
+    meta.title = Some(entry.title.clone());
+
+    if let Some(year) = entry.year {
+        meta.extra.insert("year".to_string(), serde_yaml::Value::Number(year.into()));
+    }
+    if let Some(ref venue) = entry.venue {
+        meta.extra.insert("venue".to_string(), serde_yaml::Value::String(venue.clone()));
+    }
+    if let Some(ref publisher) = entry.publisher {
+        meta.extra.insert("publisher".to_string(), serde_yaml::Value::String(publisher.clone()));
+    }
+
+    let authors_val: Vec<serde_yaml::Value> = entry.authors.iter()
+        .map(|a| serde_yaml::Value::String(a.clone()))
+        .collect();
+    meta.extra.insert("authors".to_string(), serde_yaml::Value::Sequence(authors_val));
+
+    let mut ext_ids = serde_yaml::Mapping::new();
+    if let Some(ref doi) = entry.doi {
+        ext_ids.insert(
+            serde_yaml::Value::String("doi".to_string()),
+            serde_yaml::Value::String(doi.clone()),
+        );
+    }
+    if let Some(ref isbn) = entry.isbn {
+        ext_ids.insert(
+            serde_yaml::Value::String("isbn".to_string()),
+            serde_yaml::Value::String(isbn.clone()),
+        );
+    }
+    if let Some(ref arxiv) = entry.arxiv {
+        ext_ids.insert(
+            serde_yaml::Value::String("arxiv".to_string()),
+            serde_yaml::Value::String(arxiv.clone()),
+        );
+    }
+    if !ext_ids.is_empty() {
+        meta.extra.insert("external_ids".to_string(), serde_yaml::Value::Mapping(ext_ids));
+    }
+
+    if let Some(import_val) = meta.extra.get_mut("import") {
+        if let serde_yaml::Value::Mapping(import_map) = import_val {
+            import_map.insert(
+                serde_yaml::Value::String("imported_at".to_string()),
+                serde_yaml::Value::String(chrono::Utc::now().to_rfc3339()),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod source_wins_tests {
+    use super::*;
+    use crate::vault::academic::WorkType;
+    use crate::vault::import::BibImportEntry;
+    use crate::vault::page::PageMeta;
+
+    fn sample_entry() -> BibImportEntry {
+        BibImportEntry {
+            cite_key: "smith2020".into(),
+            title: "A Study".into(),
+            work_type: WorkType::Paper,
+            authors: vec!["Smith, J.".into()],
+            year: Some(2020),
+            venue: Some("Nature".into()),
+            publisher: None,
+            doi: Some("10.1/x".into()),
+            isbn: None,
+            arxiv: None,
+            url: None,
+        }
+    }
+
+    #[test]
+    fn overwrites_title_and_scalar_fields() {
+        let mut meta = PageMeta::new();
+        apply_source_wins_to_meta(&mut meta, &sample_entry());
+        assert_eq!(meta.title.as_deref(), Some("A Study"));
+        assert_eq!(meta.extra.get("year"), Some(&serde_yaml::Value::Number(2020.into())));
+        assert_eq!(meta.extra.get("venue"), Some(&serde_yaml::Value::String("Nature".into())));
+    }
+
+    #[test]
+    fn builds_external_ids_only_for_present_fields() {
+        let mut meta = PageMeta::new();
+        apply_source_wins_to_meta(&mut meta, &sample_entry());
+        let ext = meta.extra.get("external_ids").expect("external_ids present");
+        let serde_yaml::Value::Mapping(m) = ext else { panic!("expected mapping") };
+        assert!(m.contains_key(serde_yaml::Value::String("doi".into())));
+        assert!(!m.contains_key(serde_yaml::Value::String("isbn".into())));
+    }
+
+    #[test]
+    fn imported_at_updates_existing_import_mapping() {
+        let mut meta = PageMeta::new();
+        let mut import_map = serde_yaml::Mapping::new();
+        import_map.insert(
+            serde_yaml::Value::String("source".into()),
+            serde_yaml::Value::String("zotero".into()),
+        );
+        meta.extra.insert("import".into(), serde_yaml::Value::Mapping(import_map));
+        apply_source_wins_to_meta(&mut meta, &sample_entry());
+        let serde_yaml::Value::Mapping(m) = meta.extra.get("import").unwrap() else { panic!() };
+        assert!(m.contains_key(serde_yaml::Value::String("imported_at".into())));
+    }
+}

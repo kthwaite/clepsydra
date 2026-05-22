@@ -707,69 +707,12 @@ fn apply_source_wins(
     let vp = VaultPath::new(page_path)
         .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
     let abs_path = state.vault.resolve(&vp);
-
     let mut page = Page::from_file(&abs_path, vp.clone())
         .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-
-    // Overwrite mapped fields
-    page.meta.title = Some(entry.title.clone());
-
-    // Update work_meta fields via extra
-    if let Some(year) = entry.year {
-        page.meta.extra.insert("year".to_string(), serde_yaml::Value::Number(year.into()));
-    }
-    if let Some(ref venue) = entry.venue {
-        page.meta.extra.insert("venue".to_string(), serde_yaml::Value::String(venue.clone()));
-    }
-    if let Some(ref publisher) = entry.publisher {
-        page.meta.extra.insert("publisher".to_string(), serde_yaml::Value::String(publisher.clone()));
-    }
-
-    // Update authors
-    let authors_val: Vec<serde_yaml::Value> = entry.authors.iter()
-        .map(|a| serde_yaml::Value::String(a.clone()))
-        .collect();
-    page.meta.extra.insert("authors".to_string(), serde_yaml::Value::Sequence(authors_val));
-
-    // Update external_ids
-    let mut ext_ids = serde_yaml::Mapping::new();
-    if let Some(ref doi) = entry.doi {
-        ext_ids.insert(
-            serde_yaml::Value::String("doi".to_string()),
-            serde_yaml::Value::String(doi.clone()),
-        );
-    }
-    if let Some(ref isbn) = entry.isbn {
-        ext_ids.insert(
-            serde_yaml::Value::String("isbn".to_string()),
-            serde_yaml::Value::String(isbn.clone()),
-        );
-    }
-    if let Some(ref arxiv) = entry.arxiv {
-        ext_ids.insert(
-            serde_yaml::Value::String("arxiv".to_string()),
-            serde_yaml::Value::String(arxiv.clone()),
-        );
-    }
-    if !ext_ids.is_empty() {
-        page.meta.extra.insert("external_ids".to_string(), serde_yaml::Value::Mapping(ext_ids));
-    }
-
-    // Update import.imported_at timestamp
-    if let Some(import_val) = page.meta.extra.get_mut("import") {
-        if let serde_yaml::Value::Mapping(import_map) = import_val {
-            import_map.insert(
-                serde_yaml::Value::String("imported_at".to_string()),
-                serde_yaml::Value::String(Utc::now().to_rfc3339()),
-            );
-        }
-    }
-
-    // Write back (preserves body)
+    crate::vault::import_zotero::apply_source_wins_to_meta(&mut page.meta, entry);
     let content = write_page_content(&page.meta, &page.body);
     fs::write(&abs_path, content)
         .map_err(|e| ApiError::internal(format!("Failed to write page: {e}")))?;
-
     Ok(())
 }
 
