@@ -610,8 +610,6 @@ pub fn apply_source_wins_to_meta(
 #[cfg(test)]
 mod source_wins_tests {
     use super::*;
-    use crate::vault::academic::WorkType;
-    use crate::vault::import::BibImportEntry;
     use crate::vault::page::PageMeta;
 
     fn sample_entry() -> BibImportEntry {
@@ -661,5 +659,13 @@ mod source_wins_tests {
         apply_source_wins_to_meta(&mut meta, &sample_entry());
         let serde_yaml::Value::Mapping(m) = meta.extra.get("import").unwrap() else { panic!() };
         assert!(m.contains_key(serde_yaml::Value::String("imported_at".into())));
+    }
+
+    #[test]
+    fn imported_at_is_not_created_when_import_key_absent() {
+        // Fresh meta has no "import" mapping; the helper must not create one.
+        let mut meta = PageMeta::new();
+        apply_source_wins_to_meta(&mut meta, &sample_entry());
+        assert!(!meta.extra.contains_key("import"));
     }
 }
