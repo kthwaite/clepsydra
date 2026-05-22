@@ -560,67 +560,9 @@ impl LanguageServer for LspBackend {
         // ---------------------------------------------------------------
         // 1. Determine what is being renamed and resolve old vault path
         // ---------------------------------------------------------------
-        let (old_vp, _current_title) = {
-            let docs = self.documents.lock().await;
-            let doc = match docs.get(&uri) {
-                Some(d) => d,
-                None => return Ok(None),
-            };
-
-            // Case A: cursor on a wikilink
-            if let Some(link) = doc.link_at_position(pos) {
-                if link.kind == crate::vault::link::LinkKind::Wiki {
-                    let target_raw = link.target_raw.clone();
-                    drop(docs);
-
-                    // Resolve target_raw to a VaultPath via canonical name lookup
-                    let canonical =
-                        crate::vault::canonical::CanonicalName::from_title(&target_raw);
-                    let target_path: Option<String> = self
-                        .state
-                        .index
-                        .with_index({
-                            let cn = canonical.as_str().to_string();
-                            move |index, _| {
-                                index
-                                    .connection()
-                                    .query_row(
-                                        "SELECT p.path FROM canonical_names cn \
-                                         JOIN pages p ON p.id = cn.page_id \
-                                         WHERE cn.canonical_name = ?1 LIMIT 1",
-                                        rusqlite::params![cn],
-                                        |row| row.get(0),
-                                    )
-                                    .ok()
-                            }
-                        })
-                        .await
-                        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-
-                    match target_path {
-                        Some(p) => {
-                            let vp = crate::vault::path::VaultPath::new(&p)
-                                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-                            (vp, target_raw)
-                        }
-                        None => return Ok(None),
-                    }
-                } else {
-                    return Ok(None);
-                }
-            }
-            // Case B: cursor in frontmatter (rename current page)
-            else if doc.position_to_body_byte_offset(pos).is_none() {
-                let title = doc.meta.title.clone().unwrap_or_default();
-                drop(docs);
-
-                match self.uri_to_vault_path(&uri) {
-                    Some(vp) => (vp, title),
-                    None => return Ok(None),
-                }
-            } else {
-                return Ok(None);
-            }
+        let old_vp = match self.resolve_rename_target(&uri, pos).await? {
+            Some(vp) => vp,
+            None => return Ok(None),
         };
 
         // ---------------------------------------------------------------
@@ -687,34 +629,12 @@ impl LanguageServer for LspBackend {
         let old_uri = Url::from_file_path(&old_abs)
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-        let target_content = {
-            let docs = self.documents.lock().await;
-            docs.get(&old_uri)
-                .map(|doc| (doc.version, doc.rope.to_string()))
-        };
-
-        let (target_version, target_text) = match target_content {
-            Some((v, t)) => (Some(v), t),
-            None => match tokio::fs::read_to_string(&old_abs).await {
-                Ok(t) => (None, t),
-                Err(_) => return Ok(None),
-            },
-        };
-
+        match self
+            .build_rename_title_edit(&old_uri, &old_abs, &new_name)
+            .await?
         {
-            let new_text = rename::update_frontmatter_title(&target_text, &new_name);
-            let full_range = rename::full_document_range(&target_text);
-            let edit = TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier {
-                    uri: old_uri.clone(),
-                    version: target_version,
-                },
-                edits: vec![OneOf::Left(TextEdit {
-                    range: full_range,
-                    new_text,
-                })],
-            };
-            ops.push(DocumentChangeOperation::Edit(edit));
+            Some(op) => ops.push(op),
+            None => return Ok(None),
         }
 
         // 6b. File rename operation (if path changes)
@@ -733,47 +653,10 @@ impl LanguageServer for LspBackend {
         }
 
         // 6c. TextDocumentEdit on each referring page — rewrite wikilinks
-        for ref_path_str in &referring_paths {
-            let ref_vp = match crate::vault::path::VaultPath::new(ref_path_str) {
-                Ok(vp) => vp,
-                Err(_) => continue,
-            };
-            let ref_abs = self.state.vault.resolve(&ref_vp);
-            let ref_uri = match Url::from_file_path(&ref_abs) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-
-            // Get the document content and version
-            let (ref_version, ref_text) = {
-                let docs = self.documents.lock().await;
-                if let Some(doc) = docs.get(&ref_uri) {
-                    (Some(doc.version), doc.rope.to_string())
-                } else {
-                    drop(docs);
-                    match tokio::fs::read_to_string(&ref_abs).await {
-                        Ok(t) => (None, t),
-                        Err(_) => continue,
-                    }
-                }
-            };
-
-            // Build a throwaway Document to find links
-            let ref_doc = document::Document::from_text(&ref_text, 0);
-            let text_edits =
-                rename::build_wikilink_text_edits(&ref_doc, &old_canonical_names, &new_name);
-
-            if !text_edits.is_empty() {
-                let edit = TextDocumentEdit {
-                    text_document: OptionalVersionedTextDocumentIdentifier {
-                        uri: ref_uri,
-                        version: ref_version,
-                    },
-                    edits: text_edits,
-                };
-                ops.push(DocumentChangeOperation::Edit(edit));
-            }
-        }
+        ops.extend(
+            self.build_rename_referrer_edits(&referring_paths, &old_canonical_names, &new_name)
+                .await,
+        );
 
         if ops.is_empty() {
             return Ok(None);
@@ -934,6 +817,171 @@ impl LspBackend {
             Ok(Err(e)) => tracing::error!("failed to load canonical names: {e}"),
             Err(e) => tracing::error!("index thread error loading canonical names: {e}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // rename sub-methods
+    // -----------------------------------------------------------------------
+
+    /// Resolve the vault path being renamed: the wikilink target under the
+    /// cursor, or the current page when the cursor is in frontmatter.
+    ///
+    /// Returns `Ok(None)` when the cursor is not on something renamable
+    /// (caller returns `Ok(None)`).
+    async fn resolve_rename_target(
+        &self,
+        uri: &Url,
+        pos: Position,
+    ) -> Result<Option<crate::vault::path::VaultPath>> {
+        let docs = self.documents.lock().await;
+        let doc = match docs.get(uri) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        // Case A: cursor on a wikilink
+        if let Some(link) = doc.link_at_position(pos) {
+            if link.kind == crate::vault::link::LinkKind::Wiki {
+                let target_raw = link.target_raw.clone();
+                drop(docs);
+
+                // Resolve target_raw to a VaultPath via canonical name lookup
+                let canonical =
+                    crate::vault::canonical::CanonicalName::from_title(&target_raw);
+                let target_path: Option<String> = self
+                    .state
+                    .index
+                    .with_index({
+                        let cn = canonical.as_str().to_string();
+                        move |index, _| {
+                            index
+                                .connection()
+                                .query_row(
+                                    "SELECT p.path FROM canonical_names cn \
+                                     JOIN pages p ON p.id = cn.page_id \
+                                     WHERE cn.canonical_name = ?1 LIMIT 1",
+                                    rusqlite::params![cn],
+                                    |row| row.get(0),
+                                )
+                                .ok()
+                        }
+                    })
+                    .await
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+
+                match target_path {
+                    Some(p) => {
+                        let vp = crate::vault::path::VaultPath::new(&p)
+                            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                        Ok(Some(vp))
+                    }
+                    None => Ok(None),
+                }
+            } else {
+                Ok(None)
+            }
+        }
+        // Case B: cursor in frontmatter (rename current page)
+        else if doc.position_to_body_byte_offset(pos).is_none() {
+            drop(docs);
+            match self.uri_to_vault_path(uri) {
+                Some(vp) => Ok(Some(vp)),
+                None => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Build the frontmatter-title `TextDocumentEdit` for the page being
+    /// renamed.  Returns `Ok(None)` if the page content cannot be read
+    /// (caller returns `Ok(None)`).
+    async fn build_rename_title_edit(
+        &self,
+        old_uri: &Url,
+        old_abs: &std::path::Path,
+        new_name: &str,
+    ) -> Result<Option<DocumentChangeOperation>> {
+        let target_content = {
+            let docs = self.documents.lock().await;
+            docs.get(old_uri)
+                .map(|doc| (doc.version, doc.rope.to_string()))
+        };
+
+        let (target_version, target_text) = match target_content {
+            Some((v, t)) => (Some(v), t),
+            None => match tokio::fs::read_to_string(old_abs).await {
+                Ok(t) => (None, t),
+                Err(_) => return Ok(None),
+            },
+        };
+
+        let new_text = rename::update_frontmatter_title(&target_text, new_name);
+        let full_range = rename::full_document_range(&target_text);
+        let edit = TextDocumentEdit {
+            text_document: OptionalVersionedTextDocumentIdentifier {
+                uri: old_uri.clone(),
+                version: target_version,
+            },
+            edits: vec![OneOf::Left(TextEdit {
+                range: full_range,
+                new_text,
+            })],
+        };
+        Ok(Some(DocumentChangeOperation::Edit(edit)))
+    }
+
+    /// Build the wikilink-rewrite edits for every referring page.  Pages that
+    /// cannot be resolved/read, or that yield no edits, are skipped silently.
+    async fn build_rename_referrer_edits(
+        &self,
+        referring_paths: &[String],
+        old_canonical_names: &[String],
+        new_name: &str,
+    ) -> Vec<DocumentChangeOperation> {
+        let mut ops: Vec<DocumentChangeOperation> = Vec::new();
+        for ref_path_str in referring_paths {
+            let ref_vp = match crate::vault::path::VaultPath::new(ref_path_str) {
+                Ok(vp) => vp,
+                Err(_) => continue,
+            };
+            let ref_abs = self.state.vault.resolve(&ref_vp);
+            let ref_uri = match Url::from_file_path(&ref_abs) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+
+            // Get the document content and version
+            let (ref_version, ref_text) = {
+                let docs = self.documents.lock().await;
+                if let Some(doc) = docs.get(&ref_uri) {
+                    (Some(doc.version), doc.rope.to_string())
+                } else {
+                    drop(docs);
+                    match tokio::fs::read_to_string(&ref_abs).await {
+                        Ok(t) => (None, t),
+                        Err(_) => continue,
+                    }
+                }
+            };
+
+            // Build a throwaway Document to find links
+            let ref_doc = document::Document::from_text(&ref_text, 0);
+            let text_edits =
+                rename::build_wikilink_text_edits(&ref_doc, old_canonical_names, new_name);
+
+            if !text_edits.is_empty() {
+                let edit = TextDocumentEdit {
+                    text_document: OptionalVersionedTextDocumentIdentifier {
+                        uri: ref_uri,
+                        version: ref_version,
+                    },
+                    edits: text_edits,
+                };
+                ops.push(DocumentChangeOperation::Edit(edit));
+            }
+        }
+        ops
     }
 
     /// Complete wikilink targets by prefix matching against canonical names.
