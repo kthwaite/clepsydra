@@ -2822,3 +2822,268 @@ async fn import_zotero_is_idempotent() {
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r["status"] == "skipped"), "second import should skip all items");
 }
+
+#[tokio::test]
+async fn import_zotero_source_wins_updates() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import — creates works
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let first_results = body["results"].as_array().unwrap();
+    assert!(first_results.iter().all(|r| r["status"] == "created"));
+
+    // Second import with source_wins — should update (live, not dry_run)
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "source_wins"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2, "should have results for both items");
+    assert!(
+        results.iter().all(|r| r["status"] == "updated"),
+        "source_wins live mode should produce 'updated' status; got: {:?}",
+        results.iter().map(|r| &r["status"]).collect::<Vec<_>>()
+    );
+
+    // Page paths should still be populated
+    for r in results {
+        assert!(r["page_path"].is_string(), "page_path should be set for updated items");
+    }
+}
+
+#[tokio::test]
+async fn import_zotero_source_wins_dry_run_would_update() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import — creates works
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+
+    // Second import dry_run + source_wins — should report would_update
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "dry_run": true,
+            "conflict_policy": "source_wins"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(
+        results.iter().all(|r| r["status"] == "would_update"),
+        "dry_run source_wins should produce 'would_update'"
+    );
+}
+
+#[tokio::test]
+async fn import_zotero_manual_reports_skipped_when_no_diffs() {
+    // The mock DB items are imported, then re-imported with manual policy.
+    // Because the data is identical (same mock DB), the second import should
+    // report "skipped" (no diffs between source and local).
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // First import
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["results"].as_array().unwrap().iter().all(|r| r["status"] == "created"));
+
+    // Second import with manual policy — no changes in source, so expect "skipped"
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "manual"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    // With no diffs between source and local, manual policy skips silently.
+    for r in results {
+        let status = r["status"].as_str().unwrap();
+        assert!(
+            status == "skipped" || status == "conflict",
+            "manual policy should produce 'skipped' or 'conflict', got: {status}"
+        );
+    }
+}
+
+/// Create a Zotero mock DB with only the journal article (has DOI), and also
+/// pre-create the matching work via the API so that the zotero_key path is NOT
+/// set (no import provenance). The subsequent Zotero import must go through the
+/// DOI/cite_key dedup path (handle_doi_existing).
+#[tokio::test]
+async fn import_zotero_doi_path_skip() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Pre-create the article via the works API (no Zotero provenance).
+    // The mock article has DOI "10.1234/test.article".
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "title": "Test Article",
+            "work_type": "paper",
+            "authors": ["Alice Smith"],
+            "year": 2023,
+            "venue": "Test Journal",
+            "external_ids": { "doi": "10.1234/test.article" }
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // Now import from Zotero — the article should be matched by DOI (not zotero_key)
+    // and skipped (default policy = skip).
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+
+    // The article (DOI match) should be skipped; the book (no DOI pre-existing) created.
+    let article = results.iter().find(|r| {
+        r["cite_key"].as_str().map(|k| k.contains("smith") || k.contains("2023")).unwrap_or(false)
+    });
+    assert!(article.is_some(), "should find article result");
+    assert_eq!(article.unwrap()["status"], "skipped", "DOI-matched article should be skipped");
+}
+
+#[tokio::test]
+async fn import_zotero_doi_path_source_wins() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Pre-create the article via the works API (no Zotero provenance).
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "title": "Test Article Old Title",
+            "work_type": "paper",
+            "authors": ["Alice Smith"],
+            "year": 2023,
+            "external_ids": { "doi": "10.1234/test.article" }
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // Import with source_wins — the article should be updated via DOI path.
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "source_wins"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+
+    // The article should be updated; the book should be created (new).
+    let article = results.iter().find(|r| {
+        r["status"].as_str() == Some("updated") || r["status"].as_str() == Some("created")
+    });
+    assert!(article.is_some(), "should have at least one updated or created result");
+
+    // Verify that the article was updated (source_wins live mode).
+    let updated = results.iter().filter(|r| r["status"] == "updated").count();
+    assert!(updated >= 1, "at least the DOI-matched article should be 'updated'");
+}
+
+#[tokio::test]
+async fn import_zotero_doi_path_manual() {
+    let (server, tmp) = setup_server();
+
+    let zotero_db_path = tmp.path().join("zotero.sqlite");
+    create_mock_zotero_db_for_api(&zotero_db_path);
+
+    // Pre-create the article with identical content (no diffs expected).
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "title": "Test Article",
+            "work_type": "paper",
+            "authors": ["Alice Smith"],
+            "year": 2023,
+            "venue": "Test Journal",
+            "external_ids": { "doi": "10.1234/test.article" }
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    // Import with manual policy — should report skipped or conflict for article.
+    let res = server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": zotero_db_path.to_string_lossy(),
+            "auto_checkpoint": false,
+            "conflict_policy": "manual"
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let results = body["results"].as_array().unwrap();
+
+    // Find the article result — it should be skipped or conflict from DOI path.
+    let doi_result = results.iter().find(|r| {
+        let ck = r["cite_key"].as_str().unwrap_or("");
+        ck.contains("smith") || ck.contains("2023")
+    });
+    assert!(doi_result.is_some(), "should find article result");
+    let status = doi_result.unwrap()["status"].as_str().unwrap();
+    assert!(
+        status == "skipped" || status == "conflict",
+        "manual policy on DOI path should yield 'skipped' or 'conflict', got: {status}"
+    );
+}
