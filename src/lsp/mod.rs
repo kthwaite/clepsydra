@@ -541,45 +541,10 @@ impl LanguageServer for LspBackend {
             let line_idx = pos.line as usize;
             if line_idx < doc.rope.len_lines() {
                 let line_text = doc.rope.line(line_idx).to_string();
-                let trimmed = line_text.trim_start();
-                if let Some(rest) = trimmed.strip_prefix("title:") {
-                    let value = rest.trim();
-                    // Strip surrounding quotes if present
-                    let title_value = if (value.starts_with('"') && value.ends_with('"'))
-                        || (value.starts_with('\'') && value.ends_with('\''))
-                    {
-                        &value[1..value.len() - 1]
-                    } else {
-                        value.trim_end_matches('\n')
-                    };
-
-                    // Compute the range of the title value on this line.
-                    let value_start_in_line = if (value.starts_with('"') && value.ends_with('"'))
-                        || (value.starts_with('\'') && value.ends_with('\''))
-                    {
-                        // Position after the opening quote
-                        line_text.find(value).unwrap_or(0) + 1
-                    } else {
-                        // Position at start of the trimmed value
-                        line_text.find(value).unwrap_or(0)
-                    };
-                    let value_end_in_line = value_start_in_line + title_value.len();
-
-                    let range = Range {
-                        start: Position {
-                            line: pos.line,
-                            character: value_start_in_line as u32,
-                        },
-                        end: Position {
-                            line: pos.line,
-                            character: value_end_in_line as u32,
-                        },
-                    };
-
-                    return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
-                        range,
-                        placeholder: title_value.to_string(),
-                    }));
+                if let Some(response) =
+                    rename::frontmatter_title_rename_range(&line_text, pos.line)
+                {
+                    return Ok(Some(response));
                 }
             }
         }
@@ -1483,5 +1448,40 @@ mod tests {
         let refs = backend.references(params).await.unwrap().unwrap_or_default();
         assert!(refs.iter().any(|l| l.uri.path().ends_with("B.md")));
         assert!(refs.iter().any(|l| l.uri.path().ends_with("A.md")));
+    }
+
+    #[tokio::test]
+    async fn prepare_rename_on_wikilink() {
+        let (backend, _tmp) = make_backend(&[
+            ("A.md", "# A\n\n[[Target]]\n"),
+            ("Target.md", "# Target\n"),
+        ]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, "# A\n\n[[Target]]\n").await;
+        let params = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position { line: 2, character: 4 },
+        };
+        assert!(backend.prepare_rename(params).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn prepare_rename_on_frontmatter_title() {
+        let text = "---\ntitle: Old Title\n---\nbody\n";
+        let (backend, _tmp) = make_backend(&[("A.md", text)]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, text).await;
+        let params = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position { line: 1, character: 9 },
+        };
+        let resp = backend.prepare_rename(params).await.unwrap();
+        assert!(resp.is_some());
+        match resp.unwrap() {
+            PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. } => {
+                assert_eq!(placeholder, "Old Title");
+            }
+            _ => panic!("expected RangeWithPlaceholder"),
+        }
     }
 }

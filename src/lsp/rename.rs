@@ -1,5 +1,6 @@
 use crate::vault::canonical::CanonicalName;
 use crate::vault::page::{parse_or_repair_frontmatter, write_page_content};
+use tower_lsp::lsp_types::{Position, PrepareRenameResponse, Range};
 
 /// Rewrite a wikilink span text with a new target, preserving display text.
 ///
@@ -39,6 +40,58 @@ pub fn update_frontmatter_title(full_text: &str, new_title: &str) -> String {
     write_page_content(&meta, &body)
 }
 
+/// If `line_text` is a frontmatter `title:` line, return the rename range and
+/// placeholder for the (possibly quoted) title value on `line_number`.
+///
+/// Replicates the exact logic from `prepare_rename` Case 2 so the inline
+/// arithmetic can be replaced with a single call here.
+pub fn frontmatter_title_rename_range(
+    line_text: &str,
+    line_number: u32,
+) -> Option<PrepareRenameResponse> {
+    let trimmed = line_text.trim_start();
+    let rest = trimmed.strip_prefix("title:")?;
+    let value = rest.trim();
+
+    // Strip surrounding quotes if present (replicates prepare_rename exactly,
+    // including the absence of a len >= 2 guard on the slice).
+    let title_value = if (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value.trim_end_matches('\n')
+    };
+
+    // Compute character offset of the title value within line_text.
+    let value_start_in_line = if (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''))
+    {
+        // Position after the opening quote
+        line_text.find(value).unwrap_or(0) + 1
+    } else {
+        // Position at start of the trimmed value
+        line_text.find(value).unwrap_or(0)
+    };
+    let value_end_in_line = value_start_in_line + title_value.len();
+
+    let range = Range {
+        start: Position {
+            line: line_number,
+            character: value_start_in_line as u32,
+        },
+        end: Position {
+            line: line_number,
+            character: value_end_in_line as u32,
+        },
+    };
+
+    Some(PrepareRenameResponse::RangeWithPlaceholder {
+        range,
+        placeholder: title_value.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +129,39 @@ mod tests {
         assert!(new_text.contains("title: New Title"));
         assert!(new_text.contains("Body text here."));
         assert!(!new_text.contains("Old Title"));
+    }
+
+    #[test]
+    fn frontmatter_title_unquoted() {
+        let r = frontmatter_title_rename_range("title: My Note", 0).unwrap();
+        match r {
+            PrepareRenameResponse::RangeWithPlaceholder { placeholder, range } => {
+                assert_eq!(placeholder, "My Note");
+                assert_eq!(range.start.line, 0);
+                assert_eq!(range.start.character, 7); // "title: " is 7 chars
+                assert_eq!(range.end.character, 7 + 7); // "My Note" is 7 chars
+            }
+            _ => panic!("expected RangeWithPlaceholder"),
+        }
+    }
+
+    #[test]
+    fn frontmatter_title_double_quoted() {
+        let r = frontmatter_title_rename_range("title: \"My Note\"", 3).unwrap();
+        match r {
+            PrepareRenameResponse::RangeWithPlaceholder { placeholder, range } => {
+                assert_eq!(placeholder, "My Note");
+                assert_eq!(range.start.line, 3);
+                // "title: \"" is 8 chars; value starts at char 8
+                assert_eq!(range.start.character, 8);
+                assert_eq!(range.end.character, 8 + 7); // "My Note" is 7 chars
+            }
+            _ => panic!("expected RangeWithPlaceholder"),
+        }
+    }
+
+    #[test]
+    fn non_title_line_returns_none() {
+        assert!(frontmatter_title_rename_range("tags: [a]", 0).is_none());
     }
 }
