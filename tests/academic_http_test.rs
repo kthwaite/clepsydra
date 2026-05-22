@@ -10,7 +10,9 @@ async fn fetch_doi_parses_a_crossref_fixture() {
         "message": {
             "title": ["A Study of Things"],
             "DOI": "10.1234/abcd",
-            "issued": { "date-parts": [[2021]] },
+            // parse_crossref_response reads published-print/published-online,
+            // not "issued" — use the key the parser actually consumes.
+            "published-print": { "date-parts": [[2021]] },
             "author": [{ "given": "Ada", "family": "Lovelace" }]
         }
     });
@@ -22,6 +24,7 @@ async fn fetch_doi_parses_a_crossref_fixture() {
     let json = fetch_doi("10.1234/abcd", &server.uri()).await.unwrap();
     let entry = parse_crossref_response(&json).unwrap();
     assert_eq!(entry.title, "A Study of Things");
+    assert_eq!(entry.year, Some(2021));
 }
 
 #[tokio::test]
@@ -40,8 +43,7 @@ async fn fetch_isbn_resolves_edition_and_authors() {
     let server = MockServer::start().await;
     let edition = serde_json::json!({
         "title": "Structure and Interpretation",
-        "authors": [{ "key": "/authors/OL1A" }],
-        "isbn_13": ["9780262011532"]
+        "authors": [{ "key": "/authors/OL1A" }]
     });
     Mock::given(method("GET"))
         .and(path("/isbn/9780262011532.json"))

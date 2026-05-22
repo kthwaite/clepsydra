@@ -60,6 +60,8 @@ pub fn parse_openlibrary_response(
     })
 }
 
+/// Production base URL for the Open Library API. Tests override this with a
+/// mock server URL.
 pub const DEFAULT_OPENLIBRARY_BASE: &str = "https://openlibrary.org";
 
 /// Fetch book metadata from the Open Library API by ISBN.

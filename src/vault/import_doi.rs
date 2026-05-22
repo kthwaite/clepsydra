@@ -102,6 +102,8 @@ pub fn parse_crossref_response(json: &serde_json::Value) -> Result<BibImportEntr
     })
 }
 
+/// Production base URL for the Crossref REST API. Tests override this with a
+/// mock server URL.
 pub const DEFAULT_CROSSREF_BASE: &str = "https://api.crossref.org";
 
 /// Fetch metadata for a DOI from the Crossref API.
