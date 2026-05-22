@@ -60,13 +60,15 @@ pub fn parse_openlibrary_response(
     })
 }
 
+pub const DEFAULT_OPENLIBRARY_BASE: &str = "https://openlibrary.org";
+
 /// Fetch book metadata from the Open Library API by ISBN.
 /// Returns (edition_json, resolved_author_names).
-pub async fn fetch_isbn(isbn: &str) -> Result<(serde_json::Value, Vec<String>), String> {
+pub async fn fetch_isbn(isbn: &str, base_url: &str) -> Result<(serde_json::Value, Vec<String>), String> {
     let client = reqwest::Client::new();
 
     // 1. Fetch edition data
-    let edition_url = format!("https://openlibrary.org/isbn/{isbn}.json");
+    let edition_url = format!("{base_url}/isbn/{isbn}.json");
     let edition_resp = client
         .get(&edition_url)
         .header(
@@ -91,7 +93,7 @@ pub async fn fetch_isbn(isbn: &str) -> Result<(serde_json::Value, Vec<String>), 
     if let Some(authors) = edition.get("authors").and_then(|a| a.as_array()) {
         for author_ref in authors {
             if let Some(key) = author_ref.get("key").and_then(|k| k.as_str()) {
-                let author_url = format!("https://openlibrary.org{key}.json");
+                let author_url = format!("{base_url}{key}.json");
                 if let Ok(resp) = client
                     .get(&author_url)
                     .header(

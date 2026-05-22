@@ -554,7 +554,7 @@ pub async fn import_doi(
     }
 
     // 2. Fetch from Crossref
-    let json = crate::vault::import_doi::fetch_doi(&req.doi)
+    let json = crate::vault::import_doi::fetch_doi(&req.doi, crate::vault::import_doi::DEFAULT_CROSSREF_BASE)
         .await
         .map_err(|e| ApiError::bad_request(format!("DOI lookup failed: {e}")))?;
 
@@ -649,7 +649,7 @@ pub async fn import_isbn_handler(
     }
 
     // 2. Fetch from Open Library
-    let (edition_json, author_names) = crate::vault::import_isbn::fetch_isbn(&req.isbn)
+    let (edition_json, author_names) = crate::vault::import_isbn::fetch_isbn(&req.isbn, crate::vault::import_isbn::DEFAULT_OPENLIBRARY_BASE)
         .await
         .map_err(|e| ApiError::bad_request(format!("ISBN lookup failed: {e}")))?;
 

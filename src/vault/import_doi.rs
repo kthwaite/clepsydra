@@ -102,9 +102,11 @@ pub fn parse_crossref_response(json: &serde_json::Value) -> Result<BibImportEntr
     })
 }
 
+pub const DEFAULT_CROSSREF_BASE: &str = "https://api.crossref.org";
+
 /// Fetch metadata for a DOI from the Crossref API.
-pub async fn fetch_doi(doi: &str) -> Result<serde_json::Value, String> {
-    let url = format!("https://api.crossref.org/works/{doi}");
+pub async fn fetch_doi(doi: &str, base_url: &str) -> Result<serde_json::Value, String> {
+    let url = format!("{base_url}/works/{doi}");
     let client = reqwest::Client::new();
     let resp = client
         .get(&url)
