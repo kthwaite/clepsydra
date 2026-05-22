@@ -684,12 +684,23 @@ mod decide_tests {
             decide_item_action(false, ConflictPolicy::Skip, true, false),
             ItemAction { status: "would_create", kind: ItemActionKind::ReportOnly }
         );
+        // Policy is irrelevant when the item does not exist yet.
+        assert_eq!(
+            decide_item_action(false, ConflictPolicy::Manual, false, false),
+            ItemAction { status: "created", kind: ItemActionKind::Create }
+        );
     }
 
     #[test]
     fn existing_skip_policy() {
-        assert_eq!(decide_item_action(true, ConflictPolicy::Skip, false, false).status, "skipped");
-        assert_eq!(decide_item_action(true, ConflictPolicy::Skip, true, false).status, "would_skip");
+        assert_eq!(
+            decide_item_action(true, ConflictPolicy::Skip, false, false),
+            ItemAction { status: "skipped", kind: ItemActionKind::ReportOnly }
+        );
+        assert_eq!(
+            decide_item_action(true, ConflictPolicy::Skip, true, false),
+            ItemAction { status: "would_skip", kind: ItemActionKind::ReportOnly }
+        );
     }
 
     #[test]
