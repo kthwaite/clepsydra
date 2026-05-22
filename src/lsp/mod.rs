@@ -626,13 +626,8 @@ impl LanguageServer for LspBackend {
         // ---------------------------------------------------------------
         // 2. Compute new VaultPath
         // ---------------------------------------------------------------
-        let new_filename_vp = crate::vault::path::VaultPath::from_title(&new_name);
-        let new_vp_str = match old_vp.parent() {
-            Some(parent) => format!("{}/{}", parent, new_filename_vp.as_str()),
-            None => new_filename_vp.as_str().to_string(),
-        };
-        let new_vp = crate::vault::path::VaultPath::new(&new_vp_str)
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let new_vp = rename::compute_new_vault_path(&old_vp, &new_name)
+            .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
 
         // ---------------------------------------------------------------
         // 3. Check for conflicts
@@ -649,30 +644,17 @@ impl LanguageServer for LspBackend {
         // ---------------------------------------------------------------
         // 4. Get all canonical names for the old page
         // ---------------------------------------------------------------
-        let old_canonical_names: Vec<String> = self
-            .state
-            .index
-            .with_index({
-                let old_path = old_vp.as_str().to_string();
-                move |index, _| -> std::result::Result<Vec<String>, rusqlite::Error> {
-                    let page_id: String = index.connection().query_row(
-                        "SELECT id FROM pages WHERE path = ?1",
-                        rusqlite::params![old_path],
-                        |row| row.get(0),
-                    )?;
-                    let mut stmt = index
-                        .connection()
-                        .prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
-                    let names = stmt
-                        .query_map(rusqlite::params![page_id], |row| row.get(0))?
-                        .filter_map(|r| r.ok())
-                        .collect();
-                    Ok(names)
-                }
-            })
-            .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let old_canonical_names: Vec<String> = {
+            let old_path = old_vp.as_str().to_string();
+            self.state
+                .index
+                .with_index(move |index, _| {
+                    rename::fetch_canonical_names_for_path(index.connection(), &old_path)
+                })
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+        };
 
         if old_canonical_names.is_empty() {
             return Ok(None);
@@ -681,74 +663,18 @@ impl LanguageServer for LspBackend {
         // ---------------------------------------------------------------
         // 5. Find all referring pages via index
         // ---------------------------------------------------------------
-        let referring_paths: Vec<String> = self
-            .state
-            .index
-            .with_index({
-                let old_path = old_vp.as_str().to_string();
-                let cn_list = old_canonical_names.clone();
-                move |index, _| -> std::result::Result<Vec<String>, rusqlite::Error> {
-                    let page_id: Option<String> = index
-                        .connection()
-                        .query_row(
-                            "SELECT id FROM pages WHERE path = ?1",
-                            rusqlite::params![old_path],
-                            |row| row.get(0),
-                        )
-                        .ok();
-
-                    let mut source_paths =
-                        std::collections::HashSet::<String>::new();
-
-                    if let Some(ref pid) = page_id {
-                        // Resolved links targeting this page
-                        let mut stmt = index.connection().prepare(
-                            "SELECT DISTINCT p.path FROM links l \
-                             JOIN pages p ON l.source_id = p.id \
-                             WHERE l.target_id = ?1",
-                        )?;
-                        let paths: Vec<String> = stmt
-                            .query_map(rusqlite::params![pid], |row| row.get(0))?
-                            .filter_map(|r| r.ok())
-                            .collect();
-                        source_paths.extend(paths);
-                    }
-
-                    // Unresolved links matching canonical names
-                    for cn in &cn_list {
-                        let mut stmt = index.connection().prepare(
-                            "SELECT DISTINCT p.path FROM links l \
-                             JOIN pages p ON l.source_id = p.id \
-                             WHERE l.target_canonical = ?1 AND l.target_id IS NULL",
-                        )?;
-                        let paths: Vec<String> = stmt
-                            .query_map(rusqlite::params![cn], |row| row.get(0))?
-                            .filter_map(|r| r.ok())
-                            .collect();
-                        source_paths.extend(paths);
-                    }
-
-                    // Remove self
-                    if let Some(ref pid) = page_id {
-                        let self_path: Option<String> = index
-                            .connection()
-                            .query_row(
-                                "SELECT path FROM pages WHERE id = ?1",
-                                rusqlite::params![pid],
-                                |row| row.get(0),
-                            )
-                            .ok();
-                        if let Some(sp) = self_path {
-                            source_paths.remove(&sp);
-                        }
-                    }
-
-                    Ok(source_paths.into_iter().collect())
-                }
-            })
-            .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let referring_paths: Vec<String> = {
+            let old_path = old_vp.as_str().to_string();
+            let cn_list = old_canonical_names.clone();
+            self.state
+                .index
+                .with_index(move |index, _| {
+                    rename::find_referring_paths(index.connection(), &old_path, &cn_list)
+                })
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+        };
 
         // ---------------------------------------------------------------
         // 6. Build DocumentChanges::Operations
@@ -777,21 +703,7 @@ impl LanguageServer for LspBackend {
 
         {
             let new_text = rename::update_frontmatter_title(&target_text, &new_name);
-            let full_range = {
-                let line_count = target_text.lines().count();
-                let last_line = target_text.lines().last().unwrap_or("");
-                Range {
-                    start: Position {
-                        line: 0,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: line_count.saturating_sub(1) as u32,
-                        character: last_line.len() as u32,
-                    },
-                }
-            };
-
+            let full_range = rename::full_document_range(&target_text);
             let edit = TextDocumentEdit {
                 text_document: OptionalVersionedTextDocumentIdentifier {
                     uri: old_uri.clone(),
@@ -848,29 +760,8 @@ impl LanguageServer for LspBackend {
 
             // Build a throwaway Document to find links
             let ref_doc = document::Document::from_text(&ref_text, 0);
-
-            let mut text_edits: Vec<OneOf<TextEdit, AnnotatedTextEdit>> = Vec::new();
-            for link in &ref_doc.links {
-                // Skip property ref links (span 0..0)
-                if link.span.start == 0 && link.span.end == 0 {
-                    continue;
-                }
-                if link.kind != crate::vault::link::LinkKind::Wiki {
-                    continue;
-                }
-                if !rename::link_matches_target(&link.target_raw, &old_canonical_names) {
-                    continue;
-                }
-
-                let raw_span_text = &ref_doc.body[link.span.clone()];
-                let new_link_text = rename::rewrite_wikilink(raw_span_text, &new_name);
-                let range = ref_doc.link_to_range(link);
-
-                text_edits.push(OneOf::Left(TextEdit {
-                    range,
-                    new_text: new_link_text,
-                }));
-            }
+            let text_edits =
+                rename::build_wikilink_text_edits(&ref_doc, &old_canonical_names, &new_name);
 
             if !text_edits.is_empty() {
                 let edit = TextDocumentEdit {
@@ -1405,6 +1296,46 @@ mod tests {
             }
             _ => panic!("expected RangeWithPlaceholder"),
         }
+    }
+
+    #[tokio::test]
+    async fn rename_wikilink_target_rewrites_referrers() {
+        let (backend, _tmp) = make_backend(&[
+            ("Target.md", "---\ntitle: Target\n---\nbody\n"),
+            ("A.md", "# A\n\n[[Target]]\n"),
+        ]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, "# A\n\n[[Target]]\n").await;
+        let params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 4 },
+            },
+            new_name: "Renamed Target".to_string(),
+            work_done_progress_params: Default::default(),
+        };
+        let edit = backend.rename(params).await.unwrap().expect("workspace edit");
+        assert!(edit.document_changes.is_some() || edit.changes.is_some());
+    }
+
+    #[tokio::test]
+    async fn rename_to_existing_path_is_rejected() {
+        let (backend, _tmp) = make_backend(&[
+            ("Target.md", "---\ntitle: Target\n---\n"),
+            ("Existing.md", "---\ntitle: Existing\n---\n"),
+            ("A.md", "# A\n\n[[Target]]\n"),
+        ]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, "# A\n\n[[Target]]\n").await;
+        let params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 4 },
+            },
+            new_name: "Existing".to_string(),
+            work_done_progress_params: Default::default(),
+        };
+        assert!(backend.rename(params).await.is_err());
     }
 
     #[tokio::test]
