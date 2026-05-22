@@ -214,19 +214,9 @@ pub fn find_referring_paths(
         source_paths.extend(paths);
     }
 
-    // Remove self
-    if let Some(ref pid) = page_id {
-        let self_path: Option<String> = conn
-            .query_row(
-                "SELECT path FROM pages WHERE id = ?1",
-                rusqlite::params![pid],
-                |row| row.get(0),
-            )
-            .ok();
-        if let Some(sp) = self_path {
-            source_paths.remove(&sp);
-        }
-    }
+    // Remove self: `old_path` is, by definition, the path that resolved to
+    // `page_id`, so there is no need to re-query it from the id.
+    source_paths.remove(old_path);
 
     Ok(source_paths.into_iter().collect())
 }
@@ -409,10 +399,10 @@ mod tests {
 
     #[test]
     fn full_document_range_trailing_newline() {
-        // "line one\n" has 2 lines per .lines() count but last line is ""
+        // str::lines() strips the trailing newline: "line one\n" yields a
+        // single line "line one" (count = 1, last = "line one", 8 chars).
         let text = "line one\n";
         let r = full_document_range(text);
-        // lines().count() = 1, last() = "line one" (8 chars)
         assert_eq!(r.end.line, 0);
         assert_eq!(r.end.character, 8);
     }

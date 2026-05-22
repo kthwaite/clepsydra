@@ -1315,7 +1315,7 @@ mod tests {
             work_done_progress_params: Default::default(),
         };
         let edit = backend.rename(params).await.unwrap().expect("workspace edit");
-        assert!(edit.document_changes.is_some() || edit.changes.is_some());
+        assert!(edit.document_changes.is_some());
     }
 
     #[tokio::test]
