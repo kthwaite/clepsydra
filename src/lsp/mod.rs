@@ -588,14 +588,14 @@ impl LanguageServer for LspBackend {
         // ---------------------------------------------------------------
         let old_canonical_names: Vec<String> = {
             let old_path = old_vp.as_str().to_string();
-            self.state
-                .index
-                .with_index(move |index, _| {
-                    rename::fetch_canonical_names_for_path(index.connection(), &old_path)
-                })
-                .await
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+            flatten_index_result(
+                self.state
+                    .index
+                    .with_index(move |index, _| {
+                        rename::fetch_canonical_names_for_path(index.connection(), &old_path)
+                    })
+                    .await,
+            )?
         };
 
         if old_canonical_names.is_empty() {
@@ -608,14 +608,14 @@ impl LanguageServer for LspBackend {
         let referring_paths: Vec<String> = {
             let old_path = old_vp.as_str().to_string();
             let cn_list = old_canonical_names.clone();
-            self.state
-                .index
-                .with_index(move |index, _| {
-                    rename::find_referring_paths(index.connection(), &old_path, &cn_list)
-                })
-                .await
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+            flatten_index_result(
+                self.state
+                    .index
+                    .with_index(move |index, _| {
+                        rename::find_referring_paths(index.connection(), &old_path, &cn_list)
+                    })
+                    .await,
+            )?
         };
 
         // ---------------------------------------------------------------
@@ -626,8 +626,7 @@ impl LanguageServer for LspBackend {
         // 6a. TextDocumentEdit on the target page — update frontmatter title
         // (Must come BEFORE RenameFile so the edit targets a URI that still exists.)
         let old_abs = self.state.vault.resolve(&old_vp);
-        let old_uri = Url::from_file_path(&old_abs)
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let old_uri = file_uri(&old_abs)?;
 
         match self
             .build_rename_title_edit(&old_uri, &old_abs, &new_name)
@@ -640,8 +639,7 @@ impl LanguageServer for LspBackend {
         // 6b. File rename operation (if path changes)
         if new_vp.as_str() != old_vp.as_str() {
             let new_abs = self.state.vault.resolve(&new_vp);
-            let new_uri = Url::from_file_path(&new_abs)
-                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            let new_uri = file_uri(&new_abs)?;
             ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
                 RenameFile {
                     old_uri: old_uri.clone(),
@@ -773,6 +771,22 @@ impl LanguageServer for LspBackend {
 
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
+}
+
+/// Flatten the doubly-nested result returned by `IndexHandle::with_index`
+/// (whose closure itself returns a `Result`) into a single JSON-RPC result,
+/// mapping any error to an internal error.
+fn flatten_index_result<T, E1, E2>(r: std::result::Result<std::result::Result<T, E1>, E2>) -> Result<T> {
+    match r {
+        Ok(Ok(v)) => Ok(v),
+        _ => Err(tower_lsp::jsonrpc::Error::internal_error()),
+    }
+}
+
+/// Convert an absolute filesystem path to a `file://` URL, mapping failure to a
+/// JSON-RPC internal error.
+fn file_uri(abs: &std::path::Path) -> Result<Url> {
+    Url::from_file_path(abs).map_err(|_| tower_lsp::jsonrpc::Error::internal_error())
 }
 
 impl LspBackend {
