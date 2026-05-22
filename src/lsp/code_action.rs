@@ -13,14 +13,12 @@ use tower_lsp::lsp_types::{
 /// `target` is the raw wikilink target string (e.g. `"Ghost"`).
 /// `vault_root` is the absolute path to the vault root.
 /// `diag` is the diagnostic this action resolves.
-/// `_uri` is unused but kept for API symmetry with the disambiguate builder.
 ///
 /// Returns `None` if the new page path is not representable as a URL.
 pub fn build_create_page_action(
     target: &str,
     vault_root: &Path,
     diag: &Diagnostic,
-    _uri: &Url,
 ) -> Option<CodeActionOrCommand> {
     let new_vp = crate::vault::path::VaultPath::from_title(target);
     // Resolve against vault_root by replicating what Vault::resolve does:
@@ -70,8 +68,6 @@ pub fn build_create_page_action(
 
 /// Build disambiguation actions for an ambiguous-link diagnostic (one per candidate).
 ///
-/// `target_raw` is the raw wikilink target (used only for display; the caller
-/// has already resolved `candidate_paths`).
 /// `candidate_paths` are the vault-relative paths (e.g. `"a/Dup.md"`).
 /// `link_range` is the LSP range of the wikilink in the document.
 /// `body_text` is the full document body (used to extract the raw wikilink span).
@@ -104,10 +100,8 @@ pub fn build_disambiguate_actions(
             new_text,
         };
 
-        let title_display = path.strip_suffix(".md").unwrap_or(path);
-
         actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: format!("Resolve to: {title_display}"),
+            title: format!("Resolve to: {path_stem}"),
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: Some(vec![diag.clone()]),
             edit: Some(WorkspaceEdit {
@@ -137,26 +131,16 @@ mod tests {
 
     #[test]
     fn create_page_action_is_built_for_unresolved() {
-        let uri = Url::from_file_path("/vault/A.md").unwrap();
-        let action = build_create_page_action(
-            "Ghost",
-            Path::new("/vault"),
-            &diag("unresolved-link"),
-            &uri,
-        );
+        let action =
+            build_create_page_action("Ghost", Path::new("/vault"), &diag("unresolved-link"));
         assert!(action.is_some());
     }
 
     #[test]
     fn create_page_action_title_matches() {
-        let uri = Url::from_file_path("/vault/A.md").unwrap();
-        let action = build_create_page_action(
-            "Ghost",
-            Path::new("/vault"),
-            &diag("unresolved-link"),
-            &uri,
-        )
-        .unwrap();
+        let action =
+            build_create_page_action("Ghost", Path::new("/vault"), &diag("unresolved-link"))
+                .unwrap();
         let CodeActionOrCommand::CodeAction(ca) = action else {
             panic!("expected CodeAction");
         };

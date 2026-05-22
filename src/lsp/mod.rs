@@ -937,7 +937,6 @@ impl LanguageServer for LspBackend {
                         &link.target_raw,
                         self.state.vault.root(),
                         diag,
-                        &uri,
                     ) {
                         actions.push(action);
                     }
@@ -1441,5 +1440,10 @@ mod tests {
             .unwrap()
             .unwrap_or_default();
         assert!(!actions.is_empty());
+        let CodeActionOrCommand::CodeAction(ca) = &actions[0] else {
+            panic!("expected a CodeAction");
+        };
+        assert_eq!(ca.kind, Some(CodeActionKind::QUICKFIX));
+        assert!(ca.title.contains("Ghost"));
     }
 }
