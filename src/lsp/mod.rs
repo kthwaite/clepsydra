@@ -353,12 +353,9 @@ impl LanguageServer for LspBackend {
                 Ok(vp) => vp,
                 Err(_) => continue,
             };
-            let source_uri = match crate::lsp::references::vault_path_to_location(
-                vault_root,
-                &source_vp,
-                Range::default(),
-            ) {
-                Some(loc) => loc.uri,
+            let source_uri = match crate::lsp::references::vault_path_to_uri(vault_root, &source_vp)
+            {
+                Some(uri) => uri,
                 None => continue,
             };
             let range = self.backlink_to_range(&source_uri, bl).await;
@@ -1485,5 +1482,6 @@ mod tests {
         };
         let refs = backend.references(params).await.unwrap().unwrap_or_default();
         assert!(refs.iter().any(|l| l.uri.path().ends_with("B.md")));
+        assert!(refs.iter().any(|l| l.uri.path().ends_with("A.md")));
     }
 }
