@@ -53,24 +53,23 @@ pub fn frontmatter_title_rename_range(
     let rest = trimmed.strip_prefix("title:")?;
     let value = rest.trim();
 
+    // Whether the value is wrapped in matching single or double quotes.
+    let is_quoted = (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''));
+
     // Strip surrounding quotes if present (replicates prepare_rename exactly,
     // including the absence of a len >= 2 guard on the slice).
-    let title_value = if (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''))
-    {
+    let title_value = if is_quoted {
         &value[1..value.len() - 1]
     } else {
         value.trim_end_matches('\n')
     };
 
-    // Compute character offset of the title value within line_text.
-    let value_start_in_line = if (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''))
-    {
-        // Position after the opening quote
+    // Compute character offset of the title value within line_text. For a quoted
+    // value, skip past the opening quote.
+    let value_start_in_line = if is_quoted {
         line_text.find(value).unwrap_or(0) + 1
     } else {
-        // Position at start of the trimmed value
         line_text.find(value).unwrap_or(0)
     };
     let value_end_in_line = value_start_in_line + title_value.len();
@@ -153,6 +152,21 @@ mod tests {
                 assert_eq!(placeholder, "My Note");
                 assert_eq!(range.start.line, 3);
                 // "title: \"" is 8 chars; value starts at char 8
+                assert_eq!(range.start.character, 8);
+                assert_eq!(range.end.character, 8 + 7); // "My Note" is 7 chars
+            }
+            _ => panic!("expected RangeWithPlaceholder"),
+        }
+    }
+
+    #[test]
+    fn frontmatter_title_single_quoted() {
+        let r = frontmatter_title_rename_range("title: 'My Note'", 2).unwrap();
+        match r {
+            PrepareRenameResponse::RangeWithPlaceholder { placeholder, range } => {
+                assert_eq!(placeholder, "My Note");
+                assert_eq!(range.start.line, 2);
+                // "title: '" is 8 chars; value starts at char 8
                 assert_eq!(range.start.character, 8);
                 assert_eq!(range.end.character, 8 + 7); // "My Note" is 7 chars
             }
