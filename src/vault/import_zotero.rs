@@ -607,6 +607,109 @@ pub fn apply_source_wins_to_meta(
     }
 }
 
+// ── Decision kernel ────────────────────────────────────────────────────────
+
+/// What the importer should do with a single item, decided purely from its
+/// dedup state, the conflict policy, and the dry-run flag.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ItemActionKind {
+    /// Only record a result; perform no filesystem mutation.
+    ReportOnly,
+    /// Apply source-wins field updates to the existing page, then reindex.
+    ApplySourceWins,
+    /// Create a new work page.
+    Create,
+}
+
+/// The decided action for one item: the `ImportResult.status` string to record
+/// and the side effect (if any) to perform.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ItemAction {
+    pub status: &'static str,
+    pub kind: ItemActionKind,
+}
+
+/// Decide the action for a single Zotero item.
+///
+/// `exists` is whether a dedup match was found. `has_diffs` is only consulted
+/// when `exists && policy == Manual` (whether the source differs from local);
+/// pass `false` otherwise. dry_run is intentionally ignored for the Manual
+/// policy (matching `import_zotero_handler`'s current behavior).
+pub fn decide_item_action(
+    exists: bool,
+    policy: ConflictPolicy,
+    dry_run: bool,
+    has_diffs: bool,
+) -> ItemAction {
+    if !exists {
+        return if dry_run {
+            ItemAction { status: "would_create", kind: ItemActionKind::ReportOnly }
+        } else {
+            ItemAction { status: "created", kind: ItemActionKind::Create }
+        };
+    }
+    match policy {
+        ConflictPolicy::Skip => ItemAction {
+            status: if dry_run { "would_skip" } else { "skipped" },
+            kind: ItemActionKind::ReportOnly,
+        },
+        ConflictPolicy::SourceWins => {
+            if dry_run {
+                ItemAction { status: "would_update", kind: ItemActionKind::ReportOnly }
+            } else {
+                ItemAction { status: "updated", kind: ItemActionKind::ApplySourceWins }
+            }
+        }
+        ConflictPolicy::Manual => {
+            if has_diffs {
+                ItemAction { status: "conflict", kind: ItemActionKind::ReportOnly }
+            } else {
+                ItemAction { status: "skipped", kind: ItemActionKind::ReportOnly }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod decide_tests {
+    use super::*;
+
+    #[test]
+    fn not_existing_creates_or_would_create() {
+        assert_eq!(
+            decide_item_action(false, ConflictPolicy::Skip, false, false),
+            ItemAction { status: "created", kind: ItemActionKind::Create }
+        );
+        assert_eq!(
+            decide_item_action(false, ConflictPolicy::Skip, true, false),
+            ItemAction { status: "would_create", kind: ItemActionKind::ReportOnly }
+        );
+    }
+
+    #[test]
+    fn existing_skip_policy() {
+        assert_eq!(decide_item_action(true, ConflictPolicy::Skip, false, false).status, "skipped");
+        assert_eq!(decide_item_action(true, ConflictPolicy::Skip, true, false).status, "would_skip");
+    }
+
+    #[test]
+    fn existing_source_wins() {
+        let live = decide_item_action(true, ConflictPolicy::SourceWins, false, false);
+        assert_eq!(live, ItemAction { status: "updated", kind: ItemActionKind::ApplySourceWins });
+        let dry = decide_item_action(true, ConflictPolicy::SourceWins, true, false);
+        assert_eq!(dry, ItemAction { status: "would_update", kind: ItemActionKind::ReportOnly });
+    }
+
+    #[test]
+    fn existing_manual_ignores_dry_run() {
+        // Manual reports conflict/skipped identically in dry and live mode.
+        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, false, true).status, "conflict");
+        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, true, true).status, "conflict");
+        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, false, false).status, "skipped");
+        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, true, false).status, "skipped");
+    }
+}
+
 #[cfg(test)]
 mod source_wins_tests {
     use super::*;
