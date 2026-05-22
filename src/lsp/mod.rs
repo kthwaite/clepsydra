@@ -933,54 +933,14 @@ impl LanguageServer for LspBackend {
 
             match code {
                 "unresolved-link" => {
-                    let target = &link.target_raw;
-                    let new_vp = crate::vault::path::VaultPath::from_title(target);
-                    let new_abs = self.state.vault.resolve(&new_vp);
-                    let new_uri = match Url::from_file_path(&new_abs) {
-                        Ok(u) => u,
-                        Err(_) => continue,
-                    };
-
-                    // Build frontmatter scaffold
-                    let mut meta = crate::vault::page::PageMeta::new();
-                    meta.title = Some(target.to_string());
-                    let content = crate::vault::page::write_page_content(&meta, "\n");
-
-                    let ops = vec![
-                        DocumentChangeOperation::Op(ResourceOp::Create(
-                            CreateFile {
-                                uri: new_uri.clone(),
-                                options: Some(CreateFileOptions {
-                                    overwrite: Some(false),
-                                    ignore_if_exists: Some(false),
-                                }),
-                                annotation_id: None,
-                            },
-                        )),
-                        DocumentChangeOperation::Edit(TextDocumentEdit {
-                            text_document: OptionalVersionedTextDocumentIdentifier {
-                                uri: new_uri,
-                                version: None,
-                            },
-                            edits: vec![OneOf::Left(TextEdit {
-                                range: Range::default(),
-                                new_text: content,
-                            })],
-                        }),
-                    ];
-
-                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: format!("Create page: {target}"),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: Some(WorkspaceEdit {
-                            changes: None,
-                            document_changes: Some(DocumentChanges::Operations(ops)),
-                            change_annotations: None,
-                        }),
-                        is_preferred: Some(true),
-                        ..Default::default()
-                    }));
+                    if let Some(action) = code_action::build_create_page_action(
+                        &link.target_raw,
+                        self.state.vault.root(),
+                        diag,
+                        &uri,
+                    ) {
+                        actions.push(action);
+                    }
                 }
                 "ambiguous-link" => {
                     let canonical =
@@ -990,51 +950,14 @@ impl LanguageServer for LspBackend {
                     if let Some(candidate_paths) = names.get(canonical.as_str())
                         && candidate_paths.len() > 1
                     {
-                        for path in candidate_paths {
-                            // Use the full path stem (path minus .md) as the
-                            // wikilink target. This is always indexed as a
-                            // canonical name, unlike shorter suffixes which
-                            // may not have corresponding index entries.
-                            let path_stem =
-                                path.strip_suffix(".md").unwrap_or(path);
-
-                            // Read raw wikilink text to preserve display text
-                            let raw_text = if link.span.end <= body_text.len() {
-                                &body_text[link.span.clone()]
-                            } else {
-                                continue;
-                            };
-                            let new_text =
-                                rename::rewrite_wikilink(raw_text, path_stem);
-
-                            let edit = TextEdit {
-                                range: diag.range,
-                                new_text,
-                            };
-
-                            let title_display =
-                                path.strip_suffix(".md").unwrap_or(path);
-
-                            actions.push(CodeActionOrCommand::CodeAction(
-                                CodeAction {
-                                    title: format!(
-                                        "Resolve to: {title_display}"
-                                    ),
-                                    kind: Some(CodeActionKind::QUICKFIX),
-                                    diagnostics: Some(vec![diag.clone()]),
-                                    edit: Some(WorkspaceEdit {
-                                        changes: Some(
-                                            [(uri.clone(), vec![edit])]
-                                                .into_iter()
-                                                .collect(),
-                                        ),
-                                        document_changes: None,
-                                        change_annotations: None,
-                                    }),
-                                    ..Default::default()
-                                },
-                            ));
-                        }
+                        actions.extend(code_action::build_disambiguate_actions(
+                            candidate_paths,
+                            diag.range,
+                            &body_text,
+                            link.span.clone(),
+                            diag,
+                            &uri,
+                        ));
                     }
                 }
                 _ => {}
@@ -1483,5 +1406,40 @@ mod tests {
             }
             _ => panic!("expected RangeWithPlaceholder"),
         }
+    }
+
+    #[tokio::test]
+    async fn code_action_offers_create_page_for_unresolved_link() {
+        let (backend, _tmp) = make_backend(&[("A.md", "# A\n\n[[Ghost]]\n")]);
+        let uri = uri_for(&backend, "A.md");
+        open_doc(&backend, &uri, "# A\n\n[[Ghost]]\n").await;
+        // Build the diagnostics the editor would send back in the request context.
+        let names = backend.canonical_names.read().await.clone();
+        let diagnostics = {
+            let docs = backend.documents.lock().await;
+            let doc = docs.get(&uri).unwrap();
+            crate::lsp::diagnostics::compute_link_diagnostics(
+                doc,
+                &names,
+                backend.state.vault.root(),
+            )
+        };
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::default(),
+            context: CodeActionContext {
+                diagnostics,
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        let actions = backend
+            .code_action(params)
+            .await
+            .unwrap()
+            .unwrap_or_default();
+        assert!(!actions.is_empty());
     }
 }
