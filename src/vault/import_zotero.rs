@@ -860,19 +860,19 @@ mod resolve_db_path_tests {
     }
 
     #[test]
-    fn no_path_no_config_no_detect_returns_err() {
-        // Pass a nonsense home so detect_zotero_db (which uses dirs::home_dir internally)
-        // won't accidentally find a real Zotero installation. But since detect_zotero_db
-        // ignores our `home` parameter entirely, we can only test the None/None case
-        // deterministically by knowing no Zotero is at the real home — or by checking
-        // that Err is returned when nothing is found. We can't fully mock detect_zotero_db,
-        // so just test that explicit None/None when no file exists produces Err.
+    fn explicit_path_returned_without_existence_check() {
+        // An explicit request path is resolved verbatim — `resolve_zotero_db_path`
+        // performs no existence check, so a nonexistent path still returns Ok.
+        // (Detection via `detect_zotero_db` is only reached when both request and
+        // config are None; that branch is not exercised here.)
         let result = resolve_zotero_db_path(
             Some("/nonexistent/path/zotero.sqlite"),
             None,
             Some(Path::new("/home/user")),
         );
-        // This path is explicit — returns Ok (no existence check here), just tests parse path.
-        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            PathBuf::from("/nonexistent/path/zotero.sqlite")
+        );
     }
 }

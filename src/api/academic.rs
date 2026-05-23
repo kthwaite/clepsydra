@@ -809,6 +809,20 @@ fn should_save_zotero_checkpoint(results: &[ImportResult]) -> bool {
     created_count > 0 || results.iter().any(|r| r.status == "skipped")
 }
 
+/// Re-index a single page by vault-relative path (used after writing changes
+/// during an import).
+async fn reindex_page(state: &AppState, path: &str) -> Result<(), ApiError> {
+    let vp = VaultPath::new(path)
+        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+    state
+        .index
+        .with_index(move |index, vault| index.index_page(vault, &vp))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(())
+}
+
 /// Handle a dedup-hit on an existing work via the zotero_key path.
 ///
 /// cite_key for Skip/Manual results uses the `zotero:<key>` form; for
@@ -828,70 +842,54 @@ async fn handle_zk_existing(
 
     let entry = map_to_import_entry(item);
 
-    // Manual policy needs diffs to distinguish conflict from skipped.
-    let has_diffs = matches!(policy, crate::vault::import_zotero::ConflictPolicy::Manual)
-        && {
-            let vp = VaultPath::new(&path)
-                .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
-            let abs_path = state.vault.resolve(&vp);
-            let page = Page::from_file(&abs_path, vp)
-                .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-            !compute_field_diffs(&entry, &page.meta).is_empty()
-        };
-
-    let action = decide_item_action(true, policy, dry_run, has_diffs);
-
-    // cite_key: SourceWins uses derived key; Skip/Manual use "zotero:<key>".
-    let cite_key = if matches!(policy, crate::vault::import_zotero::ConflictPolicy::SourceWins) {
-        let formatted_authors: Vec<String> =
-            item.authors.iter().map(format_author).collect();
-        let mut e = entry.clone();
-        e.cite_key = derive_cite_key(
-            item.extra_field.as_deref(),
-            &formatted_authors,
-            e.year,
-            &item.title,
-            used_cite_keys,
-        );
-        e.cite_key
-    } else {
-        format!("zotero:{}", item.zotero_key)
-    };
-
-    // conflict_detail only for Manual conflicts.
-    let conflict_detail = if action.status == "conflict" {
+    // Manual policy needs the diffs to distinguish conflict from skipped. Read
+    // the page once and reuse the diffs for both `has_diffs` and conflict_detail.
+    let diffs = if matches!(policy, crate::vault::import_zotero::ConflictPolicy::Manual) {
         let vp = VaultPath::new(&path)
             .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
         let abs_path = state.vault.resolve(&vp);
         let page = Page::from_file(&abs_path, vp)
             .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-        let diffs = compute_field_diffs(&entry, &page.meta);
-        Some(ConflictDetail { fields: diffs })
+        Some(compute_field_diffs(&entry, &page.meta))
+    } else {
+        None
+    };
+    let has_diffs = diffs.as_ref().is_some_and(|d| !d.is_empty());
+
+    let action = decide_item_action(true, policy, dry_run, has_diffs);
+
+    // SourceWins derives a cite_key (used both in the result and the apply
+    // call); Skip/Manual use "zotero:<key>". Derive it once.
+    let derived_cite_key =
+        if matches!(policy, crate::vault::import_zotero::ConflictPolicy::SourceWins) {
+            let formatted_authors: Vec<String> =
+                item.authors.iter().map(format_author).collect();
+            Some(derive_cite_key(
+                item.extra_field.as_deref(),
+                &formatted_authors,
+                entry.year,
+                &item.title,
+                used_cite_keys,
+            ))
+        } else {
+            None
+        };
+    let cite_key = derived_cite_key
+        .clone()
+        .unwrap_or_else(|| format!("zotero:{}", item.zotero_key));
+
+    // conflict_detail only for Manual conflicts (reuse the diffs read above).
+    let conflict_detail = if action.status == "conflict" {
+        diffs.map(|fields| ConflictDetail { fields })
     } else {
         None
     };
 
     if action.kind == ItemActionKind::ApplySourceWins {
-        // Rebuild entry with derived cite_key for source_wins apply.
-        let formatted_authors: Vec<String> =
-            item.authors.iter().map(format_author).collect();
         let mut sw_entry = entry;
-        sw_entry.cite_key = derive_cite_key(
-            item.extra_field.as_deref(),
-            &formatted_authors,
-            sw_entry.year,
-            &item.title,
-            used_cite_keys,
-        );
+        sw_entry.cite_key = derived_cite_key.expect("SourceWins derives a cite_key");
         apply_source_wins(state, &path, &sw_entry)?;
-        let vp = VaultPath::new(&path)
-            .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
-        state
-            .index
-            .with_index(move |index, vault| index.index_page(vault, &vp))
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        reindex_page(state, &path).await?;
     }
 
     Ok(ImportResult {
@@ -917,40 +915,31 @@ async fn handle_doi_existing(
         ConflictDetail, ItemActionKind, compute_field_diffs, decide_item_action,
     };
 
-    let has_diffs = matches!(policy, crate::vault::import_zotero::ConflictPolicy::Manual)
-        && {
-            let vp = VaultPath::new(&path)
-                .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
-            let abs_path = state.vault.resolve(&vp);
-            let page = Page::from_file(&abs_path, vp)
-                .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-            !compute_field_diffs(entry, &page.meta).is_empty()
-        };
-
-    let action = decide_item_action(true, policy, dry_run, has_diffs);
-
-    let conflict_detail = if action.status == "conflict" {
+    // Manual policy: read the page once, reuse the diffs for both the
+    // has_diffs decision and the conflict_detail.
+    let diffs = if matches!(policy, crate::vault::import_zotero::ConflictPolicy::Manual) {
         let vp = VaultPath::new(&path)
             .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
         let abs_path = state.vault.resolve(&vp);
         let page = Page::from_file(&abs_path, vp)
             .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-        let diffs = compute_field_diffs(entry, &page.meta);
-        Some(ConflictDetail { fields: diffs })
+        Some(compute_field_diffs(entry, &page.meta))
+    } else {
+        None
+    };
+    let has_diffs = diffs.as_ref().is_some_and(|d| !d.is_empty());
+
+    let action = decide_item_action(true, policy, dry_run, has_diffs);
+
+    let conflict_detail = if action.status == "conflict" {
+        diffs.map(|fields| ConflictDetail { fields })
     } else {
         None
     };
 
     if action.kind == ItemActionKind::ApplySourceWins {
         apply_source_wins(state, &path, entry)?;
-        let vp = VaultPath::new(&path)
-            .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
-        state
-            .index
-            .with_index(move |index, vault| index.index_page(vault, &vp))
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        reindex_page(state, &path).await?;
     }
 
     Ok(ImportResult {

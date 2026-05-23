@@ -2940,12 +2940,12 @@ async fn import_zotero_manual_reports_skipped_when_no_diffs() {
     let body: serde_json::Value = res.json();
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 2);
-    // With no diffs between source and local, manual policy skips silently.
+    // Identical source data ⇒ no diffs ⇒ manual policy skips silently.
     for r in results {
-        let status = r["status"].as_str().unwrap();
-        assert!(
-            status == "skipped" || status == "conflict",
-            "manual policy should produce 'skipped' or 'conflict', got: {status}"
+        assert_eq!(
+            r["status"].as_str().unwrap(),
+            "skipped",
+            "manual policy with no diffs should produce 'skipped'"
         );
     }
 }
@@ -3082,8 +3082,8 @@ async fn import_zotero_doi_path_manual() {
     });
     assert!(doi_result.is_some(), "should find article result");
     let status = doi_result.unwrap()["status"].as_str().unwrap();
-    assert!(
-        status == "skipped" || status == "conflict",
-        "manual policy on DOI path should yield 'skipped' or 'conflict', got: {status}"
+    assert_eq!(
+        status, "skipped",
+        "manual policy on DOI path with matching fields should yield 'skipped'"
     );
 }
