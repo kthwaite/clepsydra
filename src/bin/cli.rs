@@ -85,14 +85,14 @@ enum Commands {
     Version,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-
+/// Dispatch a parsed CLI invocation; returns the process exit code.
+/// (Extracted from main so every arm except Serve is unit-testable.)
+async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Init { path } => {
             init_vault(&path)?;
             println!("Initialized vault at {}", path.display());
+            Ok(0)
         }
         Commands::New { title, body } => {
             let cwd = std::env::current_dir()?;
@@ -102,9 +102,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 created.vault_path.as_str(),
                 created.vault_root.display()
             );
+            Ok(0)
         }
         Commands::Env => {
             println!("env command not implemented yet");
+            Ok(0)
         }
         Commands::Doctor { json, strict, full } => {
             let report = diagnostics::run(DoctorOpts { full }).await;
@@ -114,15 +116,107 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 report.render_human(&mut stdout)?;
             }
-            std::process::exit(report.exit_code(strict));
+            Ok(report.exit_code(strict))
         }
         Commands::Serve { lsp } => {
             run_server(lsp).await?;
+            Ok(0)
         }
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(0)
         }
     }
+}
 
-    Ok(())
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let code = run_cli(Cli::parse()).await?;
+    std::process::exit(code);
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn version_returns_zero() {
+        let cli = Cli::try_parse_from(["clepsydra", "version"]).unwrap();
+        let code = run_cli(cli).await.unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[tokio::test]
+    async fn env_returns_zero() {
+        let cli = Cli::try_parse_from(["clepsydra", "env"]).unwrap();
+        let code = run_cli(cli).await.unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[tokio::test]
+    async fn init_creates_a_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let cli = Cli::try_parse_from(["clepsydra", "init", root.to_str().unwrap()]).unwrap();
+        let code = run_cli(cli).await.unwrap();
+        assert_eq!(code, 0);
+        assert!(root.join(".clepsydra").exists());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn new_creates_a_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        init_vault(&root).unwrap();
+        // create_new_note resolves the vault via config.toml in CWD
+        std::fs::write(
+            root.join("config.toml"),
+            format!("[vault]\nroot = \"{}\"\n", root.display()),
+        )
+        .unwrap();
+
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let cli = Cli::try_parse_from(["clepsydra", "new", "Test Note"]).unwrap();
+        let result = run_cli(cli).await;
+        std::env::set_current_dir(&orig).unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn doctor_human_returns_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        init_vault(&root).unwrap();
+
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let cli = Cli::try_parse_from(["clepsydra", "doctor"]).unwrap();
+        let result = run_cli(cli).await;
+        std::env::set_current_dir(&orig).unwrap();
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn doctor_json_returns_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        init_vault(&root).unwrap();
+
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let cli = Cli::try_parse_from(["clepsydra", "doctor", "--json"]).unwrap();
+        let result = run_cli(cli).await;
+        std::env::set_current_dir(&orig).unwrap();
+
+        assert!(result.is_ok());
+    }
 }
