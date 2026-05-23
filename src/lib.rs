@@ -277,7 +277,7 @@ async fn ensure_certificates(
 }
 
 /// Initialize tracing/logging. Uses try_init so repeated calls (e.g. in tests) don't panic.
-pub fn init_logging() {
+pub(crate) fn init_logging() {
     let _ = fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
@@ -288,7 +288,7 @@ pub fn init_logging() {
 
 /// Parse a host + port into a SocketAddr for IP-literal hosts (127.0.0.1, 0.0.0.0, ::1).
 /// Returns None for names that need DNS resolution.
-pub fn parse_bind_addr(host: &str, port: u16) -> Option<std::net::SocketAddr> {
+pub(crate) fn parse_bind_addr(host: &str, port: u16) -> Option<std::net::SocketAddr> {
     format!("{host}:{port}").parse().ok()
 }
 
@@ -312,7 +312,11 @@ async fn resolve_bind_addr(
 
 /// Compose the full Axum router from application state. (Exact extraction of the
 /// inline router build formerly in run_server.)
-pub fn build_router(state: Arc<AppState>, archive_body_limit: usize, dev_mode: bool) -> Router {
+pub(crate) fn build_router(
+    state: Arc<AppState>,
+    archive_body_limit: usize,
+    dev_mode: bool,
+) -> Router {
     let mut app = Router::new()
         .nest(
             "/api/vault",
@@ -329,7 +333,7 @@ pub fn build_router(state: Arc<AppState>, archive_body_limit: usize, dev_mode: b
 /// Build the shared application state over a vault root: open vault + CAS, open
 /// and build the index, spawn the index handle, wire hooks/bcl/location, assemble
 /// AppState. (Exact extraction of run_server lines ~289–349.)
-pub async fn build_app_state(
+pub(crate) async fn build_app_state(
     vault_root: &Path,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let vault = Vault::open(vault_root)?;
