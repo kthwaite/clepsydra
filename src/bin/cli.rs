@@ -141,6 +141,38 @@ mod cli_tests {
 
     use super::*;
 
+    /// Create a temp vault with a CWD-discoverable `config.toml` pointing at it.
+    /// Returns the `TempDir` (keep it alive for the test's duration) and its root.
+    /// The `config.toml` makes config-dependent commands (`new`, `doctor`)
+    /// hermetic: they resolve `./config.toml` first, never an ambient
+    /// `~/.config/clepsydra/config.toml` on the dev machine.
+    fn vault_in_tempdir() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        init_vault(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            format!("[vault]\nroot = \"{}\"\n", root.display()),
+        )
+        .unwrap();
+        (dir, root)
+    }
+
+    /// Run `run_cli` with the process CWD temporarily set to `root`, restoring
+    /// the original CWD before returning. All fallible setup happens before the
+    /// CWD is changed, so the only code running under the mutated CWD is
+    /// `run_cli` itself (Result-returning) — keeping the window panic-free.
+    async fn run_cli_in(
+        root: &std::path::Path,
+        cli: Cli,
+    ) -> Result<i32, Box<dyn std::error::Error>> {
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+        let result = run_cli(cli).await;
+        std::env::set_current_dir(orig).unwrap();
+        result
+    }
+
     #[tokio::test]
     async fn version_returns_zero() {
         let cli = Cli::try_parse_from(["clepsydra", "version"]).unwrap();
@@ -168,55 +200,35 @@ mod cli_tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn new_creates_a_note() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        init_vault(&root).unwrap();
-        // create_new_note resolves the vault via config.toml in CWD
-        std::fs::write(
-            root.join("config.toml"),
-            format!("[vault]\nroot = \"{}\"\n", root.display()),
-        )
-        .unwrap();
-
-        let orig = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
+        let (_dir, root) = vault_in_tempdir();
         let cli = Cli::try_parse_from(["clepsydra", "new", "Test Note"]).unwrap();
-        let result = run_cli(cli).await;
-        std::env::set_current_dir(&orig).unwrap();
-
-        assert!(result.is_ok());
+        let result = run_cli_in(&root, cli).await;
         assert_eq!(result.unwrap(), 0);
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn doctor_human_returns_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        init_vault(&root).unwrap();
-
-        let orig = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
+        let (_dir, root) = vault_in_tempdir();
         let cli = Cli::try_parse_from(["clepsydra", "doctor"]).unwrap();
-        let result = run_cli(cli).await;
-        std::env::set_current_dir(&orig).unwrap();
-
-        assert!(result.is_ok());
+        let result = run_cli_in(&root, cli).await;
+        // Exit code reflects the vault's check results (env-dependent); we only
+        // assert that dispatch + human rendering succeeded — a render error
+        // would surface as Err via `?`.
+        assert!(result.is_ok(), "doctor dispatch/render failed: {result:?}");
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn doctor_json_returns_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        init_vault(&root).unwrap();
-
-        let orig = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
+        let (_dir, root) = vault_in_tempdir();
         let cli = Cli::try_parse_from(["clepsydra", "doctor", "--json"]).unwrap();
-        let result = run_cli(cli).await;
-        std::env::set_current_dir(&orig).unwrap();
-
-        assert!(result.is_ok());
+        let result = run_cli_in(&root, cli).await;
+        // Covers the `if json` true branch; Err would indicate a JSON render
+        // failure.
+        assert!(
+            result.is_ok(),
+            "doctor --json dispatch/render failed: {result:?}"
+        );
     }
 }
