@@ -34,7 +34,7 @@ pub struct ArchiveRequest {
     pub blobs: Vec<BlobUpload>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct BlobUpload {
     pub hash: String,
     pub content_type: String,
@@ -105,6 +105,195 @@ pub(crate) fn slugify(title: &str, max_len: usize) -> String {
     }
 }
 
+/// Validate per-blob and total request sizes against configured MB limits.
+pub(crate) fn validate_blob_sizes(
+    blobs: &[BlobUpload],
+    max_blob_size_mb: u64,
+    max_request_size_mb: u64,
+) -> Result<(), ApiError> {
+    let max_blob_bytes = max_blob_size_mb * 1024 * 1024;
+    let max_request_bytes = max_request_size_mb * 1024 * 1024;
+    let mut total_blob_bytes: u64 = 0;
+    for blob in blobs {
+        let estimated_size = (blob.data.len() as u64) * 3 / 4;
+        if estimated_size > max_blob_bytes {
+            return Err(ApiError::bad_request(format!(
+                "blob {} exceeds max_blob_size_mb ({} MB)",
+                blob.hash, max_blob_size_mb
+            )));
+        }
+        total_blob_bytes += estimated_size;
+    }
+    if total_blob_bytes > max_request_bytes {
+        return Err(ApiError::bad_request(format!(
+            "total blob size (~{} bytes) exceeds max_request_size_mb ({} MB)",
+            total_blob_bytes, max_request_size_mb
+        )));
+    }
+    Ok(())
+}
+
+/// Decode base64 blobs, dedup by hash, and verify each against its declared hash.
+/// Returns `(hash, bytes, content_type)` per unique blob.
+pub(crate) fn decode_and_verify_blobs(
+    blobs: &[BlobUpload],
+) -> Result<Vec<(String, Vec<u8>, String)>, ApiError> {
+    let mut seen_hashes = std::collections::HashSet::new();
+    let mut decoded_blobs: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(blobs.len());
+    for blob in blobs {
+        if !seen_hashes.insert(blob.hash.clone()) {
+            continue;
+        }
+        let data = BASE64
+            .decode(&blob.data)
+            .map_err(|e| ApiError::bad_request(format!("invalid base64 in blob: {e}")))?;
+        let computed_hash = ContentStore::hash_bytes(&data);
+        if computed_hash != blob.hash {
+            return Err(ApiError::bad_request(format!(
+                "blob hash mismatch: declared={}, computed={}",
+                blob.hash, computed_hash
+            )));
+        }
+        decoded_blobs.push((blob.hash.clone(), data, blob.content_type.clone()));
+    }
+    Ok(decoded_blobs)
+}
+
+/// Resolve a non-colliding `{prefix}/{domain}/{slug}.md` page path. Empty slug
+/// falls back to "untitled". `path_exists` lets tests inject collisions.
+pub(crate) fn resolve_page_path(
+    prefix: &str,
+    domain: &str,
+    slug: &str,
+    path_exists: impl Fn(&str) -> bool,
+) -> Result<String, ApiError> {
+    let slug = if slug.is_empty() { "untitled" } else { slug };
+    let mut page_path = format!("{prefix}/{domain}/{slug}.md");
+    let mut counter = 1u32;
+    while path_exists(&page_path) {
+        page_path = format!("{prefix}/{domain}/{slug}-{counter}.md");
+        counter += 1;
+        if counter > 1000 {
+            return Err(ApiError::internal(
+                "too many path collisions for archive page".to_string(),
+            ));
+        }
+    }
+    Ok(page_path)
+}
+
+/// Build the PageMeta (with nested `archive` YAML mapping) for an ingest request.
+/// `decoded_blobs` supplies the non-snapshot blob hash list stored in frontmatter.
+pub(crate) fn build_archive_meta(
+    req: &ArchiveRequest,
+    decoded_blobs: &[(String, Vec<u8>, String)],
+) -> PageMeta {
+    fn ys(s: &str) -> serde_yaml::Value {
+        serde_yaml::Value::String(s.to_string())
+    }
+    let mut meta = PageMeta::new();
+    meta.title = Some(req.title.clone());
+    meta.tags = req.tags.clone();
+
+    let mut archive_map = serde_yaml::Mapping::new();
+    archive_map.insert(ys("url"), ys(&req.url));
+    if let Some(ref canonical_url) = req.canonical_url {
+        archive_map.insert(ys("canonical_url"), ys(canonical_url));
+    }
+    archive_map.insert(ys("domain"), ys(&req.domain));
+    archive_map.insert(ys("captured_at"), ys(&req.captured_at));
+    archive_map.insert(ys("content_hash"), ys(&req.content_hash));
+    archive_map.insert(ys("snapshot_hash"), ys(&req.snapshot_hash));
+    if let Some(ref description) = req.description {
+        archive_map.insert(ys("description"), ys(description));
+    }
+
+    let non_snapshot_blobs: Vec<serde_yaml::Value> = decoded_blobs
+        .iter()
+        .filter(|(h, _, _)| *h != req.snapshot_hash)
+        .map(|(h, _, _)| serde_yaml::Value::String(h.clone()))
+        .collect();
+    if !non_snapshot_blobs.is_empty() {
+        archive_map.insert(ys("blobs"), serde_yaml::Value::Sequence(non_snapshot_blobs));
+    }
+
+    meta.extra.insert(
+        "archive".to_string(),
+        serde_yaml::Value::Mapping(archive_map),
+    );
+    meta
+}
+
+/// Store decoded blobs in the CAS (locking per-iteration, matching the original),
+/// returning (stored, deduped, stored_hashes).
+fn store_decoded_blobs(
+    cas: &parking_lot::Mutex<ContentStore>,
+    decoded: &[(String, Vec<u8>, String)],
+) -> Result<(u32, u32, Vec<String>), ApiError> {
+    let mut stored: u32 = 0;
+    let mut deduped: u32 = 0;
+    let mut stored_hashes: Vec<String> = Vec::new();
+    for (hash, data, content_type) in decoded {
+        let cas = cas.lock();
+        let result = cas
+            .store(data, content_type)
+            .map_err(|e| ApiError::internal(format!("CAS store error: {e}")))?;
+        if result.already_existed {
+            deduped += 1;
+        } else {
+            stored += 1;
+        }
+        stored_hashes.push(hash.clone());
+    }
+    Ok((stored, deduped, stored_hashes))
+}
+
+/// Atomically create + write a new page file. Removes the file it created ONLY
+/// when the write fails (never on AlreadyExists / other create errors, to avoid
+/// deleting a file owned by a concurrent writer). `vault_path_str` is used in the
+/// conflict message to match the original.
+fn write_new_page_file(
+    abs_path: &std::path::Path,
+    content: &str,
+    vault_path_str: &str,
+) -> Result<(), ApiError> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(abs_path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = file.write_all(content.as_bytes()) {
+                let _ = fs::remove_file(abs_path);
+                return Err(ApiError::internal(format!("failed to write file: {e}")));
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(ApiError::conflict(
+            format!("path already exists (concurrent write): {vault_path_str}"),
+        )),
+        Err(e) => Err(ApiError::internal(format!("failed to create file: {e}"))),
+    }
+}
+
+/// Index a freshly written archive page and resolve its links (link-resolve
+/// failure is non-fatal). Returns Err on index failure (caller rolls back).
+async fn index_archive_page(state: &AppState, vault_path: &VaultPath) -> Result<(), ApiError> {
+    let vp = vault_path.clone();
+    let index_result = state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &vp)?;
+            let _ = index.resolve_links_for_page(&vp);
+            Ok::<_, crate::vault::index::IndexError>(())
+        })
+        .await;
+    match index_result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) | Err(e) => Err(ApiError::internal(e.to_string())),
+    }
+}
+
 async fn serve_blob(
     State(state): State<Arc<AppState>>,
     Path(hash): Path<String>,
@@ -155,29 +344,13 @@ async fn ingest_archive(
         )));
     }
 
-    // Enforce per-blob and total request size limits
-    let max_blob_bytes = archive_config.max_blob_size_mb * 1024 * 1024;
-    let max_request_bytes = archive_config.max_request_size_mb * 1024 * 1024;
-    let mut total_blob_bytes: u64 = 0;
-    for blob in &req.blobs {
-        // Estimate decoded size from base64 length (3/4 ratio)
-        let estimated_size = (blob.data.len() as u64) * 3 / 4;
-        if estimated_size > max_blob_bytes {
-            return Err(ApiError::bad_request(format!(
-                "blob {} exceeds max_blob_size_mb ({} MB)",
-                blob.hash, archive_config.max_blob_size_mb
-            )));
-        }
-        total_blob_bytes += estimated_size;
-    }
-    if total_blob_bytes > max_request_bytes {
-        return Err(ApiError::bad_request(format!(
-            "total blob size (~{} bytes) exceeds max_request_size_mb ({} MB)",
-            total_blob_bytes, archive_config.max_request_size_mb
-        )));
-    }
+    validate_blob_sizes(
+        &req.blobs,
+        archive_config.max_blob_size_mb,
+        archive_config.max_request_size_mb,
+    )?;
 
-    let prefix = &archive_config.default_path_prefix;
+    let prefix = archive_config.default_path_prefix.clone();
 
     // Serialize the entire mutating section to prevent concurrent races
     // (duplicate URL check + path collision + file write + index commit).
@@ -220,73 +393,19 @@ async fn ingest_archive(
 
     // 2. Validate path BEFORE touching CAS (prevents orphaned blobs on bad input)
     let slug = slugify(&req.title, 80);
-    let slug = if slug.is_empty() {
-        "untitled".to_string()
-    } else {
-        slug
-    };
-
-    let base_path = format!("{}/{}/{}.md", prefix, req.domain, slug);
-    let mut page_path = base_path.clone();
-
-    // Handle path collisions with numeric suffix
     let vault_root = state.vault.root();
-    let mut counter = 1u32;
-    while vault_root.join(&page_path).exists() {
-        page_path = format!("{}/{}/{}-{}.md", prefix, req.domain, slug, counter);
-        counter += 1;
-        if counter > 1000 {
-            return Err(ApiError::internal(
-                "too many path collisions for archive page".to_string(),
-            ));
-        }
-    }
+    let page_path =
+        resolve_page_path(&prefix, &req.domain, &slug, |c| vault_root.join(c).exists())?;
 
     let vault_path = VaultPath::new(&page_path)
         .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
 
     // 3. Decode and verify all blobs before storing anything (fail fast).
-    //    Deduplicate by hash so duplicate entries don't inflate ref_counts.
-    let mut seen_hashes = std::collections::HashSet::new();
-    let mut decoded_blobs: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(req.blobs.len());
-    for blob in &req.blobs {
-        if !seen_hashes.insert(blob.hash.clone()) {
-            continue; // skip duplicate hash within same request
-        }
-
-        let data = BASE64
-            .decode(&blob.data)
-            .map_err(|e| ApiError::bad_request(format!("invalid base64 in blob: {e}")))?;
-
-        let computed_hash = ContentStore::hash_bytes(&data);
-        if computed_hash != blob.hash {
-            return Err(ApiError::bad_request(format!(
-                "blob hash mismatch: declared={}, computed={}",
-                blob.hash, computed_hash
-            )));
-        }
-
-        decoded_blobs.push((blob.hash.clone(), data, blob.content_type.clone()));
-    }
+    let decoded_blobs = decode_and_verify_blobs(&req.blobs)?;
 
     // 4. Store blobs in CAS (track stored hashes for rollback on downstream failure)
-    let mut blobs_stored: u32 = 0;
-    let mut blobs_deduped: u32 = 0;
-    let mut stored_hashes: Vec<String> = Vec::new();
-
-    for (hash, data, content_type) in &decoded_blobs {
-        let cas = state.cas.lock();
-        let result = cas
-            .store(data, content_type)
-            .map_err(|e| ApiError::internal(format!("CAS store error: {e}")))?;
-
-        if result.already_existed {
-            blobs_deduped += 1;
-        } else {
-            blobs_stored += 1;
-        }
-        stored_hashes.push(hash.clone());
-    }
+    let (blobs_stored, blobs_deduped, stored_hashes) =
+        store_decoded_blobs(&state.cas, &decoded_blobs)?;
 
     // Helper: rollback CAS ref_counts on downstream failure
     let rollback_cas = |state: &AppState, hashes: &[String]| {
@@ -308,119 +427,22 @@ async fn ingest_archive(
         )));
     }
 
-    // Build PageMeta with archive metadata in extra
-    let mut meta = PageMeta::new();
-    meta.title = Some(req.title.clone());
-    meta.tags = req.tags.clone();
-
-    // Build archive metadata as a nested YAML mapping
-    let mut archive_map = serde_yaml::Mapping::new();
-    archive_map.insert(
-        serde_yaml::Value::String("url".to_string()),
-        serde_yaml::Value::String(req.url.clone()),
-    );
-    if let Some(ref canonical_url) = req.canonical_url {
-        archive_map.insert(
-            serde_yaml::Value::String("canonical_url".to_string()),
-            serde_yaml::Value::String(canonical_url.clone()),
-        );
-    }
-    archive_map.insert(
-        serde_yaml::Value::String("domain".to_string()),
-        serde_yaml::Value::String(req.domain.clone()),
-    );
-    archive_map.insert(
-        serde_yaml::Value::String("captured_at".to_string()),
-        serde_yaml::Value::String(req.captured_at.clone()),
-    );
-    archive_map.insert(
-        serde_yaml::Value::String("content_hash".to_string()),
-        serde_yaml::Value::String(req.content_hash.clone()),
-    );
-    archive_map.insert(
-        serde_yaml::Value::String("snapshot_hash".to_string()),
-        serde_yaml::Value::String(req.snapshot_hash.clone()),
-    );
-    if let Some(ref description) = req.description {
-        archive_map.insert(
-            serde_yaml::Value::String("description".to_string()),
-            serde_yaml::Value::String(description.clone()),
-        );
-    }
-
-    // Store blob hashes in frontmatter from the deduplicated set,
-    // excluding snapshot_hash to avoid double ref_count decrement on delete.
-    let non_snapshot_blobs: Vec<serde_yaml::Value> = decoded_blobs
-        .iter()
-        .filter(|(h, _, _)| *h != req.snapshot_hash)
-        .map(|(h, _, _)| serde_yaml::Value::String(h.clone()))
-        .collect();
-    if !non_snapshot_blobs.is_empty() {
-        archive_map.insert(
-            serde_yaml::Value::String("blobs".to_string()),
-            serde_yaml::Value::Sequence(non_snapshot_blobs),
-        );
-    }
-
-    meta.extra.insert(
-        "archive".to_string(),
-        serde_yaml::Value::Mapping(archive_map),
-    );
-
-    let page_body = &req.markdown_body;
-
-    // Write file atomically: create_new ensures we don't overwrite a file
-    // created by a concurrent endpoint (e.g. POST /pages).
-    let content = write_page_content(&meta, page_body);
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&abs_path)
-    {
-        Ok(mut file) => {
-            if let Err(e) = file.write_all(content.as_bytes()) {
-                let _ = fs::remove_file(&abs_path);
-                rollback_cas(&state, &stored_hashes);
-                return Err(ApiError::internal(format!("failed to write file: {e}")));
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            rollback_cas(&state, &stored_hashes);
-            return Err(ApiError::conflict(format!(
-                "path already exists (concurrent write): {}",
-                vault_path.as_str()
-            )));
-        }
-        Err(e) => {
-            rollback_cas(&state, &stored_hashes);
-            return Err(ApiError::internal(format!("failed to create file: {e}")));
-        }
-    }
-
+    let meta = build_archive_meta(&req, &decoded_blobs);
+    let content = write_page_content(&meta, &req.markdown_body);
     let page_id = meta.id.to_string();
+
+    if let Err(e) = write_new_page_file(&abs_path, &content, vault_path.as_str()) {
+        rollback_cas(&state, &stored_hashes);
+        return Err(e);
+    }
 
     // 6. Index the page.
     // create_new above guarantees we own this file, so remove_file on
     // index failure is safe — no concurrent endpoint could have written it.
-    {
-        let vp = vault_path.clone();
-        let index_result = state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                // resolve_links failure is non-fatal (page exists, just links unresolved)
-                let _ = index.resolve_links_for_page(&vp);
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await;
-        match index_result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) | Err(e) => {
-                let _ = fs::remove_file(&abs_path);
-                rollback_cas(&state, &stored_hashes);
-                return Err(ApiError::internal(e.to_string()));
-            }
-        }
+    if let Err(e) = index_archive_page(&state, &vault_path).await {
+        let _ = fs::remove_file(&abs_path);
+        rollback_cas(&state, &stored_hashes);
+        return Err(e);
     }
 
     // 7. Broadcast change
@@ -446,6 +468,10 @@ async fn ingest_archive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------------------------------------------------------------------------
+    // slugify tests (existing)
+    // ---------------------------------------------------------------------------
 
     #[test]
     fn slugify_basic() {
@@ -499,5 +525,232 @@ mod tests {
         let title = "café résumé à la mode extrêmement long titre pour tester";
         let slug = slugify(title, 30);
         assert!(slug.chars().count() <= 30);
+    }
+
+    // ---------------------------------------------------------------------------
+    // validate_blob_sizes tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn validate_blob_sizes_accepts_within_limits() {
+        // 1 MB limit per blob, 10 MB total; data well under that
+        let blobs = vec![BlobUpload {
+            hash: String::new(),
+            content_type: String::new(),
+            data: "A".repeat(100),
+        }];
+        assert!(validate_blob_sizes(&blobs, 1, 10).is_ok());
+    }
+
+    #[test]
+    fn validate_blob_sizes_rejects_oversized_blob() {
+        // 1 MB limit; ~1.5 MB of base64 data → estimated ~1.125 MB decoded
+        let blobs = vec![BlobUpload {
+            hash: "testhash".to_string(),
+            content_type: String::new(),
+            // 1.5 MB of base64 chars → estimated decoded size = 1.5*1024*1024 * 3/4 > 1 MB
+            data: "A".repeat(2 * 1024 * 1024),
+        }];
+        let err = validate_blob_sizes(&blobs, 1, 100).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("testhash") || msg.contains("max_blob_size_mb"));
+    }
+
+    #[test]
+    fn validate_blob_sizes_rejects_oversized_request_total() {
+        // 2 MB per blob, but 3 MB total limit; two blobs each ~1.5 MB decoded
+        let large_data = "A".repeat(2 * 1024 * 1024); // ~1.5 MB decoded
+        let blobs = vec![
+            BlobUpload {
+                hash: String::new(),
+                content_type: String::new(),
+                data: large_data.clone(),
+            },
+            BlobUpload {
+                hash: String::new(),
+                content_type: String::new(),
+                data: large_data,
+            },
+        ];
+        // per-blob limit = 2 MB (each passes), total limit = 2 MB (combined ~3 MB fails)
+        let err = validate_blob_sizes(&blobs, 2, 2).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("max_request_size_mb") || msg.contains("total blob size"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // decode_and_verify_blobs tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn decode_and_verify_blobs_valid() {
+        let data = b"hello archive blob";
+        let hash = ContentStore::hash_bytes(data);
+        let b64 = BASE64.encode(data);
+        let blobs = vec![BlobUpload {
+            hash: hash.clone(),
+            content_type: "text/plain".to_string(),
+            data: b64,
+        }];
+        let result = decode_and_verify_blobs(&blobs).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, hash);
+        assert_eq!(result[0].1, data);
+        assert_eq!(result[0].2, "text/plain");
+    }
+
+    #[test]
+    fn decode_and_verify_blobs_deduplicates() {
+        let data = b"duplicate blob data";
+        let hash = ContentStore::hash_bytes(data);
+        let b64 = BASE64.encode(data);
+        let blob = BlobUpload {
+            hash: hash.clone(),
+            content_type: "image/png".to_string(),
+            data: b64,
+        };
+        let blobs = vec![blob.clone(), blob];
+        let result = decode_and_verify_blobs(&blobs).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "duplicate blob should be deduped to 1 entry"
+        );
+    }
+
+    #[test]
+    fn decode_and_verify_blobs_rejects_hash_mismatch() {
+        let data = b"some data";
+        let b64 = BASE64.encode(data);
+        let blobs = vec![BlobUpload {
+            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            content_type: "text/plain".to_string(),
+            data: b64,
+        }];
+        let err = decode_and_verify_blobs(&blobs).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("hash mismatch") || msg.contains("mismatch"));
+    }
+
+    #[test]
+    fn decode_and_verify_blobs_rejects_invalid_base64() {
+        let blobs = vec![BlobUpload {
+            hash: "sha256:anything".to_string(),
+            content_type: "text/plain".to_string(),
+            data: "not-valid-base64!!!".to_string(),
+        }];
+        let err = decode_and_verify_blobs(&blobs).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("base64") || msg.contains("invalid"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // resolve_page_path tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn resolve_page_path_empty_slug_becomes_untitled() {
+        let path = resolve_page_path("archive", "example.com", "", |_| false).unwrap();
+        assert!(
+            path.contains("untitled"),
+            "empty slug should fall back to 'untitled', got: {path}"
+        );
+    }
+
+    #[test]
+    fn resolve_page_path_collision_appends_counter() {
+        let base = "archive/example.com/my-article.md";
+        // path_exists returns true only for the base path, forcing one counter increment
+        let path =
+            resolve_page_path("archive", "example.com", "my-article", |c| c == base).unwrap();
+        assert_ne!(path, base, "collided path should differ from base");
+        assert!(
+            path.contains("-1"),
+            "collision should append -1 counter, got: {path}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // build_archive_meta tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn build_archive_meta_sets_archive_key() {
+        let req = ArchiveRequest {
+            url: "https://example.com/test".to_string(),
+            canonical_url: None,
+            domain: "example.com".to_string(),
+            title: "Test Article".to_string(),
+            description: None,
+            captured_at: "2026-01-01T00:00:00Z".to_string(),
+            content_hash: "sha256:abc".to_string(),
+            snapshot_hash: "sha256:def".to_string(),
+            markdown_body: "# Test".to_string(),
+            tags: vec!["archive".to_string()],
+            blobs: vec![],
+        };
+        let meta = build_archive_meta(&req, &[]);
+        assert!(
+            meta.extra.contains_key("archive"),
+            "meta.extra should have 'archive' key"
+        );
+        assert_eq!(meta.title, Some("Test Article".to_string()));
+    }
+
+    // ---------------------------------------------------------------------------
+    // store_decoded_blobs tests (real CAS over tempdir)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn store_decoded_blobs_new_and_dedup() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cas = parking_lot::Mutex::new(ContentStore::open(&tmp.path().join("cas")).unwrap());
+        let decoded = vec![("h".to_string(), b"abc".to_vec(), "text/plain".to_string())];
+
+        // First store: should be new
+        let (stored, deduped, hashes) = store_decoded_blobs(&cas, &decoded).unwrap();
+        assert_eq!(stored, 1);
+        assert_eq!(deduped, 0);
+        assert_eq!(hashes.len(), 1);
+
+        // Second store of the same data: should be deduped
+        let (stored2, deduped2, _) = store_decoded_blobs(&cas, &decoded).unwrap();
+        assert_eq!(stored2, 0);
+        assert_eq!(deduped2, 1);
+    }
+
+    // ---------------------------------------------------------------------------
+    // write_new_page_file tests (tempdir)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn write_new_page_file_creates_and_returns_ok() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("test-page.md");
+        let content = "# Hello\n\nworld\n";
+
+        write_new_page_file(&path, content, "archive/test-page.md").unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, content);
+    }
+
+    #[test]
+    fn write_new_page_file_second_call_returns_conflict_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("existing-page.md");
+        let vault_path_str = "archive/existing-page.md";
+
+        // First write succeeds
+        write_new_page_file(&path, "content", vault_path_str).unwrap();
+
+        // Second write on same path should fail with AlreadyExists
+        let err = write_new_page_file(&path, "other content", vault_path_str).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("already exists") || msg.contains("concurrent"),
+            "expected already-exists error, got: {msg}"
+        );
     }
 }
