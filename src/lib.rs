@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use config::{Config, Environment, File};
 use serde::Deserialize;
 use tower::ServiceBuilder;
@@ -188,8 +189,6 @@ fn notification_from_batch(batch: &[ChangeEvent]) -> Option<api::events::SyncNot
     }
 }
 
-use axum_server::tls_rustls::RustlsConfig;
-
 /// Resolve the on-disk cert + key paths for the given TLS settings, without
 /// generating any new certificates.
 ///
@@ -223,81 +222,125 @@ pub fn default_tls_paths(tls: &TlsSettings) -> Result<Option<(PathBuf, PathBuf, 
     }
 }
 
+/// Invoke mkcert to install the local CA and generate localhost certs.
+fn run_mkcert(cert_path: &Path, key_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Generating TLS certificates with mkcert...");
+    let status = std::process::Command::new("mkcert")
+        .arg("-install")
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            let status = std::process::Command::new("mkcert")
+                .arg("-cert-file")
+                .arg(cert_path)
+                .arg("-key-file")
+                .arg(key_path)
+                .arg("localhost")
+                .arg("127.0.0.1")
+                .arg("::1")
+                .status()?;
+            if !status.success() {
+                return Err("mkcert failed to generate certificates".into());
+            }
+            Ok(())
+        }
+        _ => Err("mkcert not found or failed to install CA. Please install mkcert (https://github.com/FiloSottile/mkcert)".into()),
+    }
+}
+
+/// Create the data dir and generate certs via mkcert if either file is missing.
+fn generate_certificates_if_missing(
+    data_dir: &Path,
+    cert_path: &Path,
+    key_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(data_dir)?;
+    if !cert_path.exists() || !key_path.exists() {
+        run_mkcert(cert_path, key_path)?;
+    }
+    Ok(())
+}
+
 async fn ensure_certificates(
     tls: &TlsSettings,
 ) -> Result<(PathBuf, PathBuf), Box<dyn std::error::Error>> {
     if let (Some(cert), Some(key)) = (&tls.cert_path, &tls.key_path) {
         return Ok((cert.clone(), key.clone()));
     }
-
     let data_dir = dirs::data_dir()
         .ok_or("could not find app data directory")?
         .join("clepsydra");
-    std::fs::create_dir_all(&data_dir)?;
-
     let cert_path = data_dir.join("localhost.pem");
     let key_path = data_dir.join("localhost-key.pem");
-
-    if !cert_path.exists() || !key_path.exists() {
-        info!("Generating TLS certificates with mkcert...");
-        let status = std::process::Command::new("mkcert")
-            .arg("-install")
-            .status();
-
-        match status {
-            Ok(s) if s.success() => {
-                let status = std::process::Command::new("mkcert")
-                    .arg("-cert-file")
-                    .arg(&cert_path)
-                    .arg("-key-file")
-                    .arg(&key_path)
-                    .arg("localhost")
-                    .arg("127.0.0.1")
-                    .arg("::1")
-                    .status()?;
-
-                if !status.success() {
-                    return Err("mkcert failed to generate certificates".into());
-                }
-            }
-            _ => {
-                return Err("mkcert not found or failed to install CA. Please install mkcert (https://github.com/FiloSottile/mkcert)".into());
-            }
-        }
-    }
-
+    generate_certificates_if_missing(&data_dir, &cert_path, &key_path)?;
     Ok((cert_path, key_path))
 }
 
-pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Error>> {
-    // Logging via `tracing`.
-    // Configure with `RUST_LOG=debug` (or e.g. `RUST_LOG=clepsydra=debug,tower_http=debug`).
-    fmt()
+/// Initialize tracing/logging. Uses try_init so repeated calls (e.g. in tests) don't panic.
+pub fn init_logging() {
+    let _ = fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new(Level::INFO.to_string())),
         )
-        .init();
+        .try_init();
+}
 
-    let cwd = std::env::current_dir()?;
-    let (settings, config_path) = Settings::load(&cwd)?;
+/// Parse a host + port into a SocketAddr for IP-literal hosts (127.0.0.1, 0.0.0.0, ::1).
+/// Returns None for names that need DNS resolution.
+pub fn parse_bind_addr(host: &str, port: u16) -> Option<std::net::SocketAddr> {
+    format!("{host}:{port}").parse().ok()
+}
 
-    // Resolve vault root path
-    let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+/// Resolve the bind address: fast path for IP literals, DNS fallback for names
+/// (preserves the original lookup_host behavior for the default "localhost" host).
+async fn resolve_bind_addr(
+    host: &str,
+    port: u16,
+) -> Result<std::net::SocketAddr, Box<dyn std::error::Error>> {
+    if let Some(addr) = parse_bind_addr(host, port) {
+        return Ok(addr);
+    }
+    let host_port = format!("{host}:{port}");
+    let addr = tokio::net::lookup_host(&host_port)
+        .await
+        .map_err(|e| format!("cannot resolve server address \"{host_port}\": {e}"))?
+        .next()
+        .ok_or_else(|| format!("server address \"{host_port}\" resolved to no addresses"))?;
+    Ok(addr)
+}
 
-    // Open vault
-    let vault = Vault::open(&vault_root)?;
+/// Compose the full Axum router from application state. (Exact extraction of the
+/// inline router build formerly in run_server.)
+pub fn build_router(state: Arc<AppState>, archive_body_limit: usize, dev_mode: bool) -> Router {
+    let mut app = Router::new()
+        .nest(
+            "/api/vault",
+            api::api_router_with_archive_limit(archive_body_limit),
+        )
+        .merge(api::openapi::router());
+    if !dev_mode {
+        app = app.merge(api::frontend::frontend_router());
+    }
+    app.with_state(state)
+        .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
+}
 
-    // Open CAS
+/// Build the shared application state over a vault root: open vault + CAS, open
+/// and build the index, spawn the index handle, wire hooks/bcl/location, assemble
+/// AppState. (Exact extraction of run_server lines ~289–349.)
+pub async fn build_app_state(
+    vault_root: &Path,
+) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
+    let vault = Vault::open(vault_root)?;
+
     let cas_path_raw = &vault.config().archive.cas_path;
     let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
     let cas = vault::cas::ContentStore::open(&cas_path)?;
 
-    // Open index
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path)?;
 
-    // Build index and resolve links
     let stats = index.build(&vault)?;
     info!(
         pages_indexed = stats.pages_indexed,
@@ -308,36 +351,26 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
     );
     index.resolve_links()?;
 
-    // Spawn index on a dedicated thread
     let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    // Broadcast channel for SSE notifications
     let (change_broadcast_tx, _) =
         tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
 
-    // Build post-move hooks
     let hooks: Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>> =
         Arc::new(vec![Box::new(vault::academic_hook::AcademicMoveHook)]);
 
-    // Wrap CAS for shared access
     let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
 
-    // Build post-delete hooks
     let delete_hooks: Arc<Vec<Box<dyn vault::hooks::PostDeleteHook>>> =
         Arc::new(vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
             cas: Arc::clone(&cas_arc),
         })]);
 
-    // Load BCL config (lookaside cache: vault file, then ~/.config/bcl).
     let bcl = vault::bcl::load_or_seed(vault.root());
-
-    // Load vault location (lookaside cache: vault file, then ~/.config/clepsydra).
     let location = vault::location::load_or_seed(vault.root());
 
-    // Build shared state
-    let state = Arc::new(AppState {
+    Ok(Arc::new(AppState {
         vault,
-        index: index_handle.clone(),
+        index: index_handle,
         cas: cas_arc,
         warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
@@ -346,26 +379,48 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,
         location,
-    });
+    }))
+}
 
-    // Optionally start LSP on stdio
-    if enable_lsp {
-        info!("starting LSP server on stdio");
-        let lsp_state = Arc::clone(&state);
-        tokio::spawn(async move {
-            lsp::run_lsp(lsp_state).await;
-            tracing::info!("LSP disconnected, shutting down");
-            std::process::exit(0);
-        });
+/// Process one drained batch of change events: reindex, log, broadcast a sync
+/// notification. (Exact extraction of the per-batch body of the former sync loop.)
+async fn process_sync_batch(
+    index: &IndexHandle,
+    batch: Vec<ChangeEvent>,
+    change_tx: &tokio::sync::broadcast::Sender<api::events::SyncNotification>,
+) {
+    let notification = notification_from_batch(&batch);
+    match index.process_sync_events(batch).await {
+        Ok(stats) => {
+            if stats.pages_indexed > 0 || stats.pages_removed > 0 {
+                tracing::info!(
+                    indexed = stats.pages_indexed,
+                    skipped = stats.pages_skipped,
+                    removed = stats.pages_removed,
+                    resolved = stats.links_resolved,
+                    deps = stats.deps_reresolved,
+                    "sync cycle complete"
+                );
+            }
+            if let Some(notification) = notification {
+                let _ = change_tx.send(notification);
+            }
+        }
+        Err(e) => {
+            tracing::error!("sync error: {e}");
+        }
     }
+}
 
-    // Spawn file watcher + sync loop
+/// Start the file watcher and spawn the sync loop. Returns the watcher, which the
+/// caller MUST keep alive for the server's lifetime.
+fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std::error::Error>> {
     let vault_root_buf = state.vault.root().to_path_buf();
-    let sync_index = index_handle;
+    let sync_index = state.index.clone();
     let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
     let sync_change_tx = state.change_tx.clone();
 
-    let _watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
+    let watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
 
     tokio::spawn(async move {
         loop {
@@ -373,74 +428,101 @@ pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Erro
                 Some(event) => drain_change_batch(event, &mut change_rx),
                 None => break,
             };
-
-            // Compute notification before passing batch to process_sync_events (which consumes it)
-            let notification = notification_from_batch(&batch);
-
-            match sync_index.process_sync_events(batch).await {
-                Ok(stats) => {
-                    if stats.pages_indexed > 0 || stats.pages_removed > 0 {
-                        tracing::info!(
-                            indexed = stats.pages_indexed,
-                            skipped = stats.pages_skipped,
-                            removed = stats.pages_removed,
-                            resolved = stats.links_resolved,
-                            deps = stats.deps_reresolved,
-                            "sync cycle complete"
-                        );
-                    }
-
-                    if let Some(notification) = notification {
-                        let _ = sync_change_tx.send(notification);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("sync error: {e}");
-                }
-            }
+            process_sync_batch(&sync_index, batch, &sync_change_tx).await;
         }
     });
 
+    Ok(watcher)
+}
+
+/// Optionally start the LSP server on stdio.
+fn maybe_spawn_lsp(enable_lsp: bool, state: &Arc<AppState>) {
+    if enable_lsp {
+        info!("starting LSP server on stdio");
+        let lsp_state = Arc::clone(state);
+        tokio::spawn(async move {
+            lsp::run_lsp(lsp_state).await;
+            tracing::info!("LSP disconnected, shutting down");
+            std::process::exit(0);
+        });
+    }
+}
+
+/// Build the application state + settings for the server (cwd, config load,
+/// vault-root resolution, app-state build).
+async fn build_server_state() -> Result<(Arc<AppState>, Settings), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let (settings, config_path) = Settings::load(&cwd)?;
+    let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+    let state = build_app_state(&vault_root).await?;
+    Ok((state, settings))
+}
+
+/// Load the rustls config from resolved cert/key paths.
+async fn load_tls_config(tls: &TlsSettings) -> Result<RustlsConfig, Box<dyn std::error::Error>> {
+    let (cert_path, key_path) = ensure_certificates(tls).await?;
+    let config = RustlsConfig::from_pem_file(cert_path, key_path).await?;
+    Ok(config)
+}
+
+/// Serve over HTTPS.
+async fn serve_tls(
+    app: Router,
+    addr: std::net::SocketAddr,
+    tls: &TlsSettings,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = load_tls_config(tls).await?;
+    info!(%addr, "listening (HTTPS)");
+    axum_server::bind_rustls(addr, config)
+        .serve(app.into_make_service())
+        .await?;
+    Ok(())
+}
+
+/// Serve over plain HTTP.
+async fn serve_plain(
+    app: Router,
+    addr: std::net::SocketAddr,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!(%addr, "listening (HTTP)");
+    axum_server::bind(addr)
+        .serve(app.into_make_service())
+        .await?;
+    Ok(())
+}
+
+/// Resolve the bind address and serve, choosing TLS or plain per settings.
+async fn serve(app: Router, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
+    let addr = resolve_bind_addr(&settings.server.host, settings.server.port).await?;
+    if settings.server.tls.enabled {
+        serve_tls(app, addr, &settings.server.tls).await
+    } else {
+        serve_plain(app, addr).await
+    }
+}
+
+pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Error>> {
+    init_logging();
+    let (state, settings) = build_server_state().await?;
+    maybe_spawn_lsp(enable_lsp, &state);
+    let _watcher = spawn_sync_watcher(&state)?;
     let archive_body_limit =
         (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;
+    let app = build_router(state.clone(), archive_body_limit, settings.server.dev_mode);
+    serve(app, &settings).await
+}
 
-    let mut app = Router::new()
-        .nest(
-            "/api/vault",
-            api::api_router_with_archive_limit(archive_body_limit),
-        )
-        .merge(api::openapi::router());
-
-    if !settings.server.dev_mode {
-        app = app.merge(api::frontend::frontend_router());
+#[cfg(test)]
+pub(crate) mod state_test_support {
+    use super::*;
+    use tempfile::TempDir;
+    pub(crate) async fn make_state() -> (Arc<AppState>, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let state = build_app_state(&root).await.unwrap();
+        (state, tmp)
     }
-
-    let app = app
-        .with_state(state)
-        .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
-
-    let host_port = format!("{}:{}", settings.server.host, settings.server.port);
-    let addr = tokio::net::lookup_host(&host_port)
-        .await
-        .map_err(|e| format!("cannot resolve server address \"{host_port}\": {e}"))?
-        .next()
-        .ok_or_else(|| format!("server address \"{host_port}\" resolved to no addresses"))?;
-
-    if settings.server.tls.enabled {
-        let (cert_path, key_path) = ensure_certificates(&settings.server.tls).await?;
-        let config = RustlsConfig::from_pem_file(cert_path, key_path).await?;
-        info!(%addr, ?settings.server, vault_root = %vault_root.display(), "listening (HTTPS)");
-        axum_server::bind_rustls(addr, config)
-            .serve(app.into_make_service())
-            .await?;
-    } else {
-        info!(%addr, ?settings.server, vault_root = %vault_root.display(), "listening (HTTP)");
-        axum_server::bind(addr)
-            .serve(app.into_make_service())
-            .await?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -525,5 +607,114 @@ mod tests {
     fn expand_tilde_returns_none_for_non_tilde() {
         assert!(expand_tilde("./vault").is_none());
         assert!(expand_tilde("/absolute/path").is_none());
+    }
+}
+
+#[cfg(test)]
+mod bind_tests {
+    use super::*;
+
+    #[test]
+    fn parse_bind_addr_ip_literal_returns_some() {
+        let addr = parse_bind_addr("127.0.0.1", 8080);
+        assert!(addr.is_some());
+        let addr = addr.unwrap();
+        assert_eq!(addr.port(), 8080);
+        assert!(addr.is_ipv4());
+    }
+
+    #[test]
+    fn parse_bind_addr_hostname_returns_none() {
+        let addr = parse_bind_addr("example.com", 80);
+        assert!(addr.is_none());
+    }
+}
+
+#[cfg(test)]
+mod resolve_addr_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn resolve_ip_literal_returns_correct_addr() {
+        let addr = resolve_bind_addr("127.0.0.1", 8080).await.unwrap();
+        assert_eq!(addr.port(), 8080);
+        assert!(addr.is_ipv4());
+    }
+}
+
+#[cfg(test)]
+mod router_tests {
+    use super::state_test_support::make_state;
+    use super::*;
+
+    #[tokio::test]
+    async fn build_router_dev_mode_does_not_panic() {
+        let (state, _tmp) = make_state().await;
+        let _router = build_router(state, 1024, true);
+    }
+
+    #[tokio::test]
+    async fn build_router_prod_mode_does_not_panic() {
+        let (state, _tmp) = make_state().await;
+        let _router = build_router(state, 1024, false);
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn build_app_state_opens_vault_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let state = build_app_state(&root).await.unwrap();
+        assert!(state.vault.root().exists());
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[serial_test::serial]
+    #[test]
+    fn load_from_reads_port_from_config_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "[server]\nport = 9999\n").unwrap();
+        let settings = Settings::load_from(&cfg).unwrap();
+        assert_eq!(settings.server.port, 9999);
+    }
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::state_test_support::make_state;
+    use super::*;
+
+    #[tokio::test]
+    async fn process_sync_batch_broadcasts_notification_for_upsert() {
+        let (state, _tmp) = make_state().await;
+        let mut rx = state.change_tx.subscribe();
+
+        // Create a markdown file in the vault root so indexing can succeed
+        let page_path = state.vault.root().join("notes").join("x.md");
+        std::fs::create_dir_all(page_path.parent().unwrap()).unwrap();
+        std::fs::write(&page_path, "---\ntitle: Test Page\n---\n\nHello from x.\n").unwrap();
+
+        let batch = vec![ChangeEvent::Upsert(
+            vault::path::VaultPath::new("notes/x.md").unwrap(),
+        )];
+
+        process_sync_batch(&state.index, batch, &state.change_tx).await;
+
+        // The Ok path + Some(notification) branch should have sent on the channel
+        let result = rx.try_recv();
+        assert!(
+            result.is_ok(),
+            "expected a notification on the broadcast channel, got: {result:?}"
+        );
     }
 }
