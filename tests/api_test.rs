@@ -613,19 +613,26 @@ async fn similar_returns_pages_sharing_tags() {
         .await
         .assert_status(StatusCode::CREATED);
 
-    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
 
     let res = server.get("/api/vault/index/similar/a.md").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let items = body["items"].as_array().expect("items array");
-    let paths: Vec<&str> = items
-        .iter()
-        .map(|i| i["path"].as_str().unwrap())
-        .collect();
+    let paths: Vec<&str> = items.iter().map(|i| i["path"].as_str().unwrap()).collect();
 
-    assert_eq!(paths, vec!["b.md", "c.md"], "expected b then c (more shared tags first); got {paths:?}");
-    assert!(!paths.contains(&"d.md"), "d has no shared tags and must not appear");
+    assert_eq!(
+        paths,
+        vec!["b.md", "c.md"],
+        "expected b then c (more shared tags first); got {paths:?}"
+    );
+    assert!(
+        !paths.contains(&"d.md"),
+        "d has no shared tags and must not appear"
+    );
 }
 
 #[tokio::test]
@@ -643,13 +650,19 @@ async fn similar_returns_empty_for_untagged_page() {
         .await
         .assert_status(StatusCode::CREATED);
 
-    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
 
     let res = server.get("/api/vault/index/similar/a.md").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     assert!(
-        body["items"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+        body["items"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(false),
         "expected empty items for untagged page; got {body:?}",
     );
 }
@@ -1604,9 +1617,7 @@ async fn content_index_groups_tags_and_links_per_page() {
         .collect();
 
     let tags_of = |p: &str| -> Vec<String> {
-        by_path
-            .get(p)
-            .unwrap_or_else(|| panic!("missing {p}"))["tags"]
+        by_path.get(p).unwrap_or_else(|| panic!("missing {p}"))["tags"]
             .as_array()
             .unwrap()
             .iter()
@@ -2622,7 +2633,10 @@ async fn content_index_includes_word_count() {
         .await
         .assert_status(StatusCode::CREATED);
 
-    server.post("/api/vault/index/rebuild").await.assert_status_ok();
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
 
     let res = server.get("/api/vault/index/content-index").await;
     res.assert_status_ok();
@@ -2754,9 +2768,18 @@ async fn import_zotero_creates_works() {
     let vault_root = tmp.path().join("vault");
     let article_path = results[0]["page_path"].as_str().unwrap();
     let content = fs::read_to_string(vault_root.join(article_path)).unwrap();
-    assert!(content.contains("source: zotero"), "should have import source");
-    assert!(content.contains("zotero_key: ABC12345"), "should have zotero_key");
-    assert!(content.contains("zotero_item_id: 1"), "should have zotero_item_id");
+    assert!(
+        content.contains("source: zotero"),
+        "should have import source"
+    );
+    assert!(
+        content.contains("zotero_key: ABC12345"),
+        "should have zotero_key"
+    );
+    assert!(
+        content.contains("zotero_item_id: 1"),
+        "should have zotero_item_id"
+    );
 }
 
 #[tokio::test]
@@ -2820,7 +2843,10 @@ async fn import_zotero_is_idempotent() {
     let body: serde_json::Value = res.json();
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|r| r["status"] == "skipped"), "second import should skip all items");
+    assert!(
+        results.iter().all(|r| r["status"] == "skipped"),
+        "second import should skip all items"
+    );
 }
 
 #[tokio::test]
@@ -2864,7 +2890,10 @@ async fn import_zotero_source_wins_updates() {
 
     // Page paths should still be populated
     for r in results {
-        assert!(r["page_path"].is_string(), "page_path should be set for updated items");
+        assert!(
+            r["page_path"].is_string(),
+            "page_path should be set for updated items"
+        );
     }
 }
 
@@ -2925,7 +2954,13 @@ async fn import_zotero_manual_reports_skipped_when_no_diffs() {
         .await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
-    assert!(body["results"].as_array().unwrap().iter().all(|r| r["status"] == "created"));
+    assert!(
+        body["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["status"] == "created")
+    );
 
     // Second import with manual policy — no changes in source, so expect "skipped"
     let res = server
@@ -2991,10 +3026,17 @@ async fn import_zotero_doi_path_skip() {
 
     // The article (DOI match) should be skipped; the book (no DOI pre-existing) created.
     let article = results.iter().find(|r| {
-        r["cite_key"].as_str().map(|k| k.contains("smith") || k.contains("2023")).unwrap_or(false)
+        r["cite_key"]
+            .as_str()
+            .map(|k| k.contains("smith") || k.contains("2023"))
+            .unwrap_or(false)
     });
     assert!(article.is_some(), "should find article result");
-    assert_eq!(article.unwrap()["status"], "skipped", "DOI-matched article should be skipped");
+    assert_eq!(
+        article.unwrap()["status"],
+        "skipped",
+        "DOI-matched article should be skipped"
+    );
 }
 
 #[tokio::test]
@@ -3034,11 +3076,17 @@ async fn import_zotero_doi_path_source_wins() {
     let article = results.iter().find(|r| {
         r["status"].as_str() == Some("updated") || r["status"].as_str() == Some("created")
     });
-    assert!(article.is_some(), "should have at least one updated or created result");
+    assert!(
+        article.is_some(),
+        "should have at least one updated or created result"
+    );
 
     // Verify that the article was updated (source_wins live mode).
     let updated = results.iter().filter(|r| r["status"] == "updated").count();
-    assert!(updated >= 1, "at least the DOI-matched article should be 'updated'");
+    assert!(
+        updated >= 1,
+        "at least the DOI-matched article should be 'updated'"
+    );
 }
 
 #[tokio::test]

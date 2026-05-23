@@ -119,10 +119,7 @@ mod tests {
     #[test]
     fn wikilink_with_multibyte_chars() {
         // 你 is 3 bytes in UTF-8
-        assert_eq!(
-            wikilink_prefix("你好 [[Des", 13),
-            Some("Des".to_string())
-        );
+        assert_eq!(wikilink_prefix("你好 [[Des", 13), Some("Des".to_string()));
     }
 
     #[test]

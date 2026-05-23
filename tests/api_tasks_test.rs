@@ -126,13 +126,15 @@ async fn filter_tasks_by_due_date() {
         .assert_status(axum::http::StatusCode::CREATED);
 
     // Due before 2026-03-01
-    let res = server
-        .get("/api/vault/tasks?due_before=2026-03-01")
-        .await;
+    let res = server.get("/api/vault/tasks?due_before=2026-03-01").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected 1 task due before March, got: {tasks:?}");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "expected 1 task due before March, got: {tasks:?}"
+    );
     assert!(tasks[0]["content"].as_str().unwrap().contains("Early task"));
 }
 
@@ -154,7 +156,12 @@ async fn filter_tasks_has_no_date() {
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1, "expected 1 undated task, got: {tasks:?}");
-    assert!(tasks[0]["content"].as_str().unwrap().contains("Undated task"));
+    assert!(
+        tasks[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Undated task")
+    );
 }
 
 #[tokio::test]
@@ -185,10 +192,12 @@ async fn filter_tasks_by_page_prefix() {
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1, "expected 1 journal task, got: {tasks:?}");
-    assert!(tasks[0]["page_path"]
-        .as_str()
-        .unwrap()
-        .starts_with("journals/"));
+    assert!(
+        tasks[0]["page_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("journals/")
+    );
 }
 
 #[tokio::test]
@@ -209,7 +218,12 @@ async fn filter_tasks_by_priority() {
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1, "expected 1 priority-A task, got: {tasks:?}");
-    assert!(tasks[0]["content"].as_str().unwrap().contains("High priority"));
+    assert!(
+        tasks[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("High priority")
+    );
 }
 
 #[tokio::test]

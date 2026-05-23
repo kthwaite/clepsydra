@@ -539,7 +539,10 @@ impl VaultIndex {
 
             // Clear old derived data for this page
             // block_properties must be deleted before blocks due to FK constraint
-            tx.execute("DELETE FROM block_properties WHERE page_id = ?1", params![page_id])?;
+            tx.execute(
+                "DELETE FROM block_properties WHERE page_id = ?1",
+                params![page_id],
+            )?;
             tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
             tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
             tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
@@ -816,7 +819,10 @@ impl VaultIndex {
 
         // Clear old derived data
         // block_properties must be deleted before blocks due to FK constraint
-        tx.execute("DELETE FROM block_properties WHERE page_id = ?1", params![page_id])?;
+        tx.execute(
+            "DELETE FROM block_properties WHERE page_id = ?1",
+            params![page_id],
+        )?;
         tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
@@ -950,9 +956,7 @@ impl VaultIndex {
                  WHERE b.block_id = ?1",
             )?;
             let matches: Vec<(String, String)> = lookup
-                .query_map(params![block_id], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?
+                .query_map(params![block_id], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .filter_map(|r| r.ok())
                 .collect();
             drop(lookup);
@@ -1011,9 +1015,8 @@ impl VaultIndex {
         }
 
         // 4. Resolve incoming block_ref links targeting block IDs on this page
-        let mut block_id_stmt = tx.prepare(
-            "SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL",
-        )?;
+        let mut block_id_stmt =
+            tx.prepare("SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL")?;
         let page_block_ids: Vec<String> = block_id_stmt
             .query_map(params![page_id], |row| row.get(0))?
             .filter_map(|r| r.ok())

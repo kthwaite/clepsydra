@@ -320,9 +320,11 @@ impl LanguageServer for LspBackend {
 
             if let Some(target_raw) = link_target {
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
-                let path =
-                    crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
-                        .await;
+                let path = crate::lsp::queries::canonical_to_vault_path(
+                    &self.state.index,
+                    canonical.as_str(),
+                )
+                .await;
 
                 match path {
                     Some(p) => match crate::vault::path::VaultPath::new(&p) {
@@ -385,15 +387,12 @@ impl LanguageServer for LspBackend {
                 .index
                 .with_index(
                     move |index, _| -> std::result::Result<Vec<_>, rusqlite::Error> {
-                        let mut stmt = index.connection().prepare(
-                            "SELECT path, title FROM pages ORDER BY path LIMIT 50",
-                        )?;
+                        let mut stmt = index
+                            .connection()
+                            .prepare("SELECT path, title FROM pages ORDER BY path LIMIT 50")?;
                         let rows = stmt
                             .query_map([], |row| {
-                                Ok((
-                                    row.get::<_, String>(0)?,
-                                    row.get::<_, Option<String>>(1)?,
-                                ))
+                                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                             })?
                             .filter_map(|r| r.ok())
                             .collect();
@@ -477,11 +476,7 @@ impl LanguageServer for LspBackend {
     }
 
     async fn code_lens_resolve(&self, lens: CodeLens) -> Result<CodeLens> {
-        let vault_path_str = lens
-            .data
-            .as_ref()
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let vault_path_str = lens.data.as_ref().and_then(|v| v.as_str()).unwrap_or("");
 
         let count = if let Ok(vp) = crate::vault::path::VaultPath::new(vault_path_str) {
             self.state
@@ -541,8 +536,7 @@ impl LanguageServer for LspBackend {
             let line_idx = pos.line as usize;
             if line_idx < doc.rope.len_lines() {
                 let line_text = doc.rope.line(line_idx).to_string();
-                if let Some(response) =
-                    rename::frontmatter_title_rename_range(&line_text, pos.line)
+                if let Some(response) = rename::frontmatter_title_rename_range(&line_text, pos.line)
                 {
                     return Ok(Some(response));
                 }
@@ -776,7 +770,9 @@ impl LanguageServer for LspBackend {
 /// Flatten the doubly-nested result returned by `IndexHandle::with_index`
 /// (whose closure itself returns a `Result`) into a single JSON-RPC result,
 /// mapping any error to an internal error.
-fn flatten_index_result<T, E1, E2>(r: std::result::Result<std::result::Result<T, E1>, E2>) -> Result<T> {
+fn flatten_index_result<T, E1, E2>(
+    r: std::result::Result<std::result::Result<T, E1>, E2>,
+) -> Result<T> {
     match r {
         Ok(Ok(v)) => Ok(v),
         _ => Err(tower_lsp::jsonrpc::Error::internal_error()),
@@ -860,8 +856,7 @@ impl LspBackend {
                 drop(docs);
 
                 // Resolve target_raw to a VaultPath via canonical name lookup
-                let canonical =
-                    crate::vault::canonical::CanonicalName::from_title(&target_raw);
+                let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
                 let target_path: Option<String> = self
                     .state
                     .index
@@ -1160,8 +1155,8 @@ pub async fn run_lsp(state: Arc<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::test_support::*;
-    use tower_lsp::lsp_types::*;
     use tower_lsp::LanguageServer;
+    use tower_lsp::lsp_types::*;
 
     #[tokio::test]
     async fn backend_constructs_and_opens_a_document() {
@@ -1183,7 +1178,10 @@ mod tests {
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 8 },
+                position: Position {
+                    line: 2,
+                    character: 8,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -1197,16 +1195,17 @@ mod tests {
 
     #[tokio::test]
     async fn completion_suggests_wikilink_targets() {
-        let (backend, _tmp) = make_backend(&[
-            ("Src.md", "# Src\n\n[[Tar\n"),
-            ("Target.md", "# Target\n"),
-        ]);
+        let (backend, _tmp) =
+            make_backend(&[("Src.md", "# Src\n\n[[Tar\n"), ("Target.md", "# Target\n")]);
         let uri = uri_for(&backend, "Src.md");
         open_doc(&backend, &uri, "# Src\n\n[[Tar\n").await;
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 5 },
+                position: Position {
+                    line: 2,
+                    character: 5,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -1229,7 +1228,10 @@ mod tests {
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 3 },
+                position: Position {
+                    line: 2,
+                    character: 3,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -1249,7 +1251,10 @@ mod tests {
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 4 },
+                position: Position {
+                    line: 2,
+                    character: 4,
+                },
             },
             work_done_progress_params: Default::default(),
         };
@@ -1292,13 +1297,22 @@ mod tests {
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 0, character: 2 },
+                position: Position {
+                    line: 0,
+                    character: 2,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
-            context: ReferenceContext { include_declaration: false },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
         };
-        let refs = backend.references(params).await.unwrap().unwrap_or_default();
+        let refs = backend
+            .references(params)
+            .await
+            .unwrap()
+            .unwrap_or_default();
         assert!(refs.iter().any(|l| l.uri.path().ends_with("Other.md")));
     }
 
@@ -1314,28 +1328,38 @@ mod tests {
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 4 },
+                position: Position {
+                    line: 2,
+                    character: 4,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
-            context: ReferenceContext { include_declaration: false },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
         };
-        let refs = backend.references(params).await.unwrap().unwrap_or_default();
+        let refs = backend
+            .references(params)
+            .await
+            .unwrap()
+            .unwrap_or_default();
         assert!(refs.iter().any(|l| l.uri.path().ends_with("B.md")));
         assert!(refs.iter().any(|l| l.uri.path().ends_with("A.md")));
     }
 
     #[tokio::test]
     async fn prepare_rename_on_wikilink() {
-        let (backend, _tmp) = make_backend(&[
-            ("A.md", "# A\n\n[[Target]]\n"),
-            ("Target.md", "# Target\n"),
-        ]);
+        let (backend, _tmp) =
+            make_backend(&[("A.md", "# A\n\n[[Target]]\n"), ("Target.md", "# Target\n")]);
         let uri = uri_for(&backend, "A.md");
         open_doc(&backend, &uri, "# A\n\n[[Target]]\n").await;
         let params = TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line: 2, character: 4 },
+            position: Position {
+                line: 2,
+                character: 4,
+            },
         };
         assert!(backend.prepare_rename(params).await.unwrap().is_some());
     }
@@ -1348,7 +1372,10 @@ mod tests {
         open_doc(&backend, &uri, text).await;
         let params = TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line: 1, character: 9 },
+            position: Position {
+                line: 1,
+                character: 9,
+            },
         };
         let resp = backend.prepare_rename(params).await.unwrap();
         assert!(resp.is_some());
@@ -1371,12 +1398,19 @@ mod tests {
         let params = RenameParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 4 },
+                position: Position {
+                    line: 2,
+                    character: 4,
+                },
             },
             new_name: "Renamed Target".to_string(),
             work_done_progress_params: Default::default(),
         };
-        let edit = backend.rename(params).await.unwrap().expect("workspace edit");
+        let edit = backend
+            .rename(params)
+            .await
+            .unwrap()
+            .expect("workspace edit");
         assert!(edit.document_changes.is_some());
     }
 
@@ -1392,7 +1426,10 @@ mod tests {
         let params = RenameParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line: 2, character: 4 },
+                position: Position {
+                    line: 2,
+                    character: 4,
+                },
             },
             new_name: "Existing".to_string(),
             work_done_progress_params: Default::default(),
@@ -1405,10 +1442,8 @@ mod tests {
         // Cursor in the frontmatter `title:` line renames the current page
         // (Case B in resolve_rename_target) and rewrites referrers.
         let text = "---\ntitle: Old Note\n---\nbody\n";
-        let (backend, _tmp) = make_backend(&[
-            ("Old Note.md", text),
-            ("A.md", "# A\n\n[[Old Note]]\n"),
-        ]);
+        let (backend, _tmp) =
+            make_backend(&[("Old Note.md", text), ("A.md", "# A\n\n[[Old Note]]\n")]);
         let uri = uri_for(&backend, "Old Note.md");
         open_doc(&backend, &uri, text).await;
         let params = RenameParams {

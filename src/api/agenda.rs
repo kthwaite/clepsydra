@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
+use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
-use axum::Router;
 use chrono::{Duration, Utc};
 use rusqlite::params;
 use serde::Serialize;
@@ -136,7 +136,16 @@ async fn agenda_today(
             let mut task_keys: Vec<(String, i64)> = Vec::new();
 
             for row in rows {
-                let (page_id, block_id, content, span_start, span_end, status, page_path, page_title) = row?;
+                let (
+                    page_id,
+                    block_id,
+                    content,
+                    span_start,
+                    span_end,
+                    status,
+                    page_path,
+                    page_title,
+                ) = row?;
                 task_keys.push((page_id, span_start));
                 tasks.push(TaskItem {
                     block_id,
@@ -214,7 +223,17 @@ async fn agenda_week(
             let mut task_keys: Vec<(String, i64)> = Vec::new();
 
             for row in rows {
-                let (page_id, block_id, content, span_start, span_end, status, page_path, page_title, due_date) = row?;
+                let (
+                    page_id,
+                    block_id,
+                    content,
+                    span_start,
+                    span_end,
+                    status,
+                    page_path,
+                    page_title,
+                    due_date,
+                ) = row?;
                 task_keys.push((page_id, span_start));
                 tasks.push((
                     TaskItem {
@@ -232,16 +251,19 @@ async fn agenda_week(
             }
 
             // Fill properties — extract TaskItems temporarily
-            let mut task_items: Vec<TaskItem> = tasks.iter().map(|(t, _)| TaskItem {
-                block_id: t.block_id.clone(),
-                content: t.content.clone(),
-                status: t.status.clone(),
-                properties: HashMap::new(),
-                page_path: t.page_path.clone(),
-                page_title: t.page_title.clone(),
-                span_start: t.span_start,
-                span_end: t.span_end,
-            }).collect();
+            let mut task_items: Vec<TaskItem> = tasks
+                .iter()
+                .map(|(t, _)| TaskItem {
+                    block_id: t.block_id.clone(),
+                    content: t.content.clone(),
+                    status: t.status.clone(),
+                    properties: HashMap::new(),
+                    page_path: t.page_path.clone(),
+                    page_title: t.page_title.clone(),
+                    span_start: t.span_start,
+                    span_end: t.span_end,
+                })
+                .collect();
 
             fill_properties(conn, &mut task_items, &task_keys)?;
 
@@ -326,7 +348,16 @@ async fn agenda_overdue(
             let mut task_keys: Vec<(String, i64)> = Vec::new();
 
             for row in rows {
-                let (page_id, block_id, content, span_start, span_end, status, page_path, page_title) = row?;
+                let (
+                    page_id,
+                    block_id,
+                    content,
+                    span_start,
+                    span_end,
+                    status,
+                    page_path,
+                    page_title,
+                ) = row?;
                 task_keys.push((page_id, span_start));
                 tasks.push(TaskItem {
                     block_id,

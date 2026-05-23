@@ -554,9 +554,12 @@ pub async fn import_doi(
     }
 
     // 2. Fetch from Crossref
-    let json = crate::vault::import_doi::fetch_doi(&req.doi, crate::vault::import_doi::DEFAULT_CROSSREF_BASE)
-        .await
-        .map_err(|e| ApiError::bad_request(format!("DOI lookup failed: {e}")))?;
+    let json = crate::vault::import_doi::fetch_doi(
+        &req.doi,
+        crate::vault::import_doi::DEFAULT_CROSSREF_BASE,
+    )
+    .await
+    .map_err(|e| ApiError::bad_request(format!("DOI lookup failed: {e}")))?;
 
     let entry = crate::vault::import_doi::parse_crossref_response(&json)
         .map_err(|e| ApiError::bad_request(format!("Failed to parse Crossref data: {e}")))?;
@@ -649,9 +652,12 @@ pub async fn import_isbn_handler(
     }
 
     // 2. Fetch from Open Library
-    let (edition_json, author_names) = crate::vault::import_isbn::fetch_isbn(&req.isbn, crate::vault::import_isbn::DEFAULT_OPENLIBRARY_BASE)
-        .await
-        .map_err(|e| ApiError::bad_request(format!("ISBN lookup failed: {e}")))?;
+    let (edition_json, author_names) = crate::vault::import_isbn::fetch_isbn(
+        &req.isbn,
+        crate::vault::import_isbn::DEFAULT_OPENLIBRARY_BASE,
+    )
+    .await
+    .map_err(|e| ApiError::bad_request(format!("ISBN lookup failed: {e}")))?;
 
     let entry = crate::vault::import_isbn::parse_openlibrary_response(
         &edition_json,
@@ -750,10 +756,9 @@ async fn patch_zotero_provenance(
         serde_yaml::Value::String(Utc::now().to_rfc3339()),
     );
 
-    page.meta.extra.insert(
-        "import".to_string(),
-        serde_yaml::Value::Mapping(import_map),
-    );
+    page.meta
+        .extra
+        .insert("import".to_string(), serde_yaml::Value::Mapping(import_map));
 
     // Resolve and add attachment references
     let mut assets: Vec<String> = Vec::new();
@@ -776,9 +781,11 @@ async fn patch_zotero_provenance(
         );
     }
     if let Some(url) = pdf_url {
-        let urls_val = page.meta.extra.entry("urls".to_string()).or_insert_with(|| {
-            serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
-        });
+        let urls_val = page
+            .meta
+            .extra
+            .entry("urls".to_string())
+            .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
         if let serde_yaml::Value::Mapping(m) = urls_val {
             m.insert(
                 serde_yaml::Value::String("pdf".into()),
@@ -812,8 +819,8 @@ fn should_save_zotero_checkpoint(results: &[ImportResult]) -> bool {
 /// Re-index a single page by vault-relative path (used after writing changes
 /// during an import).
 async fn reindex_page(state: &AppState, path: &str) -> Result<(), ApiError> {
-    let vp = VaultPath::new(path)
-        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+    let vp =
+        VaultPath::new(path).map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
     state
         .index
         .with_index(move |index, vault| index.index_page(vault, &vp))
@@ -836,8 +843,8 @@ async fn handle_zk_existing(
     used_cite_keys: &std::collections::HashSet<String>,
 ) -> Result<ImportResult, ApiError> {
     use crate::vault::import_zotero::{
-        ConflictDetail, ItemActionKind, compute_field_diffs, decide_item_action,
-        derive_cite_key, format_author, map_to_import_entry,
+        ConflictDetail, ItemActionKind, compute_field_diffs, decide_item_action, derive_cite_key,
+        format_author, map_to_import_entry,
     };
 
     let entry = map_to_import_entry(item);
@@ -860,20 +867,21 @@ async fn handle_zk_existing(
 
     // SourceWins derives a cite_key (used both in the result and the apply
     // call); Skip/Manual use "zotero:<key>". Derive it once.
-    let derived_cite_key =
-        if matches!(policy, crate::vault::import_zotero::ConflictPolicy::SourceWins) {
-            let formatted_authors: Vec<String> =
-                item.authors.iter().map(format_author).collect();
-            Some(derive_cite_key(
-                item.extra_field.as_deref(),
-                &formatted_authors,
-                entry.year,
-                &item.title,
-                used_cite_keys,
-            ))
-        } else {
-            None
-        };
+    let derived_cite_key = if matches!(
+        policy,
+        crate::vault::import_zotero::ConflictPolicy::SourceWins
+    ) {
+        let formatted_authors: Vec<String> = item.authors.iter().map(format_author).collect();
+        Some(derive_cite_key(
+            item.extra_field.as_deref(),
+            &formatted_authors,
+            entry.year,
+            &item.title,
+            used_cite_keys,
+        ))
+    } else {
+        None
+    };
     let cite_key = derived_cite_key
         .clone()
         .unwrap_or_else(|| format!("zotero:{}", item.zotero_key));
@@ -972,7 +980,13 @@ pub async fn import_zotero_handler(
     // 1. Resolve DB path
     let db_path = crate::vault::import_zotero::resolve_zotero_db_path(
         req.database_path.as_deref(),
-        state.vault.config().academic.zotero.database_path.as_deref(),
+        state
+            .vault
+            .config()
+            .academic
+            .zotero
+            .database_path
+            .as_deref(),
         dirs::home_dir().as_deref(),
     )
     .map_err(ApiError::bad_request)?;
@@ -999,8 +1013,7 @@ pub async fn import_zotero_handler(
         .or(checkpoint_since);
 
     // 3. Open DB and query items
-    let conn = crate::vault::import_zotero::open_zotero_db(&db_path)
-        .map_err(ApiError::internal)?;
+    let conn = crate::vault::import_zotero::open_zotero_db(&db_path).map_err(ApiError::internal)?;
 
     let items = crate::vault::import_zotero::query_items(
         &conn,
@@ -1027,7 +1040,10 @@ pub async fn import_zotero_handler(
         .await
         .unwrap_or_else(|_| HashSet::new());
 
-    let zotero_data_dir = db_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    let zotero_data_dir = db_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
 
     let mut results = Vec::with_capacity(items.len());
 
@@ -1038,17 +1054,19 @@ pub async fn import_zotero_handler(
         let existing_by_zk = state
             .index
             .with_index(move |index, _vault| {
-                crate::vault::import_zotero::find_existing_by_zotero_key(
-                    index.connection(),
-                    &zk,
-                )
+                crate::vault::import_zotero::find_existing_by_zotero_key(index.connection(), &zk)
             })
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if let Some(path) = existing_by_zk {
             let result = handle_zk_existing(
-                &state, item, path, req.conflict_policy, req.dry_run, &used_cite_keys,
+                &state,
+                item,
+                path,
+                req.conflict_policy,
+                req.dry_run,
+                &used_cite_keys,
             )
             .await?;
             results.push(result);
@@ -1089,8 +1107,7 @@ pub async fn import_zotero_handler(
 
         if let Some(path) = existing {
             let result =
-                handle_doi_existing(&state, &entry, path, req.conflict_policy, req.dry_run)
-                    .await?;
+                handle_doi_existing(&state, &entry, path, req.conflict_policy, req.dry_run).await?;
             results.push(result);
             continue;
         }
@@ -1162,9 +1179,7 @@ pub async fn import_zotero_handler(
     // 6. Save checkpoint after successful import (not on dry_run)
     if req.auto_checkpoint && !req.dry_run && should_save_zotero_checkpoint(&results) {
         let created_count = results.iter().filter(|r| r.status == "created").count() as u64;
-        let now = chrono::Utc::now()
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string();
+        let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let cp = crate::vault::checkpoint::ImportCheckpoint {
             last_synced: now,
             items_imported: created_count,
@@ -1183,43 +1198,37 @@ mod zotero_handler_tests {
 
     #[test]
     fn should_save_checkpoint_when_created() {
-        let results = vec![
-            ImportResult {
-                cite_key: "a".into(),
-                status: "created".into(),
-                page_path: None,
-                error: None,
-                conflict_detail: None,
-            },
-        ];
+        let results = vec![ImportResult {
+            cite_key: "a".into(),
+            status: "created".into(),
+            page_path: None,
+            error: None,
+            conflict_detail: None,
+        }];
         assert!(should_save_zotero_checkpoint(&results));
     }
 
     #[test]
     fn should_save_checkpoint_when_skipped() {
-        let results = vec![
-            ImportResult {
-                cite_key: "b".into(),
-                status: "skipped".into(),
-                page_path: Some("p".into()),
-                error: None,
-                conflict_detail: None,
-            },
-        ];
+        let results = vec![ImportResult {
+            cite_key: "b".into(),
+            status: "skipped".into(),
+            page_path: Some("p".into()),
+            error: None,
+            conflict_detail: None,
+        }];
         assert!(should_save_zotero_checkpoint(&results));
     }
 
     #[test]
     fn should_not_save_checkpoint_when_only_errors() {
-        let results = vec![
-            ImportResult {
-                cite_key: "c".into(),
-                status: "error".into(),
-                page_path: None,
-                error: Some("oops".into()),
-                conflict_detail: None,
-            },
-        ];
+        let results = vec![ImportResult {
+            cite_key: "c".into(),
+            status: "error".into(),
+            page_path: None,
+            error: Some("oops".into()),
+            conflict_detail: None,
+        }];
         assert!(!should_save_zotero_checkpoint(&results));
     }
 

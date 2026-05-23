@@ -38,10 +38,7 @@ async fn with_index_returns_value() {
     let (_tmp, vault) = setup_vault(&[]);
     let handle = build_handle(&vault);
 
-    let result = handle
-        .with_index(|_index, _vault| 42)
-        .await
-        .unwrap();
+    let result = handle.with_index(|_index, _vault| 42).await.unwrap();
 
     assert_eq!(result, 42);
 }
@@ -265,9 +262,7 @@ Accessible from multiple tasks.
     let h1 = handle.clone();
     let h2 = handle.clone();
 
-    let task1 = tokio::spawn(async move {
-        h1.search("shared".into(), 10).await.unwrap()
-    });
+    let task1 = tokio::spawn(async move { h1.search("shared".into(), 10).await.unwrap() });
 
     let task2 = tokio::spawn(async move {
         h2.with_index(|index, _vault| {

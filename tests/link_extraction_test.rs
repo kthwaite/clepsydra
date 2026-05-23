@@ -139,14 +139,22 @@ fn extract_block_ref_12_char() {
 fn skip_block_ref_in_code_block() {
     let body = "```\n((abc123DEF0a))\n```";
     let links = extract_links(body);
-    assert_eq!(links.len(), 0, "block refs inside fenced code blocks must be ignored");
+    assert_eq!(
+        links.len(),
+        0,
+        "block refs inside fenced code blocks must be ignored"
+    );
 }
 
 #[test]
 fn skip_block_ref_in_inline_code() {
     let body = "`((abc123DEF0a))`";
     let links = extract_links(body);
-    assert_eq!(links.len(), 0, "block refs inside inline code must be ignored");
+    assert_eq!(
+        links.len(),
+        0,
+        "block refs inside inline code must be ignored"
+    );
 }
 
 #[test]

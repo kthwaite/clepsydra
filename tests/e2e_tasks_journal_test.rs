@@ -103,10 +103,7 @@ async fn full_workflow_tasks_journal_agenda() {
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let agenda_tasks = body["tasks"].as_array().unwrap();
-    assert!(
-        !agenda_tasks.is_empty(),
-        "agenda/today should have tasks"
-    );
+    assert!(!agenda_tasks.is_empty(), "agenda/today should have tasks");
     // The "Write proposal" task has due = yesterday, so it's overdue
     assert!(
         agenda_tasks
@@ -145,9 +142,16 @@ async fn full_workflow_tasks_journal_agenda() {
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "should have 1 remaining todo task after marking one done");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "should have 1 remaining todo task after marking one done"
+    );
     assert!(
-        tasks[0]["content"].as_str().unwrap().contains("Review document"),
+        tasks[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Review document"),
         "remaining todo task should be 'Review document'"
     );
 
@@ -211,9 +215,10 @@ async fn full_workflow_tasks_journal_agenda() {
         "should now have 2 todo tasks (yesterday's remaining + captured): {tasks:?}"
     );
     assert!(
-        tasks
-            .iter()
-            .any(|t| t["content"].as_str().unwrap().contains("New task from capture")),
+        tasks.iter().any(|t| t["content"]
+            .as_str()
+            .unwrap()
+            .contains("New task from capture")),
         "captured task should appear in task queries"
     );
     assert!(

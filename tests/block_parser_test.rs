@@ -1,4 +1,4 @@
-use clepsydra::vault::block::{parse_blocks, BlockType, CheckboxState};
+use clepsydra::vault::block::{BlockType, CheckboxState, parse_blocks};
 
 #[test]
 fn parses_simple_list() {
@@ -95,15 +95,21 @@ fn parses_cancelled_checkbox() {
 fn parses_headings() {
     let md = "# Title\n\nSome text.\n\n## Section\n";
     let blocks = parse_blocks(md);
-    assert!(blocks
-        .iter()
-        .any(|b| b.block_type == BlockType::Heading && b.content == "Title"));
-    assert!(blocks
-        .iter()
-        .any(|b| b.block_type == BlockType::Paragraph && b.content == "Some text."));
-    assert!(blocks
-        .iter()
-        .any(|b| b.block_type == BlockType::Heading && b.content == "Section"));
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.block_type == BlockType::Heading && b.content == "Title")
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.block_type == BlockType::Paragraph && b.content == "Some text.")
+    );
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.block_type == BlockType::Heading && b.content == "Section")
+    );
 }
 
 #[test]
@@ -123,8 +129,7 @@ fn records_byte_spans() {
     assert!(blocks[0].span.start < blocks[0].span.end);
     assert!(blocks[1].span.start < blocks[1].span.end);
     assert!(
-        blocks[0].span.end <= blocks[1].span.start
-            || blocks[0].span.start != blocks[1].span.start
+        blocks[0].span.end <= blocks[1].span.start || blocks[0].span.start != blocks[1].span.start
     );
 }
 
@@ -180,9 +185,11 @@ fn nested_order_index_resets_per_parent() {
 fn parses_blockquote() {
     let md = "> Some quoted text\n";
     let blocks = parse_blocks(md);
-    assert!(blocks
-        .iter()
-        .any(|b| b.block_type == BlockType::Blockquote && b.content == "Some quoted text"));
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.block_type == BlockType::Blockquote && b.content == "Some quoted text")
+    );
 }
 
 #[test]

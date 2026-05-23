@@ -38,10 +38,9 @@ fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
     let cas = ContentStore::open(&cas_path).unwrap();
     let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
 
-    let delete_hooks: Vec<Box<dyn PostDeleteHook>> =
-        vec![Box::new(ArchiveDeleteHook {
-            cas: Arc::clone(&cas_arc),
-        })];
+    let delete_hooks: Vec<Box<dyn PostDeleteHook>> = vec![Box::new(ArchiveDeleteHook {
+        cas: Arc::clone(&cas_arc),
+    })];
 
     let index_handle = IndexHandle::spawn(index, vault.clone());
 
@@ -336,7 +335,10 @@ async fn archive_content_hash_mismatch_rejected() {
     assert_eq!(res.status_code(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json();
     assert!(
-        body["error"].as_str().unwrap().contains("content_hash mismatch"),
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("content_hash mismatch"),
         "expected content_hash mismatch error, got: {}",
         body["error"]
     );

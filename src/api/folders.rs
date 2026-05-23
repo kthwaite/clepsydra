@@ -515,8 +515,9 @@ pub async fn move_folder(
             let plan = planner
                 .plan(&op)
                 .map_err(|e| crate::vault::index::IndexError::Other(format!("plan failed: {e}")))?;
-            plan.execute(vault, index, &hooks)
-                .map_err(|e| crate::vault::index::IndexError::Other(format!("execute failed: {e}")))?;
+            plan.execute(vault, index, &hooks).map_err(|e| {
+                crate::vault::index::IndexError::Other(format!("execute failed: {e}"))
+            })?;
             Ok::<_, crate::vault::index::IndexError>(())
         })
         .await

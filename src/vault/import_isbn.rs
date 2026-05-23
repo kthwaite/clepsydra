@@ -66,7 +66,10 @@ pub const DEFAULT_OPENLIBRARY_BASE: &str = "https://openlibrary.org";
 
 /// Fetch book metadata from the Open Library API by ISBN.
 /// Returns (edition_json, resolved_author_names).
-pub async fn fetch_isbn(isbn: &str, base_url: &str) -> Result<(serde_json::Value, Vec<String>), String> {
+pub async fn fetch_isbn(
+    isbn: &str,
+    base_url: &str,
+) -> Result<(serde_json::Value, Vec<String>), String> {
     let client = reqwest::Client::new();
 
     // 1. Fetch edition data

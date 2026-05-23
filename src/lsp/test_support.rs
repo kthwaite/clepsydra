@@ -4,9 +4,9 @@ use std::sync::{Arc, OnceLock};
 
 use tempfile::TempDir;
 use tokio::sync::{Mutex, RwLock, broadcast};
+use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
-use tower_lsp::jsonrpc::Result as JsonRpcResult;
 
 use crate::api::AppState;
 use crate::lsp::LspBackend;
@@ -109,12 +109,7 @@ pub(crate) async fn open_doc(backend: &LspBackend, uri: &Url, text: &str) {
 /// Open `text` as a document at `uri` with an explicit `version` and refresh
 /// the canonical-name cache.
 #[allow(dead_code)]
-pub(crate) async fn open_doc_at_version(
-    backend: &LspBackend,
-    uri: &Url,
-    text: &str,
-    version: i32,
-) {
+pub(crate) async fn open_doc_at_version(backend: &LspBackend, uri: &Url, text: &str, version: i32) {
     backend.refresh_canonical_names().await;
     let mut docs = backend.documents.lock().await;
     docs.insert(uri.clone(), Document::from_text(text, version));

@@ -42,7 +42,10 @@ fn parse_round_trips() {
 #[test]
 fn parse_rejects_invalid() {
     // Empty string
-    assert!(BlockId::parse("").is_none(), "empty string should be rejected");
+    assert!(
+        BlockId::parse("").is_none(),
+        "empty string should be rejected"
+    );
 
     // Too short (9 chars)
     assert!(

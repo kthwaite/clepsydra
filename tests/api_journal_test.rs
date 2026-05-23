@@ -127,12 +127,13 @@ async fn get_by_date_returns_existing() {
 
     // Now fetch by today's date explicitly
     let date = today_str();
-    let res = server
-        .get(&format!("/api/vault/journal/{date}"))
-        .await;
+    let res = server.get(&format!("/api/vault/journal/{date}")).await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
-    assert_eq!(body["path"].as_str().unwrap(), format!("journals/{date}.md"));
+    assert_eq!(
+        body["path"].as_str().unwrap(),
+        format!("journals/{date}.md")
+    );
 }
 
 #[tokio::test]
@@ -260,9 +261,7 @@ async fn range_returns_journals_in_date_range() {
 
     let today = today_str();
     let res = server
-        .get(&format!(
-            "/api/vault/journal/range?from={today}&to={today}"
-        ))
+        .get(&format!("/api/vault/journal/range?from={today}&to={today}"))
         .await;
     res.assert_status_ok();
 
@@ -371,5 +370,8 @@ async fn today_journal_carried_forward_empty_when_no_recent_tasks() {
     let carried = body["carried_forward"]
         .as_array()
         .expect("carried_forward should be an array");
-    assert!(carried.is_empty(), "should be empty when no recent journal tasks");
+    assert!(
+        carried.is_empty(),
+        "should be empty when no recent journal tasks"
+    );
 }

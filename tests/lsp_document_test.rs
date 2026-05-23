@@ -30,7 +30,10 @@ fn parse_extracts_meta_and_body() {
 fn body_byte_offset_is_correct() {
     let doc = Document::from_text(SIMPLE_DOC, 1);
     let tail = &SIMPLE_DOC[doc.body_byte_offset..];
-    assert_eq!(tail, doc.body, "SIMPLE_DOC[body_byte_offset..] must equal body");
+    assert_eq!(
+        tail, doc.body,
+        "SIMPLE_DOC[body_byte_offset..] must equal body"
+    );
 }
 
 #[test]
@@ -74,13 +77,18 @@ fn position_to_byte_offset_roundtrip() {
     let doc = Document::from_text(SIMPLE_DOC, 1);
 
     // Test several body offsets: start, middle of "Hello", start of link
-    let offsets = [0, 5, doc.links[0].span.start, doc.links[0].span.end.saturating_sub(1)];
+    let offsets = [
+        0,
+        5,
+        doc.links[0].span.start,
+        doc.links[0].span.end.saturating_sub(1),
+    ];
 
     for &offset in &offsets {
         let pos = doc.byte_offset_to_position(offset);
-        let back = doc
-            .position_to_body_byte_offset(pos)
-            .unwrap_or_else(|| panic!("roundtrip failed for body offset {offset}: position {pos:?} mapped to None"));
+        let back = doc.position_to_body_byte_offset(pos).unwrap_or_else(|| {
+            panic!("roundtrip failed for body offset {offset}: position {pos:?} mapped to None")
+        });
         assert_eq!(
             back, offset,
             "roundtrip failed for body offset {offset}: got {back}"
@@ -95,7 +103,10 @@ fn malformed_frontmatter_treats_whole_file_as_body() {
 
     assert_eq!(doc.body_byte_offset, 0, "entire text should be the body");
     assert_eq!(doc.body, text);
-    assert!(doc.meta.title.is_none(), "default meta should have no title");
+    assert!(
+        doc.meta.title.is_none(),
+        "default meta should have no title"
+    );
     assert_eq!(doc.links.len(), 1, "link should still be extracted");
     assert_eq!(doc.links[0].target_raw, "Link");
 }

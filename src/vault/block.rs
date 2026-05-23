@@ -117,9 +117,7 @@ fn extract_cancelled_checkbox(text: &mut String) -> bool {
 }
 
 /// Post-process raw content: extract block ID, inline properties, and trim.
-fn postprocess_content(
-    text: &mut String,
-) -> (Option<String>, HashMap<String, String>) {
+fn postprocess_content(text: &mut String) -> (Option<String>, HashMap<String, String>) {
     let block_id = extract_block_id(text);
     let properties = extract_inline_properties(text);
     *text = text.trim().to_string();
@@ -372,8 +370,8 @@ fn emit_block(blocks: &mut Vec<Block>, builder: BlockBuilder) {
         properties,
         checkbox,
         depth: builder.list_depth,
-        parent_index: None,   // assigned later
-        order_index: 0,       // assigned later
+        parent_index: None, // assigned later
+        order_index: 0,     // assigned later
         span: builder.span_start..builder.span_end,
     });
 }

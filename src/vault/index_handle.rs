@@ -1,7 +1,9 @@
 use std::sync::mpsc;
 
 use super::Vault;
-use super::index::{BacklinkWithContext, BuildStats, IndexError, SearchResult, SimilarRow, VaultIndex};
+use super::index::{
+    BacklinkWithContext, BuildStats, IndexError, SearchResult, SimilarRow, VaultIndex,
+};
 use super::path::VaultPath;
 use super::sync::{ChangeEvent, SyncEngine, SyncStats};
 
@@ -80,8 +82,7 @@ impl IndexHandle {
 
     /// Full (re-)build of the index.
     pub async fn build(&self) -> Result<BuildStats, IndexError> {
-        self.with_index(|index, vault| index.build(vault))
-            .await?
+        self.with_index(|index, vault| index.build(vault)).await?
     }
 
     /// Resolve all unresolved links across the index.
@@ -113,10 +114,8 @@ impl IndexHandle {
         &self,
         events: Vec<ChangeEvent>,
     ) -> Result<SyncStats, IndexError> {
-        self.with_index(move |index, vault| {
-            SyncEngine::process_events(&events, vault, index)
-        })
-        .await?
+        self.with_index(move |index, vault| SyncEngine::process_events(&events, vault, index))
+            .await?
     }
 
     /// Find backlinks to a page with surrounding context.

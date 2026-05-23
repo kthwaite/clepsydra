@@ -3,9 +3,9 @@ use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
+use axum::Router;
 use axum::extract::{Query, State};
 use axum::routing::{get, put};
-use axum::Router;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -350,9 +350,7 @@ async fn update_task_status(
         .or_else(|| search_region.find("[X]"))
         .or_else(|| search_region.find("[-]"))
         .ok_or_else(|| {
-            ApiError::bad_request(format!(
-                "no checkbox found near span_start {span_start}"
-            ))
+            ApiError::bad_request(format!("no checkbox found near span_start {span_start}"))
         })?;
 
     let replacement = match new_status {

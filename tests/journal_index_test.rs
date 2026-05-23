@@ -24,7 +24,8 @@ fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
 
 #[test]
 fn indexes_journal_date_from_path() {
-    let page = "---\nid: 00000000-0000-0000-0000-000000000001\ntitle: \"2026-02-17\"\n---\n- Notes\n";
+    let page =
+        "---\nid: 00000000-0000-0000-0000-000000000001\ntitle: \"2026-02-17\"\n---\n- Notes\n";
     let (_tmp, vault) = setup_vault(&[("journals/2026-02-17.md", page)]);
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
@@ -63,8 +64,7 @@ fn non_journal_page_has_null_journal_date() {
 #[test]
 fn journal_in_subfolder_not_matched() {
     // A page at other/journals/2026-02-17.md should NOT be a journal
-    let page =
-        "---\nid: 00000000-0000-0000-0000-000000000003\ntitle: Fake\n---\n";
+    let page = "---\nid: 00000000-0000-0000-0000-000000000003\ntitle: Fake\n---\n";
     let (_tmp, vault) = setup_vault(&[("other/journals/2026-02-17.md", page)]);
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();

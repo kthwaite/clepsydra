@@ -152,8 +152,7 @@ pub fn fetch_canonical_names_for_path(
         rusqlite::params![old_path],
         |row| row.get(0),
     )?;
-    let mut stmt =
-        conn.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
+    let mut stmt = conn.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
     let names = stmt
         .query_map(rusqlite::params![page_id], |row| row.get(0))?
         .filter_map(|r| r.ok())
@@ -414,9 +413,8 @@ mod tests {
     #[tokio::test]
     async fn fetch_canonical_names_returns_page_names() {
         use crate::lsp::test_support::make_backend;
-        let (backend, _tmp) = make_backend(&[
-            ("Target.md", "---\ntitle: Target Page\n---\nbody\n"),
-        ]);
+        let (backend, _tmp) =
+            make_backend(&[("Target.md", "---\ntitle: Target Page\n---\nbody\n")]);
         let names = backend
             .state
             .index
@@ -467,9 +465,7 @@ mod tests {
         let referring = backend
             .state
             .index
-            .with_index(move |idx, _| {
-                find_referring_paths(idx.connection(), "Target.md", &old_cns)
-            })
+            .with_index(move |idx, _| find_referring_paths(idx.connection(), "Target.md", &old_cns))
             .await
             .unwrap()
             .unwrap();
@@ -487,9 +483,8 @@ mod tests {
     async fn find_referring_paths_excludes_self() {
         use crate::lsp::test_support::make_backend;
         // Self-referential link: Target links to itself
-        let (backend, _tmp) = make_backend(&[
-            ("Target.md", "---\ntitle: Target\n---\n[[Target]]\n"),
-        ]);
+        let (backend, _tmp) =
+            make_backend(&[("Target.md", "---\ntitle: Target\n---\n[[Target]]\n")]);
         let old_cns = backend
             .state
             .index
@@ -500,9 +495,7 @@ mod tests {
         let referring = backend
             .state
             .index
-            .with_index(move |idx, _| {
-                find_referring_paths(idx.connection(), "Target.md", &old_cns)
-            })
+            .with_index(move |idx, _| find_referring_paths(idx.connection(), "Target.md", &old_cns))
             .await
             .unwrap()
             .unwrap();
@@ -522,7 +515,11 @@ mod tests {
         let doc = Document::from_text("# A\n\n[[Old]] and [[Other]]\n", 0);
         let old_cns = vec!["old".to_string()];
         let edits = build_wikilink_text_edits(&doc, &old_cns, "New");
-        assert_eq!(edits.len(), 1, "exactly one edit for [[Old]]; got {edits:?}");
+        assert_eq!(
+            edits.len(),
+            1,
+            "exactly one edit for [[Old]]; got {edits:?}"
+        );
         let OneOf::Left(te) = &edits[0] else {
             panic!("expected Left(TextEdit)");
         };

@@ -21,13 +21,11 @@ impl ImportCheckpoint {
 
     pub fn save(&self, vault_root: &Path, source: &str) -> Result<(), String> {
         let dir = vault_root.join(".clepsydra/importers");
-        fs::create_dir_all(&dir)
-            .map_err(|e| format!("failed to create importers dir: {e}"))?;
+        fs::create_dir_all(&dir).map_err(|e| format!("failed to create importers dir: {e}"))?;
         let path = dir.join(format!("{source}.toml"));
         let contents = toml::to_string_pretty(self)
             .map_err(|e| format!("failed to serialize checkpoint: {e}"))?;
-        fs::write(path, contents)
-            .map_err(|e| format!("failed to write checkpoint: {e}"))?;
+        fs::write(path, contents).map_err(|e| format!("failed to write checkpoint: {e}"))?;
         Ok(())
     }
 }

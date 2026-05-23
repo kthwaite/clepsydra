@@ -187,9 +187,7 @@ async fn ingest_archive(
     let url_for_lookup = req.url.clone();
     let existing = state
         .index
-        .with_index(move |index, _vault| {
-            index.find_by_archive_url(&url_for_lookup)
-        })
+        .with_index(move |index, _vault| index.find_by_archive_url(&url_for_lookup))
         .await
         .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
         .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?;
@@ -305,7 +303,9 @@ async fn ingest_archive(
         && let Err(e) = fs::create_dir_all(parent)
     {
         rollback_cas(&state, &stored_hashes);
-        return Err(ApiError::internal(format!("failed to create directories: {e}")));
+        return Err(ApiError::internal(format!(
+            "failed to create directories: {e}"
+        )));
     }
 
     // Build PageMeta with archive metadata in extra

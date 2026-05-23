@@ -149,9 +149,9 @@ pub fn open_zotero_db(path: &Path) -> Result<Connection, String> {
 
 /// Row type from the main EAV query.
 type ItemRow = (
-    i64,           // item_id
-    String,        // zotero_key
-    String,        // item_type
+    i64,            // item_id
+    String,         // zotero_key
+    String,         // item_type
     Option<String>, // title
     Option<String>, // date_raw
     Option<String>, // doi
@@ -222,10 +222,17 @@ pub fn query_items(
     let rows: Vec<ItemRow> = stmt
         .query_map(param_refs.as_slice(), |row| {
             Ok((
-                row.get(0)?, row.get(1)?, row.get(3)?,
-                row.get(4)?, row.get(5)?, row.get(6)?,
-                row.get(7)?, row.get(8)?, row.get(9)?,
-                row.get(10)?, row.get(11)?,
+                row.get(0)?,
+                row.get(1)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
+                row.get(11)?,
             ))
         })
         .map_err(|e| e.to_string())?
@@ -233,16 +240,20 @@ pub fn query_items(
         .collect();
 
     // Batch-load creators
-    let mut creators_stmt = conn.prepare(
-        "SELECT ic.itemID, c.firstName, c.lastName, c.fieldMode
+    let mut creators_stmt = conn
+        .prepare(
+            "SELECT ic.itemID, c.firstName, c.lastName, c.fieldMode
          FROM itemCreators ic
          JOIN creators c ON c.creatorID = ic.creatorID
          JOIN creatorTypes ct ON ct.creatorTypeID = ic.creatorTypeID
          WHERE ct.creatorType = 'author'
-         ORDER BY ic.itemID, ic.orderIndex"
-    ).map_err(|e| e.to_string())?;
+         ORDER BY ic.itemID, ic.orderIndex",
+        )
+        .map_err(|e| e.to_string())?;
     let all_creators: Vec<(i64, String, String, i32)> = creators_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
@@ -258,22 +269,40 @@ pub fn query_items(
         .collect();
 
     // Batch-load PDF attachments
-    let mut att_stmt = conn.prepare(
-        "SELECT ia.parentItemID, ia.linkMode, ia.path, i.key
+    let mut att_stmt = conn
+        .prepare(
+            "SELECT ia.parentItemID, ia.linkMode, ia.path, i.key
          FROM itemAttachments ia
          JOIN items i ON i.itemID = ia.itemID
-         WHERE ia.contentType = 'application/pdf' AND ia.parentItemID IS NOT NULL"
-    ).map_err(|e| e.to_string())?;
+         WHERE ia.contentType = 'application/pdf' AND ia.parentItemID IS NOT NULL",
+        )
+        .map_err(|e| e.to_string())?;
     let all_attachments: Vec<(i64, i32, Option<String>, String)> = att_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
 
     // Assemble
     let mut items = Vec::with_capacity(rows.len());
-    for (item_id, zotero_key, item_type, title, date_raw, doi, isbn, url, venue, publisher, extra_field) in rows {
-        let authors: Vec<ZoteroAuthor> = all_creators.iter()
+    for (
+        item_id,
+        zotero_key,
+        item_type,
+        title,
+        date_raw,
+        doi,
+        isbn,
+        url,
+        venue,
+        publisher,
+        extra_field,
+    ) in rows
+    {
+        let authors: Vec<ZoteroAuthor> = all_creators
+            .iter()
             .filter(|(id, _, _, _)| *id == item_id)
             .map(|(_, f, l, m)| ZoteroAuthor {
                 first_name: f.clone(),
@@ -282,12 +311,14 @@ pub fn query_items(
             })
             .collect();
 
-        let tags: Vec<String> = all_tags.iter()
+        let tags: Vec<String> = all_tags
+            .iter()
             .filter(|(id, _)| *id == item_id)
             .map(|(_, name)| name.clone())
             .collect();
 
-        let pdf_attachments: Vec<ZoteroPdf> = all_attachments.iter()
+        let pdf_attachments: Vec<ZoteroPdf> = all_attachments
+            .iter()
             .filter(|(parent_id, _, _, _)| *parent_id == item_id)
             .map(|(_, lm, p, k)| ZoteroPdf {
                 link_mode: *lm,
@@ -355,7 +386,11 @@ pub fn derive_cite_key(
     let title_part = title
         .split_whitespace()
         .map(|w| w.to_lowercase())
-        .map(|w| w.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>())
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+        })
         .find(|w| !w.is_empty() && !SKIP_WORDS.contains(&w.as_str()))
         .unwrap_or_else(|| "untitled".to_string());
 
@@ -482,10 +517,7 @@ pub fn resolve_attachment_path(zotero_data_dir: &Path, pdf: &ZoteroPdf) -> Optio
 /// replaced with a space and trailing `Z` stripped so that SQLite lexical
 /// comparison works correctly.
 pub fn normalize_since(since: &str) -> String {
-    since
-        .replace('T', " ")
-        .trim_end_matches('Z')
-        .to_string()
+    since.replace('T', " ").trim_end_matches('Z').to_string()
 }
 
 // ── Deduplication query ────────────────────────────────────────────────────
@@ -493,7 +525,10 @@ pub fn normalize_since(since: &str) -> String {
 /// Compare a source import entry against local page metadata.
 /// Returns a list of fields where the source and local values differ.
 /// Only compares mapped metadata fields (title, year, venue, publisher, doi, isbn).
-pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::PageMeta) -> Vec<FieldDiff> {
+pub fn compute_field_diffs(
+    source: &BibImportEntry,
+    local: &crate::vault::page::PageMeta,
+) -> Vec<FieldDiff> {
     let mut diffs = Vec::new();
 
     // Title
@@ -507,11 +542,10 @@ pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::
     }
 
     // Year — compare via extra.year
-    let local_year = local.extra.get("year")
-        .and_then(|v| match v {
-            serde_yaml::Value::Number(n) => n.as_i64().map(|i| i as i32),
-            _ => None,
-        });
+    let local_year = local.extra.get("year").and_then(|v| match v {
+        serde_yaml::Value::Number(n) => n.as_i64().map(|i| i as i32),
+        _ => None,
+    });
     if local_year != source.year {
         diffs.push(FieldDiff {
             field: "year".to_string(),
@@ -521,7 +555,9 @@ pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::
     }
 
     // Venue
-    let local_venue = local.extra.get("venue")
+    let local_venue = local
+        .extra
+        .get("venue")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     if local_venue != source.venue {
@@ -533,7 +569,9 @@ pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::
     }
 
     // Publisher
-    let local_publisher = local.extra.get("publisher")
+    let local_publisher = local
+        .extra
+        .get("publisher")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     if local_publisher != source.publisher {
@@ -545,7 +583,9 @@ pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::
     }
 
     // DOI — nested in external_ids
-    let local_doi = local.extra.get("external_ids")
+    let local_doi = local
+        .extra
+        .get("external_ids")
         .and_then(|v| v.as_mapping())
         .and_then(|m| m.get(serde_yaml::Value::String("doi".to_string())))
         .and_then(|v| v.as_str())
@@ -559,7 +599,9 @@ pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::
     }
 
     // ISBN — nested in external_ids
-    let local_isbn = local.extra.get("external_ids")
+    let local_isbn = local
+        .extra
+        .get("external_ids")
         .and_then(|v| v.as_mapping())
         .and_then(|m| m.get(serde_yaml::Value::String("isbn".to_string())))
         .and_then(|v| v.as_str())
@@ -577,7 +619,10 @@ pub fn compute_field_diffs(source: &BibImportEntry, local: &crate::vault::page::
 
 /// Check if a work was previously imported from Zotero by its item key.
 /// Returns Some(vault_path) if found, None otherwise.
-pub fn find_existing_by_zotero_key(conn: &rusqlite::Connection, zotero_key: &str) -> Option<String> {
+pub fn find_existing_by_zotero_key(
+    conn: &rusqlite::Connection,
+    zotero_key: &str,
+) -> Option<String> {
     conn.query_row(
         "SELECT path FROM pages WHERE json_extract(meta_json, '$.import.source') = 'zotero' AND json_extract(meta_json, '$.import.zotero_key') = ?1",
         rusqlite::params![zotero_key],
@@ -595,19 +640,31 @@ pub fn apply_source_wins_to_meta(
     meta.title = Some(entry.title.clone());
 
     if let Some(year) = entry.year {
-        meta.extra.insert("year".to_string(), serde_yaml::Value::Number(year.into()));
+        meta.extra
+            .insert("year".to_string(), serde_yaml::Value::Number(year.into()));
     }
     if let Some(ref venue) = entry.venue {
-        meta.extra.insert("venue".to_string(), serde_yaml::Value::String(venue.clone()));
+        meta.extra.insert(
+            "venue".to_string(),
+            serde_yaml::Value::String(venue.clone()),
+        );
     }
     if let Some(ref publisher) = entry.publisher {
-        meta.extra.insert("publisher".to_string(), serde_yaml::Value::String(publisher.clone()));
+        meta.extra.insert(
+            "publisher".to_string(),
+            serde_yaml::Value::String(publisher.clone()),
+        );
     }
 
-    let authors_val: Vec<serde_yaml::Value> = entry.authors.iter()
+    let authors_val: Vec<serde_yaml::Value> = entry
+        .authors
+        .iter()
         .map(|a| serde_yaml::Value::String(a.clone()))
         .collect();
-    meta.extra.insert("authors".to_string(), serde_yaml::Value::Sequence(authors_val));
+    meta.extra.insert(
+        "authors".to_string(),
+        serde_yaml::Value::Sequence(authors_val),
+    );
 
     let mut ext_ids = serde_yaml::Mapping::new();
     if let Some(ref doi) = entry.doi {
@@ -629,7 +686,10 @@ pub fn apply_source_wins_to_meta(
         );
     }
     if !ext_ids.is_empty() {
-        meta.extra.insert("external_ids".to_string(), serde_yaml::Value::Mapping(ext_ids));
+        meta.extra.insert(
+            "external_ids".to_string(),
+            serde_yaml::Value::Mapping(ext_ids),
+        );
     }
 
     if let Some(import_val) = meta.extra.get_mut("import") {
@@ -678,9 +738,15 @@ pub fn decide_item_action(
 ) -> ItemAction {
     if !exists {
         return if dry_run {
-            ItemAction { status: "would_create", kind: ItemActionKind::ReportOnly }
+            ItemAction {
+                status: "would_create",
+                kind: ItemActionKind::ReportOnly,
+            }
         } else {
-            ItemAction { status: "created", kind: ItemActionKind::Create }
+            ItemAction {
+                status: "created",
+                kind: ItemActionKind::Create,
+            }
         };
     }
     match policy {
@@ -690,16 +756,28 @@ pub fn decide_item_action(
         },
         ConflictPolicy::SourceWins => {
             if dry_run {
-                ItemAction { status: "would_update", kind: ItemActionKind::ReportOnly }
+                ItemAction {
+                    status: "would_update",
+                    kind: ItemActionKind::ReportOnly,
+                }
             } else {
-                ItemAction { status: "updated", kind: ItemActionKind::ApplySourceWins }
+                ItemAction {
+                    status: "updated",
+                    kind: ItemActionKind::ApplySourceWins,
+                }
             }
         }
         ConflictPolicy::Manual => {
             if has_diffs {
-                ItemAction { status: "conflict", kind: ItemActionKind::ReportOnly }
+                ItemAction {
+                    status: "conflict",
+                    kind: ItemActionKind::ReportOnly,
+                }
             } else {
-                ItemAction { status: "skipped", kind: ItemActionKind::ReportOnly }
+                ItemAction {
+                    status: "skipped",
+                    kind: ItemActionKind::ReportOnly,
+                }
             }
         }
     }
@@ -713,16 +791,25 @@ mod decide_tests {
     fn not_existing_creates_or_would_create() {
         assert_eq!(
             decide_item_action(false, ConflictPolicy::Skip, false, false),
-            ItemAction { status: "created", kind: ItemActionKind::Create }
+            ItemAction {
+                status: "created",
+                kind: ItemActionKind::Create
+            }
         );
         assert_eq!(
             decide_item_action(false, ConflictPolicy::Skip, true, false),
-            ItemAction { status: "would_create", kind: ItemActionKind::ReportOnly }
+            ItemAction {
+                status: "would_create",
+                kind: ItemActionKind::ReportOnly
+            }
         );
         // Policy is irrelevant when the item does not exist yet.
         assert_eq!(
             decide_item_action(false, ConflictPolicy::Manual, false, false),
-            ItemAction { status: "created", kind: ItemActionKind::Create }
+            ItemAction {
+                status: "created",
+                kind: ItemActionKind::Create
+            }
         );
     }
 
@@ -730,29 +817,59 @@ mod decide_tests {
     fn existing_skip_policy() {
         assert_eq!(
             decide_item_action(true, ConflictPolicy::Skip, false, false),
-            ItemAction { status: "skipped", kind: ItemActionKind::ReportOnly }
+            ItemAction {
+                status: "skipped",
+                kind: ItemActionKind::ReportOnly
+            }
         );
         assert_eq!(
             decide_item_action(true, ConflictPolicy::Skip, true, false),
-            ItemAction { status: "would_skip", kind: ItemActionKind::ReportOnly }
+            ItemAction {
+                status: "would_skip",
+                kind: ItemActionKind::ReportOnly
+            }
         );
     }
 
     #[test]
     fn existing_source_wins() {
         let live = decide_item_action(true, ConflictPolicy::SourceWins, false, false);
-        assert_eq!(live, ItemAction { status: "updated", kind: ItemActionKind::ApplySourceWins });
+        assert_eq!(
+            live,
+            ItemAction {
+                status: "updated",
+                kind: ItemActionKind::ApplySourceWins
+            }
+        );
         let dry = decide_item_action(true, ConflictPolicy::SourceWins, true, false);
-        assert_eq!(dry, ItemAction { status: "would_update", kind: ItemActionKind::ReportOnly });
+        assert_eq!(
+            dry,
+            ItemAction {
+                status: "would_update",
+                kind: ItemActionKind::ReportOnly
+            }
+        );
     }
 
     #[test]
     fn existing_manual_ignores_dry_run() {
         // Manual reports conflict/skipped identically in dry and live mode.
-        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, false, true).status, "conflict");
-        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, true, true).status, "conflict");
-        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, false, false).status, "skipped");
-        assert_eq!(decide_item_action(true, ConflictPolicy::Manual, true, false).status, "skipped");
+        assert_eq!(
+            decide_item_action(true, ConflictPolicy::Manual, false, true).status,
+            "conflict"
+        );
+        assert_eq!(
+            decide_item_action(true, ConflictPolicy::Manual, true, true).status,
+            "conflict"
+        );
+        assert_eq!(
+            decide_item_action(true, ConflictPolicy::Manual, false, false).status,
+            "skipped"
+        );
+        assert_eq!(
+            decide_item_action(true, ConflictPolicy::Manual, true, false).status,
+            "skipped"
+        );
     }
 }
 
@@ -782,16 +899,27 @@ mod source_wins_tests {
         let mut meta = PageMeta::new();
         apply_source_wins_to_meta(&mut meta, &sample_entry());
         assert_eq!(meta.title.as_deref(), Some("A Study"));
-        assert_eq!(meta.extra.get("year"), Some(&serde_yaml::Value::Number(2020.into())));
-        assert_eq!(meta.extra.get("venue"), Some(&serde_yaml::Value::String("Nature".into())));
+        assert_eq!(
+            meta.extra.get("year"),
+            Some(&serde_yaml::Value::Number(2020.into()))
+        );
+        assert_eq!(
+            meta.extra.get("venue"),
+            Some(&serde_yaml::Value::String("Nature".into()))
+        );
     }
 
     #[test]
     fn builds_external_ids_only_for_present_fields() {
         let mut meta = PageMeta::new();
         apply_source_wins_to_meta(&mut meta, &sample_entry());
-        let ext = meta.extra.get("external_ids").expect("external_ids present");
-        let serde_yaml::Value::Mapping(m) = ext else { panic!("expected mapping") };
+        let ext = meta
+            .extra
+            .get("external_ids")
+            .expect("external_ids present");
+        let serde_yaml::Value::Mapping(m) = ext else {
+            panic!("expected mapping")
+        };
         assert!(m.contains_key(serde_yaml::Value::String("doi".into())));
         assert!(!m.contains_key(serde_yaml::Value::String("isbn".into())));
     }
@@ -804,9 +932,12 @@ mod source_wins_tests {
             serde_yaml::Value::String("source".into()),
             serde_yaml::Value::String("zotero".into()),
         );
-        meta.extra.insert("import".into(), serde_yaml::Value::Mapping(import_map));
+        meta.extra
+            .insert("import".into(), serde_yaml::Value::Mapping(import_map));
         apply_source_wins_to_meta(&mut meta, &sample_entry());
-        let serde_yaml::Value::Mapping(m) = meta.extra.get("import").unwrap() else { panic!() };
+        let serde_yaml::Value::Mapping(m) = meta.extra.get("import").unwrap() else {
+            panic!()
+        };
         assert!(m.contains_key(serde_yaml::Value::String("imported_at".into())));
     }
 
@@ -835,7 +966,10 @@ mod resolve_db_path_tests {
     fn explicit_tilde_path_expanded() {
         let home = Path::new("/home/user");
         let result = resolve_zotero_db_path(Some("~/Zotero/zotero.sqlite"), None, Some(home));
-        assert_eq!(result.unwrap(), PathBuf::from("/home/user/Zotero/zotero.sqlite"));
+        assert_eq!(
+            result.unwrap(),
+            PathBuf::from("/home/user/Zotero/zotero.sqlite")
+        );
     }
 
     #[test]
@@ -849,7 +983,10 @@ mod resolve_db_path_tests {
     fn configured_tilde_expanded() {
         let home = Path::new("/home/user");
         let result = resolve_zotero_db_path(None, Some("~/custom/zotero.sqlite"), Some(home));
-        assert_eq!(result.unwrap(), PathBuf::from("/home/user/custom/zotero.sqlite"));
+        assert_eq!(
+            result.unwrap(),
+            PathBuf::from("/home/user/custom/zotero.sqlite")
+        );
     }
 
     #[test]

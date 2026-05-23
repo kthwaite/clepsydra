@@ -80,8 +80,9 @@ pub fn router() -> Router<Arc<AppState>> {
 
 /// Validate a date string as YYYY-MM-DD and return it parsed.
 fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d")
-        .map_err(|_| ApiError::bad_request(format!("invalid date format (expected YYYY-MM-DD): {s}")))
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| {
+        ApiError::bad_request(format!("invalid date format (expected YYYY-MM-DD): {s}"))
+    })
 }
 
 /// Build a VaultPath for a journal date.
@@ -108,10 +109,7 @@ fn page_detail(page: &Page, vault_path: &VaultPath) -> PageDetail {
 
 /// Ensure a journal page exists for the given date. Returns the VaultPath and
 /// whether the page was newly created.
-async fn ensure_journal(
-    state: &Arc<AppState>,
-    date: &str,
-) -> Result<(VaultPath, bool), ApiError> {
+async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath, bool), ApiError> {
     let vault_path = journal_path(date)?;
     let abs_path = state.vault.resolve(&vault_path);
 
@@ -230,7 +228,7 @@ async fn get_today(
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map(params![today_clone, lookback_date], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,        // page_id
+                    row.get::<_, String>(0)?,         // page_id
                     row.get::<_, Option<String>>(1)?, // block_id
                     row.get::<_, String>(2)?,         // content
                     row.get::<_, i64>(3)?,            // span_start
@@ -274,10 +272,9 @@ async fn get_today(
                     "SELECT bp.key, bp.value FROM block_properties bp \
                      WHERE bp.page_id = ?1 AND bp.span_start = ?2",
                 )?;
-                let prop_rows =
-                    prop_stmt.query_map(params![page_id, span_start], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?;
+                let prop_rows = prop_stmt.query_map(params![page_id, span_start], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
                 for prop_row in prop_rows {
                     let (key, value) = prop_row?;
                     tasks[i].properties.insert(key, value);

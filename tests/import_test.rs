@@ -4,9 +4,9 @@ use clepsydra::vault::import_doi::parse_crossref_response;
 use clepsydra::vault::import_isbn::parse_openlibrary_response;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
+use rusqlite::Connection;
 use std::fs;
 use tempfile::TempDir;
-use rusqlite::Connection;
 
 #[test]
 fn parse_single_article() {
@@ -351,9 +351,9 @@ fn cite_key_multiple_collisions() {
 // ── Zotero DB query tests ─────────────────────────────────────────────────
 
 use clepsydra::vault::import_zotero::{
-    open_zotero_db, query_items, map_to_import_entry, resolve_attachment_path,
-    find_existing_by_zotero_key, normalize_since, ZoteroAuthor, ZoteroPdf, ZoteroItem,
-    compute_field_diffs, ConflictPolicy,
+    ConflictPolicy, ZoteroAuthor, ZoteroItem, ZoteroPdf, compute_field_diffs,
+    find_existing_by_zotero_key, map_to_import_entry, normalize_since, open_zotero_db, query_items,
+    resolve_attachment_path,
 };
 
 /// Create a minimal Zotero-schema SQLite DB for testing.
@@ -484,7 +484,11 @@ fn query_items_returns_all_bibliographic_items() {
     let conn = open_zotero_db(&db_path).unwrap();
     let items = query_items(&conn, None, None).unwrap();
 
-    assert_eq!(items.len(), 3, "should find 3 items (article, book, article w/ BBT key)");
+    assert_eq!(
+        items.len(),
+        3,
+        "should find 3 items (article, book, article w/ BBT key)"
+    );
 
     let article = items.iter().find(|i| i.zotero_key == "ABC12345").unwrap();
     assert_eq!(article.title, "Attention Is All You Need");
@@ -527,7 +531,10 @@ fn query_items_filters_by_since() {
     let items = query_items(&conn, None, Some("2024-05-01")).unwrap();
 
     assert_eq!(items.len(), 2, "2 items modified after 2024-05-01");
-    assert!(items.iter().all(|i| i.zotero_key != "DEF67890"), "book was modified 2024-03-01, should be excluded");
+    assert!(
+        items.iter().all(|i| i.zotero_key != "DEF67890"),
+        "book was modified 2024-03-01, should be excluded"
+    );
 }
 
 // ── Zotero item mapping tests ────────────────────────────────────────────
@@ -546,8 +553,16 @@ fn make_article_item() -> ZoteroItem {
         publisher: None,
         extra_field: Some("arXiv: 1706.03762".to_string()),
         authors: vec![
-            ZoteroAuthor { first_name: "Ashish".to_string(), last_name: "Vaswani".to_string(), field_mode: 0 },
-            ZoteroAuthor { first_name: "Noam".to_string(), last_name: "Shazeer".to_string(), field_mode: 0 },
+            ZoteroAuthor {
+                first_name: "Ashish".to_string(),
+                last_name: "Vaswani".to_string(),
+                field_mode: 0,
+            },
+            ZoteroAuthor {
+                first_name: "Noam".to_string(),
+                last_name: "Shazeer".to_string(),
+                field_mode: 0,
+            },
         ],
         tags: vec!["ml".to_string()],
         pdf_attachments: vec![],
@@ -559,7 +574,10 @@ fn map_journal_article_to_import_entry() {
     let item = make_article_item();
     let entry = map_to_import_entry(&item);
     assert_eq!(entry.title, "Attention Is All You Need");
-    assert!(matches!(entry.work_type, clepsydra::vault::academic::WorkType::Paper));
+    assert!(matches!(
+        entry.work_type,
+        clepsydra::vault::academic::WorkType::Paper
+    ));
     assert_eq!(entry.authors, vec!["Ashish Vaswani", "Noam Shazeer"]);
     assert_eq!(entry.year, Some(2017));
     assert_eq!(entry.doi.as_deref(), Some("10.48550/arXiv.1706.03762"));
@@ -575,11 +593,17 @@ fn map_institutional_author() {
         item_type: "report".to_string(),
         title: "Report".to_string(),
         date_raw: None,
-        doi: None, isbn: None, url: None, venue: None, publisher: None,
+        doi: None,
+        isbn: None,
+        url: None,
+        venue: None,
+        publisher: None,
         extra_field: None,
-        authors: vec![
-            ZoteroAuthor { first_name: String::new(), last_name: "World Health Organization".to_string(), field_mode: 1 },
-        ],
+        authors: vec![ZoteroAuthor {
+            first_name: String::new(),
+            last_name: "World Health Organization".to_string(),
+            field_mode: 1,
+        }],
         tags: vec![],
         pdf_attachments: vec![],
     };
@@ -604,7 +628,10 @@ fn resolve_imported_file_attachment() {
     };
     let zotero_data_dir = std::path::Path::new("/Users/kit/Zotero");
     let result = resolve_attachment_path(zotero_data_dir, &pdf);
-    assert_eq!(result, Some("/Users/kit/Zotero/storage/PDFKEY01/attention.pdf".to_string()));
+    assert_eq!(
+        result,
+        Some("/Users/kit/Zotero/storage/PDFKEY01/attention.pdf".to_string())
+    );
 }
 
 #[test]
@@ -626,7 +653,10 @@ fn resolve_url_attachment() {
         attachment_key: "X".to_string(),
     };
     let result = resolve_attachment_path(std::path::Path::new("/unused"), &pdf);
-    assert_eq!(result, Some("https://arxiv.org/pdf/1706.03762.pdf".to_string()));
+    assert_eq!(
+        result,
+        Some("https://arxiv.org/pdf/1706.03762.pdf".to_string())
+    );
 }
 
 // ── Zotero-key dedup tests ────────────────────────────────────────────────
@@ -661,7 +691,10 @@ Content.
     index.build(&vault).unwrap();
 
     let found = find_existing_by_zotero_key(index.connection(), "ABC12345");
-    assert_eq!(found, Some("library/papers/previously-imported.md".to_string()));
+    assert_eq!(
+        found,
+        Some("library/papers/previously-imported.md".to_string())
+    );
 
     let not_found = find_existing_by_zotero_key(index.connection(), "UNKNOWN");
     assert!(not_found.is_none());
@@ -671,7 +704,10 @@ Content.
 
 #[test]
 fn normalize_since_strips_iso8601() {
-    assert_eq!(normalize_since("2024-05-01T00:00:00Z"), "2024-05-01 00:00:00");
+    assert_eq!(
+        normalize_since("2024-05-01T00:00:00Z"),
+        "2024-05-01 00:00:00"
+    );
 }
 
 #[test]
@@ -681,7 +717,10 @@ fn normalize_since_passes_through_plain_date() {
 
 #[test]
 fn normalize_since_handles_datetime_without_z() {
-    assert_eq!(normalize_since("2024-05-01T12:30:00"), "2024-05-01 12:30:00");
+    assert_eq!(
+        normalize_since("2024-05-01T12:30:00"),
+        "2024-05-01 12:30:00"
+    );
 }
 
 // ── cite-key collision regression tests ────────────────────────────────────
@@ -743,7 +782,10 @@ fn compute_diffs_empty_when_identical() {
     };
 
     let diffs = compute_field_diffs(&entry, &local_meta);
-    assert!(diffs.iter().all(|d| d.field != "title"), "title should not diff when identical");
+    assert!(
+        diffs.iter().all(|d| d.field != "title"),
+        "title should not diff when identical"
+    );
 }
 
 // ── ISO since filter with Zotero DB ─────────────────────────────────────
@@ -760,8 +802,10 @@ fn query_items_with_iso_since_after_normalize() {
     let items = query_items(&conn, None, Some(&normalized)).unwrap();
 
     assert_eq!(items.len(), 2, "2 items modified after 2024-05-01");
-    assert!(items.iter().all(|i| i.zotero_key != "DEF67890"),
-        "book was modified 2024-03-01, should be excluded");
+    assert!(
+        items.iter().all(|i| i.zotero_key != "DEF67890"),
+        "book was modified 2024-03-01, should be excluded"
+    );
 }
 
 #[test]
@@ -771,10 +815,9 @@ fn compute_diffs_detects_year_change() {
 
     let mut local_meta = clepsydra::vault::page::PageMeta::default();
     local_meta.title = Some("Attention Is All You Need".to_string());
-    local_meta.extra.insert(
-        "year".to_string(),
-        serde_yaml::Value::Number(2016.into()),
-    );
+    local_meta
+        .extra
+        .insert("year".to_string(), serde_yaml::Value::Number(2016.into()));
 
     let diffs = compute_field_diffs(&entry, &local_meta);
     let year_diff = diffs.iter().find(|d| d.field == "year").unwrap();
@@ -792,7 +835,10 @@ fn compute_diffs_detects_doi_change() {
     let diffs = compute_field_diffs(&entry, &local_meta);
     let doi_diff = diffs.iter().find(|d| d.field == "doi").unwrap();
     assert!(doi_diff.local_value.is_none());
-    assert_eq!(doi_diff.source_value.as_deref(), Some("10.48550/arXiv.1706.03762"));
+    assert_eq!(
+        doi_diff.source_value.as_deref(),
+        Some("10.48550/arXiv.1706.03762")
+    );
 }
 
 #[test]

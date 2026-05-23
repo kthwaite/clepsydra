@@ -126,7 +126,10 @@ async fn get_block(
 
     match result {
         Some(block) => Ok(Json(block)),
-        None => Err(ApiError::not_found(format!("Block not found: {}", block_id))),
+        None => Err(ApiError::not_found(format!(
+            "Block not found: {}",
+            block_id
+        ))),
     }
 }
 
@@ -261,11 +264,12 @@ async fn assign_block_id(
     }
 
     // Find the position to insert (before the newline at span_end)
-    let insert_pos = if file_span_end > 0 && content.as_bytes().get(file_span_end - 1) == Some(&b'\n') {
-        file_span_end - 1
-    } else {
-        file_span_end
-    };
+    let insert_pos =
+        if file_span_end > 0 && content.as_bytes().get(file_span_end - 1) == Some(&b'\n') {
+            file_span_end - 1
+        } else {
+            file_span_end
+        };
 
     // Insert the block reference
     let block_ref = format!(" ^{}", id_str);

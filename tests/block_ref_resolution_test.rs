@@ -63,11 +63,13 @@ async fn block_ref_link_resolves_to_page() {
         std::fs::write(
             root.join("source.md"),
             "---\ntitle: Source\n---\n- Buy milk ^abc123DEF0a\n",
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::write(
             root.join("referrer.md"),
             "---\ntitle: Referrer\n---\nSee ((abc123DEF0a))\n",
-        ).unwrap();
+        )
+        .unwrap();
     });
 
     // Check backlinks for source page — referrer should appear
@@ -75,7 +77,9 @@ async fn block_ref_link_resolves_to_page() {
     response.assert_status_ok();
     let backlinks: Vec<serde_json::Value> = response.json();
     assert!(
-        backlinks.iter().any(|bl| bl["source_path"].as_str() == Some("referrer.md")),
+        backlinks
+            .iter()
+            .any(|bl| bl["source_path"].as_str() == Some("referrer.md")),
         "block ref should create a backlink from referrer to source. Got: {backlinks:?}"
     );
 }

@@ -105,7 +105,8 @@ impl ContentStore {
             }
             if let Err(e) = fs::write(&path, data) {
                 // Roll back DB insert if filesystem write fails
-                self.db.execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
+                self.db
+                    .execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
                 return Err(e.into());
             }
 

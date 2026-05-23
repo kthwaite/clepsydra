@@ -1200,7 +1200,8 @@ fn open_migrates_old_links_table_without_target_block_id() {
     // Create an old-style links table without target_block_id
     {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
         conn.execute_batch(
             "CREATE TABLE pages (
                 id TEXT PRIMARY KEY,
@@ -1269,12 +1270,19 @@ fn resolve_links_for_page_resolves_block_refs() {
 
     // Resolve the source page — this should resolve incoming block refs
     let resolved = index.resolve_links_for_page(&source_vp).unwrap();
-    assert!(resolved > 0, "should have resolved at least one block ref link");
+    assert!(
+        resolved > 0,
+        "should have resolved at least one block ref link"
+    );
 
     // Verify the block_ref link from referrer now targets source
-    let backlinks = index.backlinks_with_context(&vault, &source_vp, 200).unwrap();
+    let backlinks = index
+        .backlinks_with_context(&vault, &source_vp, 200)
+        .unwrap();
     assert!(
-        backlinks.iter().any(|bl| bl.source_path == "referrer.md" && bl.kind == "block_ref"),
+        backlinks
+            .iter()
+            .any(|bl| bl.source_path == "referrer.md" && bl.kind == "block_ref"),
         "should have a block_ref backlink from referrer.md, got: {backlinks:?}"
     );
 
@@ -1283,11 +1291,18 @@ fn resolve_links_for_page_resolves_block_refs() {
     index.remove_page(&referrer_vp).unwrap();
     index.index_page(&vault, &referrer_vp).unwrap();
     let resolved2 = index.resolve_links_for_page(&referrer_vp).unwrap();
-    assert!(resolved2 > 0, "outgoing block ref from referrer should resolve");
-
-    let backlinks2 = index.backlinks_with_context(&vault, &source_vp, 200).unwrap();
     assert!(
-        backlinks2.iter().any(|bl| bl.source_path == "referrer.md" && bl.kind == "block_ref"),
+        resolved2 > 0,
+        "outgoing block ref from referrer should resolve"
+    );
+
+    let backlinks2 = index
+        .backlinks_with_context(&vault, &source_vp, 200)
+        .unwrap();
+    assert!(
+        backlinks2
+            .iter()
+            .any(|bl| bl.source_path == "referrer.md" && bl.kind == "block_ref"),
         "block_ref backlink should still exist after re-index + per-page resolve"
     );
 }

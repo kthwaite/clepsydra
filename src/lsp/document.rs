@@ -94,7 +94,9 @@ impl Document {
     /// for a link with a span that includes that offset.
     pub fn link_at_position(&self, pos: Position) -> Option<&Link> {
         let body_offset = self.position_to_body_byte_offset(pos)?;
-        self.links.iter().find(|link| link.span.contains(&body_offset))
+        self.links
+            .iter()
+            .find(|link| link.span.contains(&body_offset))
     }
 
     /// Convert a [`Link`]'s byte span to an LSP [`Range`].
@@ -121,8 +123,20 @@ mod tests {
     fn body_span_to_range_maps_offsets() {
         let doc = Document::from_text("line one\nline two\n", 1);
         let r = doc.body_span_to_range(0, 4);
-        assert_eq!(r.start, Position { line: 0, character: 0 });
-        assert_eq!(r.end, Position { line: 0, character: 4 });
+        assert_eq!(
+            r.start,
+            Position {
+                line: 0,
+                character: 0
+            }
+        );
+        assert_eq!(
+            r.end,
+            Position {
+                line: 0,
+                character: 4
+            }
+        );
     }
 
     #[test]
@@ -131,7 +145,19 @@ mod tests {
         // absolute document coordinates (frontmatter pushes the body down).
         let doc = Document::from_text("---\ntitle: T\n---\nfoo\n", 1);
         let r = doc.body_span_to_range(0, 3);
-        assert_eq!(r.start, Position { line: 3, character: 0 });
-        assert_eq!(r.end, Position { line: 3, character: 3 });
+        assert_eq!(
+            r.start,
+            Position {
+                line: 3,
+                character: 0
+            }
+        );
+        assert_eq!(
+            r.end,
+            Position {
+                line: 3,
+                character: 3
+            }
+        );
     }
 }

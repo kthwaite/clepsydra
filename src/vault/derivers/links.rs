@@ -32,11 +32,14 @@ impl Deriver for LinkDeriver {
                 }
                 LinkKind::PropertyRef { source_field } => {
                     let cn = CanonicalName::new(&link.target_raw);
-                    ("property_ref", Some(source_field.clone()), Some(cn.as_str().to_owned()), None)
+                    (
+                        "property_ref",
+                        Some(source_field.clone()),
+                        Some(cn.as_str().to_owned()),
+                        None,
+                    )
                 }
-                LinkKind::BlockRef => {
-                    ("block_ref", None, None, Some(link.target_raw.clone()))
-                }
+                LinkKind::BlockRef => ("block_ref", None, None, Some(link.target_raw.clone())),
             };
             tx.execute(
                 "INSERT OR IGNORE INTO links (source_id, target_raw, target_canonical, target_block_id, kind, source_field, span_start, span_end)
@@ -67,7 +70,11 @@ impl Deriver for LinkDeriver {
                 }
                 LinkKind::PropertyRef { source_field } => {
                     let cn = CanonicalName::new(&link.target_raw);
-                    ("property_ref", Some(source_field.clone()), Some(cn.as_str().to_owned()))
+                    (
+                        "property_ref",
+                        Some(source_field.clone()),
+                        Some(cn.as_str().to_owned()),
+                    )
                 }
                 LinkKind::BlockRef => ("block_ref", None, None),
             };

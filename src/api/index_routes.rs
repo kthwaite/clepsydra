@@ -307,16 +307,12 @@ pub async fn outlinks(
                     params![vp_str],
                     |row| row.get(0),
                 )
-                .map_err(|_| {
-                    rusqlite::Error::QueryReturnedNoRows
-                })?;
+                .map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
 
-            let mut stmt = index
-                .connection()
-                .prepare(
-                    "SELECT l.target_raw, l.target_path, l.target_id, l.kind, l.source_field
+            let mut stmt = index.connection().prepare(
+                "SELECT l.target_raw, l.target_path, l.target_id, l.kind, l.source_field
                      FROM links l WHERE l.source_id = ?1",
-                )?;
+            )?;
 
             let links: Vec<OutlinkEntry> = stmt
                 .query_map(params![page_id], |row| {
@@ -419,21 +415,18 @@ pub async fn ambiguous(
     let names = state
         .index
         .with_index(move |index, _vault| {
-            let mut stmt = index
-                .connection()
-                .prepare(
-                    "SELECT cn.canonical_name, GROUP_CONCAT(cn.page_id) as page_ids
+            let mut stmt = index.connection().prepare(
+                "SELECT cn.canonical_name, GROUP_CONCAT(cn.page_id) as page_ids
                      FROM canonical_names cn
                      GROUP BY cn.canonical_name
                      HAVING COUNT(*) > 1",
-                )?;
+            )?;
 
             let names: Vec<AmbiguousName> = stmt
                 .query_map([], |row| {
                     let name: String = row.get(0)?;
                     let ids_str: String = row.get(1)?;
-                    let page_ids: Vec<String> =
-                        ids_str.split(',').map(|s| s.to_string()).collect();
+                    let page_ids: Vec<String> = ids_str.split(',').map(|s| s.to_string()).collect();
                     Ok(AmbiguousName {
                         canonical_name: name,
                         page_ids,
@@ -481,9 +474,9 @@ pub async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCoun
     let tag_counts = state
         .index
         .with_index(move |index, _vault| {
-            let mut stmt = index
-                .connection()
-                .prepare("SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY count DESC")?;
+            let mut stmt = index.connection().prepare(
+                "SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY count DESC",
+            )?;
 
             let tag_counts: Vec<TagCount> = stmt
                 .query_map([], |row| {
@@ -533,39 +526,41 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
         .with_index(move |index, _vault| {
             let conn = index.connection();
 
-            let pages: i64 = conn
-                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))?;
+            let pages: i64 = conn.query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))?;
 
-            let links_total: i64 = conn
-                .query_row("SELECT COUNT(*) FROM links", [], |row| row.get(0))?;
+            let links_total: i64 =
+                conn.query_row("SELECT COUNT(*) FROM links", [], |row| row.get(0))?;
 
-            let links_resolved: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM links WHERE target_id IS NOT NULL",
-                    [],
-                    |row| row.get(0),
-                )?;
+            let links_resolved: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM links WHERE target_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )?;
 
-            let links_unresolved: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
-                    [],
-                    |row| row.get(0),
-                )?;
+            let links_unresolved: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
+                [],
+                |row| row.get(0),
+            )?;
 
-            let tags_count: i64 = conn
-                .query_row("SELECT COUNT(DISTINCT tag) FROM tags", [], |row| row.get(0))?;
+            let tags_count: i64 =
+                conn.query_row("SELECT COUNT(DISTINCT tag) FROM tags", [], |row| row.get(0))?;
 
             let last_indexed_at: Option<String> = conn
-                .query_row(
-                    "SELECT MAX(updated_at) FROM pages",
-                    [],
-                    |row| row.get::<_, Option<String>>(0),
-                )
+                .query_row("SELECT MAX(updated_at) FROM pages", [], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
                 .ok()
                 .flatten();
 
-            Ok::<_, rusqlite::Error>((pages, links_total, links_resolved, links_unresolved, tags_count, last_indexed_at))
+            Ok::<_, rusqlite::Error>((
+                pages,
+                links_total,
+                links_resolved,
+                links_unresolved,
+                tags_count,
+                last_indexed_at,
+            ))
         })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
@@ -598,8 +593,7 @@ pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphRespo
         .with_index(move |index, _vault| {
             let conn = index.connection();
 
-            let mut node_stmt = conn
-                .prepare("SELECT id, path, title FROM pages")?;
+            let mut node_stmt = conn.prepare("SELECT id, path, title FROM pages")?;
 
             let nodes: Vec<GraphNode> = node_stmt
                 .query_map([], |row| {
@@ -612,8 +606,9 @@ pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphRespo
                 .filter_map(|r| r.ok())
                 .collect();
 
-            let mut edge_stmt = conn
-                .prepare("SELECT source_id, target_id, kind FROM links WHERE target_id IS NOT NULL")?;
+            let mut edge_stmt = conn.prepare(
+                "SELECT source_id, target_id, kind FROM links WHERE target_id IS NOT NULL",
+            )?;
 
             let edges: Vec<GraphEdge> = edge_stmt
                 .query_map([], |row| {

@@ -112,7 +112,11 @@ async fn agenda_today_includes_scheduled_today() {
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected 1 scheduled-today task, got: {tasks:?}");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "expected 1 scheduled-today task, got: {tasks:?}"
+    );
     assert!(tasks[0]["content"].as_str().unwrap().contains("Meeting"));
 }
 
@@ -136,7 +140,12 @@ async fn agenda_today_includes_overdue() {
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1, "expected 1 overdue task, got: {tasks:?}");
-    assert!(tasks[0]["content"].as_str().unwrap().contains("Overdue task"));
+    assert!(
+        tasks[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Overdue task")
+    );
 }
 
 #[tokio::test]
@@ -144,7 +153,10 @@ async fn agenda_today_includes_journal_tasks() {
     let (server, _tmp) = setup_server();
 
     // Create today's journal with an incomplete task (no due date)
-    server.get("/api/vault/journal/today").await.assert_status_ok();
+    server
+        .get("/api/vault/journal/today")
+        .await
+        .assert_status_ok();
     server
         .post("/api/vault/journal/today/capture")
         .json(&serde_json::json!({ "content": "- [ ] Journal task without due date" }))
@@ -156,10 +168,12 @@ async fn agenda_today_includes_journal_tasks() {
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1, "expected 1 journal task, got: {tasks:?}");
-    assert!(tasks[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("Journal task without due date"));
+    assert!(
+        tasks[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Journal task without due date")
+    );
 }
 
 #[tokio::test]
@@ -170,7 +184,10 @@ async fn agenda_today_deduplicates() {
     // Create today's journal with a task that is also due today.
     // This matches BOTH the journal_date condition and the due condition,
     // but should appear only once.
-    server.get("/api/vault/journal/today").await.assert_status_ok();
+    server
+        .get("/api/vault/journal/today")
+        .await
+        .assert_status_ok();
     server
         .post("/api/vault/journal/today/capture")
         .json(&serde_json::json!({
@@ -269,10 +286,12 @@ async fn agenda_overdue_returns_past_due_incomplete_tasks() {
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1, "expected 1 overdue task, got: {tasks:?}");
-    assert!(tasks[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("Should appear"));
+    assert!(
+        tasks[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Should appear")
+    );
 }
 
 #[tokio::test]
@@ -293,7 +312,10 @@ async fn agenda_overdue_excludes_completed() {
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
-    assert!(tasks.is_empty(), "completed overdue tasks should not appear, got: {tasks:?}");
+    assert!(
+        tasks.is_empty(),
+        "completed overdue tasks should not appear, got: {tasks:?}"
+    );
 }
 
 #[tokio::test]
