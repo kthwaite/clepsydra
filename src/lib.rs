@@ -469,10 +469,10 @@ async fn load_tls_config(tls: &TlsSettings) -> Result<RustlsConfig, Box<dyn std:
 async fn serve_tls(
     app: Router,
     addr: std::net::SocketAddr,
-    tls: &TlsSettings,
+    settings: &Settings,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = load_tls_config(tls).await?;
-    info!(%addr, "listening (HTTPS)");
+    let config = load_tls_config(&settings.server.tls).await?;
+    info!(%addr, ?settings.server, "listening (HTTPS)");
     axum_server::bind_rustls(addr, config)
         .serve(app.into_make_service())
         .await?;
@@ -483,8 +483,9 @@ async fn serve_tls(
 async fn serve_plain(
     app: Router,
     addr: std::net::SocketAddr,
+    settings: &Settings,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(%addr, "listening (HTTP)");
+    info!(%addr, ?settings.server, "listening (HTTP)");
     axum_server::bind(addr)
         .serve(app.into_make_service())
         .await?;
@@ -495,9 +496,9 @@ async fn serve_plain(
 async fn serve(app: Router, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
     let addr = resolve_bind_addr(&settings.server.host, settings.server.port).await?;
     if settings.server.tls.enabled {
-        serve_tls(app, addr, &settings.server.tls).await
+        serve_tls(app, addr, settings).await
     } else {
-        serve_plain(app, addr).await
+        serve_plain(app, addr, settings).await
     }
 }
 
