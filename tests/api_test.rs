@@ -222,16 +222,27 @@ async fn lists_folder_contents_sorted() {
     let resp = server.get("/api/vault/folders/topic").await;
     resp.assert_status_ok();
     let body: serde_json::Value = resp.json();
-    // pages sorted by path: Alpha before Beta
+    // exactly the two md files in topic/ (sub/Child.md is one level deeper)
     let pages = body["pages"].as_array().expect("pages array");
+    assert_eq!(
+        pages.len(),
+        2,
+        "expected exactly 2 pages in topic/: {pages:?}"
+    );
     let paths: Vec<&str> = pages.iter().filter_map(|p| p["path"].as_str()).collect();
     assert!(paths.iter().any(|p| p.ends_with("Alpha.md")));
     assert!(paths.iter().any(|p| p.ends_with("Beta.md")));
+    // pages sorted by path: Alpha before Beta
     let alpha = paths.iter().position(|p| p.ends_with("Alpha.md")).unwrap();
     let beta = paths.iter().position(|p| p.ends_with("Beta.md")).unwrap();
     assert!(alpha < beta, "Alpha should sort before Beta: {paths:?}");
-    // subfolder present
+    // exactly the one subfolder
     let folders = body["folders"].as_array().expect("folders array");
+    assert_eq!(
+        folders.len(),
+        1,
+        "expected exactly 1 subfolder: {folders:?}"
+    );
     assert!(folders.iter().any(|f| f["name"].as_str() == Some("sub")));
 }
 
