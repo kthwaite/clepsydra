@@ -600,7 +600,18 @@ fn evaluate_vault(facts: &VaultFacts) -> (Vec<CheckResult>, bool) {
             ));
             return (out, false);
         }
-        None => return (out, false),
+        None => {
+            // Unreachable in production: gather_vault_facts only leaves
+            // config_load None when dot_dir is absent, and we already returned
+            // above in that case. Emit a loud diagnostic rather than aborting
+            // silently if the invariant is ever violated.
+            out.push(err(
+                SECTION,
+                "config",
+                "internal: .clepsydra present but config load was not attempted",
+            ));
+            return (out, false);
+        }
     }
 
     if facts.bad_globs.is_empty() {
@@ -677,28 +688,28 @@ fn gather_vault_facts(settings: &Settings, config_path: &Path, cwd: &Path) -> Va
     let mut default_folder_exists = false;
 
     if dot_dir_exists {
-        config_load = Some(
-            VaultConfig::load(&vault_root)
-                .map_err(|e| e.to_string())
-                .map(|vault_config| {
-                    excluded_count = vault_config.vault.excluded_patterns.len();
-                    for pat in &vault_config.vault.excluded_patterns {
-                        if glob::Pattern::new(pat).is_err() {
-                            bad_globs.push(pat.clone());
-                        }
+        config_load = Some(match VaultConfig::load(&vault_root) {
+            Ok(vault_config) => {
+                excluded_count = vault_config.vault.excluded_patterns.len();
+                for pat in &vault_config.vault.excluded_patterns {
+                    if glob::Pattern::new(pat).is_err() {
+                        bad_globs.push(pat.clone());
                     }
-                    attachment_folder = vault_config.vault.attachment_folder.clone();
-                    attach_exists = vault_root
-                        .join(&vault_config.vault.attachment_folder)
-                        .is_dir();
-                    default_page_folder = vault_config.vault.default_page_folder.clone();
-                    default_folder_exists = if default_page_folder.is_empty() {
-                        false
-                    } else {
-                        vault_root.join(&default_page_folder).is_dir()
-                    };
-                }),
-        );
+                }
+                attachment_folder = vault_config.vault.attachment_folder.clone();
+                attach_exists = vault_root
+                    .join(&vault_config.vault.attachment_folder)
+                    .is_dir();
+                default_page_folder = vault_config.vault.default_page_folder.clone();
+                default_folder_exists = if default_page_folder.is_empty() {
+                    false
+                } else {
+                    vault_root.join(&default_page_folder).is_dir()
+                };
+                Ok(())
+            }
+            Err(e) => Err(e.to_string()),
+        });
     }
 
     VaultFacts {
@@ -1715,6 +1726,27 @@ mod evaluate_tls_tests {
         assert_eq!(results[0].name, "paths");
         assert_eq!(results[0].status, Status::Info);
     }
+
+    #[test]
+    fn auto_only_key_missing_lists_just_the_key_path() {
+        // Exercises the single-missing branch: only one of cert/key absent.
+        let mut facts = base_facts();
+        facts.cert_exists = true;
+        facts.key_exists = false;
+        facts.pem_parse = None;
+        let results = evaluate_tls(&facts, false);
+        let certs = results.iter().find(|r| r.name == "certs").unwrap();
+        assert!(
+            certs.detail.contains("key.pem"),
+            "expected key path in detail: {}",
+            certs.detail
+        );
+        assert!(
+            !certs.detail.contains("cert.pem"),
+            "present cert path should not appear: {}",
+            certs.detail
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1860,6 +1892,20 @@ mod evaluate_vault_tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, Status::Err);
         assert!(results[0].detail.contains("is not a directory"));
+    }
+
+    #[test]
+    fn config_load_none_is_loud_and_aborts() {
+        // Defensive invariant-violation arm: dot_dir present but config_load None.
+        let mut facts = healthy_facts();
+        facts.config_load = None;
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(!should_open);
+        let config = results
+            .iter()
+            .find(|r| r.name == "config")
+            .expect("a config diagnostic should be emitted");
+        assert_eq!(config.status, Status::Err);
     }
 
     #[test]
