@@ -4,7 +4,6 @@
 //! [`Report`]. Checks are read-only and never panic: failures inside a check
 //! become `Status::Err` results so the rest of the report still runs.
 
-use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -353,86 +352,72 @@ async fn check_server_address(settings: &Settings, report: &mut Report) {
 // Check 3: TLS
 // ---------------------------------------------------------------------------
 
-async fn check_tls(settings: &Settings, report: &mut Report) {
+#[derive(Debug, Clone)]
+struct TlsFacts {
+    cert_path: std::path::PathBuf,
+    key_path: std::path::PathBuf,
+    explicit: bool,
+    cert_exists: bool,
+    key_exists: bool,
+    /// Some iff both files exist (we only attempt a parse then); Ok=parsed, Err=parse failure.
+    pem_parse: Option<Result<(), String>>,
+}
+
+/// Pure evaluation of TLS facts. `mkcert_available` is injected (PATH lookup).
+fn evaluate_tls(facts: &TlsFacts, mkcert_available: bool) -> Vec<CheckResult> {
     const SECTION: &str = "tls";
-
-    if !settings.server.tls.enabled {
-        report.push(info(SECTION, "enabled", "disabled in config"));
-        return;
-    }
-
-    let (cert_path, key_path, explicit) = match default_tls_paths(&settings.server.tls) {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            report.push(err(
-                SECTION,
-                "paths",
-                "no cert paths configured and dirs::data_dir() is unavailable",
-            ));
-            return;
-        }
-        Err(msg) => {
-            report.push(
-                err(SECTION, "paths", msg)
-                    .with_hint("set both server.tls.cert_path and server.tls.key_path"),
-            );
-            return;
-        }
-    };
-
-    let source = if explicit {
+    let mut out = Vec::new();
+    let source = if facts.explicit {
         "explicit"
     } else {
         "auto-discovered"
     };
-    report.push(info(
+    out.push(info(
         SECTION,
         "paths",
         format!(
             "cert={} key={} ({source})",
-            cert_path.display(),
-            key_path.display()
+            facts.cert_path.display(),
+            facts.key_path.display()
         ),
     ));
 
-    let cert_exists = cert_path.is_file();
-    let key_exists = key_path.is_file();
-
-    if cert_exists && key_exists {
-        match RustlsConfig::from_pem_file(&cert_path, &key_path).await {
-            Ok(_) => {
-                report.push(ok(SECTION, "certs", "loaded and parsed"));
-            }
-            Err(e) => {
-                report.push(err(
-                    SECTION,
-                    "certs",
-                    format!("PEM files present but failed to parse: {e}"),
-                ));
-            }
+    if facts.cert_exists && facts.key_exists {
+        match &facts.pem_parse {
+            Some(Ok(())) => out.push(ok(SECTION, "certs", "loaded and parsed")),
+            Some(Err(e)) => out.push(err(
+                SECTION,
+                "certs",
+                format!("PEM files present but failed to parse: {e}"),
+            )),
+            None => out.push(err(
+                SECTION,
+                "certs",
+                "PEM files present but were not validated".to_string(),
+            )),
         }
-        return;
+        return out;
     }
 
     let mut missing = Vec::new();
-    if !cert_exists {
-        missing.push(cert_path.display().to_string());
+    if !facts.cert_exists {
+        missing.push(facts.cert_path.display().to_string());
     }
-    if !key_exists {
-        missing.push(key_path.display().to_string());
+    if !facts.key_exists {
+        missing.push(facts.key_path.display().to_string());
     }
 
-    if explicit {
-        report.push(err(
+    if facts.explicit {
+        out.push(err(
             SECTION,
             "certs",
             format!("missing: {}", missing.join(", ")),
         ));
-        return;
+        return out;
     }
 
-    if has_executable_on_path("mkcert") {
-        report.push(
+    if mkcert_available {
+        out.push(
             warn(
                 SECTION,
                 "certs",
@@ -441,7 +426,7 @@ async fn check_tls(settings: &Settings, report: &mut Report) {
             .with_hint("run `clepsydra serve` once to generate via mkcert"),
         );
     } else {
-        report.push(
+        out.push(
             err(
                 SECTION,
                 "certs",
@@ -451,6 +436,62 @@ async fn check_tls(settings: &Settings, report: &mut Report) {
                 "install mkcert (https://github.com/FiloSottile/mkcert) or set tls.cert_path/tls.key_path",
             ),
         );
+    }
+    out
+}
+
+async fn gather_tls_facts(tls: &crate::TlsSettings) -> Result<TlsFacts, CheckResult> {
+    let (cert_path, key_path, explicit) = match default_tls_paths(tls) {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return Err(err(
+                "tls",
+                "paths",
+                "no cert paths configured and dirs::data_dir() is unavailable",
+            ));
+        }
+        Err(msg) => {
+            return Err(err("tls", "paths", msg)
+                .with_hint("set both server.tls.cert_path and server.tls.key_path"));
+        }
+    };
+
+    let cert_exists = cert_path.is_file();
+    let key_exists = key_path.is_file();
+    let pem_parse = if cert_exists && key_exists {
+        Some(
+            RustlsConfig::from_pem_file(&cert_path, &key_path)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        )
+    } else {
+        None
+    };
+
+    Ok(TlsFacts {
+        cert_path,
+        key_path,
+        explicit,
+        cert_exists,
+        key_exists,
+        pem_parse,
+    })
+}
+
+async fn check_tls(settings: &Settings, report: &mut Report) {
+    if !settings.server.tls.enabled {
+        report.push(info("tls", "enabled", "disabled in config"));
+        return;
+    }
+    match gather_tls_facts(&settings.server.tls).await {
+        Ok(facts) => {
+            let mkcert = has_executable_on_path("mkcert");
+            for r in evaluate_tls(&facts, mkcert) {
+                report.push(r);
+            }
+        }
+        Err(result) => report.push(result),
     }
 }
 
@@ -471,114 +512,120 @@ fn has_executable_on_path(name: &str) -> bool {
 // Check 4: vault
 // ---------------------------------------------------------------------------
 
-fn check_vault(
-    settings: &Settings,
-    config_path: &Path,
-    cwd: &Path,
-    report: &mut Report,
-) -> Option<Vault> {
+#[derive(Debug, Clone)]
+struct VaultFacts {
+    vault_root: std::path::PathBuf,
+    root_exists: bool,
+    root_is_dir: bool,
+    root_writable: bool,
+    dot_dir_exists: bool,
+    /// Some iff dot_dir exists (we only load config then); Ok=parsed, Err=error msg.
+    config_load: Option<Result<(), String>>,
+    excluded_count: usize,
+    bad_globs: Vec<String>,
+    attachment_folder: String,
+    attach_exists: bool,
+    default_page_folder: String,
+    default_folder_exists: bool,
+}
+
+/// Pure evaluation; returns (results, should_open_vault).
+fn evaluate_vault(facts: &VaultFacts) -> (Vec<CheckResult>, bool) {
     const SECTION: &str = "vault";
+    let mut out = Vec::new();
+    let root = &facts.vault_root;
 
-    let vault_root = resolve_vault_root(&settings.vault.root, config_path, cwd);
-
-    if !vault_root.exists() {
-        report.push(
+    if !facts.root_exists {
+        out.push(
             err(
                 SECTION,
                 "root",
-                format!("{} does not exist", vault_root.display()),
+                format!("{} does not exist", root.display()),
             )
             .with_hint(format!(
                 "run `clepsydra init {}` or fix vault.root",
-                vault_root.display()
+                root.display()
             )),
         );
-        return None;
+        return (out, false);
     }
-    if !vault_root.is_dir() {
-        report.push(err(
+    if !facts.root_is_dir {
+        out.push(err(
             SECTION,
             "root",
-            format!("{} is not a directory", vault_root.display()),
+            format!("{} is not a directory", root.display()),
         ));
-        return None;
+        return (out, false);
     }
 
-    let writable = is_dir_writable(&vault_root);
-    if writable {
-        report.push(ok(
+    if facts.root_writable {
+        out.push(ok(
             SECTION,
             "root",
-            format!("{} (read+write)", vault_root.display()),
+            format!("{} (read+write)", root.display()),
         ));
     } else {
-        report.push(warn(
+        out.push(warn(
             SECTION,
             "root",
-            format!("{} is not writable", vault_root.display()),
+            format!("{} is not writable", root.display()),
         ));
     }
 
-    let dot_dir = vault_root.join(".clepsydra");
-    if !dot_dir.is_dir() {
-        report.push(
+    let dot_dir = root.join(".clepsydra");
+    if !facts.dot_dir_exists {
+        out.push(
             err(
                 SECTION,
                 "initialized",
                 format!("{} missing", dot_dir.display()),
             )
-            .with_hint(format!("run `clepsydra init {}`", vault_root.display())),
+            .with_hint(format!("run `clepsydra init {}`", root.display())),
         );
-        return None;
+        return (out, false);
     }
-    report.push(ok(
+    out.push(ok(
         SECTION,
         "initialized",
         ".clepsydra/ present".to_string(),
     ));
 
-    let vault_config = match VaultConfig::load(&vault_root) {
-        Ok(c) => c,
-        Err(e) => {
-            report.push(err(
+    match &facts.config_load {
+        Some(Ok(())) => out.push(ok(SECTION, "config", "parsed .clepsydra/config.toml")),
+        Some(Err(e)) => {
+            out.push(err(
                 SECTION,
                 "config",
                 format!(".clepsydra/config.toml: {e}"),
             ));
-            return None;
+            return (out, false);
         }
-    };
-    report.push(ok(SECTION, "config", "parsed .clepsydra/config.toml"));
-
-    let mut bad_globs: Vec<String> = Vec::new();
-    for pat in &vault_config.vault.excluded_patterns {
-        if glob::Pattern::new(pat).is_err() {
-            bad_globs.push(pat.clone());
-        }
+        None => return (out, false),
     }
-    if bad_globs.is_empty() {
-        report.push(ok(
+
+    if facts.bad_globs.is_empty() {
+        out.push(ok(
             SECTION,
             "excluded patterns",
-            format!("{} valid", vault_config.vault.excluded_patterns.len()),
+            format!("{} valid", facts.excluded_count),
         ));
     } else {
-        report.push(err(
+        out.push(err(
             SECTION,
             "excluded patterns",
-            format!("invalid glob(s): {}", bad_globs.join(", ")),
+            format!("invalid glob(s): {}", facts.bad_globs.join(", ")),
         ));
     }
 
-    let attach = vault_root.join(&vault_config.vault.attachment_folder);
-    if attach.is_dir() {
-        report.push(ok(
+    let attach = root.join(&facts.attachment_folder);
+    if facts.attach_exists {
+        out.push(ok(
             SECTION,
             "attachments",
-            format!("{} present", vault_config.vault.attachment_folder),
+            format!("{} present", facts.attachment_folder),
         ));
     } else {
-        report.push(warn(
+        out.push(warn(
             SECTION,
             "attachments",
             format!(
@@ -588,22 +635,22 @@ fn check_vault(
         ));
     }
 
-    if vault_config.vault.default_page_folder.is_empty() {
-        report.push(info(
+    if facts.default_page_folder.is_empty() {
+        out.push(info(
             SECTION,
             "default folder",
             "vault root (default_page_folder = \"\")",
         ));
     } else {
-        let folder = vault_root.join(&vault_config.vault.default_page_folder);
-        if folder.is_dir() {
-            report.push(ok(
+        let folder = root.join(&facts.default_page_folder);
+        if facts.default_folder_exists {
+            out.push(ok(
                 SECTION,
                 "default folder",
-                vault_config.vault.default_page_folder.clone(),
+                facts.default_page_folder.clone(),
             ));
         } else {
-            report.push(warn(
+            out.push(warn(
                 SECTION,
                 "default folder",
                 format!("{} missing — `clepsydra new` will fail", folder.display()),
@@ -611,10 +658,83 @@ fn check_vault(
         }
     }
 
-    match Vault::open(&vault_root) {
+    (out, true)
+}
+
+fn gather_vault_facts(settings: &Settings, config_path: &Path, cwd: &Path) -> VaultFacts {
+    let vault_root = resolve_vault_root(&settings.vault.root, config_path, cwd);
+    let root_exists = vault_root.exists();
+    let root_is_dir = vault_root.is_dir();
+    let root_writable = is_dir_writable(&vault_root);
+    let dot_dir_exists = vault_root.join(".clepsydra").is_dir();
+
+    let mut config_load: Option<Result<(), String>> = None;
+    let mut excluded_count = 0usize;
+    let mut bad_globs: Vec<String> = Vec::new();
+    let mut attachment_folder = String::new();
+    let mut attach_exists = false;
+    let mut default_page_folder = String::new();
+    let mut default_folder_exists = false;
+
+    if dot_dir_exists {
+        config_load = Some(
+            VaultConfig::load(&vault_root)
+                .map_err(|e| e.to_string())
+                .map(|vault_config| {
+                    excluded_count = vault_config.vault.excluded_patterns.len();
+                    for pat in &vault_config.vault.excluded_patterns {
+                        if glob::Pattern::new(pat).is_err() {
+                            bad_globs.push(pat.clone());
+                        }
+                    }
+                    attachment_folder = vault_config.vault.attachment_folder.clone();
+                    attach_exists = vault_root
+                        .join(&vault_config.vault.attachment_folder)
+                        .is_dir();
+                    default_page_folder = vault_config.vault.default_page_folder.clone();
+                    default_folder_exists = if default_page_folder.is_empty() {
+                        false
+                    } else {
+                        vault_root.join(&default_page_folder).is_dir()
+                    };
+                }),
+        );
+    }
+
+    VaultFacts {
+        vault_root,
+        root_exists,
+        root_is_dir,
+        root_writable,
+        dot_dir_exists,
+        config_load,
+        excluded_count,
+        bad_globs,
+        attachment_folder,
+        attach_exists,
+        default_page_folder,
+        default_folder_exists,
+    }
+}
+
+fn check_vault(
+    settings: &Settings,
+    config_path: &Path,
+    cwd: &Path,
+    report: &mut Report,
+) -> Option<Vault> {
+    let facts = gather_vault_facts(settings, config_path, cwd);
+    let (results, should_open) = evaluate_vault(&facts);
+    for r in results {
+        report.push(r);
+    }
+    if !should_open {
+        return None;
+    }
+    match Vault::open(&facts.vault_root) {
         Ok(vault) => Some(vault),
         Err(e) => {
-            report.push(err(SECTION, "open", format!("Vault::open: {e}")));
+            report.push(err("vault", "open", format!("Vault::open: {e}")));
             None
         }
     }
@@ -634,14 +754,135 @@ const REQUIRED_TABLES: &[&str] = &[
     "pages_fts",
 ];
 
-async fn check_index(vault: &Vault, full: bool, report: &mut Report) {
-    const SECTION: &str = "index";
-    let db_path = vault.root().join(".clepsydra/cache.db");
+#[derive(Debug, Clone)]
+struct IndexFacts {
+    db_path: std::path::PathBuf,
+    db_open_error: Option<String>,
+    missing_tables: Vec<&'static str>,
+    page_count: i64,
+    unresolved_link_count: i64,
+    fts_row_count: i64,
+    has_markdown: bool,
+}
 
+/// Pure evaluation of index facts (db known to exist; excludes the `--full` dry build).
+fn evaluate_index(facts: &IndexFacts) -> Vec<CheckResult> {
+    const SECTION: &str = "index";
+    let mut out = Vec::new();
+    if let Some(e) = &facts.db_open_error {
+        out.push(err(
+            SECTION,
+            "cache.db",
+            format!("cannot open {}: {e}", facts.db_path.display()),
+        ));
+        return out;
+    }
+    out.push(ok(
+        SECTION,
+        "cache.db",
+        format!("opened {}", facts.db_path.display()),
+    ));
+
+    if !facts.missing_tables.is_empty() {
+        out.push(
+            err(
+                SECTION,
+                "schema",
+                format!("missing tables: {}", facts.missing_tables.join(", ")),
+            )
+            .with_hint("delete .clepsydra/cache.db and rebuild"),
+        );
+        return out;
+    }
+    out.push(ok(
+        SECTION,
+        "schema",
+        format!("{} tables present", REQUIRED_TABLES.len()),
+    ));
+
+    out.push(ok(
+        SECTION,
+        "counts",
+        format!(
+            "{} pages, {} unresolved links, {} fts rows",
+            facts.page_count, facts.unresolved_link_count, facts.fts_row_count
+        ),
+    ));
+
+    if facts.page_count == 0 && facts.has_markdown {
+        out.push(
+            warn(SECTION, "stale", "index empty but vault contains markdown")
+                .with_hint("delete .clepsydra/cache.db and rebuild"),
+        );
+    }
+    out
+}
+
+fn gather_index_facts(vault: &Vault, db_path: std::path::PathBuf) -> IndexFacts {
+    let conn = match Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            return IndexFacts {
+                db_open_error: Some(format!("{e}")),
+                db_path,
+                missing_tables: Vec::new(),
+                page_count: 0,
+                unresolved_link_count: 0,
+                fts_row_count: 0,
+                has_markdown: false,
+            };
+        }
+    };
+
+    let mut missing_tables: Vec<&'static str> = Vec::new();
+    for tbl in REQUIRED_TABLES {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                [tbl],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if exists == 0 {
+            missing_tables.push(tbl);
+        }
+    }
+
+    let page_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+        .unwrap_or(-1);
+    let unresolved_link_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(-1);
+    let fts_row_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pages_fts", [], |row| row.get(0))
+        .unwrap_or(-1);
+    let has_markdown = vault_has_markdown(vault.root());
+
+    IndexFacts {
+        db_path,
+        db_open_error: None,
+        missing_tables,
+        page_count,
+        unresolved_link_count,
+        fts_row_count,
+        has_markdown,
+    }
+}
+
+async fn check_index(vault: &Vault, full: bool, report: &mut Report) {
+    let db_path = vault.root().join(".clepsydra/cache.db");
     if !db_path.exists() {
         report.push(
             warn(
-                SECTION,
+                "index",
                 "cache.db",
                 format!("{} missing", db_path.display()),
             )
@@ -652,86 +893,10 @@ async fn check_index(vault: &Vault, full: bool, report: &mut Report) {
         }
         return;
     }
-
-    let conn = match Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            report.push(err(
-                SECTION,
-                "cache.db",
-                format!("cannot open {}: {e}", db_path.display()),
-            ));
-            return;
-        }
-    };
-    report.push(ok(
-        SECTION,
-        "cache.db",
-        format!("opened {}", db_path.display()),
-    ));
-
-    let mut missing: Vec<&str> = Vec::new();
-    for tbl in REQUIRED_TABLES {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
-                [tbl],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        if exists == 0 {
-            missing.push(tbl);
-        }
+    let facts = gather_index_facts(vault, db_path);
+    for r in evaluate_index(&facts) {
+        report.push(r);
     }
-    if missing.is_empty() {
-        report.push(ok(
-            SECTION,
-            "schema",
-            format!("{} tables present", REQUIRED_TABLES.len()),
-        ));
-    } else {
-        report.push(
-            err(
-                SECTION,
-                "schema",
-                format!("missing tables: {}", missing.join(", ")),
-            )
-            .with_hint("delete .clepsydra/cache.db and rebuild"),
-        );
-        return;
-    }
-
-    let pages: i64 = conn
-        .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
-        .unwrap_or(-1);
-    let unresolved: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM links WHERE target_id IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(-1);
-    let fts: i64 = conn
-        .query_row("SELECT COUNT(*) FROM pages_fts", [], |row| row.get(0))
-        .unwrap_or(-1);
-
-    let mut detail = String::new();
-    let _ = write!(
-        &mut detail,
-        "{pages} pages, {unresolved} unresolved links, {fts} fts rows"
-    );
-    report.push(ok(SECTION, "counts", detail));
-
-    if pages == 0 && vault_has_markdown(vault.root()) {
-        report.push(
-            warn(SECTION, "stale", "index empty but vault contains markdown")
-                .with_hint("delete .clepsydra/cache.db and rebuild"),
-        );
-    }
-
     if full {
         run_index_dry_build(vault, report).await;
     }
@@ -1447,5 +1612,378 @@ mod tests {
             "expected detail to mention indexed pages: {}",
             r.detail
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pure evaluate_* unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod evaluate_tls_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn base_facts() -> TlsFacts {
+        TlsFacts {
+            cert_path: PathBuf::from("/tmp/cert.pem"),
+            key_path: PathBuf::from("/tmp/key.pem"),
+            explicit: false,
+            cert_exists: true,
+            key_exists: true,
+            pem_parse: Some(Ok(())),
+        }
+    }
+
+    #[test]
+    fn valid_pem_both_exist_emits_ok() {
+        let facts = base_facts();
+        let results = evaluate_tls(&facts, false);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "paths" && r.status == Status::Info)
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "certs" && r.status == Status::Ok)
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.detail.contains("loaded and parsed"))
+        );
+    }
+
+    #[test]
+    fn corrupt_pem_emits_err() {
+        let mut facts = base_facts();
+        facts.pem_parse = Some(Err("invalid PEM data".to_string()));
+        let results = evaluate_tls(&facts, false);
+        let certs = results.iter().find(|r| r.name == "certs").unwrap();
+        assert_eq!(certs.status, Status::Err);
+        assert!(certs.detail.contains("failed to parse"));
+        assert!(certs.detail.contains("invalid PEM data"));
+    }
+
+    #[test]
+    fn explicit_missing_emits_err() {
+        let mut facts = base_facts();
+        facts.explicit = true;
+        facts.cert_exists = false;
+        facts.key_exists = false;
+        facts.pem_parse = None;
+        let results = evaluate_tls(&facts, false);
+        let certs = results.iter().find(|r| r.name == "certs").unwrap();
+        assert_eq!(certs.status, Status::Err);
+        assert!(certs.detail.contains("missing"));
+    }
+
+    #[test]
+    fn auto_missing_with_mkcert_emits_warn() {
+        let mut facts = base_facts();
+        facts.explicit = false;
+        facts.cert_exists = false;
+        facts.key_exists = false;
+        facts.pem_parse = None;
+        let results = evaluate_tls(&facts, true);
+        let certs = results.iter().find(|r| r.name == "certs").unwrap();
+        assert_eq!(certs.status, Status::Warn);
+        assert!(certs.detail.contains("mkcert available on PATH"));
+        assert!(certs.hint.as_ref().unwrap().contains("clepsydra serve"));
+    }
+
+    #[test]
+    fn auto_missing_no_mkcert_emits_err() {
+        let mut facts = base_facts();
+        facts.explicit = false;
+        facts.cert_exists = false;
+        facts.key_exists = false;
+        facts.pem_parse = None;
+        let results = evaluate_tls(&facts, false);
+        let certs = results.iter().find(|r| r.name == "certs").unwrap();
+        assert_eq!(certs.status, Status::Err);
+        assert!(certs.detail.contains("mkcert not on PATH"));
+        assert!(certs.hint.as_ref().unwrap().contains("mkcert"));
+    }
+
+    #[test]
+    fn paths_info_always_first() {
+        let facts = base_facts();
+        let results = evaluate_tls(&facts, false);
+        assert_eq!(results[0].name, "paths");
+        assert_eq!(results[0].status, Status::Info);
+    }
+}
+
+#[cfg(test)]
+mod evaluate_index_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn healthy_facts() -> IndexFacts {
+        IndexFacts {
+            db_path: PathBuf::from("/vault/.clepsydra/cache.db"),
+            db_open_error: None,
+            missing_tables: Vec::new(),
+            page_count: 5,
+            unresolved_link_count: 1,
+            fts_row_count: 5,
+            has_markdown: true,
+        }
+    }
+
+    #[test]
+    fn healthy_index_emits_ok_results() {
+        let facts = healthy_facts();
+        let results = evaluate_index(&facts);
+        assert!(results.iter().all(|r| r.status == Status::Ok));
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name == "cache.db" && r.detail.contains("opened"))
+        );
+        assert!(results.iter().any(|r| r.name == "schema"));
+        assert!(results.iter().any(|r| r.name == "counts"));
+    }
+
+    #[test]
+    fn open_error_emits_err_and_stops() {
+        let mut facts = healthy_facts();
+        facts.db_open_error = Some("no such file".to_string());
+        let results = evaluate_index(&facts);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, Status::Err);
+        assert!(results[0].detail.contains("cannot open"));
+        assert!(results[0].detail.contains("no such file"));
+    }
+
+    #[test]
+    fn missing_tables_emits_err_and_stops() {
+        let mut facts = healthy_facts();
+        facts.missing_tables = vec!["pages", "links"];
+        let results = evaluate_index(&facts);
+        // cache.db ok + schema err
+        assert_eq!(results.len(), 2);
+        let schema = results.iter().find(|r| r.name == "schema").unwrap();
+        assert_eq!(schema.status, Status::Err);
+        assert!(schema.detail.contains("missing tables"));
+        assert!(schema.hint.as_ref().unwrap().contains("cache.db"));
+    }
+
+    #[test]
+    fn empty_index_with_markdown_emits_stale_warn() {
+        let mut facts = healthy_facts();
+        facts.page_count = 0;
+        facts.has_markdown = true;
+        let results = evaluate_index(&facts);
+        let stale = results.iter().find(|r| r.name == "stale").unwrap();
+        assert_eq!(stale.status, Status::Warn);
+        assert!(
+            stale
+                .detail
+                .contains("index empty but vault contains markdown")
+        );
+    }
+
+    #[test]
+    fn empty_index_no_markdown_no_stale_warn() {
+        let mut facts = healthy_facts();
+        facts.page_count = 0;
+        facts.has_markdown = false;
+        let results = evaluate_index(&facts);
+        assert!(!results.iter().any(|r| r.name == "stale"));
+    }
+
+    #[test]
+    fn counts_detail_format_matches_original() {
+        let facts = healthy_facts();
+        let results = evaluate_index(&facts);
+        let counts = results.iter().find(|r| r.name == "counts").unwrap();
+        assert_eq!(counts.detail, "5 pages, 1 unresolved links, 5 fts rows");
+    }
+}
+
+#[cfg(test)]
+mod evaluate_vault_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn healthy_facts() -> VaultFacts {
+        VaultFacts {
+            vault_root: PathBuf::from("/vault"),
+            root_exists: true,
+            root_is_dir: true,
+            root_writable: true,
+            dot_dir_exists: true,
+            config_load: Some(Ok(())),
+            excluded_count: 2,
+            bad_globs: Vec::new(),
+            attachment_folder: "_attachments".to_string(),
+            attach_exists: true,
+            default_page_folder: "notes".to_string(),
+            default_folder_exists: true,
+        }
+    }
+
+    #[test]
+    fn healthy_vault_should_open_true_no_errors() {
+        let facts = healthy_facts();
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(should_open);
+        assert!(
+            results
+                .iter()
+                .all(|r| r.status == Status::Ok || r.status == Status::Info)
+        );
+    }
+
+    #[test]
+    fn root_not_exists_should_open_false_with_err() {
+        let mut facts = healthy_facts();
+        facts.root_exists = false;
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(!should_open);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, Status::Err);
+        assert!(results[0].detail.contains("does not exist"));
+        assert!(results[0].hint.as_ref().unwrap().contains("clepsydra init"));
+    }
+
+    #[test]
+    fn root_not_dir_should_open_false_with_err() {
+        let mut facts = healthy_facts();
+        facts.root_is_dir = false;
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(!should_open);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, Status::Err);
+        assert!(results[0].detail.contains("is not a directory"));
+    }
+
+    #[test]
+    fn root_not_writable_emits_warn_and_continues() {
+        let mut facts = healthy_facts();
+        facts.root_writable = false;
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(should_open);
+        let root_r = results.iter().find(|r| r.name == "root").unwrap();
+        assert_eq!(root_r.status, Status::Warn);
+        assert!(root_r.detail.contains("is not writable"));
+    }
+
+    #[test]
+    fn dot_dir_missing_should_open_false_with_err() {
+        let mut facts = healthy_facts();
+        facts.dot_dir_exists = false;
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(!should_open);
+        let init_r = results.iter().find(|r| r.name == "initialized").unwrap();
+        assert_eq!(init_r.status, Status::Err);
+        assert!(init_r.hint.as_ref().unwrap().contains("clepsydra init"));
+    }
+
+    #[test]
+    fn config_load_error_should_open_false_with_err() {
+        let mut facts = healthy_facts();
+        facts.config_load = Some(Err("parse error".to_string()));
+        let (results, should_open) = evaluate_vault(&facts);
+        assert!(!should_open);
+        let cfg_r = results.iter().find(|r| r.name == "config").unwrap();
+        assert_eq!(cfg_r.status, Status::Err);
+        assert!(cfg_r.detail.contains("parse error"));
+    }
+
+    #[test]
+    fn bad_globs_emits_err() {
+        let mut facts = healthy_facts();
+        facts.bad_globs = vec!["[invalid".to_string()];
+        let (results, _) = evaluate_vault(&facts);
+        let globs_r = results
+            .iter()
+            .find(|r| r.name == "excluded patterns")
+            .unwrap();
+        assert_eq!(globs_r.status, Status::Err);
+        assert!(globs_r.detail.contains("invalid glob"));
+    }
+
+    #[test]
+    fn attach_missing_emits_warn() {
+        let mut facts = healthy_facts();
+        facts.attach_exists = false;
+        let (results, _) = evaluate_vault(&facts);
+        let attach_r = results.iter().find(|r| r.name == "attachments").unwrap();
+        assert_eq!(attach_r.status, Status::Warn);
+        assert!(
+            attach_r
+                .detail
+                .contains("missing (will be created on first use)")
+        );
+    }
+
+    #[test]
+    fn default_folder_non_empty_missing_emits_warn() {
+        let mut facts = healthy_facts();
+        facts.default_folder_exists = false;
+        let (results, _) = evaluate_vault(&facts);
+        let folder_r = results.iter().find(|r| r.name == "default folder").unwrap();
+        assert_eq!(folder_r.status, Status::Warn);
+        assert!(folder_r.detail.contains("clepsydra new` will fail"));
+    }
+
+    #[test]
+    fn default_folder_empty_emits_info() {
+        let mut facts = healthy_facts();
+        facts.default_page_folder = String::new();
+        let (results, _) = evaluate_vault(&facts);
+        let folder_r = results.iter().find(|r| r.name == "default folder").unwrap();
+        assert_eq!(folder_r.status, Status::Info);
+        assert!(folder_r.detail.contains("vault root"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Renderer tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+
+    #[test]
+    fn render_json_contains_summary_and_check_name() {
+        let mut report = Report::default();
+        report.push(ok("mysect", "mycheck", "all good"));
+        report.push(warn("mysect", "otherwarn", "heads up"));
+
+        let mut buf = Vec::new();
+        report.render_json(&mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(text.contains("\"summary\""));
+        assert!(text.contains("mycheck"));
+        assert!(text.contains("otherwarn"));
+        // Verify it parses as valid JSON.
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(v.get("checks").unwrap().is_array());
+        assert_eq!(v["checks"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn render_human_contains_hint_and_summary_line() {
+        let mut report = Report::default();
+        report.push(
+            warn("things", "mything", "something is off").with_hint("try doing the other thing"),
+        );
+        report.push(ok("things", "another", "fine"));
+
+        let mut buf = Vec::new();
+        report.render_human(&mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        assert!(text.contains("try doing the other thing"));
+        assert!(text.contains("Summary:"));
+        assert!(text.contains("things"));
     }
 }
