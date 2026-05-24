@@ -135,6 +135,112 @@ struct BlockBuilder {
     span_end: usize,
 }
 
+/// Emit the in-progress builder (if any), clearing `current`.
+fn flush_current(blocks: &mut Vec<Block>, current: &mut Option<BlockBuilder>) {
+    if let Some(builder) = current.take() {
+        emit_block(blocks, builder);
+    }
+}
+
+/// Flush any in-progress block and start a fresh builder of `block_type`.
+fn start_block_builder(
+    blocks: &mut Vec<Block>,
+    current: &mut Option<BlockBuilder>,
+    block_type: BlockType,
+    list_depth: usize,
+    span_start: usize,
+    span_end: usize,
+) {
+    flush_current(blocks, current);
+    *current = Some(BlockBuilder {
+        block_type,
+        text_parts: Vec::new(),
+        checkbox: None,
+        list_depth,
+        span_start,
+        span_end,
+    });
+}
+
+/// Set the in-progress builder's `span_end` then flush it (used by the End arms
+/// of Item / Heading / CodeBlock).
+fn finish_block(blocks: &mut Vec<Block>, current: &mut Option<BlockBuilder>, span_end: usize) {
+    if let Some(builder) = current.as_mut() {
+        builder.span_end = span_end;
+    }
+    flush_current(blocks, current);
+}
+
+/// Apply a task-list checkbox marker to the in-progress builder.
+fn set_checkbox(current: &mut Option<BlockBuilder>, checked: bool) {
+    if let Some(builder) = current.as_mut() {
+        builder.checkbox = Some(if checked {
+            CheckboxState::Done
+        } else {
+            CheckboxState::Todo
+        });
+    }
+}
+
+/// Handle `Start(Paragraph)`. Inside a blockquote a paragraph is a structural
+/// wrapper, so we (re)start a Blockquote builder spanning from the blockquote
+/// start WITHOUT flushing the current builder (matches the original); otherwise
+/// start a normal Paragraph builder.
+fn handle_paragraph_start(
+    blocks: &mut Vec<Block>,
+    current: &mut Option<BlockBuilder>,
+    in_blockquote: bool,
+    blockquote_span_start: usize,
+    range_start: usize,
+    range_end: usize,
+) {
+    if in_blockquote {
+        *current = Some(BlockBuilder {
+            block_type: BlockType::Blockquote,
+            text_parts: Vec::new(),
+            checkbox: None,
+            list_depth: 0,
+            span_start: blockquote_span_start,
+            span_end: range_end,
+        });
+    } else {
+        start_block_builder(
+            blocks,
+            current,
+            BlockType::Paragraph,
+            0,
+            range_start,
+            range_end,
+        );
+    }
+}
+
+/// Handle `End(Paragraph)`: set the builder's span_end (blockquote end when in a
+/// blockquote, else the paragraph range end), then flush.
+fn handle_paragraph_end(
+    blocks: &mut Vec<Block>,
+    current: &mut Option<BlockBuilder>,
+    in_blockquote: bool,
+    blockquote_span_end: usize,
+    range_end: usize,
+) {
+    if let Some(builder) = current.as_mut() {
+        builder.span_end = if in_blockquote {
+            blockquote_span_end
+        } else {
+            range_end
+        };
+    }
+    flush_current(blocks, current);
+}
+
+/// Append inline text to the in-progress builder (no-op if none open).
+fn append_text(current: &mut Option<BlockBuilder>, text: String) {
+    if let Some(builder) = current.as_mut() {
+        builder.text_parts.push(text);
+    }
+}
+
 /// Parse a markdown document into a flat list of blocks with parent-child
 /// relationships encoded via `parent_index`.
 ///
@@ -155,138 +261,51 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
 
     for (event, range) in parser {
         match event {
-            // --- List nesting ---
-            Event::Start(Tag::List(_)) => {
-                list_depth += 1;
-            }
-            Event::End(TagEnd::List(_)) => {
-                list_depth = list_depth.saturating_sub(1);
-            }
-
-            // --- List items ---
-            Event::Start(Tag::Item) => {
-                // Emit any pending block before starting a new item
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-                // list_depth is 1-based while item is open (the List Start
-                // fired before this Item Start), so item depth = list_depth - 1.
-                current = Some(BlockBuilder {
-                    block_type: BlockType::ListItem,
-                    text_parts: Vec::new(),
-                    checkbox: None,
-                    list_depth: list_depth.saturating_sub(1),
-                    span_start: range.start,
-                    span_end: range.end,
-                });
-            }
-            Event::End(TagEnd::Item) => {
-                if let Some(ref mut builder) = current {
-                    builder.span_end = range.end;
-                }
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-            }
-
-            // --- Task list markers ---
-            Event::TaskListMarker(checked) => {
-                if let Some(ref mut builder) = current {
-                    builder.checkbox = Some(if checked {
-                        CheckboxState::Done
-                    } else {
-                        CheckboxState::Todo
-                    });
-                }
-            }
-
-            // --- Headings ---
-            Event::Start(Tag::Heading { .. }) => {
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-                current = Some(BlockBuilder {
-                    block_type: BlockType::Heading,
-                    text_parts: Vec::new(),
-                    checkbox: None,
-                    list_depth: 0,
-                    span_start: range.start,
-                    span_end: range.end,
-                });
-            }
-            Event::End(TagEnd::Heading(_)) => {
-                if let Some(ref mut builder) = current {
-                    builder.span_end = range.end;
-                }
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-            }
-
-            // --- Paragraphs ---
-            Event::Start(Tag::Paragraph) => {
-                // Inside a blockquote, paragraphs are structural wrappers;
-                // we emit a Blockquote block instead.
-                if in_blockquote {
-                    current = Some(BlockBuilder {
-                        block_type: BlockType::Blockquote,
-                        text_parts: Vec::new(),
-                        checkbox: None,
-                        list_depth: 0,
-                        span_start: blockquote_span_start,
-                        span_end: range.end,
-                    });
-                } else {
-                    if let Some(builder) = current.take() {
-                        emit_block(&mut blocks, builder);
-                    }
-                    current = Some(BlockBuilder {
-                        block_type: BlockType::Paragraph,
-                        text_parts: Vec::new(),
-                        checkbox: None,
-                        list_depth: 0,
-                        span_start: range.start,
-                        span_end: range.end,
-                    });
-                }
-            }
-            Event::End(TagEnd::Paragraph) => {
-                if let Some(ref mut builder) = current {
-                    builder.span_end = if in_blockquote {
-                        blockquote_span_end
-                    } else {
-                        range.end
-                    };
-                }
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-            }
-
-            // --- Code blocks ---
-            Event::Start(Tag::CodeBlock(_)) => {
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-                current = Some(BlockBuilder {
-                    block_type: BlockType::Code,
-                    text_parts: Vec::new(),
-                    checkbox: None,
-                    list_depth: 0,
-                    span_start: range.start,
-                    span_end: range.end,
-                });
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some(ref mut builder) = current {
-                    builder.span_end = range.end;
-                }
-                if let Some(builder) = current.take() {
-                    emit_block(&mut blocks, builder);
-                }
-            }
-
-            // --- Blockquotes ---
+            Event::Start(Tag::List(_)) => list_depth += 1,
+            Event::End(TagEnd::List(_)) => list_depth = list_depth.saturating_sub(1),
+            Event::Start(Tag::Item) => start_block_builder(
+                &mut blocks,
+                &mut current,
+                BlockType::ListItem,
+                list_depth.saturating_sub(1),
+                range.start,
+                range.end,
+            ),
+            Event::End(TagEnd::Item) => finish_block(&mut blocks, &mut current, range.end),
+            Event::TaskListMarker(checked) => set_checkbox(&mut current, checked),
+            Event::Start(Tag::Heading { .. }) => start_block_builder(
+                &mut blocks,
+                &mut current,
+                BlockType::Heading,
+                0,
+                range.start,
+                range.end,
+            ),
+            Event::End(TagEnd::Heading(_)) => finish_block(&mut blocks, &mut current, range.end),
+            Event::Start(Tag::Paragraph) => handle_paragraph_start(
+                &mut blocks,
+                &mut current,
+                in_blockquote,
+                blockquote_span_start,
+                range.start,
+                range.end,
+            ),
+            Event::End(TagEnd::Paragraph) => handle_paragraph_end(
+                &mut blocks,
+                &mut current,
+                in_blockquote,
+                blockquote_span_end,
+                range.end,
+            ),
+            Event::Start(Tag::CodeBlock(_)) => start_block_builder(
+                &mut blocks,
+                &mut current,
+                BlockType::Code,
+                0,
+                range.start,
+                range.end,
+            ),
+            Event::End(TagEnd::CodeBlock) => finish_block(&mut blocks, &mut current, range.end),
             Event::Start(Tag::BlockQuote(_)) => {
                 in_blockquote = true;
                 blockquote_span_start = range.start;
@@ -296,43 +315,64 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 in_blockquote = false;
                 blockquote_span_end = range.end;
             }
-
-            // --- Text content ---
-            Event::Text(text) => {
-                if let Some(ref mut builder) = current {
-                    builder.text_parts.push(text.to_string());
-                }
-            }
-            Event::Code(code) => {
-                if let Some(ref mut builder) = current {
-                    // Preserve inline code as backtick-wrapped text
-                    builder.text_parts.push(format!("`{code}`"));
-                }
-            }
-            Event::SoftBreak => {
-                if let Some(ref mut builder) = current {
-                    builder.text_parts.push(" ".to_string());
-                }
-            }
-            Event::HardBreak => {
-                if let Some(ref mut builder) = current {
-                    builder.text_parts.push("\n".to_string());
-                }
-            }
-
+            Event::Text(text) => append_text(&mut current, text.to_string()),
+            Event::Code(code) => append_text(&mut current, format!("`{code}`")),
+            Event::SoftBreak => append_text(&mut current, " ".to_string()),
+            Event::HardBreak => append_text(&mut current, "\n".to_string()),
             _ => {}
         }
     }
 
-    // Emit any trailing block
-    if let Some(builder) = current.take() {
-        emit_block(&mut blocks, builder);
-    }
+    flush_current(&mut blocks, &mut current);
 
     // Compute parent_index and order_index using a depth stack.
     assign_parents_and_order(&mut blocks);
 
     blocks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flush_current_emits_and_clears() {
+        let mut blocks = Vec::new();
+        let mut current = Some(BlockBuilder {
+            block_type: BlockType::Paragraph,
+            text_parts: vec!["hi".to_string()],
+            checkbox: None,
+            list_depth: 0,
+            span_start: 0,
+            span_end: 2,
+        });
+        flush_current(&mut blocks, &mut current);
+        assert!(current.is_none());
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].content, "hi");
+    }
+
+    #[test]
+    fn set_checkbox_maps_checked_flag() {
+        let mut current = Some(BlockBuilder {
+            block_type: BlockType::ListItem,
+            text_parts: Vec::new(),
+            checkbox: None,
+            list_depth: 0,
+            span_start: 0,
+            span_end: 0,
+        });
+        set_checkbox(&mut current, true);
+        assert_eq!(
+            current.as_ref().unwrap().checkbox,
+            Some(CheckboxState::Done)
+        );
+        set_checkbox(&mut current, false);
+        assert_eq!(
+            current.as_ref().unwrap().checkbox,
+            Some(CheckboxState::Todo)
+        );
+    }
 }
 
 /// Convert a `BlockBuilder` into a `Block` and push it onto the result vec.
