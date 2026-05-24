@@ -201,36 +201,11 @@ pub async fn list_folder_contents(
 
     let entries = fs::read_dir(&abs_path).map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let mut folders = Vec::new();
-    let mut md_children: Vec<(String, VaultPath)> = Vec::new();
-
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        let child_rel = format!("{path}/{name}");
-
-        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-            // Skip hidden dirs
-            if name.starts_with('.') {
-                continue;
-            }
-            if let Ok(vp) = VaultPath::new(&child_rel)
-                && state.vault.is_excluded(&vp)
-            {
-                continue;
-            }
-            folders.push(FolderInfo {
-                name: name.clone(),
-                path: child_rel,
-            });
-        } else if name.ends_with(".md")
-            && let Ok(vp) = VaultPath::new(&child_rel)
-        {
-            md_children.push((name, vp));
-        }
-    }
+    let (mut folders, md_children) =
+        classify_dir_entries(&path, entries.flatten(), |vp| state.vault.is_excluded(vp));
 
     // Look up all markdown children in the index in one closure
-    let pages = state
+    let mut pages = state
         .index
         .with_index(move |index, _vault| {
             let mut pages = Vec::new();
@@ -254,12 +229,7 @@ pub async fn list_folder_contents(
                 if let Some(s) = summary {
                     pages.push(s);
                 } else {
-                    pages.push(PageSummary {
-                        id: String::new(),
-                        path: vp.as_str().to_string(),
-                        title: None,
-                        canonical_name: name.trim_end_matches(".md").to_string(),
-                    });
+                    pages.push(build_page_summary_fallback(name, vp));
                 }
             }
             pages
@@ -267,15 +237,169 @@ pub async fn list_folder_contents(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    folders.sort_by(|a, b| a.name.cmp(&b.name));
-    let mut pages = pages;
-    pages.sort_by(|a, b| a.path.cmp(&b.path));
+    sort_folder_listing(&mut folders, &mut pages);
 
     Ok(Json(FolderListing {
         path,
         folders,
         pages,
     }))
+}
+
+/// Classify directory entries into (folders, md_children), skipping hidden
+/// directories and vault-excluded directories. Pure given an exclusion predicate.
+fn classify_dir_entries(
+    parent_path: &str,
+    entries: impl IntoIterator<Item = std::fs::DirEntry>,
+    is_excluded: impl Fn(&VaultPath) -> bool,
+) -> (Vec<FolderInfo>, Vec<(String, VaultPath)>) {
+    let mut folders = Vec::new();
+    let mut md_children: Vec<(String, VaultPath)> = Vec::new();
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let child_rel = format!("{parent_path}/{name}");
+        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            if name.starts_with('.') {
+                continue;
+            }
+            if let Ok(vp) = VaultPath::new(&child_rel)
+                && is_excluded(&vp)
+            {
+                continue;
+            }
+            folders.push(FolderInfo {
+                name: name.clone(),
+                path: child_rel,
+            });
+        } else if name.ends_with(".md")
+            && let Ok(vp) = VaultPath::new(&child_rel)
+        {
+            md_children.push((name, vp));
+        }
+    }
+    (folders, md_children)
+}
+
+/// Synthetic page summary for an md file that has no index row yet.
+fn build_page_summary_fallback(name: &str, vp: &VaultPath) -> PageSummary {
+    PageSummary {
+        id: String::new(),
+        path: vp.as_str().to_string(),
+        title: None,
+        canonical_name: name.trim_end_matches(".md").to_string(),
+    }
+}
+
+/// Sort folders by name and pages by path (in place).
+fn sort_folder_listing(folders: &mut [FolderInfo], pages: &mut [PageSummary]) {
+    folders.sort_by(|a, b| a.name.cmp(&b.name));
+    pages.sort_by(|a, b| a.path.cmp(&b.path));
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_tmp_with_entries() -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".hidden")).unwrap();
+        std::fs::write(tmp.path().join("note.md"), "# Note").unwrap();
+        std::fs::write(tmp.path().join("data.bin"), "binary").unwrap();
+        tmp
+    }
+
+    #[test]
+    fn classify_dir_entries_basic() {
+        let tmp = make_tmp_with_entries();
+        let entries = std::fs::read_dir(tmp.path()).unwrap().flatten();
+        let (folders, md_children) = classify_dir_entries("root", entries, |_| false);
+
+        let folder_names: Vec<&str> = folders.iter().map(|f| f.name.as_str()).collect();
+        assert!(
+            folder_names.contains(&"sub"),
+            "expected 'sub' in folders: {folder_names:?}"
+        );
+        assert!(
+            !folder_names.contains(&".hidden"),
+            "'.hidden' should be skipped: {folder_names:?}"
+        );
+
+        let md_names: Vec<&str> = md_children.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(
+            md_names.contains(&"note.md"),
+            "expected 'note.md' in md_children: {md_names:?}"
+        );
+
+        // data.bin should appear in neither
+        assert!(
+            !md_names.contains(&"data.bin"),
+            "data.bin should not appear in md_children"
+        );
+        assert!(
+            !folder_names.contains(&"data.bin"),
+            "data.bin should not appear in folders"
+        );
+    }
+
+    #[test]
+    fn classify_dir_entries_exclusion() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("skip")).unwrap();
+        let entries = std::fs::read_dir(tmp.path()).unwrap().flatten();
+        let (folders, _) =
+            classify_dir_entries("root", entries, |vp| vp.as_str().ends_with("skip"));
+        assert!(
+            folders.is_empty(),
+            "excluded dir should not appear in folders: {folders:?}"
+        );
+    }
+
+    #[test]
+    fn build_page_summary_fallback_fields() {
+        let vp = VaultPath::new("a/Note.md").unwrap();
+        let summary = build_page_summary_fallback("Note.md", &vp);
+        assert_eq!(summary.canonical_name, "Note");
+        assert_eq!(summary.id, "");
+        assert!(summary.title.is_none());
+        assert_eq!(summary.path, "a/Note.md");
+    }
+
+    #[test]
+    fn sort_folder_listing_sorts_correctly() {
+        let mut folders = vec![
+            FolderInfo {
+                name: "b".to_string(),
+                path: "root/b".to_string(),
+            },
+            FolderInfo {
+                name: "a".to_string(),
+                path: "root/a".to_string(),
+            },
+        ];
+        let mut pages = vec![
+            PageSummary {
+                id: String::new(),
+                path: "x/b".to_string(),
+                title: None,
+                canonical_name: "b".to_string(),
+            },
+            PageSummary {
+                id: String::new(),
+                path: "x/a".to_string(),
+                title: None,
+                canonical_name: "a".to_string(),
+            },
+        ];
+        sort_folder_listing(&mut folders, &mut pages);
+        assert_eq!(folders[0].name, "a");
+        assert_eq!(pages[0].path, "x/a");
+    }
 }
 
 #[utoipa::path(

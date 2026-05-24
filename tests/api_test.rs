@@ -213,6 +213,29 @@ async fn create_and_list_folder() {
 }
 
 #[tokio::test]
+async fn lists_folder_contents_sorted() {
+    let (server, _tmp) = setup_server_with_files(&[
+        ("topic/Beta.md", "# Beta\n"),
+        ("topic/Alpha.md", "# Alpha\n"),
+        ("topic/sub/Child.md", "# Child\n"),
+    ]);
+    let resp = server.get("/api/vault/folders/topic").await;
+    resp.assert_status_ok();
+    let body: serde_json::Value = resp.json();
+    // pages sorted by path: Alpha before Beta
+    let pages = body["pages"].as_array().expect("pages array");
+    let paths: Vec<&str> = pages.iter().filter_map(|p| p["path"].as_str()).collect();
+    assert!(paths.iter().any(|p| p.ends_with("Alpha.md")));
+    assert!(paths.iter().any(|p| p.ends_with("Beta.md")));
+    let alpha = paths.iter().position(|p| p.ends_with("Alpha.md")).unwrap();
+    let beta = paths.iter().position(|p| p.ends_with("Beta.md")).unwrap();
+    assert!(alpha < beta, "Alpha should sort before Beta: {paths:?}");
+    // subfolder present
+    let folders = body["folders"].as_array().expect("folders array");
+    assert!(folders.iter().any(|f| f["name"].as_str() == Some("sub")));
+}
+
+#[tokio::test]
 async fn list_attachments_empty() {
     let (server, _tmp) = setup_server();
 
