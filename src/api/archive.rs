@@ -106,7 +106,7 @@ pub(crate) fn slugify(title: &str, max_len: usize) -> String {
 }
 
 /// Validate per-blob and total request sizes against configured MB limits.
-pub(crate) fn validate_blob_sizes(
+fn validate_blob_sizes(
     blobs: &[BlobUpload],
     max_blob_size_mb: u64,
     max_request_size_mb: u64,
@@ -135,7 +135,7 @@ pub(crate) fn validate_blob_sizes(
 
 /// Decode base64 blobs, dedup by hash, and verify each against its declared hash.
 /// Returns `(hash, bytes, content_type)` per unique blob.
-pub(crate) fn decode_and_verify_blobs(
+fn decode_and_verify_blobs(
     blobs: &[BlobUpload],
 ) -> Result<Vec<(String, Vec<u8>, String)>, ApiError> {
     let mut seen_hashes = std::collections::HashSet::new();
@@ -161,7 +161,7 @@ pub(crate) fn decode_and_verify_blobs(
 
 /// Resolve a non-colliding `{prefix}/{domain}/{slug}.md` page path. Empty slug
 /// falls back to "untitled". `path_exists` lets tests inject collisions.
-pub(crate) fn resolve_page_path(
+fn resolve_page_path(
     prefix: &str,
     domain: &str,
     slug: &str,
@@ -184,7 +184,7 @@ pub(crate) fn resolve_page_path(
 
 /// Build the PageMeta (with nested `archive` YAML mapping) for an ingest request.
 /// `decoded_blobs` supplies the non-snapshot blob hash list stored in frontmatter.
-pub(crate) fn build_archive_meta(
+fn build_archive_meta(
     req: &ArchiveRequest,
     decoded_blobs: &[(String, Vec<u8>, String)],
 ) -> PageMeta {
@@ -225,14 +225,16 @@ pub(crate) fn build_archive_meta(
 }
 
 /// Store decoded blobs in the CAS (locking per-iteration, matching the original),
-/// returning (stored, deduped, stored_hashes).
+/// returning `(stored, deduped, ref_hashes)`. `ref_hashes` lists EVERY touched
+/// blob — both newly stored and deduplicated — because each had its ref-count
+/// incremented and so must be decremented if a later step fails (rollback).
 fn store_decoded_blobs(
     cas: &parking_lot::Mutex<ContentStore>,
     decoded: &[(String, Vec<u8>, String)],
 ) -> Result<(u32, u32, Vec<String>), ApiError> {
     let mut stored: u32 = 0;
     let mut deduped: u32 = 0;
-    let mut stored_hashes: Vec<String> = Vec::new();
+    let mut ref_hashes: Vec<String> = Vec::new();
     for (hash, data, content_type) in decoded {
         let cas = cas.lock();
         let result = cas
@@ -243,9 +245,9 @@ fn store_decoded_blobs(
         } else {
             stored += 1;
         }
-        stored_hashes.push(hash.clone());
+        ref_hashes.push(hash.clone());
     }
-    Ok((stored, deduped, stored_hashes))
+    Ok((stored, deduped, ref_hashes))
 }
 
 /// Atomically create + write a new page file. Removes the file it created ONLY
@@ -671,6 +673,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolve_page_path_too_many_collisions_returns_err() {
+        // Every candidate "exists" -> the counter blows past 1000 and bails out.
+        let result = resolve_page_path("archive", "example.com", "slug", |_| true);
+        let err = result.expect_err("unbounded collisions should error");
+        assert!(
+            format!("{err:?}").contains("too many path collisions"),
+            "unexpected error: {err:?}"
+        );
+    }
+
     // ---------------------------------------------------------------------------
     // build_archive_meta tests
     // ---------------------------------------------------------------------------
@@ -696,6 +709,56 @@ mod tests {
             "meta.extra should have 'archive' key"
         );
         assert_eq!(meta.title, Some("Test Article".to_string()));
+    }
+
+    #[test]
+    fn build_archive_meta_includes_optional_fields_and_filters_snapshot_blob() {
+        let req = ArchiveRequest {
+            url: "https://example.com/test".to_string(),
+            canonical_url: Some("https://example.com/canonical".to_string()),
+            domain: "example.com".to_string(),
+            title: "Test Article".to_string(),
+            description: Some("a description".to_string()),
+            captured_at: "2026-01-01T00:00:00Z".to_string(),
+            content_hash: "sha256:abc".to_string(),
+            snapshot_hash: "sha256:snap".to_string(),
+            markdown_body: "# Test".to_string(),
+            tags: vec![],
+            blobs: vec![],
+        };
+        // One ordinary blob plus the snapshot blob; only the former should appear.
+        let decoded = vec![
+            ("sha256:img".to_string(), vec![1u8], "image/png".to_string()),
+            (
+                "sha256:snap".to_string(),
+                vec![2u8],
+                "text/html".to_string(),
+            ),
+        ];
+        let meta = build_archive_meta(&req, &decoded);
+
+        let archive = match meta.extra.get("archive") {
+            Some(serde_yaml::Value::Mapping(m)) => m,
+            other => panic!("expected archive mapping, got {other:?}"),
+        };
+        let get = |k: &str| archive.get(serde_yaml::Value::String(k.to_string()));
+        assert_eq!(
+            get("canonical_url").and_then(|v| v.as_str()),
+            Some("https://example.com/canonical")
+        );
+        assert_eq!(
+            get("description").and_then(|v| v.as_str()),
+            Some("a description")
+        );
+        let blobs = get("blobs")
+            .and_then(|v| v.as_sequence())
+            .expect("blobs sequence present");
+        let blob_hashes: Vec<&str> = blobs.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(
+            blob_hashes,
+            vec!["sha256:img"],
+            "snapshot_hash must be excluded from the blobs list"
+        );
     }
 
     // ---------------------------------------------------------------------------
