@@ -18,8 +18,8 @@ use super::derivers::canonical_names::CanonicalNameDeriver;
 use super::derivers::cite_key::CiteKeyDeriver;
 use super::derivers::links::LinkDeriver;
 use super::derivers::tags::TagDeriver;
-use super::link::{extract_links, extract_property_refs};
-use super::page::{parse_or_repair_frontmatter, write_page_content};
+use super::link::{Link, extract_links, extract_property_refs};
+use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -298,285 +298,15 @@ impl VaultIndex {
     /// Pages removed from disk are pruned from the database.
     pub fn build(&mut self, vault: &Vault) -> Result<BuildStats, IndexError> {
         let mut stats = BuildStats::default();
-        let mut seen_paths: HashSet<String> = HashSet::new();
-
         let linkable_properties = &vault.config().vault.linkable_properties;
-
-        // -----------------------------------------------------------------
-        // Pass 1: Walk vault, parse files, collect into Vec<IndexedPage>
-        // -----------------------------------------------------------------
-
-        let mut parsed_files: Vec<IndexedPage> = Vec::new();
-
         let tx = self.conn.transaction()?;
-
-        for entry in WalkDir::new(vault.root())
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-        {
-            let abs_path = entry.path();
-            let rel_path = match abs_path.strip_prefix(vault.root()) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
-            let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-
-            // Build VaultPath
-            let vault_path = match VaultPath::new(&rel_str) {
-                Ok(vp) => vp,
-                Err(e) => {
-                    stats.warnings.push(format!("skipping {rel_str}: {e}"));
-                    continue;
-                }
-            };
-
-            // Skip if excluded
-            if vault.is_excluded(&vault_path) {
-                continue;
-            }
-
-            seen_paths.insert(vault_path.as_str().to_string());
-
-            // Read content (and normalize frontmatter if needed).
-            let mut content = match fs::read_to_string(abs_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    stats.warnings.push(format!("cannot read {rel_str}: {e}"));
-                    continue;
-                }
-            };
-
-            let (meta, body, rewrote_frontmatter, fm_warning) =
-                parse_or_repair_frontmatter(&content);
-            if let Some(w) = fm_warning {
-                stats.warnings.push(format!("{rel_str}: {w}"));
-            }
-            if rewrote_frontmatter {
-                content = write_page_content(&meta, &body);
-                if let Err(e) = fs::write(abs_path, &content) {
-                    stats
-                        .warnings
-                        .push(format!("cannot rewrite frontmatter in {rel_str}: {e}"));
-                    continue;
-                }
-            }
-
-            let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
-
-            // Check if hash matches DB -> skip if unchanged
-            let existing_hash: Option<String> = tx
-                .query_row(
-                    "SELECT content_hash FROM pages WHERE path = ?1",
-                    params![vault_path.as_str()],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            if existing_hash.as_deref() == Some(&content_hash) {
-                stats.pages_skipped += 1;
-                continue;
-            }
-
-            // Derive CanonicalName
-            let canonical = if let Some(ref title) = meta.title {
-                CanonicalName::from_title(title)
-            } else {
-                CanonicalName::from_filename(vault_path.filename())
-            };
-
-            // Extract body links
-            let body_links = extract_links(&body);
-
-            // Extract blocks
-            let blocks = crate::vault::block::parse_blocks(&body);
-
-            // Extract property ref links for configured linkable_properties
-            let mut prop_links = Vec::new();
-            for prop in linkable_properties {
-                let values: Vec<String> = match prop.as_str() {
-                    "tags" => meta.tags.clone(),
-                    "aliases" => meta.aliases.clone(),
-                    _ => {
-                        // Look in meta.extra
-                        if let Some(val) = meta.extra.get(prop) {
-                            yaml_value_to_strings(val)
-                        } else {
-                            Vec::new()
-                        }
-                    }
-                };
-                if !values.is_empty() {
-                    prop_links.extend(extract_property_refs(prop, &values));
-                }
-            }
-
-            parsed_files.push(IndexedPage {
-                vault_path,
-                abs_path: abs_path.to_path_buf(),
-                meta,
-                body,
-                content_hash,
-                body_links,
-                prop_links,
-                canonical,
-                blocks,
-            });
-        }
-
-        // -----------------------------------------------------------------
-        // Between passes: Detect and resolve duplicate UUIDs
-        // -----------------------------------------------------------------
-
-        // Group parsed files by UUID
-        let mut uuid_groups: HashMap<Uuid, Vec<usize>> = HashMap::new();
-        for (idx, pf) in parsed_files.iter().enumerate() {
-            uuid_groups.entry(pf.meta.id).or_default().push(idx);
-        }
-
-        for indices in uuid_groups.values() {
-            if indices.len() < 2 {
-                continue;
-            }
-
-            // Sort indices by created_at (older first), falling back to
-            // filesystem mtime for files without created_at.
-            let mut sorted = indices.clone();
-            sorted.sort_by(|&a, &b| {
-                let ts_a = parsed_files[a].meta.created_at.or_else(|| {
-                    fs::metadata(&parsed_files[a].abs_path)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .map(chrono::DateTime::<Utc>::from)
-                });
-                let ts_b = parsed_files[b].meta.created_at.or_else(|| {
-                    fs::metadata(&parsed_files[b].abs_path)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .map(chrono::DateTime::<Utc>::from)
-                });
-                ts_a.cmp(&ts_b)
-            });
-
-            let winner_path = parsed_files[sorted[0]].vault_path.as_str().to_string();
-            let original_uuid = parsed_files[sorted[0]].meta.id;
-
-            // The first entry (oldest) keeps the UUID; all others get new UUIDs.
-            for &loser_idx in &sorted[1..] {
-                let new_uuid = Uuid::now_v7();
-                let loser = &mut parsed_files[loser_idx];
-                let loser_path = loser.vault_path.as_str().to_string();
-
-                stats.warnings.push(format!(
-                    "duplicate UUID {original_uuid}: \"{loser_path}\" reassigned to {new_uuid} \
-                     (kept by \"{winner_path}\")"
-                ));
-
-                // Update the in-memory meta with the new UUID
-                loser.meta.id = new_uuid;
-
-                // Write the updated frontmatter back to disk
-                let new_content = write_page_content(&loser.meta, &loser.body);
-                fs::write(&loser.abs_path, &new_content)?;
-
-                // Recompute content hash after rewrite
-                loser.content_hash = blake3::hash(new_content.as_bytes()).to_hex().to_string();
-            }
-        }
-
-        // -----------------------------------------------------------------
-        // Pass 2: Upsert all parsed files into the database
-        // -----------------------------------------------------------------
-
+        let (mut parsed_files, seen_paths) =
+            collect_indexed_pages(vault, &tx, linkable_properties, &mut stats)?;
+        resolve_duplicate_uuids(&mut parsed_files, &mut stats)?;
         for pf in &parsed_files {
-            let meta_json = serde_json::to_string(&pf.meta).unwrap_or_else(|_| "{}".to_string());
-
-            let page_id = pf.meta.id.to_string();
-            let created_at = pf.meta.created_at.map(|dt| dt.to_rfc3339());
-            let updated_at = pf.meta.updated_at.map(|dt| dt.to_rfc3339());
-
-            let journal_date = extract_journal_date(pf.vault_path.as_str());
-
-            // Upsert into pages table
-            tx.execute(
-                "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                 ON CONFLICT(id) DO UPDATE SET
-                   path = excluded.path,
-                   title = excluded.title,
-                   canonical_name = excluded.canonical_name,
-                   created_at = excluded.created_at,
-                   updated_at = excluded.updated_at,
-                   meta_json = excluded.meta_json,
-                   content_hash = excluded.content_hash,
-                   journal_date = excluded.journal_date",
-                params![
-                    page_id,
-                    pf.vault_path.as_str(),
-                    pf.meta.title,
-                    pf.canonical.as_str(),
-                    created_at,
-                    updated_at,
-                    meta_json,
-                    pf.content_hash,
-                    journal_date,
-                ],
-            )?;
-
-            // Update FTS index
-            tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![page_id])?;
-            tx.execute(
-                "INSERT INTO pages_fts (page_id, path, title, body) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    page_id,
-                    pf.vault_path.as_str(),
-                    pf.meta.title.as_deref().unwrap_or(""),
-                    &pf.body,
-                ],
-            )?;
-
-            // Clear old derived data for this page
-            // block_properties must be deleted before blocks due to FK constraint
-            tx.execute(
-                "DELETE FROM block_properties WHERE page_id = ?1",
-                params![page_id],
-            )?;
-            tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
-            tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
-            tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
-            tx.execute(
-                "DELETE FROM canonical_names WHERE page_id = ?1",
-                params![page_id],
-            )?;
-
-            // Dispatch to derivers
-            for deriver in &self.derivers {
-                deriver.derive(pf, &page_id, &tx)?;
-            }
-
-            stats.pages_indexed += 1;
+            upsert_indexed_page(pf, &tx, &self.derivers, &mut stats)?;
         }
-
-        // Remove pages from DB that are no longer on disk
-        let mut stmt = tx.prepare("SELECT id, path FROM pages")?;
-        let stale: Vec<String> = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .filter(|(_, path)| !seen_paths.contains(path))
-            .map(|(id, _)| id)
-            .collect();
-        drop(stmt);
-
-        for id in &stale {
-            tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![id])?;
-            tx.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
-            stats.pages_removed += 1;
-        }
-
+        prune_stale_pages(&tx, &seen_paths, &mut stats)?;
         tx.commit()?;
         Ok(stats)
     }
@@ -743,23 +473,7 @@ impl VaultIndex {
         let body_links = extract_links(&body);
         let blocks = crate::vault::block::parse_blocks(&body);
 
-        let mut prop_links = Vec::new();
-        for prop in linkable_properties {
-            let values: Vec<String> = match prop.as_str() {
-                "tags" => meta.tags.clone(),
-                "aliases" => meta.aliases.clone(),
-                _ => {
-                    if let Some(val) = meta.extra.get(prop) {
-                        yaml_value_to_strings(val)
-                    } else {
-                        Vec::new()
-                    }
-                }
-            };
-            if !values.is_empty() {
-                prop_links.extend(extract_property_refs(prop, &values));
-            }
-        }
+        let prop_links = extract_prop_links(&meta, linkable_properties);
 
         let page = IndexedPage {
             vault_path: vault_path.clone(),
@@ -1703,6 +1417,315 @@ fn extract_journal_date(path: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Phase helpers (free functions used by VaultIndex::build)
+// ---------------------------------------------------------------------------
+
+/// Extract property-reference links from a page's metadata for the configured
+/// linkable properties (tags, aliases, and arbitrary extra fields). Shared by
+/// `build` (via collect_indexed_pages) and `index_page`.
+fn extract_prop_links(meta: &PageMeta, linkable_properties: &[String]) -> Vec<Link> {
+    let mut prop_links = Vec::new();
+    for prop in linkable_properties {
+        let values: Vec<String> = match prop.as_str() {
+            "tags" => meta.tags.clone(),
+            "aliases" => meta.aliases.clone(),
+            _ => {
+                if let Some(val) = meta.extra.get(prop) {
+                    yaml_value_to_strings(val)
+                } else {
+                    Vec::new()
+                }
+            }
+        };
+        if !values.is_empty() {
+            prop_links.extend(extract_property_refs(prop, &values));
+        }
+    }
+    prop_links
+}
+
+/// Pass 1: walk the vault, parse/repair frontmatter, skip-unchanged, and build
+/// IndexedPage records. Returns the parsed pages plus the set of seen paths
+/// (for stale pruning).
+fn collect_indexed_pages(
+    vault: &Vault,
+    tx: &rusqlite::Transaction,
+    linkable_properties: &[String],
+    stats: &mut BuildStats,
+) -> Result<(Vec<IndexedPage>, HashSet<String>), IndexError> {
+    let mut parsed_files: Vec<IndexedPage> = Vec::new();
+    let mut seen_paths: HashSet<String> = HashSet::new();
+
+    for entry in WalkDir::new(vault.root())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+    {
+        let abs_path = entry.path();
+        let rel_path = match abs_path.strip_prefix(vault.root()) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+
+        // Build VaultPath
+        let vault_path = match VaultPath::new(&rel_str) {
+            Ok(vp) => vp,
+            Err(e) => {
+                stats.warnings.push(format!("skipping {rel_str}: {e}"));
+                continue;
+            }
+        };
+
+        // Skip if excluded
+        if vault.is_excluded(&vault_path) {
+            continue;
+        }
+
+        seen_paths.insert(vault_path.as_str().to_string());
+
+        // Read content (and normalize frontmatter if needed).
+        let mut content = match fs::read_to_string(abs_path) {
+            Ok(c) => c,
+            Err(e) => {
+                stats.warnings.push(format!("cannot read {rel_str}: {e}"));
+                continue;
+            }
+        };
+
+        let (meta, body, rewrote_frontmatter, fm_warning) = parse_or_repair_frontmatter(&content);
+        if let Some(w) = fm_warning {
+            stats.warnings.push(format!("{rel_str}: {w}"));
+        }
+        if rewrote_frontmatter {
+            content = write_page_content(&meta, &body);
+            if let Err(e) = fs::write(abs_path, &content) {
+                stats
+                    .warnings
+                    .push(format!("cannot rewrite frontmatter in {rel_str}: {e}"));
+                continue;
+            }
+        }
+
+        let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+
+        // Check if hash matches DB -> skip if unchanged
+        let existing_hash: Option<String> = tx
+            .query_row(
+                "SELECT content_hash FROM pages WHERE path = ?1",
+                params![vault_path.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if existing_hash.as_deref() == Some(&content_hash) {
+            stats.pages_skipped += 1;
+            continue;
+        }
+
+        // Derive CanonicalName
+        let canonical = if let Some(ref title) = meta.title {
+            CanonicalName::from_title(title)
+        } else {
+            CanonicalName::from_filename(vault_path.filename())
+        };
+
+        // Extract body links
+        let body_links = extract_links(&body);
+
+        // Extract blocks
+        let blocks = crate::vault::block::parse_blocks(&body);
+
+        // Extract property ref links for configured linkable_properties
+        let prop_links = extract_prop_links(&meta, linkable_properties);
+
+        parsed_files.push(IndexedPage {
+            vault_path,
+            abs_path: abs_path.to_path_buf(),
+            meta,
+            body,
+            content_hash,
+            body_links,
+            prop_links,
+            canonical,
+            blocks,
+        });
+    }
+
+    Ok((parsed_files, seen_paths))
+}
+
+/// Between passes: when pages share a UUID, keep the oldest (by created_at, then
+/// mtime) and reassign + rewrite the rest.
+fn resolve_duplicate_uuids(
+    parsed_files: &mut Vec<IndexedPage>,
+    stats: &mut BuildStats,
+) -> Result<(), IndexError> {
+    // Group parsed files by UUID
+    let mut uuid_groups: HashMap<Uuid, Vec<usize>> = HashMap::new();
+    for (idx, pf) in parsed_files.iter().enumerate() {
+        uuid_groups.entry(pf.meta.id).or_default().push(idx);
+    }
+
+    for indices in uuid_groups.values() {
+        if indices.len() < 2 {
+            continue;
+        }
+
+        // Sort indices by created_at (older first), falling back to
+        // filesystem mtime for files without created_at.
+        let mut sorted = indices.clone();
+        sorted.sort_by(|&a, &b| {
+            let ts_a = parsed_files[a].meta.created_at.or_else(|| {
+                fs::metadata(&parsed_files[a].abs_path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(chrono::DateTime::<Utc>::from)
+            });
+            let ts_b = parsed_files[b].meta.created_at.or_else(|| {
+                fs::metadata(&parsed_files[b].abs_path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(chrono::DateTime::<Utc>::from)
+            });
+            ts_a.cmp(&ts_b)
+        });
+
+        let winner_path = parsed_files[sorted[0]].vault_path.as_str().to_string();
+        let original_uuid = parsed_files[sorted[0]].meta.id;
+
+        // The first entry (oldest) keeps the UUID; all others get new UUIDs.
+        for &loser_idx in &sorted[1..] {
+            let new_uuid = Uuid::now_v7();
+            let loser = &mut parsed_files[loser_idx];
+            let loser_path = loser.vault_path.as_str().to_string();
+
+            stats.warnings.push(format!(
+                "duplicate UUID {original_uuid}: \"{loser_path}\" reassigned to {new_uuid} \
+                 (kept by \"{winner_path}\")"
+            ));
+
+            // Update the in-memory meta with the new UUID
+            loser.meta.id = new_uuid;
+
+            // Write the updated frontmatter back to disk
+            let new_content = write_page_content(&loser.meta, &loser.body);
+            fs::write(&loser.abs_path, &new_content)?;
+
+            // Recompute content hash after rewrite
+            loser.content_hash = blake3::hash(new_content.as_bytes()).to_hex().to_string();
+        }
+    }
+
+    Ok(())
+}
+
+/// Pass 2 (per page): upsert the page row, refresh FTS, clear derived rows, run
+/// derivers. Increments stats.pages_indexed.
+fn upsert_indexed_page(
+    pf: &IndexedPage,
+    tx: &rusqlite::Transaction,
+    derivers: &[Box<dyn Deriver>],
+    stats: &mut BuildStats,
+) -> Result<(), IndexError> {
+    let meta_json = serde_json::to_string(&pf.meta).unwrap_or_else(|_| "{}".to_string());
+
+    let page_id = pf.meta.id.to_string();
+    let created_at = pf.meta.created_at.map(|dt| dt.to_rfc3339());
+    let updated_at = pf.meta.updated_at.map(|dt| dt.to_rfc3339());
+
+    let journal_date = extract_journal_date(pf.vault_path.as_str());
+
+    // Upsert into pages table
+    tx.execute(
+        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(id) DO UPDATE SET
+           path = excluded.path,
+           title = excluded.title,
+           canonical_name = excluded.canonical_name,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at,
+           meta_json = excluded.meta_json,
+           content_hash = excluded.content_hash,
+           journal_date = excluded.journal_date",
+        params![
+            page_id,
+            pf.vault_path.as_str(),
+            pf.meta.title,
+            pf.canonical.as_str(),
+            created_at,
+            updated_at,
+            meta_json,
+            pf.content_hash,
+            journal_date,
+        ],
+    )?;
+
+    // Update FTS index
+    tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![page_id])?;
+    tx.execute(
+        "INSERT INTO pages_fts (page_id, path, title, body) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            page_id,
+            pf.vault_path.as_str(),
+            pf.meta.title.as_deref().unwrap_or(""),
+            &pf.body,
+        ],
+    )?;
+
+    // Clear old derived data for this page
+    // block_properties must be deleted before blocks due to FK constraint
+    tx.execute(
+        "DELETE FROM block_properties WHERE page_id = ?1",
+        params![page_id],
+    )?;
+    tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
+    tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
+    tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
+    tx.execute(
+        "DELETE FROM canonical_names WHERE page_id = ?1",
+        params![page_id],
+    )?;
+
+    // Dispatch to derivers
+    for deriver in derivers {
+        deriver.derive(pf, &page_id, tx)?;
+    }
+
+    stats.pages_indexed += 1;
+    Ok(())
+}
+
+/// Remove pages from the DB that are no longer present on disk.
+fn prune_stale_pages(
+    tx: &rusqlite::Transaction,
+    seen_paths: &HashSet<String>,
+    stats: &mut BuildStats,
+) -> Result<(), IndexError> {
+    let mut stmt = tx.prepare("SELECT id, path FROM pages")?;
+    let stale: Vec<String> = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .filter_map(|r| r.ok())
+        .filter(|(_, path)| !seen_paths.contains(path))
+        .map(|(id, _)| id)
+        .collect();
+    drop(stmt);
+
+    for id in &stale {
+        tx.execute("DELETE FROM pages_fts WHERE page_id = ?1", params![id])?;
+        tx.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
+        stats.pages_removed += 1;
+    }
+
+    Ok(())
+}
+
 /// Extract string values from a serde_yaml::Value (handles both scalar strings
 /// and sequences of strings).
 fn yaml_value_to_strings(val: &serde_yaml::Value) -> Vec<String> {
@@ -1713,5 +1736,26 @@ fn yaml_value_to_strings(val: &serde_yaml::Value) -> Vec<String> {
             .filter_map(|v| v.as_str().map(String::from))
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod prop_link_tests {
+    use super::*;
+    use crate::vault::page::PageMeta;
+
+    #[test]
+    fn extracts_tag_and_alias_refs() {
+        let mut meta = PageMeta::new();
+        meta.tags = vec!["rust".into()];
+        meta.aliases = vec!["Alias One".into()];
+        let links = extract_prop_links(&meta, &["tags".to_string(), "aliases".to_string()]);
+        assert!(!links.is_empty());
+    }
+
+    #[test]
+    fn no_linkable_props_yields_nothing() {
+        let meta = PageMeta::new();
+        assert!(extract_prop_links(&meta, &[]).is_empty());
     }
 }
