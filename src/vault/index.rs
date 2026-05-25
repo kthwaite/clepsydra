@@ -1424,6 +1424,10 @@ fn extract_journal_date(path: &str) -> Option<String> {
 /// Extract property-reference links from a page's metadata for the configured
 /// linkable properties (tags, aliases, and arbitrary extra fields). Shared by
 /// `build` (via collect_indexed_pages) and `index_page`.
+///
+/// `linkable_properties` is expected to be free of duplicates: property refs are
+/// keyed by a negative `span_start` (`-(i+1)`), so emitting the same property
+/// twice would collide on the `links` primary key at upsert time.
 fn extract_prop_links(meta: &PageMeta, linkable_properties: &[String]) -> Vec<Link> {
     let mut prop_links = Vec::new();
     for prop in linkable_properties {
@@ -1750,7 +1754,9 @@ mod prop_link_tests {
         meta.tags = vec!["rust".into()];
         meta.aliases = vec!["Alias One".into()];
         let links = extract_prop_links(&meta, &["tags".to_string(), "aliases".to_string()]);
-        assert!(!links.is_empty());
+        // Exactly one ref per value (one tag + one alias) — a dropped branch
+        // would change this count.
+        assert_eq!(links.len(), 2, "expected one ref each for tag and alias");
     }
 
     #[test]
