@@ -589,9 +589,8 @@ impl VaultIndex {
     /// Returns the number of links resolved.
     pub fn resolve_links_for_page(&mut self, vault_path: &VaultPath) -> Result<usize, IndexError> {
         let tx = self.conn.transaction()?;
-        let mut resolved_count = 0;
+        let mut resolved_count = 0usize;
 
-        // Look up page_id
         let page_id: Option<String> = tx
             .query_row(
                 "SELECT id FROM pages WHERE path = ?1",
@@ -599,7 +598,6 @@ impl VaultIndex {
                 |row| row.get(0),
             )
             .ok();
-
         let page_id = match page_id {
             Some(id) => id,
             None => {
@@ -608,161 +606,17 @@ impl VaultIndex {
             }
         };
 
-        // 1. Resolve outgoing links from this page
-        let mut stmt = tx.prepare(
-            "SELECT source_id, span_start, target_canonical
-             FROM links
-             WHERE source_id = ?1 AND target_id IS NULL AND target_canonical IS NOT NULL",
-        )?;
+        resolve_outgoing_wikilinks(&tx, &page_id, &mut resolved_count)?;
+        resolve_outgoing_block_refs(&tx, &page_id, &mut resolved_count)?;
+        resolve_incoming_wikilinks(&tx, &page_id, &mut resolved_count)?;
 
-        let outgoing: Vec<(String, i64, String)> = stmt
-            .query_map(params![page_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-
-        for (source_id, span_start, target_canonical) in &outgoing {
-            let mut lookup = tx.prepare(
-                "SELECT cn.page_id, p.path
-                 FROM canonical_names cn
-                 JOIN pages p ON p.id = cn.page_id
-                 WHERE cn.canonical_name = ?1",
-            )?;
-            let matches: Vec<(String, String)> = lookup
-                .query_map(params![target_canonical], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(lookup);
-
-            if matches.len() == 1 {
-                let (target_id, target_path) = &matches[0];
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![target_id, target_path, source_id, span_start],
-                )?;
-                resolved_count += 1;
-            }
-        }
-
-        // 2. Resolve outgoing block_ref links from this page
-        let mut block_ref_stmt = tx.prepare(
-            "SELECT source_id, span_start, target_block_id
-             FROM links
-             WHERE source_id = ?1 AND target_id IS NULL AND kind = 'block_ref' AND target_block_id IS NOT NULL",
-        )?;
-        let outgoing_block_refs: Vec<(String, i64, String)> = block_ref_stmt
-            .query_map(params![page_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(block_ref_stmt);
-
-        for (source_id, span_start, block_id) in &outgoing_block_refs {
-            let mut lookup = tx.prepare(
-                "SELECT b.page_id, p.path
-                 FROM blocks b JOIN pages p ON p.id = b.page_id
-                 WHERE b.block_id = ?1",
-            )?;
-            let matches: Vec<(String, String)> = lookup
-                .query_map(params![block_id], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(lookup);
-
-            if matches.len() == 1 {
-                let (target_id, target_path) = &matches[0];
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![target_id, target_path, source_id, span_start],
-                )?;
-                resolved_count += 1;
-            }
-        }
-
-        // 3. Resolve incoming links targeting this page's canonical names
-        let mut cn_stmt =
-            tx.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
-        let canonical_names: Vec<String> = cn_stmt
-            .query_map(params![page_id], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(cn_stmt);
-
-        for cn in &canonical_names {
-            let mut stmt = tx.prepare(
-                "SELECT source_id, span_start FROM links
-                 WHERE target_canonical = ?1 AND target_id IS NULL",
-            )?;
-            let unresolved: Vec<(String, i64)> = stmt
-                .query_map(params![cn], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(stmt);
-
-            for (source_id, span_start) in &unresolved {
-                let mut count_stmt =
-                    tx.prepare("SELECT COUNT(*) FROM canonical_names WHERE canonical_name = ?1")?;
-                let match_count: i64 = count_stmt.query_row(params![cn], |row| row.get(0))?;
-                drop(count_stmt);
-
-                if match_count == 1 {
-                    let path: String = tx.query_row(
-                        "SELECT path FROM pages WHERE id = ?1",
-                        params![page_id],
-                        |row| row.get(0),
-                    )?;
-                    tx.execute(
-                        "UPDATE links SET target_id = ?1, target_path = ?2
-                         WHERE source_id = ?3 AND span_start = ?4",
-                        params![page_id, path, source_id, span_start],
-                    )?;
-                    resolved_count += 1;
-                }
-            }
-        }
-
-        // 4. Resolve incoming block_ref links targeting block IDs on this page
-        let mut block_id_stmt =
-            tx.prepare("SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL")?;
-        let page_block_ids: Vec<String> = block_id_stmt
-            .query_map(params![page_id], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(block_id_stmt);
-
+        // Prefetched for Pass 4 (was inline at the original lines 740–744).
         let page_path: String = tx.query_row(
             "SELECT path FROM pages WHERE id = ?1",
             params![page_id],
             |row| row.get(0),
         )?;
-
-        for bid in &page_block_ids {
-            let mut stmt = tx.prepare(
-                "SELECT source_id, span_start FROM links
-                 WHERE target_block_id = ?1 AND target_id IS NULL AND kind = 'block_ref'",
-            )?;
-            let unresolved: Vec<(String, i64)> = stmt
-                .query_map(params![bid], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(stmt);
-
-            for (source_id, span_start) in &unresolved {
-                tx.execute(
-                    "UPDATE links SET target_id = ?1, target_path = ?2
-                     WHERE source_id = ?3 AND span_start = ?4",
-                    params![page_id, page_path, source_id, span_start],
-                )?;
-                resolved_count += 1;
-            }
-        }
+        resolve_incoming_block_refs(&tx, &page_id, &page_path, &mut resolved_count)?;
 
         tx.commit()?;
         Ok(resolved_count)
@@ -1289,6 +1143,191 @@ impl VaultIndex {
             Ok(None)
         }
     }
+}
+
+/// Pass 1: resolve this page's outgoing wikilinks against canonical_names.
+fn resolve_outgoing_wikilinks(
+    tx: &rusqlite::Transaction,
+    page_id: &str,
+    count: &mut usize,
+) -> Result<(), IndexError> {
+    let mut stmt = tx.prepare(
+        "SELECT source_id, span_start, target_canonical
+         FROM links
+         WHERE source_id = ?1 AND target_id IS NULL AND target_canonical IS NOT NULL",
+    )?;
+
+    let outgoing: Vec<(String, i64, String)> = stmt
+        .query_map(params![page_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    for (source_id, span_start, target_canonical) in &outgoing {
+        let mut lookup = tx.prepare(
+            "SELECT cn.page_id, p.path
+             FROM canonical_names cn
+             JOIN pages p ON p.id = cn.page_id
+             WHERE cn.canonical_name = ?1",
+        )?;
+        let matches: Vec<(String, String)> = lookup
+            .query_map(params![target_canonical], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(lookup);
+
+        if matches.len() == 1 {
+            let (target_id, target_path) = &matches[0];
+            tx.execute(
+                "UPDATE links SET target_id = ?1, target_path = ?2
+                 WHERE source_id = ?3 AND span_start = ?4",
+                params![target_id, target_path, source_id, span_start],
+            )?;
+            *count += 1;
+        }
+    }
+
+    Ok(())
+}
+
+/// Pass 2: resolve this page's outgoing block-ref links against block IDs.
+fn resolve_outgoing_block_refs(
+    tx: &rusqlite::Transaction,
+    page_id: &str,
+    count: &mut usize,
+) -> Result<(), IndexError> {
+    let mut block_ref_stmt = tx.prepare(
+        "SELECT source_id, span_start, target_block_id
+         FROM links
+         WHERE source_id = ?1 AND target_id IS NULL AND kind = 'block_ref' AND target_block_id IS NOT NULL",
+    )?;
+    let outgoing_block_refs: Vec<(String, i64, String)> = block_ref_stmt
+        .query_map(params![page_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(block_ref_stmt);
+
+    for (source_id, span_start, block_id) in &outgoing_block_refs {
+        let mut lookup = tx.prepare(
+            "SELECT b.page_id, p.path
+             FROM blocks b JOIN pages p ON p.id = b.page_id
+             WHERE b.block_id = ?1",
+        )?;
+        let matches: Vec<(String, String)> = lookup
+            .query_map(params![block_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(lookup);
+
+        if matches.len() == 1 {
+            let (target_id, target_path) = &matches[0];
+            tx.execute(
+                "UPDATE links SET target_id = ?1, target_path = ?2
+                 WHERE source_id = ?3 AND span_start = ?4",
+                params![target_id, target_path, source_id, span_start],
+            )?;
+            *count += 1;
+        }
+    }
+
+    Ok(())
+}
+
+/// Pass 3: resolve other pages' incoming wikilinks that target this page's
+/// canonical names (only when the canonical name is unambiguous).
+fn resolve_incoming_wikilinks(
+    tx: &rusqlite::Transaction,
+    page_id: &str,
+    count: &mut usize,
+) -> Result<(), IndexError> {
+    let mut cn_stmt =
+        tx.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
+    let canonical_names: Vec<String> = cn_stmt
+        .query_map(params![page_id], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(cn_stmt);
+
+    for cn in &canonical_names {
+        let mut stmt = tx.prepare(
+            "SELECT source_id, span_start FROM links
+             WHERE target_canonical = ?1 AND target_id IS NULL",
+        )?;
+        let unresolved: Vec<(String, i64)> = stmt
+            .query_map(params![cn], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for (source_id, span_start) in &unresolved {
+            let mut count_stmt =
+                tx.prepare("SELECT COUNT(*) FROM canonical_names WHERE canonical_name = ?1")?;
+            let match_count: i64 = count_stmt.query_row(params![cn], |row| row.get(0))?;
+            drop(count_stmt);
+
+            if match_count == 1 {
+                let path: String = tx.query_row(
+                    "SELECT path FROM pages WHERE id = ?1",
+                    params![page_id],
+                    |row| row.get(0),
+                )?;
+                tx.execute(
+                    "UPDATE links SET target_id = ?1, target_path = ?2
+                     WHERE source_id = ?3 AND span_start = ?4",
+                    params![page_id, path, source_id, span_start],
+                )?;
+                *count += 1;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Pass 4: resolve other pages' incoming block-ref links that target block IDs
+/// on this page. `page_path` is prefetched by the caller.
+fn resolve_incoming_block_refs(
+    tx: &rusqlite::Transaction,
+    page_id: &str,
+    page_path: &str,
+    count: &mut usize,
+) -> Result<(), IndexError> {
+    let mut block_id_stmt =
+        tx.prepare("SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL")?;
+    let page_block_ids: Vec<String> = block_id_stmt
+        .query_map(params![page_id], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(block_id_stmt);
+
+    for bid in &page_block_ids {
+        let mut stmt = tx.prepare(
+            "SELECT source_id, span_start FROM links
+             WHERE target_block_id = ?1 AND target_id IS NULL AND kind = 'block_ref'",
+        )?;
+        let unresolved: Vec<(String, i64)> = stmt
+            .query_map(params![bid], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+
+        for (source_id, span_start) in &unresolved {
+            tx.execute(
+                "UPDATE links SET target_id = ?1, target_path = ?2
+                 WHERE source_id = ?3 AND span_start = ?4",
+                params![page_id, page_path, source_id, span_start],
+            )?;
+            *count += 1;
+        }
+    }
+
+    Ok(())
 }
 
 /// Count the number of common path segments between two directory paths.
