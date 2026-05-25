@@ -373,6 +373,48 @@ mod tests {
             Some(CheckboxState::Todo)
         );
     }
+
+    #[test]
+    fn paragraph_start_in_blockquote_replaces_without_flushing() {
+        // Pins the non-obvious invariant: a blockquote-wrapped paragraph start
+        // overwrites the in-progress builder WITHOUT emitting it.
+        let mut blocks: Vec<Block> = Vec::new();
+        let mut current = Some(BlockBuilder {
+            block_type: BlockType::Paragraph,
+            text_parts: vec!["stale".to_string()],
+            checkbox: None,
+            list_depth: 0,
+            span_start: 0,
+            span_end: 5,
+        });
+        handle_paragraph_start(&mut blocks, &mut current, true, 10, 20, 30);
+        // The previous builder was dropped, not emitted.
+        assert!(blocks.is_empty(), "blockquote start must not flush");
+        let b = current.as_ref().expect("a builder should be present");
+        assert_eq!(b.block_type, BlockType::Blockquote);
+        assert_eq!(b.span_start, 10, "span_start comes from blockquote start");
+    }
+
+    #[test]
+    fn paragraph_end_in_blockquote_uses_blockquote_span_end() {
+        // The blockquote branch must emit span_end == blockquote_span_end, not range_end.
+        let mut blocks: Vec<Block> = Vec::new();
+        let mut current = Some(BlockBuilder {
+            block_type: BlockType::Blockquote,
+            text_parts: vec!["quote".to_string()],
+            checkbox: None,
+            list_depth: 0,
+            span_start: 10,
+            span_end: 0,
+        });
+        handle_paragraph_end(&mut blocks, &mut current, true, 42, 99);
+        assert!(current.is_none());
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            blocks[0].span.end, 42,
+            "blockquote end span should win over range_end"
+        );
+    }
 }
 
 /// Convert a `BlockBuilder` into a `Block` and push it onto the result vec.
