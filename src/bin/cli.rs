@@ -158,19 +158,36 @@ mod cli_tests {
         (dir, root)
     }
 
-    /// Run `run_cli` with the process CWD temporarily set to `root`, restoring
-    /// the original CWD before returning. All fallible setup happens before the
-    /// CWD is changed, so the only code running under the mutated CWD is
-    /// `run_cli` itself (Result-returning) — keeping the window panic-free.
+    /// RAII guard that restores the process CWD on drop, including on panic
+    /// unwind. The Drop is what makes serial tests robust against an async
+    /// panic during `run_cli(..).await`.
+    struct CwdGuard(Option<std::path::PathBuf>);
+
+    impl CwdGuard {
+        fn enter(new: &std::path::Path) -> Self {
+            let orig = std::env::current_dir().ok();
+            std::env::set_current_dir(new).expect("set_current_dir to test vault");
+            Self(orig)
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            if let Some(orig) = self.0.take() {
+                let _ = std::env::set_current_dir(orig);
+            }
+        }
+    }
+
+    /// Run `run_cli` with the process CWD temporarily set to `root`. The CWD is
+    /// restored via a Drop guard, so a panic during `run_cli(..).await` cannot
+    /// leak a mutated CWD into the next serial test.
     async fn run_cli_in(
         root: &std::path::Path,
         cli: Cli,
     ) -> Result<i32, Box<dyn std::error::Error>> {
-        let orig = std::env::current_dir().unwrap();
-        std::env::set_current_dir(root).unwrap();
-        let result = run_cli(cli).await;
-        std::env::set_current_dir(orig).unwrap();
-        result
+        let _guard = CwdGuard::enter(root);
+        run_cli(cli).await
     }
 
     #[tokio::test]

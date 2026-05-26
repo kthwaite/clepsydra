@@ -7,14 +7,24 @@ use crate::vault::path::VaultPath;
 
 /// Resolve a vault path to a `file://` URL against the vault root.
 /// Returns `None` if the absolute path is not representable as a URL.
-pub fn vault_path_to_uri(vault_root: &Path, vp: &VaultPath) -> Option<Url> {
+pub(crate) fn vault_path_to_uri(vault_root: &Path, vp: &VaultPath) -> Option<Url> {
     Url::from_file_path(vault_root.join(vp.as_str())).ok()
 }
 
 /// Build a `Location` for a vault path + range, resolving the path against the
 /// vault root. Returns `None` if the absolute path is not representable as a
 /// `file://` URL.
-pub fn vault_path_to_location(vault_root: &Path, vp: &VaultPath, range: Range) -> Option<Location> {
+///
+/// Paired with `vault_path_to_uri` for LSP handlers that already have a
+/// precomputed `Range`. The current backlinks path computes the range *after*
+/// it has the URI (async), so it calls `vault_path_to_uri` directly; this
+/// wrapper is kept for future handlers that have a synchronous range in hand.
+#[allow(dead_code)]
+pub(crate) fn vault_path_to_location(
+    vault_root: &Path,
+    vp: &VaultPath,
+    range: Range,
+) -> Option<Location> {
     Some(Location {
         uri: vault_path_to_uri(vault_root, vp)?,
         range,
