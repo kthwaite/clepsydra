@@ -172,7 +172,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 
       {/* ── WORKSPACE ───────────────────────────────────────────────── */}
       <main className="cl-noscroll relative flex-1 overflow-auto">
-        <div key={location.pathname} className="view-anim min-h-full">
+        <div key={location.pathname} className="view-anim h-full">
           {children}
         </div>
       </main>
