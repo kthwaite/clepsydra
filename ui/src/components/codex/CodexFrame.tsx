@@ -4,19 +4,22 @@ import { useStats } from "#/api/index";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
+import { Sheaf } from "#/components/codex/Sheaf";
+import { Ticker } from "#/components/codex/Ticker";
 import { useTheme } from "#/components/ThemeProvider";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
-type View = "atrium" | "diurnal" | "folio" | "constellation" | "gazetteer";
+type View = "atrium" | "folio" | "gazetteer" | "constellation" | "diurnal";
 
-const TABS: ReadonlyArray<readonly [View, string, string]> = [
-  ["atrium", "Atrium", "/"],
-  ["diurnal", "Diurnal", "/journal"],
-  ["folio", "Folio", "/workspace"],
-  ["constellation", "Constellation", "/workspace"],
-  ["gazetteer", "Gazetteer", "/gazetteer"],
+/** Nav order + diegetic index numbers, per the redesign plan. */
+const NAV: ReadonlyArray<readonly [View, string]> = [
+  ["atrium", "ATRIUM"],
+  ["folio", "FOLIO"],
+  ["gazetteer", "GAZETTEER"],
+  ["constellation", "CONSTELLATION"],
+  ["diurnal", "DIURNAL"],
 ];
 
 type CodexFrameProps = {
@@ -30,7 +33,9 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const openSearch = useUiStore((s) => s.openSearch);
-  const { resolvedTheme, toggle } = useTheme();
+  const openSettings = useUiStore((s) => s.openSettings);
+  const settingsOpen = useUiStore((s) => s.isSettingsOpen);
+  const { toggle, resolvedTheme, diegetic } = useTheme();
   const dark = resolvedTheme === "dark";
   const { tabs: workspaceTabs, activeTabId, openTab } = useWorkspaceStore();
   const { data: stats, isError: statsError } = useStats();
@@ -49,7 +54,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     return "atrium";
   }, [forceView, location.pathname, workspaceTabs, activeTabId]);
 
-  const onTabClick = (target: View) => {
+  const onNav = (target: View) => {
     if (target === "atrium") navigate({ to: "/" });
     else if (target === "diurnal") navigate({ to: "/journal" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
@@ -58,88 +63,121 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       navigate({ to: "/workspace" });
     } else if (target === "folio") {
       const firstPage = workspaceTabs.find((t) => t.type === "page");
-      if (firstPage) {
-        useWorkspaceStore.getState().activateTab(firstPage.id);
-      }
+      if (firstPage) useWorkspaceStore.getState().activateTab(firstPage.id);
       navigate({ to: "/workspace" });
     }
   };
 
   const folioCode = useFolioCode(view);
-  const plateCode = PLATE_CODES[view];
-  const pathLabel = useMemo(
-    () => buildPathLabel(view, location.pathname, workspaceTabs, activeTabId),
-    [view, location.pathname, workspaceTabs, activeTabId],
-  );
-  const clock = useClock();
+  const clock = useUtcClock();
 
-  const totalEntries = stats?.pages ?? 0;
-  const totalLinks = stats?.links_total ?? 0;
+  const pages = stats?.pages ?? 0;
+  const links = stats?.links_total ?? 0;
+  const sync = syncStatus === "connected";
+  const syncColor = sync
+    ? "var(--cool)"
+    : syncStatus === "connecting"
+      ? "var(--warn)"
+      : "var(--hot)";
 
   return (
     <div className="cl-root cl-paper flex h-screen w-screen flex-col overflow-hidden">
-      {/* TOP STATUS BAR */}
-      <div className="cl-mono flex flex-shrink-0 border-b-2 border-rule text-[11px]">
-        <div className="border-r-2 border-rule bg-bar-bg px-3 py-1 font-serif-sc font-bold uppercase tracking-[0.18em] text-bar-fg">
-          ❦ CLEPSYDRA
-        </div>
-        <div className="border-r border-rule-soft px-3 py-1 text-ink-mute">
-          fol. {folioCode}
-        </div>
-        <div className="border-r border-rule-soft px-3 py-1">
-          ~/codex/<span className="text-accent-deep">{pathLabel}</span>
-        </div>
-        <div className="hidden border-r border-rule-soft px-3 py-1 text-ink-mute md:block">
-          vol. {volumeRoman()} · {totalEntries} ent.
-        </div>
-        <div className="flex-1" />
-        <div className="hidden border-l border-rule-soft px-3 py-1 text-ink-mute sm:block">
-          {plateCode}
-        </div>
-        <div className="border-l border-rule-soft px-3 py-1">{clock}</div>
+      {/* ── HEADER RAIL ─────────────────────────────────────────────── */}
+      <header className="flex flex-shrink-0 items-stretch border-b border-rule text-[11px]">
         <button
           type="button"
-          onClick={toggle}
-          className="cursor-pointer border-l border-rule-soft px-3 py-1 font-semibold tracking-[0.14em] text-accent-deep"
-          aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+          onClick={() => navigate({ to: "/" })}
+          className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-3 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink"
+          aria-label="CLEPSYDRA — return to Atrium"
         >
-          [{dark ? "NCT" : "LUX"}]
+          CLEPSYDRA<span className="text-accent">/</span>VII
         </button>
-      </div>
 
-      {/* TAB BAR */}
-      <div className="flex flex-shrink-0 border-b border-rule text-[10px]">
-        {TABS.map(([k, label], i) => {
-          const active = view === k;
-          return (
-            <button
-              key={k}
-              type="button"
-              onClick={() => onTabClick(k)}
-              className={`cursor-pointer border-r border-rule-soft px-3 py-[3px] font-serif-sc font-semibold uppercase tracking-[0.20em] ${
-                active ? "bg-accent text-paper" : "text-ink"
-              }`}
-            >
-              {String(i + 1).padStart(2, "0")} · {label}
-            </button>
-          );
-        })}
+        <nav className="flex items-stretch">
+          {NAV.map(([key, label], i) => {
+            const active = view === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onNav(key)}
+                className={`cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em] ${
+                  active
+                    ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
+                    : "text-ink-mute hover:text-ink"
+                }`}
+              >
+                <span className="text-[9px] text-ink-mute">
+                  {String(i).padStart(2, "0")}
+                </span>
+                <span className="text-[10px]">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
         <div className="flex-1" />
-        <button
-          type="button"
-          onClick={openSearch}
-          className="cl-mono flex cursor-pointer items-center border-l border-rule-soft px-3 py-[3px] text-ink-mute"
-        >
-          <span className="text-accent">$</span>
-          <span className="ml-1">invoke</span>
-          <span className="ml-2 border-l border-rule-soft pl-2 text-[9px]">⌘K</span>
-        </button>
-      </div>
 
-      {/* BODY */}
-      <div className="cl-noscroll relative flex-1 overflow-auto">{children}</div>
+        {/* HEADER META — minimal status that survives diegetic-off */}
+        <div className="cl-mono flex items-stretch text-[10px]">
+          <span className="hidden items-center gap-1.5 border-l border-rule-soft px-3 sm:flex">
+            <span
+              className="inline-block h-[6px] w-[6px]"
+              style={{ background: syncColor }}
+              aria-hidden
+            />
+            <span className="text-ink-mute uppercase tracking-[0.16em]">
+              {pages} notes
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={openSearch}
+            className="flex cursor-pointer items-center gap-1.5 border-l border-rule-soft px-3 text-ink-mute hover:text-ink"
+          >
+            <span className="text-accent">⌘K</span>
+            <span className="hidden md:inline uppercase tracking-[0.16em]">
+              query
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => openSettings("appearance")}
+            className={`cl-mono flex cursor-pointer items-center gap-1.5 border-l border-rule-soft px-3 uppercase tracking-[0.18em] ${
+              settingsOpen
+                ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
+                : "text-ink-mute hover:text-ink"
+            }`}
+          >
+            <span className="text-[9px] text-ink-mute">05</span>
+            <span className="text-[10px]">STATUS</span>
+          </button>
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex cursor-pointer items-center border-l border-rule-soft px-3 text-ink-mute hover:text-ink"
+            aria-label={dark ? "Switch to paper mode" : "Switch to dark mode"}
+            title={dark ? "Switch to paper mode" : "Switch to dark mode"}
+          >
+            [{dark ? "DARK" : "PAPER"}]
+          </button>
+        </div>
+      </header>
 
-      {/* READING PROGRESS — only on folio */}
+      {/* ── TICKER (diegetic chrome) ────────────────────────────────── */}
+      {diegetic && <Ticker />}
+
+      {/* ── SHEAF (open files) ──────────────────────────────────────── */}
+      <Sheaf activeTabId={activeTabId} />
+
+      {/* ── WORKSPACE ───────────────────────────────────────────────── */}
+      <main className="cl-noscroll relative flex-1 overflow-auto">
+        <div key={location.pathname} className="view-anim min-h-full">
+          {children}
+        </div>
+      </main>
+
+      {/* READING PROGRESS — folio only */}
       {view === "folio" && (
         <div className="relative h-[2px] flex-shrink-0 bg-rule-soft">
           <div
@@ -149,78 +187,54 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
         </div>
       )}
 
-      {/* BOTTOM STATUS BAR */}
-      <div className="cl-mono flex flex-shrink-0 border-t-2 border-rule bg-bar-bg text-[10px] text-bar-fg">
-        <span className="border-r border-bar-rule px-3 py-[2px] font-bold tracking-[0.16em]">
-          READ
-        </span>
-        <span className="border-r border-bar-rule px-3 py-[2px] opacity-70">UTF-8</span>
-        {view === "folio" ? (
-          <>
-            <span className="border-r border-bar-rule px-3 py-[2px]">
-              {Math.round(Math.max(0, Math.min(1, progress)) * 100)}%
-            </span>
-            <span className="px-3 py-[2px] opacity-70">
-              ≈ {Math.max(1, Math.round((1 - progress) * 8))} min remaining
-            </span>
-          </>
-        ) : (
-          <span className="px-3 py-[2px] opacity-70">
-            idx {statsError ? "✗" : stats ? "✓" : "…"} · sync{" "}
-            {syncStatus === "connected" ? "✓" : syncStatus === "connecting" ? "…" : "✗"}
+      {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
+      <footer className="cl-mono flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
+        {diegetic && (
+          <span className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]">
+            <span
+              className="inline-block h-[6px] w-[6px]"
+              style={{ background: syncColor }}
+              aria-hidden
+            />
+            <span className="font-medium tracking-[0.16em]">VESSEL</span>
           </span>
         )}
-        <span className="flex-1" />
-        <span className="hidden px-3 py-[2px] opacity-70 md:inline">
-          {totalEntries} ent · {totalLinks} xref
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">
+          FILE {folioCode} · VIEW {view.toUpperCase()} · CORPUS {pages}/{links}
         </span>
-        <span className="border-l border-bar-rule px-3 py-[2px]">
-          last collated {formatRelativeTime(stats?.last_indexed_at)}
+        {view === "folio" && (
+          <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70">
+            {Math.round(Math.max(0, Math.min(1, progress)) * 100)}%
+          </span>
+        )}
+        {diegetic && (
+          <span className="hidden flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70 md:inline">
+            idx {statsError ? "✗" : stats ? "✓" : "…"} · collated{" "}
+            {formatRelativeTime(stats?.last_indexed_at)}
+          </span>
+        )}
+        <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
+          {clock} UTC
         </span>
-      </div>
+      </footer>
     </div>
   );
 }
 
 /* helpers --------------------------------------------------------------- */
 
-const PLATE_CODES: Record<View, string> = {
-  atrium: "PL. I",
-  diurnal: "PL. XII",
-  folio: "PL. V",
-  constellation: "PL. V",
-  gazetteer: "PL. ∞",
-};
-
 function useFolioCode(view: View): string {
   const { tabs, activeTabId } = useWorkspaceStore();
-  if (view === "atrium") return "I·i";
-  if (view === "diurnal") return "XII·iv";
-  if (view === "constellation") return "V·v";
-  if (view === "gazetteer") return "∞";
+  if (view === "atrium") return "ATRIUM";
+  if (view === "diurnal") return "DIURNAL";
+  if (view === "constellation") return "GRAPH";
+  if (view === "gazetteer") return "INDEX";
   const active = tabs.find((t) => t.id === activeTabId);
-  if (!active?.path) return "V·iii";
+  if (!active?.path) return "—";
   return shortFolio(active.path);
 }
 
-function buildPathLabel(
-  view: View,
-  pathname: string,
-  tabs: ReturnType<typeof useWorkspaceStore.getState>["tabs"],
-  activeTabId: string | null,
-): string {
-  if (view === "folio") {
-    const t = tabs.find((x) => x.id === activeTabId);
-    if (t?.path) return t.path.replace(/\.md$/, "");
-  }
-  if (view === "constellation") return "graph";
-  if (view === "atrium") return "atrium";
-  if (view === "diurnal") return "diurnal";
-  if (view === "gazetteer") return "gazetteer";
-  return pathname.replace(/^\//, "") || "atrium";
-}
-
-function useClock(): string {
+function useUtcClock(): string {
   const [t, setT] = useState(() => fmtClock(new Date()));
   useEffect(() => {
     const id = window.setInterval(() => setT(fmtClock(new Date())), 1000);
@@ -231,13 +245,5 @@ function useClock(): string {
 
 function fmtClock(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-const ROMAN_UPPER = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
-function volumeRoman(): string {
-  // Volume = current calendar year - 2022 (project inception year), clamped 1..12 then numeric.
-  const year = new Date().getFullYear();
-  const idx = Math.max(1, year - 2022);
-  return ROMAN_UPPER[idx - 1] ?? String(idx);
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }

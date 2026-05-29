@@ -9,6 +9,8 @@ export interface TabDescriptor {
   type: TabType;
   path?: string;
   label: string;
+  /** Pinned tabs sort first in SHEAF and are visually marked. */
+  pinned?: boolean;
 }
 
 interface WorkspaceState {
@@ -23,6 +25,7 @@ interface WorkspaceActions {
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
   activateTab: (tabId: string) => void;
+  togglePin: (tabId: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   updateTabLabel: (tabId: string, label: string) => void;
   setNavigationMode: (mode: NavigationMode) => void;
@@ -114,6 +117,14 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
       activateTab(tabId) {
         set({ activeTabId: tabId });
+      },
+
+      togglePin(tabId) {
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === tabId ? { ...t, pinned: !t.pinned } : t,
+          ),
+        }));
       },
 
       moveTab(fromIndex, toIndex) {
