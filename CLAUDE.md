@@ -42,7 +42,7 @@ The CLI binary (`clepsydra`) uses subcommands: `serve`, `init`, `env`, `doctor`,
 ### Frontend Stack (ui/)
 
 - **React 19** with TanStack Router (file-based routing) and TanStack Query (data fetching)
-- **Rolldown-Vite** — Vite is overridden to `rolldown-vite` via package.json `overrides`. Do not add a separate `vite` dependency.
+- **Vite 8** — standard Vite (the previous `rolldown-vite` override has been removed).
 - **Tailwind CSS v4** — All design tokens live in `ui/src/main.css` via `@theme` blocks. No `tailwind.config` file.
 - **Biome** for linting and formatting (replaces ESLint/Prettier). Config in `ui/biome.json`.
 - **react-aria-components** for accessible UI primitives
@@ -61,11 +61,13 @@ The CLI binary (`clepsydra`) uses subcommands: `serve`, `init`, `env`, `doctor`,
 
 ### Design Aesthetic
 
-The UI follows a **brutalist / high modernist** visual language:
+The UI follows the **"Vessel" classified-technical-modernism** language (a dark, dense, diegetic dossier terminal). See `docs/plans/2026-05-29-clepsydra-vessel-redesign.md` for the full spec and phased build.
 - Zero border-radius (`--radius: 0`) — no rounded corners anywhere
 - Hard-edged offset shadows (bottom-right, no blur)
-- Achromatic palette (oklch, zero chroma) with high contrast
-- Light/dark mode via `.dark` class on `<html>`, toggled by `ThemeProvider`
+- Warm-grey achromatic palette with **barbican orange** (`#ee7733`) primary accent; high contrast
+- **Dark is the default** (base `:root`); the light "paper" mode is opt-in via a `.paper` class on `<html>`, toggled by `ThemeProvider`
+- Typography: **JetBrains Mono** for all chrome/UI/telemetry, **Satoshi** for prose + display/headings
+- Operator prefs applied as `<html>` attributes: `data-accent` (6 presets), `data-density` (compact/default/spacious), `data-diegetic` (off hides telemetry chrome)
 
 All semantic color tokens (background, foreground, primary, muted, border, etc.) are defined in `ui/src/main.css`. Respect these tokens when building UI.
 

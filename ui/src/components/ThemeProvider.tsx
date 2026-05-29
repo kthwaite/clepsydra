@@ -8,9 +8,20 @@ import {
   useState,
 } from "react";
 import {
+  type Accent,
+  applyAccent,
+  applyDensity,
+  applyDiegetic,
   applyThemeClass,
+  type Density,
+  readStoredAccent,
+  readStoredDensity,
+  readStoredDiegetic,
   readStoredTheme,
   resolveTheme,
+  storeAccent,
+  storeDensity,
+  storeDiegetic,
   storeTheme,
   type ThemeMode,
 } from "#/lib/theme";
@@ -20,6 +31,12 @@ type ThemeContextValue = {
   resolvedTheme: "light" | "dark";
   setMode: (mode: ThemeMode) => void;
   toggle: () => void;
+  accent: Accent;
+  setAccent: (accent: Accent) => void;
+  density: Density;
+  setDensity: (density: Density) => void;
+  diegetic: boolean;
+  setDiegetic: (on: boolean) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -28,6 +45,13 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const [mode, setModeState] = useState<ThemeMode>(() => readStoredTheme());
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">(() =>
     resolveTheme(readStoredTheme()),
+  );
+  const [accent, setAccentState] = useState<Accent>(() => readStoredAccent());
+  const [density, setDensityState] = useState<Density>(() =>
+    readStoredDensity(),
+  );
+  const [diegetic, setDiegeticState] = useState<boolean>(() =>
+    readStoredDiegetic(),
   );
 
   const setMode = useCallback((next: ThemeMode) => {
@@ -39,16 +63,35 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     setMode(resolvedTheme === "dark" ? "light" : "dark");
   }, [resolvedTheme, setMode]);
 
+  const setAccent = useCallback((next: Accent) => {
+    setAccentState(next);
+    storeAccent(next);
+  }, []);
+
+  const setDensity = useCallback((next: Density) => {
+    setDensityState(next);
+    storeDensity(next);
+  }, []);
+
+  const setDiegetic = useCallback((on: boolean) => {
+    setDiegeticState(on);
+    storeDiegetic(on);
+  }, []);
+
   useEffect(() => {
     const resolved = resolveTheme(mode);
     setResolvedTheme(resolved);
     applyThemeClass(resolved);
   }, [mode]);
 
+  useEffect(() => applyAccent(accent), [accent]);
+  useEffect(() => applyDensity(density), [density]);
+  useEffect(() => applyDiegetic(diegetic), [diegetic]);
+
   useEffect(() => {
     if (mode !== "system") return;
 
-    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const media = window.matchMedia?.("(prefers-color-scheme: light)");
     if (!media) return;
 
     const onChange = () => {
@@ -70,8 +113,30 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   }, [mode]);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ mode, resolvedTheme, setMode, toggle }),
-    [mode, resolvedTheme, setMode, toggle],
+    () => ({
+      mode,
+      resolvedTheme,
+      setMode,
+      toggle,
+      accent,
+      setAccent,
+      density,
+      setDensity,
+      diegetic,
+      setDiegetic,
+    }),
+    [
+      mode,
+      resolvedTheme,
+      setMode,
+      toggle,
+      accent,
+      setAccent,
+      density,
+      setDensity,
+      diegetic,
+      setDiegetic,
+    ],
   );
 
   return (

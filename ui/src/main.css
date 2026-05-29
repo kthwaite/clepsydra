@@ -1,191 +1,276 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Cormorant+SC:wght@500;600;700&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=Zilla+Slab:wght@400;500;600;700&display=swap");
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap");
 @import "tailwindcss";
 @import "@fontsource-variable/jetbrains-mono";
 
 /* =============================================================================
-   CLEPSYDRA — Codex tokens (A·ii merged)
-   Retro-futurist expeditionary brutalism: cyan ink on cream, gilt on deep green.
+   CLEPSYDRA — VESSEL tokens
+   Classified technical modernism: warm-grey achromatic field, barbican accent,
+   mono chrome (JetBrains Mono) + sans prose/display (Satoshi). Dark is the base;
+   "paper" is the light override. Radius zero; hard offset shadows.
    ============================================================================= */
 
 @theme {
-    /* Typography stacks */
-    --font-sans: "Spectral", "Cormorant Garamond", Georgia, serif;
-    --font-body: "Spectral", "Cormorant Garamond", Georgia, serif;
-    --font-serif: "Cormorant Garamond", "EB Garamond", Georgia, serif;
-    --font-serif-sc: "Cormorant SC", "Cormorant Garamond", Georgia, serif;
-    --font-slab: "Zilla Slab", "Roboto Slab", Georgia, serif;
-    --font-mono: "JetBrains Mono Variable", ui-monospace, "Menlo", monospace;
-    --font-heading: "Cormorant SC", "Cormorant Garamond", Georgia, serif;
+    /* Typography stacks ---------------------------------------------------- */
+    --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --font-sans: "Satoshi", "Helvetica Neue", Arial, sans-serif;
+    --font-body: var(--font-sans);
+    /* Legacy aliases retained so existing components keep resolving. Serif/slab
+       are dropped from the design — they now point at the sans face; the
+       small-caps label face becomes mono. */
+    --font-serif: var(--font-sans);
+    --font-serif-sc: var(--font-mono);
+    --font-slab: var(--font-sans);
+    --font-heading: var(--font-sans);
 
-    /* Codex (light) — cyan ink on cream */
-    --color-paper: #f1ebdd;
-    --color-paper-2: #e8e0cc;
-    --color-paper-edge: #d8cdaf;
-    --color-ink: #0f2a3d;
-    --color-ink-2: #1a4060;
-    --color-ink-mute: #5a6470;
-    --color-accent: #0c6cad;
-    --color-accent-deep: #0a4d7e;
-    --color-hot: #b03a2e;
-    --color-rule: rgba(15, 42, 61, 0.85);
-    --color-rule-soft: rgba(15, 42, 61, 0.22);
-    --color-highlight: rgba(12, 108, 173, 0.10);
-    --color-bar-bg: #0f2a3d;
-    --color-bar-fg: #f1ebdd;
-    --color-bar-rule: rgba(241, 235, 221, 0.30);
+    /* Vessel dark palette (DEFAULT / base) --------------------------------- */
+    --color-paper: #0a0a0a;
+    --color-paper-2: #111111;
+    --color-paper-edge: #161616;
+    --color-ink: #e8e6df;
+    --color-ink-2: #b8b5a8;
+    --color-ink-mute: #6a675c;
+    --color-ink-faint: #3a3833;
+    --color-accent: #ee7733;
+    /* barbican (primary / "hot" in the prototype sense) */
+    --color-accent-deep: #c75f24;
+    --color-cool: #4cd9ff;
+    /* secondary signal */
+    --color-warn: #ffb84a;
+    --color-hot: #ff3b1f;
+    /* destructive / alert — kept red */
+    --color-rule: #2a2825;
+    --color-rule-soft: #1c1b18;
+    --color-highlight: rgba(238, 119, 51, 0.12);
+    --color-bar-bg: #050505;
+    --color-bar-fg: #e8e6df;
+    --color-bar-rule: rgba(232, 230, 223, 0.18);
 
-    /* Tailwind semantic aliases — mapped to codex tokens */
-    --color-background: #f1ebdd;
-    --color-foreground: #0f2a3d;
-    --color-card: #e8e0cc;
-    --color-card-foreground: #0f2a3d;
-    --color-popover: #f1ebdd;
-    --color-popover-foreground: #0f2a3d;
-    --color-primary: #0f2a3d;
-    --color-primary-foreground: #f1ebdd;
-    --color-secondary: #e8e0cc;
-    --color-secondary-foreground: #0f2a3d;
-    --color-muted: #e8e0cc;
-    --color-muted-foreground: #5a6470;
-    --color-accent-foreground: #f1ebdd;
-    --color-destructive: #b03a2e;
-    --color-destructive-foreground: #f1ebdd;
-    --color-border: rgba(15, 42, 61, 0.22);
-    --color-input: rgba(15, 42, 61, 0.22);
-    --color-ring: rgba(15, 42, 61, 0.85);
+    /* Tailwind semantic aliases — mapped to Vessel dark */
+    --color-background: #0a0a0a;
+    --color-foreground: #e8e6df;
+    --color-card: #111111;
+    --color-card-foreground: #e8e6df;
+    --color-popover: #111111;
+    --color-popover-foreground: #e8e6df;
+    --color-primary: #ee7733;
+    --color-primary-foreground: #0a0a0a;
+    --color-secondary: #161616;
+    --color-secondary-foreground: #e8e6df;
+    --color-muted: #161616;
+    --color-muted-foreground: #6a675c;
+    --color-accent-foreground: #0a0a0a;
+    --color-destructive: #ff3b1f;
+    --color-destructive-foreground: #0a0a0a;
+    --color-border: #2a2825;
+    --color-input: #2a2825;
+    --color-ring: #ee7733;
 
     /* Radius: zero, always */
     --radius: 0;
 
-    /* Shadows: hard-edged, bottom-right offset, ink-coloured */
-    --shadow-sm: 2px 2px 0 0 rgba(15, 42, 61, 0.18);
-    --shadow-md: 4px 4px 0 0 rgba(15, 42, 61, 0.25);
-    --shadow-lg: 6px 6px 0 0 rgba(15, 42, 61, 0.35);
-    --shadow-xl: 8px 8px 0 0 rgba(15, 42, 61, 0.5);
+    /* Shadows: hard-edged, bottom-right offset, no blur (dark = black) */
+    --shadow-sm: 2px 2px 0 0 rgba(0, 0, 0, 0.55);
+    --shadow-md: 4px 4px 0 0 rgba(0, 0, 0, 0.6);
+    --shadow-lg: 6px 6px 0 0 rgba(0, 0, 0, 0.7);
+    --shadow-xl: 8px 8px 0 0 rgba(0, 0, 0, 0.8);
+
+    /* Density scale (overridable via [data-density]) */
+    --space-row: 22px;
+    --space-gap: 14px;
+    --space-pad: 14px;
+    --text-fs: 11px;
+    --text-fs-s: 10px;
+    --text-fs-xs: 9px;
 }
 
-/* Codex CSS custom properties used by .cl-* primitives — these mirror the
-   tokens above so legacy component code can address them with var(--ink) etc. */
+/* Bare custom properties consumed by .cl-* primitives and inline var() calls.
+   Mirror the Tailwind tokens above so `var(--ink)` etc. keep working. DARK is
+   the base — defined on :root so dark renders with no class (no FOUC). */
 :root {
-    color-scheme: light;
-    --paper: #f1ebdd;
-    --paper-2: #e8e0cc;
-    --paper-edge: #d8cdaf;
-    --ink: #0f2a3d;
-    --ink-2: #1a4060;
-    --ink-mute: #5a6470;
-    --accent: #0c6cad;
-    --accent-deep: #0a4d7e;
-    --hot: #b03a2e;
-    --rule: rgba(15, 42, 61, 0.85);
-    --rule-soft: rgba(15, 42, 61, 0.22);
-    --grid: rgba(15, 42, 61, 0.08);
-    --highlight: rgba(12, 108, 173, 0.10);
-    /* Status bars: always darker than the surrounding paper. */
-    --bar-bg: #0f2a3d;
-    /* = ink */
-    --bar-fg: #f1ebdd;
-    /* = paper */
-    --bar-rule: rgba(241, 235, 221, 0.30);
+    color-scheme: dark;
+    --paper: #0a0a0a;
+    --paper-2: #111111;
+    --paper-edge: #161616;
+    --ink: #e8e6df;
+    --ink-2: #b8b5a8;
+    --ink-mute: #6a675c;
+    --ink-faint: #3a3833;
+    --accent: #ee7733;
+    --accent-deep: #c75f24;
+    --cool: #4cd9ff;
+    --warn: #ffb84a;
+    --hot: #ff3b1f;
+    --rule: #2a2825;
+    --rule-soft: #1c1b18;
+    --grid: rgba(232, 230, 223, 0.05);
+    --highlight: rgba(238, 119, 51, 0.12);
+    --bar-bg: #050505;
+    --bar-fg: #e8e6df;
+    --bar-rule: rgba(232, 230, 223, 0.18);
+
+    /* Density (default) */
+    --row-h: 22px;
+    --gap: 14px;
+    --pad: 14px;
+    --fs: 11px;
+    --fs-s: 10px;
+    --fs-xs: 9px;
 }
 
-.dark {
-    color-scheme: dark;
+/* "Paper" light mode — printed-dossier inversion. Toggled by adding `.paper`
+   to <html>. Unlayered, so it overrides the @theme/:root defaults. ---------- */
+.paper {
+    color-scheme: light;
+    --paper: #efece2;
+    --paper-2: #e7e3d6;
+    --paper-edge: #ddd8c9;
+    --ink: #15140f;
+    --ink-2: #3a3833;
+    --ink-mute: #6a675c;
+    --ink-faint: #9a978a;
+    --rule: #15140f;
+    --rule-soft: #6a675c;
+    --grid: rgba(21, 20, 15, 0.06);
+    --highlight: rgba(238, 119, 51, 0.16);
+    --bar-bg: #15140f;
+    --bar-fg: #efece2;
+    --bar-rule: rgba(239, 236, 226, 0.3);
 
-    /* Codex (dark) — gilt on deep green */
-    --paper: #0d1f1a;
-    --paper-2: #0a1814;
-    --paper-edge: #1a3329;
-    --ink: #ede4c8;
-    --ink-2: #f4ecd2;
-    --ink-mute: #8a9a8a;
-    --accent: #d9b04a;
-    --accent-deep: #b8902f;
-    --hot: #d35a4a;
-    --rule: rgba(237, 228, 200, 0.78);
-    --rule-soft: rgba(237, 228, 200, 0.20);
-    --grid: rgba(237, 228, 200, 0.07);
-    --highlight: rgba(217, 176, 74, 0.12);
-    /* Status bars: stay darker than the page in dark mode too. */
-    --bar-bg: #050d0a;
-    /* deeper than --paper */
-    --bar-fg: #ede4c8;
-    /* = ink (gilt) */
-    --bar-rule: rgba(237, 228, 200, 0.22);
+    /* Re-bind Tailwind semantic aliases for paper mode (accents unchanged) */
+    --color-paper: #efece2;
+    --color-paper-2: #e7e3d6;
+    --color-paper-edge: #ddd8c9;
+    --color-ink: #15140f;
+    --color-ink-2: #3a3833;
+    --color-ink-mute: #6a675c;
+    --color-ink-faint: #9a978a;
+    --color-rule: #15140f;
+    --color-rule-soft: #6a675c;
+    --color-highlight: rgba(238, 119, 51, 0.16);
+    --color-bar-bg: #15140f;
+    --color-bar-fg: #efece2;
+    --color-bar-rule: rgba(239, 236, 226, 0.3);
 
-    /* Re-bind Tailwind semantic aliases for dark mode */
-    --color-paper: #0d1f1a;
-    --color-paper-2: #0a1814;
-    --color-paper-edge: #1a3329;
-    --color-ink: #ede4c8;
-    --color-ink-2: #f4ecd2;
-    --color-ink-mute: #8a9a8a;
-    --color-accent: #d9b04a;
-    --color-accent-deep: #b8902f;
-    --color-hot: #d35a4a;
-    --color-rule: rgba(237, 228, 200, 0.78);
-    --color-rule-soft: rgba(237, 228, 200, 0.20);
-    --color-highlight: rgba(217, 176, 74, 0.12);
-    --color-bar-bg: #050d0a;
-    --color-bar-fg: #ede4c8;
-    --color-bar-rule: rgba(237, 228, 200, 0.22);
+    --color-background: #efece2;
+    --color-foreground: #15140f;
+    --color-card: #e7e3d6;
+    --color-card-foreground: #15140f;
+    --color-popover: #e7e3d6;
+    --color-popover-foreground: #15140f;
+    --color-primary: #ee7733;
+    --color-primary-foreground: #efece2;
+    --color-secondary: #ddd8c9;
+    --color-secondary-foreground: #15140f;
+    --color-muted: #ddd8c9;
+    --color-muted-foreground: #6a675c;
+    --color-accent-foreground: #efece2;
+    --color-destructive: #ff3b1f;
+    --color-destructive-foreground: #efece2;
+    --color-border: #15140f;
+    --color-input: #15140f;
+    --color-ring: #ee7733;
 
-    --color-background: #0d1f1a;
-    --color-foreground: #ede4c8;
-    --color-card: #0a1814;
-    --color-card-foreground: #ede4c8;
-    --color-popover: #0d1f1a;
-    --color-popover-foreground: #ede4c8;
-    --color-primary: #ede4c8;
-    --color-primary-foreground: #0d1f1a;
-    --color-secondary: #1a3329;
-    --color-secondary-foreground: #ede4c8;
-    --color-muted: #1a3329;
-    --color-muted-foreground: #8a9a8a;
-    --color-accent-foreground: #0d1f1a;
-    --color-destructive: #d35a4a;
-    --color-destructive-foreground: #0d1f1a;
-    --color-border: rgba(237, 228, 200, 0.20);
-    --color-input: rgba(237, 228, 200, 0.20);
-    --color-ring: rgba(237, 228, 200, 0.78);
+    --shadow-sm: 2px 2px 0 0 rgba(21, 20, 15, 0.18);
+    --shadow-md: 4px 4px 0 0 rgba(21, 20, 15, 0.25);
+    --shadow-lg: 6px 6px 0 0 rgba(21, 20, 15, 0.35);
+    --shadow-xl: 8px 8px 0 0 rgba(21, 20, 15, 0.5);
+}
 
-    --shadow-sm: 2px 2px 0 0 rgba(0, 0, 0, 0.45);
-    --shadow-md: 4px 4px 0 0 rgba(0, 0, 0, 0.55);
-    --shadow-lg: 6px 6px 0 0 rgba(0, 0, 0, 0.65);
-    --shadow-xl: 8px 8px 0 0 rgba(0, 0, 0, 0.75);
+/* Accent presets — swap primary (--accent/--accent-deep) and secondary (--cool).
+   Applied via [data-accent] on <html>; barbican is the default (no attribute). */
+[data-accent="alert"] {
+    --accent: #ff3b1f;
+    --accent-deep: #cc2d14;
+    --cool: #4cd9ff;
+    --color-accent: #ff3b1f;
+    --color-accent-deep: #cc2d14;
+    --color-cool: #4cd9ff;
+    --color-primary: #ff3b1f;
+    --color-ring: #ff3b1f;
+}
+
+[data-accent="amber"] {
+    --accent: #ffb84a;
+    --accent-deep: #d6953a;
+    --cool: #7eeac9;
+    --color-accent: #ffb84a;
+    --color-accent-deep: #d6953a;
+    --color-cool: #7eeac9;
+    --color-primary: #ffb84a;
+    --color-ring: #ffb84a;
+}
+
+[data-accent="cyan"] {
+    --accent: #4cd9ff;
+    --accent-deep: #2bb0d6;
+    --cool: #ff3b1f;
+    --color-accent: #4cd9ff;
+    --color-accent-deep: #2bb0d6;
+    --color-cool: #ff3b1f;
+    --color-primary: #4cd9ff;
+    --color-ring: #4cd9ff;
+}
+
+[data-accent="phosphor"] {
+    --accent: #5dffa6;
+    --accent-deep: #38d67e;
+    --cool: #ffb84a;
+    --color-accent: #5dffa6;
+    --color-accent-deep: #38d67e;
+    --color-cool: #ffb84a;
+    --color-primary: #5dffa6;
+    --color-ring: #5dffa6;
+}
+
+[data-accent="bone"] {
+    --accent: #e8e6df;
+    --accent-deep: #b8b5a8;
+    --cool: #9a978a;
+    --color-accent: #e8e6df;
+    --color-accent-deep: #b8b5a8;
+    --color-cool: #9a978a;
+    --color-primary: #e8e6df;
+    --color-ring: #e8e6df;
+}
+
+/* Density presets — applied via [data-density] on <html>. */
+[data-density="compact"] {
+    --row-h: 18px;
+    --gap: 10px;
+    --pad: 10px;
+    --fs: 10px;
+    --fs-s: 9px;
+    --fs-xs: 8px;
+}
+
+[data-density="spacious"] {
+    --row-h: 28px;
+    --gap: 18px;
+    --pad: 18px;
+    --fs: 12px;
+    --fs-s: 11px;
+    --fs-xs: 10px;
 }
 
 body {
     background: var(--paper);
     color: var(--ink);
-    font-family: var(--font-body);
-    font-size: 15px;
-    line-height: 1.55;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
     letter-spacing: 0.005em;
+    font-feature-settings: "tnum" 1, "zero" 1, "calt" 0;
     -webkit-font-smoothing: antialiased;
     text-rendering: geometricPrecision;
 }
 
-/* =============================================================================
-   .cl-* primitives — codex utility classes
-   ============================================================================= */
-
-.cl-root {
-    font-family: var(--font-body);
-    font-size: 15px;
-    line-height: 1.55;
-    letter-spacing: 0.005em;
-    -webkit-font-smoothing: antialiased;
-    text-rendering: geometricPrecision;
-}
-
-.cl-root *::selection {
+::selection {
     background: var(--accent);
-    color: var(--paper);
+    color: #000;
 }
 
-/* Slate placeholder must not appear selected (Cmd/Ctrl+A still paints
-   the highlight even though the span is contentEditable=false). */
+/* Slate placeholder must not appear selected (Cmd/Ctrl+A still paints the
+   highlight even though the span is contentEditable=false). */
 [data-slate-placeholder],
 [data-slate-placeholder] *,
 [data-slate-placeholder]::selection,
@@ -194,21 +279,41 @@ body {
     color: inherit;
 }
 
-/* Tracked-out small caps — hairline section labels */
+/* =============================================================================
+   .cl-* primitives — re-pointed to the VESSEL mono-tactical language.
+   Class names preserved so existing components inherit the new aesthetic;
+   they will be migrated to purpose-built components over later phases.
+   ============================================================================= */
+
+.cl-root {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: 0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+}
+
+.cl-root *::selection {
+    background: var(--accent);
+    color: #000;
+}
+
+/* Tracked-out labels — hairline section headers (was serif small-caps). */
 .cl-cap {
-    font-family: var(--font-serif-sc);
+    font-family: var(--font-mono);
     text-transform: uppercase;
-    letter-spacing: 0.22em;
-    font-weight: 600;
+    letter-spacing: 0.18em;
+    font-weight: 500;
     font-feature-settings: "kern" 1;
 }
 
 .cl-cap-tight {
-    letter-spacing: 0.14em;
+    letter-spacing: 0.1em;
 }
 
 .cl-cap-wide {
-    letter-spacing: 0.34em;
+    letter-spacing: 0.3em;
 }
 
 .cl-mono {
@@ -216,12 +321,13 @@ body {
     font-feature-settings: "calt" 0, "liga" 0;
 }
 
+/* Serif/slab dropped — map to the sans face so any lingering refs read sanely. */
 .cl-slab {
-    font-family: var(--font-slab);
+    font-family: var(--font-sans);
 }
 
 .cl-serif {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
 }
 
 /* Hairline rules */
@@ -242,12 +348,15 @@ body {
     height: 4px;
 }
 
-/* Paper grain + grids */
+/* Dashed separator — dossier divider (6px dash). */
+.cl-rule-dash {
+    border: 0;
+    border-top: 1px dashed var(--rule);
+}
+
+/* Flat field — overlays/grain dropped, so this is just the base surface. */
 .cl-paper {
-    background:
-        radial-gradient(circle at 20% 30%, var(--grid) 0.5px, transparent 1px) 0 0/12px 12px,
-        radial-gradient(circle at 70% 65%, var(--grid) 0.5px, transparent 1px) 4px 6px/14px 14px,
-        var(--paper);
+    background: var(--paper);
 }
 
 .cl-grid {
@@ -264,9 +373,9 @@ body {
     background-size: 8px 8px;
 }
 
-/* Dossier frames */
+/* Frames */
 .cl-frame {
-    border: 1.5px solid var(--rule);
+    border: 1px solid var(--rule);
 }
 
 .cl-frame-double {
@@ -274,21 +383,20 @@ body {
     box-shadow: 0 0 0 3px var(--paper), 0 0 0 4px var(--rule);
 }
 
-/* Stamp — institutional cachet */
+/* Stamp — classification cachet (mono, tracked). */
 .cl-stamp {
     display: inline-block;
-    border: 2px solid var(--hot);
+    border: 1px solid var(--hot);
     color: var(--hot);
-    padding: 4px 10px;
-    font-family: var(--font-serif-sc);
+    padding: 3px 8px;
+    font-family: var(--font-mono);
     text-transform: uppercase;
-    letter-spacing: 0.22em;
-    font-weight: 700;
-    transform: rotate(-3deg);
-    font-size: 11px;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+    font-size: 10px;
 }
 
-/* Dingbats */
+/* Dingbats retained for any inline usage. */
 .cl-fleuron::before {
     content: "❦";
 }
@@ -308,14 +416,14 @@ body {
 /* Numeric / coordinate inline */
 .cl-coord {
     font-family: var(--font-mono);
-    font-size: 0.78em;
+    font-size: 0.82em;
     letter-spacing: 0.04em;
     color: var(--ink-mute);
 }
 
-/* Margin notes */
+/* Margin notes — sans italic */
 .cl-marg {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-style: italic;
     font-size: 13px;
     color: var(--ink-mute);
@@ -324,9 +432,9 @@ body {
 
 /* Underlined link */
 .cl-link {
-    color: var(--accent-deep);
+    color: var(--accent);
     text-decoration: none;
-    border-bottom: 1px solid var(--accent);
+    border-bottom: 1px solid var(--accent-deep);
     cursor: pointer;
 }
 
@@ -334,37 +442,39 @@ body {
     background: var(--highlight);
 }
 
-/* Button — neo-brutalist hard rect */
+/* Button — hard rect, mono uppercase */
 .cl-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    border: 1.5px solid var(--rule);
+    border: 1px solid var(--rule);
     background: var(--paper-2);
     color: var(--ink);
-    font-family: var(--font-serif-sc);
+    font-family: var(--font-mono);
     text-transform: uppercase;
     letter-spacing: 0.14em;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.1s, color 0.1s;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
 
 .cl-btn:hover {
     background: var(--ink);
     color: var(--paper);
+    border-color: var(--ink);
 }
 
 .cl-btn-hot {
-    border-color: var(--hot);
-    color: var(--hot);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .cl-btn-hot:hover {
-    background: var(--hot);
-    color: var(--paper);
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
 }
 
 /* Scrollbar suppression */
@@ -447,4 +557,16 @@ body {
     letter-spacing: 0.1em;
     color: var(--ink-mute);
     text-transform: uppercase;
+}
+
+/* Respect reduced motion across the app. */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
