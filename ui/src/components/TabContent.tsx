@@ -13,7 +13,9 @@ export function TabContent() {
       <div className="flex h-full items-center justify-center">
         <p className="cl-marg">
           No folios open. Use{" "}
-          <kbd className="cl-mono border border-[var(--rule-soft)] px-1 py-[1px] text-[10px]">⌘K</kbd>{" "}
+          <kbd className="cl-mono border border-[var(--rule-soft)] px-1 py-[1px] text-[10px]">
+            ⌘K
+          </kbd>{" "}
           to invoke the console.
         </p>
       </div>
@@ -21,7 +23,7 @@ export function TabContent() {
   }
 
   if (activeTab.type === "graph") {
-    return <Constellation tabId={activeTab.id} />;
+    return <Constellation />;
   }
 
   if (activeTab.type === "page" && activeTab.path) {

@@ -12,6 +12,7 @@ import {
 describe("resolveKindFromPath", () => {
   it("maps known top-level folders to kinds (case-insensitive)", () => {
     expect(resolveKindFromPath("daily/2026-05-29.md")).toBe("DAILY");
+    expect(resolveKindFromPath("journals/2026-05-29.md")).toBe("DAILY");
     expect(resolveKindFromPath("projects/vessel.md")).toBe("PROJECT");
     expect(resolveKindFromPath("People/kit.md")).toBe("PERSON");
     expect(resolveKindFromPath("reading/some-book.md")).toBe("BOOK");

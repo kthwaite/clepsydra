@@ -12,6 +12,26 @@ import { select } from "d3-selection";
 import { zoom, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useRef } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
+import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
+
+/** Kind-coded node glyph: square=PROJECT, triangle=TASK, ring=DAILY, dot=other. */
+function nodeShape(kind: Kind): { d: string; filled: boolean } {
+  const s = 6;
+  if (kind === "PROJECT")
+    return { d: `M${-s} ${-s}h${2 * s}v${2 * s}h${-2 * s}Z`, filled: true };
+  if (kind === "TASK")
+    return { d: `M0 ${-s}L${s} ${s}L${-s} ${s}Z`, filled: true };
+  if (kind === "DAILY")
+    return {
+      d: `M${-s} 0a${s} ${s} 0 1 0 ${2 * s} 0a${s} ${s} 0 1 0 ${-2 * s} 0`,
+      filled: false,
+    };
+  const r = 4;
+  return {
+    d: `M${-r} 0a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`,
+    filled: true,
+  };
+}
 
 interface SimNode extends SimulationNodeDatum, GraphNode {}
 
@@ -80,16 +100,25 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .selectAll("line")
       .data(simLinks)
       .join("line")
-      .attr("class", "stroke-border")
-      .attr("stroke-width", 1);
+      .attr("class", "stroke-accent")
+      .attr("stroke-width", 1)
+      .attr("stroke-opacity", 0.3);
 
-    // Nodes
+    // Nodes — kind-shaped, kind-coloured
     const nodeSel = gSel
-      .selectAll<SVGCircleElement, SimNode>("circle")
+      .selectAll<SVGPathElement, SimNode>("path.node")
       .data(simNodes)
-      .join("circle")
-      .attr("r", 6)
-      .attr("class", "fill-foreground cursor-pointer")
+      .join("path")
+      .attr("class", "node cursor-pointer")
+      .attr("d", (d) => nodeShape(resolveKindFromPath(d.path)).d)
+      .attr("fill", (d) => {
+        const k = resolveKindFromPath(d.path);
+        return nodeShape(k).filled ? kindColorVar(k) : "none";
+      })
+      .attr("stroke", (d) => kindColorVar(resolveKindFromPath(d.path)))
+      .attr("stroke-width", (d) =>
+        nodeShape(resolveKindFromPath(d.path)).filled ? 0 : 1.5,
+      )
       .on("click", (_event, d) => onNodeClick?.(d));
 
     // Labels
@@ -98,12 +127,12 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .data(simNodes)
       .join("text")
       .text((d) => d.title || d.path)
-      .attr("class", "fill-muted-foreground text-[10px]")
+      .attr("class", "cl-mono fill-muted-foreground text-[9px]")
       .attr("dx", 10)
       .attr("dy", 4);
 
     // Drag
-    const dragBehavior = drag<SVGCircleElement, SimNode>()
+    const dragBehavior = drag<SVGPathElement, SimNode>()
       .on("start", (event, d) => {
         if (!event.active) sim.alphaTarget(0.3).restart();
         d.fx = event.x as number | null;
@@ -127,7 +156,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
         .attr("x2", (d) => (d.target as SimNode).x!)
         .attr("y2", (d) => (d.target as SimNode).y!);
 
-      nodeSel.attr("cx", (d) => d.x!).attr("cy", (d) => d.y!);
+      nodeSel.attr("transform", (d) => `translate(${d.x},${d.y})`);
 
       labelSel.attr("x", (d) => d.x!).attr("y", (d) => d.y!);
     });

@@ -52,7 +52,9 @@ export const kindColorVar = (kind: Kind): string => KIND_META[kind].color;
 // map to the same kind.
 const FOLDER_KIND: Record<string, Kind> = {
   daily: "DAILY",
+  dailies: "DAILY",
   journal: "DAILY",
+  journals: "DAILY",
   diary: "DAILY",
   projects: "PROJECT",
   project: "PROJECT",
