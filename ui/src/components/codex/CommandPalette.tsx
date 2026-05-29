@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useStats, useSearch, useTags } from "#/api/index";
+import { useSearch, useStats, useTags } from "#/api/index";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
@@ -14,9 +14,30 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { useUiStore } from "#/store/ui";
 
 type Command =
-  | { kind: "cmd"; icon: string; label: string; hint?: string; sub?: string; action: () => void }
-  | { kind: "note"; icon: string; label: string; hint?: string; sub?: string; action: () => void }
-  | { kind: "tag"; icon: string; label: string; hint?: string; sub?: string; action: () => void };
+  | {
+      kind: "cmd";
+      icon: string;
+      label: string;
+      hint?: string;
+      sub?: string;
+      action: () => void;
+    }
+  | {
+      kind: "note";
+      icon: string;
+      label: string;
+      hint?: string;
+      sub?: string;
+      action: () => void;
+    }
+  | {
+      kind: "tag";
+      icon: string;
+      label: string;
+      hint?: string;
+      sub?: string;
+      action: () => void;
+    };
 
 export function CommandPalette() {
   const open = useUiStore((s) => s.isSearchOpen);
@@ -31,7 +52,10 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const debouncedQ = useDebounce(open ? q : "", 200);
-  const { data: searchResults } = useSearch(open && debouncedQ.length > 0 ? debouncedQ : "", 12);
+  const { data: searchResults } = useSearch(
+    open && debouncedQ.length > 0 ? debouncedQ : "",
+    12,
+  );
   const { data: tags } = useTags();
   const { data: stats } = useStats();
 
@@ -61,11 +85,43 @@ export function CommandPalette() {
 
   const verbCommands = useMemo<Command[]>(
     () => [
-      { kind: "cmd", icon: "›", label: "Open Atrium", hint: "⌘H", action: () => navigate({ to: "/" }) },
-      { kind: "cmd", icon: "›", label: "Open Diurnal", hint: "⌘D", action: () => navigate({ to: "/journal" }) },
-      { kind: "cmd", icon: "›", label: "Open Constellation (graph)", hint: "⌘G", action: () => { openTab("graph"); } },
-      { kind: "cmd", icon: "›", label: "Open Gazetteer (index)", hint: "⌘I", action: () => navigate({ to: "/gazetteer" }) },
-      { kind: "cmd", icon: "›", label: "Toggle dark mode", hint: "⌘\\", action: () => toggleTheme() },
+      {
+        kind: "cmd",
+        icon: "›",
+        label: "Open Atrium",
+        hint: "⌘H",
+        action: () => navigate({ to: "/" }),
+      },
+      {
+        kind: "cmd",
+        icon: "›",
+        label: "Open Diurnal",
+        hint: "⌘D",
+        action: () => navigate({ to: "/journal" }),
+      },
+      {
+        kind: "cmd",
+        icon: "›",
+        label: "Open Constellation (graph)",
+        hint: "⌘G",
+        action: () => {
+          openTab("graph");
+        },
+      },
+      {
+        kind: "cmd",
+        icon: "›",
+        label: "Open Gazetteer (index)",
+        hint: "⌘I",
+        action: () => navigate({ to: "/gazetteer" }),
+      },
+      {
+        kind: "cmd",
+        icon: "›",
+        label: "Toggle dark mode",
+        hint: "⌘\\",
+        action: () => toggleTheme(),
+      },
     ],
     [navigate, openTab, toggleTheme],
   );
@@ -89,7 +145,8 @@ export function CommandPalette() {
       icon: "#",
       label: t.tag,
       hint: String(t.count ?? 0),
-      action: () => navigate({ to: "/gazetteer", search: { tag: t.tag } as never }),
+      action: () =>
+        navigate({ to: "/gazetteer", search: { tag: t.tag } as never }),
     }));
   }, [tags, navigate]);
 
@@ -97,9 +154,13 @@ export function CommandPalette() {
     if (!q) return [...verbCommands, ...tagCommands].slice(0, 10);
     const ql = q.toLowerCase();
     const verbsMatch = verbCommands.filter(
-      (c) => c.label.toLowerCase().includes(ql) || (c.hint?.toLowerCase().includes(ql) ?? false),
+      (c) =>
+        c.label.toLowerCase().includes(ql) ||
+        (c.hint?.toLowerCase().includes(ql) ?? false),
     );
-    const tagsMatch = tagCommands.filter((c) => c.label.toLowerCase().includes(ql));
+    const tagsMatch = tagCommands.filter((c) =>
+      c.label.toLowerCase().includes(ql),
+    );
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
   }, [q, verbCommands, noteCommands, tagCommands]);
 
@@ -145,7 +206,9 @@ export function CommandPalette() {
         </div>
         {/* prompt */}
         <div className="flex items-center gap-2 border-b border-ink px-3 py-[10px]">
-          <span className="cl-mono text-[14px] text-accent">$</span>
+          <span className="cl-mono text-[13px] font-medium tracking-[0.08em] text-accent">
+            CLP&gt;
+          </span>
           <input
             ref={inputRef}
             value={q}
@@ -154,7 +217,8 @@ export function CommandPalette() {
             className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none"
           />
           <span className="cl-mono text-[10px] text-ink-mute">
-            {filtered.length}/{verbCommands.length + noteCommands.length + tagCommands.length}
+            {filtered.length}/
+            {verbCommands.length + noteCommands.length + tagCommands.length}
           </span>
         </div>
         {/* results */}
@@ -183,9 +247,13 @@ export function CommandPalette() {
                   active ? "bg-ink text-paper" : "text-ink"
                 }`}
               >
-                <span className="cl-mono text-center text-[12px] text-accent">{c.icon}</span>
+                <span className="cl-mono text-center text-[12px] text-accent">
+                  {c.icon}
+                </span>
                 <span className="flex flex-col overflow-hidden">
-                  <span className={`${labelClasses} overflow-hidden text-ellipsis whitespace-nowrap`}>
+                  <span
+                    className={`${labelClasses} overflow-hidden text-ellipsis whitespace-nowrap`}
+                  >
                     {c.label}
                   </span>
                   {c.sub && (

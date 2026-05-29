@@ -32,7 +32,20 @@ function shiftDate(s: string, delta: number): string {
   return fmtDate(d);
 }
 
-const ROMAN_MONTH = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+const ROMAN_MONTH = [
+  "I",
+  "II",
+  "III",
+  "IV",
+  "V",
+  "VI",
+  "VII",
+  "VIII",
+  "IX",
+  "X",
+  "XI",
+  "XII",
+];
 
 function romanDate(s: string): string {
   const d = parseDate(s);
@@ -68,7 +81,10 @@ export function Diurnal() {
     [captureText, capture],
   );
 
-  const goPrev = useCallback(() => setSelectedDate((d) => shiftDate(d, -1)), []);
+  const goPrev = useCallback(
+    () => setSelectedDate((d) => shiftDate(d, -1)),
+    [],
+  );
   const goNext = useCallback(() => setSelectedDate((d) => shiftDate(d, 1)), []);
   const goToday = useCallback(() => setSelectedDate(fmtDate(new Date())), []);
 
@@ -139,22 +155,32 @@ export function Diurnal() {
           </div>
         </div>
         <div className="mb-3 flex items-baseline justify-between border-b border-rule border-t-2 border-t-rule py-[5px]">
-          <div className="cl-serif text-[28px] font-semibold leading-none">{dayLabel}</div>
+          <div className="cl-serif text-[28px] font-semibold leading-none">
+            {dayLabel}
+          </div>
           <div className="cl-mono text-[11px]">
-            {yearRoman(parseDate(selectedDate).getFullYear())} · day {dayOfYear(parseDate(selectedDate))}
+            {yearRoman(parseDate(selectedDate).getFullYear())} · day{" "}
+            {dayOfYear(parseDate(selectedDate))}
           </div>
         </div>
 
-        {isLoading && <div className="cl-marg py-[18px]">… fetching diurnal page …</div>}
+        {isLoading && (
+          <div className="cl-marg py-[18px]">… fetching diurnal page …</div>
+        )}
 
         {!isLoading && fetchError && !isToday && (
-          <div className="cl-marg py-[18px]">⁂ no entry for {selectedDate}.</div>
+          <div className="cl-marg py-[18px]">
+            ⁂ no entry for {selectedDate}.
+          </div>
         )}
 
         {!isLoading && journalPath && !editor.isLoading && !editor.error && (
           <div>
             <div className="mb-1 flex items-center justify-end">
-              <SaveIndicator status={editor.saveStatus} error={editor.saveError} />
+              <SaveIndicator
+                status={editor.saveStatus}
+                error={editor.saveError}
+              />
             </div>
             <PageEditorHeader
               path={journalPath}
@@ -176,7 +202,9 @@ export function Diurnal() {
             {backlinks && backlinks.length > 0 && (
               <>
                 <hr className="cl-rule-soft my-4" />
-                <div className="cl-cap mb-2 text-[10px]">↘ Backlinks · {backlinks.length}</div>
+                <div className="cl-cap mb-2 text-[10px]">
+                  ↘ Backlinks · {backlinks.length}
+                </div>
                 <div>
                   {backlinks.map((b) => (
                     <div
@@ -218,25 +246,56 @@ export function Diurnal() {
 
       {/* R: marginalia */}
       <div className="border-l border-rule-soft pl-3">
-        <div className="cl-cap mb-1 text-[9px]">§ Habits, this day</div>
+        <div className="cl-cap mb-1 text-[9px]">§ This day</div>
         <hr className="cl-rule-soft" />
-        <p className="cl-marg mt-1">— no habits configured —</p>
+        <div className="cl-mono mt-1 flex flex-col gap-1 text-[11px]">
+          <div className="flex justify-between">
+            <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+              Day
+            </span>
+            <span className="text-ink-2">
+              {dayOfYear(parseDate(selectedDate))} / 365
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+              Backlinks
+            </span>
+            <span className="text-ink-2">{backlinks?.length ?? 0}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+              State
+            </span>
+            <span className="text-ink-2">
+              {journalPath ? "written" : "unwritten"}
+            </span>
+          </div>
+        </div>
 
-        <div className="cl-cap mb-1 mt-4 text-[9px]">§ Et cetera</div>
-        <hr className="cl-rule-soft" />
-        <p className="cl-marg mt-1">
-          The window is fogged from the inside; the kettle has stopped twice; outside, a pigeon
-          sits on the cable and does not move.
-        </p>
-
-        <pre className="cl-ascii cl-ascii-faint mt-4 text-center text-[6px]">{ASCII_QUILL}</pre>
+        <pre className="cl-ascii cl-ascii-faint mt-4 text-center text-[6px]">
+          {ASCII_QUILL}
+        </pre>
         <p className="cl-marg mt-1 text-center text-[10px]">fig. iv · stylus</p>
       </div>
     </div>
   );
 }
 
-const LOWERS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"];
+const LOWERS = [
+  "i",
+  "ii",
+  "iii",
+  "iv",
+  "v",
+  "vi",
+  "vii",
+  "viii",
+  "ix",
+  "x",
+  "xi",
+  "xii",
+];
 
 function romanLower(n: number): string {
   if (n <= 0) return "—";

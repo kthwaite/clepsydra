@@ -1,9 +1,13 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { useStats } from "#/api/index";
+import { formatRelativeTime } from "#/components/codex/codex-time";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
+import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
+import { ACCENTS, DENSITIES } from "#/lib/theme";
 import { type SettingsSection, useUiStore } from "#/store/ui";
 
 const sections: { id: SettingsSection; label: string }[] = [
@@ -84,20 +88,7 @@ export function SettingsModal() {
 
 function SettingsSectionContent({ section }: { section: SettingsSection }) {
   if (section === "general") {
-    return (
-      <>
-        <SettingsCard
-          title="Workspace"
-          description="Core workspace preferences and startup behavior will live here."
-          trailing={<ComingSoonBadge />}
-        />
-        <SettingsCard
-          title="Defaults"
-          description="Default note templates and naming rules will be configurable here."
-          trailing={<ComingSoonBadge />}
-        />
-      </>
-    );
+    return <CorpusPanel />;
   }
 
   if (section === "navigation") {
@@ -117,20 +108,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
   }
 
   if (section === "appearance") {
-    return (
-      <>
-        <SettingsCard
-          title="Theme Preferences"
-          description="Theme and typography controls will be centralized here."
-          trailing={<ComingSoonBadge />}
-        />
-        <SettingsCard
-          title="Density and Scale"
-          description="UI density and spacing controls are planned for this section."
-          trailing={<ComingSoonBadge />}
-        />
-      </>
-    );
+    return <OperatorPreferences />;
   }
 
   if (section === "editor") {
@@ -164,6 +142,165 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
       />
     </>
   );
+}
+
+function OperatorPreferences() {
+  const {
+    resolvedTheme,
+    setMode,
+    accent,
+    setAccent,
+    density,
+    setDensity,
+    diegetic,
+    setDiegetic,
+  } = useTheme();
+
+  return (
+    <div className="space-y-5">
+      <Row label="Mode">
+        <Segmented
+          value={resolvedTheme}
+          options={[
+            { id: "dark", label: "Dark" },
+            { id: "light", label: "Paper" },
+          ]}
+          onChange={(v) => setMode(v as "dark" | "light")}
+        />
+      </Row>
+
+      <Row label="Accent">
+        <div className="flex flex-wrap gap-1.5">
+          {ACCENTS.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => setAccent(a.id)}
+              title={a.label}
+              aria-label={a.label}
+              className={`flex items-center gap-1.5 border px-2 py-1 ${
+                accent === a.id
+                  ? "border-accent text-foreground"
+                  : "border-border text-muted-foreground"
+              }`}
+            >
+              <span
+                className="inline-block h-[10px] w-[10px]"
+                style={{ background: swatch(a.id) }}
+              />
+              <span className="cl-mono text-[9px] uppercase tracking-[0.1em]">
+                {a.id}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Row>
+
+      <Row label="Density">
+        <Segmented
+          value={density}
+          options={DENSITIES.map((d) => ({ id: d, label: d }))}
+          onChange={(v) => setDensity(v as (typeof DENSITIES)[number])}
+        />
+      </Row>
+
+      <Row label="Diegetic chrome">
+        <button
+          type="button"
+          onClick={() => setDiegetic(!diegetic)}
+          className={`cl-mono border px-3 py-1 text-[10px] uppercase tracking-[0.14em] ${
+            diegetic
+              ? "border-accent bg-accent text-black"
+              : "border-border text-muted-foreground"
+          }`}
+        >
+          {diegetic ? "on" : "off"}
+        </button>
+      </Row>
+    </div>
+  );
+}
+
+function CorpusPanel() {
+  const { data: stats } = useStats();
+  const rows: [string, ReactNode][] = [
+    ["Notes", stats?.pages ?? "—"],
+    ["Links, total", stats?.links_total ?? "—"],
+    ["Links, resolved", stats?.links_resolved ?? "—"],
+    ["Links, unresolved", stats?.links_unresolved ?? "—"],
+    ["Tags", stats?.tags ?? "—"],
+    ["Attachments", stats?.attachments ?? "—"],
+    ["Last collated", formatRelativeTime(stats?.last_indexed_at)],
+  ];
+  return (
+    <div className="border border-border bg-card p-4">
+      <h4 className="cl-mono mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+        § Corpus
+      </h4>
+      <div className="cl-mono flex flex-col gap-1 text-[12px]">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-4">
+            <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              {k}
+            </span>
+            <span className="tabular-nums text-foreground">{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 border-b border-border pb-4 last:border-b-0">
+      <span className="cl-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function Segmented({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="flex w-fit border border-border">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          className={`cl-mono border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] last:border-r-0 ${
+            value === o.id
+              ? "bg-accent text-black"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function swatch(id: string): string {
+  const map: Record<string, string> = {
+    barbican: "#ee7733",
+    alert: "#ff3b1f",
+    amber: "#ffb84a",
+    cyan: "#4cd9ff",
+    phosphor: "#5dffa6",
+    bone: "#e8e6df",
+  };
+  return map[id] ?? "#ee7733";
 }
 
 function SettingsCard({
