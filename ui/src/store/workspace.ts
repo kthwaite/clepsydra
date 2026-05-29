@@ -4,6 +4,23 @@ import { persist } from "zustand/middleware";
 export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
 
+export interface OpenHistoryEntry {
+  path: string;
+  openedAt: number;
+}
+
+const OPEN_HISTORY_CAP = 32;
+
+/** Prepend `path`, de-duplicate by path (newest wins), cap to 32 entries. */
+export function pushOpenHistory(
+  history: OpenHistoryEntry[],
+  path: string,
+  now: number,
+): OpenHistoryEntry[] {
+  const without = history.filter((e) => e.path !== path);
+  return [{ path, openedAt: now }, ...without].slice(0, OPEN_HISTORY_CAP);
+}
+
 export interface TabDescriptor {
   id: string;
   type: TabType;
@@ -19,6 +36,7 @@ interface WorkspaceState {
   tabs: TabDescriptor[];
   activeTabId: string | null;
   navigationMode: NavigationMode;
+  openHistory: OpenHistoryEntry[];
 }
 
 interface WorkspaceActions {
@@ -43,6 +61,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       tabs: [],
       activeTabId: null,
       navigationMode: "smart",
+      openHistory: [],
 
       openTab(type, path, label) {
         const state = get();
@@ -58,6 +77,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             tabs: state.tabs.map((t) =>
               t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
             ),
+            openHistory:
+              existing.type === "page" && existing.path
+                ? pushOpenHistory(state.openHistory, existing.path, Date.now())
+                : state.openHistory,
           });
           return;
         }
@@ -76,12 +99,20 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             tabs: state.tabs.map((t) =>
               t.id === state.activeTabId ? { ...newTab, id: t.id } : t,
             ),
+            openHistory:
+              type === "page" && path
+                ? pushOpenHistory(state.openHistory, path, Date.now())
+                : state.openHistory,
           });
         } else {
           // "new" or "smart" — add new tab
           set({
             tabs: [...state.tabs, newTab],
             activeTabId: newTab.id,
+            openHistory:
+              type === "page" && path
+                ? pushOpenHistory(state.openHistory, path, Date.now())
+                : state.openHistory,
           });
         }
       },
@@ -161,7 +192,14 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
     }),
     {
       name: "clepsydra.workspace",
-      version: 1,
+      version: 2,
+      migrate: (persisted, version): Partial<WorkspaceState> => {
+        const s = (persisted ?? {}) as Partial<WorkspaceState>;
+        if (version < 2 || !Array.isArray(s.openHistory)) {
+          return { ...s, openHistory: [] };
+        }
+        return s;
+      },
     },
   ),
 );
