@@ -378,6 +378,25 @@ body {
     border: 1px solid var(--rule);
 }
 
+/* Faint dossier grid texture (hero, cards). Sits behind content via ::before. */
+.cl-grid-texture {
+    position: relative;
+    overflow: hidden;
+}
+.cl-grid-texture > * {
+    position: relative;
+}
+.cl-grid-texture::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        repeating-linear-gradient(0deg, transparent 0 23px, var(--rule-soft) 23px 24px),
+        repeating-linear-gradient(90deg, transparent 0 23px, var(--rule-soft) 23px 24px);
+    opacity: 0.5;
+    pointer-events: none;
+}
+
 .cl-frame-double {
     border: 1px solid var(--rule);
     box-shadow: 0 0 0 3px var(--paper), 0 0 0 4px var(--rule);
