@@ -1,12 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo } from "react";
 import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useLocation } from "#/api/location";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
-import { InscribeModal } from "#/components/codex/InscribeModal";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { useUiStore } from "#/store/ui";
@@ -15,7 +14,7 @@ export function Atrium() {
   const navigate = useNavigate();
   const openTab = useOpenTab();
   const openSearch = useUiStore((s) => s.openSearch);
-  const [inscribeOpen, setInscribeOpen] = useState(false);
+  const openInscribe = useUiStore((s) => s.openInscribe);
   const { data: stats } = useStats();
   const { data: tags } = useTags();
   const { data: content } = useContentIndex(500);
@@ -75,7 +74,7 @@ export function Atrium() {
           <button
             type="button"
             className="cl-btn cl-btn-hot"
-            onClick={() => setInscribeOpen(true)}
+            onClick={openInscribe}
           >
             + Inscribe
           </button>
@@ -212,8 +211,6 @@ export function Atrium() {
           </div>
         )}
       </Panel>
-
-      {inscribeOpen && <InscribeModal onClose={() => setInscribeOpen(false)} />}
     </div>
   );
 }

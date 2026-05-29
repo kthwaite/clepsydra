@@ -1,6 +1,8 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
+import { BootSequence } from "#/components/codex/BootSequence";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { CommandPalette } from "#/components/codex/CommandPalette";
+import { InscribeModal } from "#/components/codex/InscribeModal";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
 import { RouteError } from "#/components/RouteError";
@@ -23,7 +25,9 @@ export const Route = createRootRoute({
         </CodexFrame>
         <CommandPalette />
         <SettingsModal />
+        <InscribeModal />
         <LinkPreviewLayer />
+        <BootSequence />
       </ReadingProgressProvider>
     </>
   ),

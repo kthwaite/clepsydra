@@ -11,6 +11,8 @@ interface UiState {
   isSettingsOpen: boolean;
   activeSettingsSection: SettingsSection;
   isSearchOpen: boolean;
+  isInscribeOpen: boolean;
+  isBooting: boolean;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
@@ -18,12 +20,18 @@ interface UiState {
   closeSearch: () => void;
   toggleSearch: () => void;
   setSearchOpen: (open: boolean) => void;
+  openInscribe: () => void;
+  closeInscribe: () => void;
+  runBoot: () => void;
+  endBoot: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   isSettingsOpen: false,
   activeSettingsSection: "general",
   isSearchOpen: false,
+  isInscribeOpen: false,
+  isBooting: false,
   openSettings: (section = "general") =>
     set({ isSettingsOpen: true, activeSettingsSection: section }),
   closeSettings: () => set({ isSettingsOpen: false }),
@@ -33,4 +41,8 @@ export const useUiStore = create<UiState>((set) => ({
   closeSearch: () => set({ isSearchOpen: false }),
   toggleSearch: () => set((state) => ({ isSearchOpen: !state.isSearchOpen })),
   setSearchOpen: (open) => set({ isSearchOpen: open }),
+  openInscribe: () => set({ isInscribeOpen: true }),
+  closeInscribe: () => set({ isInscribeOpen: false }),
+  runBoot: () => set({ isBooting: true }),
+  endBoot: () => set({ isBooting: false }),
 }));

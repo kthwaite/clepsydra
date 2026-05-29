@@ -43,6 +43,9 @@ export function CommandPalette() {
   const open = useUiStore((s) => s.isSearchOpen);
   const close = useUiStore((s) => s.closeSearch);
   const toggle = useUiStore((s) => s.toggleSearch);
+  const openInscribe = useUiStore((s) => s.openInscribe);
+  const openSettings = useUiStore((s) => s.openSettings);
+  const runBoot = useUiStore((s) => s.runBoot);
   const navigate = useNavigate();
   const openTab = useOpenTab();
   const { toggle: toggleTheme } = useTheme();
@@ -117,13 +120,34 @@ export function CommandPalette() {
       },
       {
         kind: "cmd",
+        icon: "▣",
+        label: "Inscribe new folio",
+        hint: "⌘N",
+        action: () => openInscribe(),
+      },
+      {
+        kind: "cmd",
+        icon: "›",
+        label: "Open Status / preferences",
+        hint: "⌘,",
+        action: () => openSettings("appearance"),
+      },
+      {
+        kind: "cmd",
         icon: "›",
         label: "Toggle dark mode",
         hint: "⌘\\",
         action: () => toggleTheme(),
       },
+      {
+        kind: "cmd",
+        icon: "⟳",
+        label: "Re-run boot sequence",
+        hint: "sys.boot",
+        action: () => runBoot(),
+      },
     ],
-    [navigate, openTab, toggleTheme],
+    [navigate, openTab, toggleTheme, openInscribe, openSettings, runBoot],
   );
 
   const noteCommands = useMemo<Command[]>(() => {
