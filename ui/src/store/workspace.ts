@@ -11,6 +11,8 @@ export interface TabDescriptor {
   label: string;
   /** Pinned tabs sort first in SHEAF and are visually marked. */
   pinned?: boolean;
+  /** Epoch ms of last activation — orders the RECENT accordion section. */
+  lastActiveAt?: number;
 }
 
 interface WorkspaceState {
@@ -51,7 +53,12 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
         if (existing) {
           // Always focus existing tab regardless of mode
-          set({ activeTabId: existing.id });
+          set({
+            activeTabId: existing.id,
+            tabs: state.tabs.map((t) =>
+              t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
+            ),
+          });
           return;
         }
 
@@ -60,6 +67,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           type,
           path: type === "page" ? path : undefined,
           label: label ?? path ?? "Graph",
+          lastActiveAt: Date.now(),
         };
 
         if (state.navigationMode === "replace" && state.activeTabId) {
@@ -116,7 +124,12 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       activateTab(tabId) {
-        set({ activeTabId: tabId });
+        set((state) => ({
+          activeTabId: tabId,
+          tabs: state.tabs.map((t) =>
+            t.id === tabId ? { ...t, lastActiveAt: Date.now() } : t,
+          ),
+        }));
       },
 
       togglePin(tabId) {

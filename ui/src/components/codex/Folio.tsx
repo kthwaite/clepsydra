@@ -1,21 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { CLink } from "#/components/codex/CLink";
+import {
+  formatAbsoluteDate,
+  formatRelativeTime,
+} from "#/components/codex/codex-time";
+import {
+  countWordsFromSlate,
+  shortFolio,
+} from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
-import { formatAbsoluteDate, formatRelativeTime } from "#/components/codex/codex-time";
-import { extractFootnoteDefinitions } from "#/components/codex/footnotes";
-import { countWordsFromSlate, shortFolio } from "#/components/codex/folio-utils";
-import { Sheaf } from "#/components/codex/Sheaf";
+import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
+import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
-import { useWorkspaceStore } from "#/store/workspace";
+import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type FolioProps = {
   tabId: string;
   path: string;
 };
+
+const R_TAB_KEY = "clp.folio.r.tab";
+type RTab = "backlinks" | "links" | "tags";
 
 export function Folio({ tabId, path }: FolioProps) {
   const editor = usePageEditor(path);
@@ -25,7 +35,38 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const { setProgress } = useReadingProgress();
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const [tocCollapsed, setTocCollapsed] = useState(false);
+
+  const left = useCollapsibleRail({
+    storageKey: "clp.folio.l",
+    side: "left",
+    defaultWidth: 240,
+    min: 180,
+    max: 480,
+  });
+  const right = useCollapsibleRail({
+    storageKey: "clp.folio.r",
+    side: "right",
+    defaultWidth: 280,
+    min: 220,
+    max: 480,
+  });
+  const [rTab, setRTab] = useState<RTab>(() => {
+    try {
+      const v = window.localStorage.getItem(R_TAB_KEY);
+      if (v === "backlinks" || v === "links" || v === "tags") return v;
+    } catch {
+      // ignore
+    }
+    return "backlinks";
+  });
+  const selectRTab = (t: RTab) => {
+    setRTab(t);
+    try {
+      window.localStorage.setItem(R_TAB_KEY, t);
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (editor.title) updateTabLabel(tabId, editor.title);
@@ -33,7 +74,7 @@ export function Folio({ tabId, path }: FolioProps) {
 
   useEffect(() => {
     setProgress(0);
-  }, [path, setProgress]);
+  }, [setProgress]);
 
   const onScroll = () => {
     const el = bodyRef.current;
@@ -43,25 +84,21 @@ export function Folio({ tabId, path }: FolioProps) {
   };
 
   const folioCode = shortFolio(path);
+  const kind = useMemo(
+    () => resolveKind({ path, body: editor.bodyMarkdown }),
+    [path, editor.bodyMarkdown],
+  );
   const wordCount = useMemo(
     () => countWordsFromSlate(editor.initialValue),
     [editor.initialValue],
   );
-
-  const toc = useMemo(() => buildToc(editor.initialValue), [editor.initialValue]);
-
-  const draftedAt = useMemo(
-    () => formatAbsoluteDate(editor.createdAt),
-    [editor.createdAt],
+  const toc = useMemo(
+    () => buildToc(editor.initialValue),
+    [editor.initialValue],
   );
-  const updatedAt = useMemo(
-    () => formatRelativeTime(editor.updatedAt),
-    [editor.updatedAt],
-  );
-
-  const footnotes = useMemo(
-    () => extractFootnoteDefinitions(editor.bodyMarkdown),
-    [editor.bodyMarkdown],
+  const { activeIndex, scrollTo } = useScrollSpy(
+    bodyRef,
+    editor.editorRevision,
   );
 
   if (editor.isLoading) {
@@ -71,80 +108,114 @@ export function Folio({ tabId, path }: FolioProps) {
     return <div className="cl-marg p-6">⁂ folio not found · {path}</div>;
   }
 
+  const lw = left.collapsed ? 34 : left.width;
+  const rw = right.collapsed ? 34 : right.width;
+
   return (
-    <div className="flex h-full flex-col">
-      <Sheaf activeTabId={tabId} />
+    <div
+      className="grid h-full min-h-0"
+      style={{ gridTemplateColumns: `${lw}px 1fr ${rw}px` }}
+    >
+      {/* ── LEFT · META ──────────────────────────────────────────────── */}
+      {left.collapsed ? (
+        <RailStub label="META" side="left" onExpand={left.toggle} />
+      ) : (
+        <aside className="cl-noscroll relative overflow-auto border-r border-rule">
+          <RailHeader label="META" onCollapse={left.toggle} side="left" />
 
-      <div
-        className={`grid min-h-0 flex-1 transition-[grid-template-columns] duration-200 ${
-          tocCollapsed ? "grid-cols-[34px_1fr_260px]" : "grid-cols-[200px_1fr_260px]"
-        }`}
-      >
-        {/* L · TOC */}
-        <div
-          className={`cl-noscroll overflow-auto border-r border-rule ${
-            tocCollapsed ? "px-1 py-3" : "px-3 py-[14px]"
-          }`}
-        >
-          <div className="mb-1 flex items-center justify-between">
-            {!tocCollapsed && <span className="cl-cap text-[9px]">§ Contents</span>}
-            <button
-              type="button"
-              onClick={() => setTocCollapsed((c) => !c)}
-              className="cl-mono cursor-pointer select-none border border-rule-soft bg-transparent px-1 text-[11px] leading-[14px] text-ink-mute"
-              title={tocCollapsed ? "expand" : "collapse"}
-              aria-label={tocCollapsed ? "expand contents" : "collapse contents"}
-            >
-              {tocCollapsed ? "›" : "‹"}
-            </button>
-          </div>
-          {!tocCollapsed && (
-            <>
-              <hr className="cl-rule-soft" />
-              <div className="cl-serif mt-1 text-[11px]">
-                {toc.length === 0 && <p className="cl-marg m-0">No headings yet.</p>}
-                {toc.map((h, i) => (
-                  <div
-                    key={`${h.text}-${i}`}
-                    className="mb-[2px] grid grid-cols-[30px_1fr] gap-1 text-ink"
-                    style={{ paddingLeft: (h.depth - 1) * 8 }}
-                  >
-                    <span
-                      className={`cl-mono text-right text-ink-mute ${
-                        h.depth > 1 ? "text-[9px]" : "text-[10px]"
+          <Block label="Document">
+            <KV k="ID" v={folioCode} />
+            <KV
+              k="Kind"
+              v={
+                <span className="inline-flex items-center gap-1.5">
+                  <Pip kind={kind} />
+                  {kindLabel(kind)}
+                </span>
+              }
+            />
+            <KV
+              k="Path"
+              v={<span className="break-all text-ink-mute">{path}</span>}
+            />
+          </Block>
+
+          <Block label={`Contents · ${toc.length}`}>
+            {toc.length === 0 ? (
+              <p className="cl-marg m-0">No headings yet.</p>
+            ) : (
+              <div className="cl-mono">
+                {toc.map((h, i) => {
+                  const active = i === activeIndex;
+                  return (
+                    <button
+                      key={`${h.text}-${i}`}
+                      type="button"
+                      onClick={() => scrollTo(i)}
+                      className={`flex w-full cursor-pointer items-baseline gap-1.5 py-[2px] pr-1 text-left text-[11px] ${
+                        active
+                          ? "border-l-2 border-accent bg-highlight pl-2 text-ink"
+                          : "border-l-2 border-transparent pl-2 text-ink-mute hover:text-ink"
                       }`}
+                      style={{ paddingLeft: (h.depth - 1) * 8 + 8 }}
                     >
-                      {h.number}
-                    </span>
-                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                      {h.text}
-                    </span>
-                  </div>
-                ))}
+                      <span className="text-[9px] text-ink-mute">
+                        {h.number}
+                      </span>
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                        {h.text}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </Block>
 
-        {/* CENTER · prose */}
-        <div
-          ref={bodyRef}
-          onScroll={onScroll}
-          className="cl-noscroll relative overflow-auto px-7 py-[14px] pb-7"
-        >
-          {/* page header */}
-          <div className="mb-1 flex items-baseline justify-between">
-            <span className="cl-cap text-[9px] text-ink-mute">{folioCode}</span>
-            <div className="cl-stamp rotate-2 text-[9px]">READ · IV·xxviii</div>
+          <Block label="Chronology">
+            <KV k="Created" v={formatAbsoluteDate(editor.createdAt)} />
+            <KV k="Modified" v={formatRelativeTime(editor.updatedAt)} />
+          </Block>
+
+          <Block label="Vitals">
+            <KV k="Words" v={wordCount > 0 ? wordCount : "—"} />
+            <KV k="Backlinks" v={backlinks?.length ?? 0} />
+            <KV k="Links" v={outlinks?.length ?? 0} />
+          </Block>
+
+          <OpenFilesAccordion activeTabId={tabId} />
+
+          <Resizer onPointerDown={left.onResizeStart} side="right" />
+        </aside>
+      )}
+
+      {/* ── CENTER · DOSSIER ─────────────────────────────────────────── */}
+      <div
+        ref={bodyRef}
+        onScroll={onScroll}
+        className="cl-noscroll relative overflow-auto"
+      >
+        <div className="mx-auto max-w-[900px] px-7 py-[18px] pb-10">
+          {/* dossier header */}
+          <div className="flex items-baseline justify-between">
+            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+              FILE / {folioCode}
+            </span>
             <div className="flex items-center gap-3">
-              <SaveIndicator status={editor.saveStatus} error={editor.saveError} />
-              <span className="cl-mono text-[9px] text-ink-mute">fol. recto</span>
+              <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+                <Pip kind={kind} />
+                {kindLabel(kind)}
+              </span>
+              <SaveIndicator
+                status={editor.saveStatus}
+                error={editor.saveError}
+              />
             </div>
           </div>
-          <hr className="cl-rule-double" />
+          <hr className="cl-rule-dash mt-2" />
 
-          {/* title */}
-          <div className="mt-3">
+          {/* title + tags + aliases */}
+          <div className="mt-4">
             <PageEditorHeader
               path={path}
               title={editor.title}
@@ -156,49 +227,10 @@ export function Folio({ tabId, path }: FolioProps) {
             />
           </div>
 
-          {/* metadata strip */}
-          <div className="cl-mono mt-3 flex flex-wrap gap-x-[14px] gap-y-[2px] text-[10px] text-ink-mute">
-            <span>
-              {(editor.tags ?? []).map((t, i) => (
-                <span key={t}>
-                  {i > 0 && " · "}
-                  <CLink
-                    noNavigate
-                    payload={{
-                      title: `#${t}`,
-                      folio: "Subject",
-                      excerpt: `Folios under #${t}.`,
-                    }}
-                    className="text-accent-deep"
-                  >
-                    {t}
-                  </CLink>
-                </span>
-              ))}
-            </span>
-            <span>
-              drafted {draftedAt} · last touched {updatedAt}
-            </span>
-            <span>
-              <em>certainty</em>: drafting · {wordCount} wd · {backlinks?.length ?? 0} backlinks
-            </span>
-          </div>
+          <hr className="cl-rule-dash mt-3" />
 
-          {/* triplet */}
-          <div className="cl-mono mb-4 mt-[6px] flex gap-[18px] border-b border-rule-soft pb-[6px] text-[10px]">
-            <span className="cursor-pointer border-b border-dotted border-ink">
-              ↘ backlinks · {backlinks?.length ?? 0}
-            </span>
-            <span style={{ borderBottom: "1px dotted var(--ink)", cursor: "pointer" }}>
-              ≈ similar · {similar?.items.length ?? 0}
-            </span>
-            <span style={{ borderBottom: "1px dotted var(--ink)", cursor: "pointer" }}>
-              ⌥ bibliography · {outlinks?.length ?? 0}
-            </span>
-          </div>
-
-          {/* body — Slate editor with codex prose styling */}
-          <article className="codex-prose">
+          {/* body — Slate editor styled as dossier prose */}
+          <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
             <SlateEditor
               key={`${path}:${editor.editorRevision}`}
               initialValue={editor.initialValue}
@@ -207,77 +239,388 @@ export function Folio({ tabId, path }: FolioProps) {
             />
           </article>
 
-          {/* page foot */}
-          <hr className="cl-rule-soft mt-6" />
-          <div className="cl-mono mt-1 flex justify-between text-[9px]">
-            <span className="text-ink-mute">{path}</span>
+          {/* end of file */}
+          <hr className="cl-rule-dash mt-8" />
+          <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+            <span>END OF FILE</span>
             <span>
-              fol. {folioCode} · {wordCount > 0 ? `${wordCount} wd` : "—"}
+              {folioCode} · {wordCount > 0 ? `${wordCount} WD` : "—"}
             </span>
           </div>
         </div>
-
-        {/* R · marginalia + apparatus */}
-        <div className="cl-noscroll cl-serif overflow-auto border-l border-rule px-3 py-[14px] text-[11px]">
-          <div className="cl-cap mb-1 text-[9px]">↘ Backlinks · {backlinks?.length ?? 0}</div>
-          <hr className="cl-rule-soft" />
-          <div className="mt-1">
-            {(backlinks ?? []).length === 0 && (
-              <p className="cl-marg m-0">None yet — this folio stands alone.</p>
-            )}
-            {(backlinks ?? []).map((b) => (
-              <div
-                key={b.source_path}
-                className="mb-[2px] grid grid-cols-[52px_1fr] text-[11px]"
-              >
-                <span className="cl-mono text-[9px] text-accent-deep">
-                  {shortFolio(b.source_path)}
-                </span>
-                <CLink path={b.source_path} className="italic">
-                  {b.source_title || b.source_path}
-                </CLink>
-              </div>
-            ))}
-          </div>
-
-          <div className="cl-cap mt-4 mb-1" style={{ fontSize: 9 }}>
-            § Marginalia · {footnotes.length}
-          </div>
-          <hr className="cl-rule-soft" />
-          {footnotes.length === 0 ? (
-            <p className="cl-marg mt-1" style={{ margin: 0 }}>
-              No sidenotes — add <span className="cl-mono">[^1]</span> in the body and a definition
-              <span className="cl-mono"> [^1]: …</span> below to populate this rail.
-            </p>
-          ) : (
-            <ol className="cl-serif mt-1" style={{ paddingLeft: 18, margin: 0, fontSize: 11 }}>
-              {footnotes.map((f, i) => (
-                <li key={f.id} style={{ marginBottom: 4 }}>
-                  <span className="cl-mono" style={{ color: "var(--accent-deep)", marginRight: 4 }}>
-                    {i + 1}.
-                  </span>
-                  {f.text}
-                </li>
-              ))}
-            </ol>
-          )}
-
-          <div className="cl-cap mb-1 mt-4 text-[9px]">⌥ Aliases</div>
-          <hr className="cl-rule-soft" />
-          <div className="cl-mono mt-1 text-[10px]">
-            {(editor.aliases ?? []).length === 0 ? (
-              <span className="cl-marg">— none —</span>
-            ) : (
-              editor.aliases.join(" · ")
-            )}
-          </div>
-        </div>
       </div>
+
+      {/* ── RIGHT · APPARATUS ────────────────────────────────────────── */}
+      {right.collapsed ? (
+        <RailStub label="LINKS" side="right" onExpand={right.toggle} />
+      ) : (
+        <aside className="cl-noscroll relative overflow-auto border-l border-rule">
+          <Resizer onPointerDown={right.onResizeStart} side="left" />
+          <div className="flex items-stretch border-b border-rule">
+            <RTabBtn
+              label="Backlinks"
+              n={backlinks?.length ?? 0}
+              active={rTab === "backlinks"}
+              onClick={() => selectRTab("backlinks")}
+            />
+            <RTabBtn
+              label="Links"
+              n={outlinks?.length ?? 0}
+              active={rTab === "links"}
+              onClick={() => selectRTab("links")}
+            />
+            <RTabBtn
+              label="Tags"
+              n={(editor.tags ?? []).length}
+              active={rTab === "tags"}
+              onClick={() => selectRTab("tags")}
+            />
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={right.toggle}
+              className="cl-mono cursor-pointer px-2 text-[12px] text-ink-mute hover:text-ink"
+              aria-label="collapse panel"
+            >
+              ›
+            </button>
+          </div>
+
+          <div className="px-3 py-3">
+            {rTab === "backlinks" && (
+              <LinkList
+                empty="No backlinks — this folio stands alone."
+                items={(backlinks ?? []).map((b) => ({
+                  path: b.source_path,
+                  title: b.source_title || b.source_path,
+                }))}
+              />
+            )}
+            {rTab === "links" && (
+              <>
+                <LinkList
+                  empty="No outbound links yet."
+                  items={(outlinks ?? [])
+                    .filter((o): o is typeof o & { target_path: string } =>
+                      Boolean(o.target_path),
+                    )
+                    .map((o) => ({
+                      path: o.target_path,
+                      title: o.target_raw || o.target_path,
+                    }))}
+                />
+                {(similar?.items.length ?? 0) > 0 && (
+                  <>
+                    <div className="cl-mono mt-4 mb-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+                      ≈ Similar
+                    </div>
+                    <LinkList
+                      empty=""
+                      items={(similar?.items ?? []).map((s) => ({
+                        path: s.path,
+                        title: s.title || s.path,
+                      }))}
+                    />
+                  </>
+                )}
+              </>
+            )}
+            {rTab === "tags" &&
+              ((editor.tags ?? []).length === 0 ? (
+                <p className="cl-marg m-0">∅ No tags.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {(editor.tags ?? []).map((t) => (
+                    <span
+                      key={t}
+                      className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] uppercase tracking-[0.08em] text-ink-2"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              ))}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
 
-/* --- TOC extraction from initial Slate value -------------------------------- */
+/* ── small presentational helpers ─────────────────────────────────────── */
+
+function Pip({ kind }: { kind: Parameters<typeof kindColorVar>[0] }) {
+  return (
+    <span
+      className="inline-block h-[6px] w-[6px] flex-shrink-0"
+      style={{ background: kindColorVar(kind) }}
+      aria-hidden
+    />
+  );
+}
+
+function RailHeader({
+  label,
+  onCollapse,
+  side,
+}: {
+  label: string;
+  onCollapse: () => void;
+  side: "left" | "right";
+}) {
+  return (
+    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-rule bg-paper px-3 py-1">
+      <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+        {label}
+      </span>
+      <button
+        type="button"
+        onClick={onCollapse}
+        className="cl-mono cursor-pointer text-[12px] text-ink-mute hover:text-ink"
+        aria-label={`collapse ${label}`}
+      >
+        {side === "left" ? "‹" : "›"}
+      </button>
+    </div>
+  );
+}
+
+function RailStub({
+  label,
+  side,
+  onExpand,
+}: {
+  label: string;
+  side: "left" | "right";
+  onExpand: () => void;
+}) {
+  return (
+    <aside
+      className={`flex justify-center pt-3 ${
+        side === "left" ? "border-r" : "border-l"
+      } border-rule`}
+    >
+      <button
+        type="button"
+        onClick={onExpand}
+        className="cl-mono cursor-pointer text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-ink [writing-mode:vertical-rl]"
+        aria-label={`expand ${label}`}
+      >
+        {label} {side === "left" ? "›" : "‹"}
+      </button>
+    </aside>
+  );
+}
+
+function Resizer({
+  onPointerDown,
+  side,
+}: {
+  onPointerDown: (e: React.PointerEvent) => void;
+  side: "left" | "right";
+}) {
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      className={`absolute top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-accent ${
+        side === "left" ? "left-0" : "right-0"
+      }`}
+      aria-hidden
+    />
+  );
+}
+
+function Block({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-rule-soft px-3 py-3">
+      <div className="cl-mono mb-1.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function KV({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="cl-mono grid grid-cols-[64px_1fr] gap-2 py-[1px] text-[11px]">
+      <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+        {k}
+      </span>
+      <span className="min-w-0 text-ink-2">{v}</span>
+    </div>
+  );
+}
+
+function RTabBtn({
+  label,
+  n,
+  active,
+  onClick,
+}: {
+  label: string;
+  n: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-2.5 py-1.5 text-[9px] uppercase tracking-[0.14em] ${
+        active
+          ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
+          : "text-ink-mute hover:text-ink"
+      }`}
+    >
+      {label}
+      <span className={active ? "text-accent" : "text-ink-mute"}>{n}</span>
+    </button>
+  );
+}
+
+function LinkList({
+  items,
+  empty,
+}: {
+  items: { path: string; title: string }[];
+  empty: string;
+}) {
+  if (items.length === 0) {
+    return empty ? <p className="cl-marg m-0">{empty}</p> : null;
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      {items.map((it) => (
+        <div key={it.path} className="grid grid-cols-[16px_1fr] gap-1.5">
+          <Pip kind={resolveKindAndColor(it.path)} />
+          <div className="min-w-0">
+            <CLink path={it.path} className="block text-[12px] text-ink">
+              {it.title}
+            </CLink>
+            <span className="cl-mono block text-[9px] text-ink-mute">
+              {shortFolio(it.path)}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function resolveKindAndColor(path: string) {
+  // list-level kind derives from path only
+  return resolveKind({ path });
+}
+
+/* ── open-files vertical accordion ────────────────────────────────────── */
+
+function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
+  const tabs = useWorkspaceStore((s) => s.tabs);
+  const activateTab = useWorkspaceStore((s) => s.activateTab);
+  const [open, setOpen] = useState(true);
+
+  const pages = tabs.filter((t) => t.type === "page");
+  const pinned = pages.filter((t) => t.pinned);
+  const recent = pages
+    .filter((t) => !t.pinned)
+    .sort((a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0));
+
+  return (
+    <div className="border-b border-rule-soft px-3 py-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="cl-mono mb-1.5 flex w-full cursor-pointer items-center justify-between text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-ink"
+      >
+        <span>Open files · {pages.length}</span>
+        <span>{open ? "⌄" : "›"}</span>
+      </button>
+      {open && (
+        <>
+          {pinned.length > 0 && (
+            <Section title="Pinned">
+              {pinned.map((t) => (
+                <OpenRow
+                  key={t.id}
+                  t={t}
+                  active={t.id === activeTabId}
+                  onClick={() => activateTab(t.id)}
+                />
+              ))}
+            </Section>
+          )}
+          <Section title="Recent">
+            {recent.length === 0 && pinned.length === 0 ? (
+              <p className="cl-marg m-0">None open.</p>
+            ) : (
+              recent.map((t) => (
+                <OpenRow
+                  key={t.id}
+                  t={t}
+                  active={t.id === activeTabId}
+                  onClick={() => activateTab(t.id)}
+                />
+              ))
+            )}
+          </Section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-1.5">
+      <div className="cl-mono mb-0.5 text-[8px] uppercase tracking-[0.2em] text-ink-mute opacity-70">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function OpenRow({
+  t,
+  active,
+  onClick,
+}: {
+  t: TabDescriptor;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const kind = resolveKind({ path: t.path ?? "" });
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={t.path ?? t.label}
+      className={`flex w-full cursor-pointer items-center gap-1.5 py-[2px] text-left text-[11px] ${
+        active ? "text-ink" : "text-ink-mute hover:text-ink"
+      }`}
+    >
+      <Pip kind={kind} />
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+        {t.label || t.path || "(untitled)"}
+      </span>
+    </button>
+  );
+}
+
+/* ── TOC extraction from initial Slate value ──────────────────────────── */
 
 type TocEntry = { number: string; depth: number; text: string };
 
