@@ -1,472 +1,474 @@
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useLocation } from "#/api/location";
-import { ASCII_COMPASS, MiniAsciiAnimation } from "#/components/codex/ascii";
-import { CLink } from "#/components/codex/CLink";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { InscribeModal } from "#/components/codex/InscribeModal";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
+import { useUiStore } from "#/store/ui";
 
 export function Atrium() {
   const navigate = useNavigate();
   const openTab = useOpenTab();
+  const openSearch = useUiStore((s) => s.openSearch);
   const [inscribeOpen, setInscribeOpen] = useState(false);
   const { data: stats } = useStats();
   const { data: tags } = useTags();
-  const { data: content } = useContentIndex(40);
+  const { data: content } = useContentIndex(500);
   const { data: bcl } = useBcl();
   const { data: location } = useLocation();
 
-  const recent = useMemo(() => {
-    const items = content?.items ?? [];
-    return [...items]
-      .sort((a, b) => {
-        const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
-        const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
-        return tb - ta;
-      })
-      .slice(0, 7);
-  }, [content]);
+  const items = content?.items ?? [];
 
-  const totalEntries = stats?.pages ?? 0;
-  const totalLinks = stats?.links_total ?? 0;
-  const totalTags = stats?.tags ?? 0;
+  const recent = useMemo(
+    () =>
+      [...items]
+        .sort(
+          (a, b) =>
+            (b.updated_at ? Date.parse(b.updated_at) : 0) -
+            (a.updated_at ? Date.parse(a.updated_at) : 0),
+        )
+        .slice(0, 8),
+    [items],
+  );
 
-  const horoLabel = useMemo(() => {
-    const now = new Date();
-    const lat = location?.latitude ?? null;
-    const lon = location?.longitude ?? null;
-    const sunsetMs =
-      lat !== null && lon !== null
-        ? SunCalc.getTimes(now, lat, lon).sunset.getTime()
-        : new Date(now).setHours(19, 0, 0, 0);
-    const remainingMin = Math.max(
-      0,
-      Math.floor((sunsetMs - now.getTime()) / 60_000),
-    );
-    const h = Math.floor(remainingMin / 60);
-    const m = remainingMin % 60;
-    return {
-      time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
-      remaining: `${h}h ${pad(m)}m of light remaining`,
-      place: location?.label ?? null,
-    };
-  }, [location?.latitude, location?.longitude, location?.label]);
+  const heat = useMemo(() => buildHeatmap(items), [items]);
+  const topTags = useMemo(
+    () => [...(tags ?? [])].sort((a, b) => b.count - a.count).slice(0, 8),
+    [tags],
+  );
+  const maxTag = topTags[0]?.count ?? 1;
 
-  const showProspective =
-    import.meta.env.VITE_ENABLE_PROSPECTIVE_PANELS === "1";
+  const now = new Date();
+  const sky = buildSky(
+    now,
+    location?.latitude ?? null,
+    location?.longitude ?? null,
+    location?.label ?? null,
+  );
+  const aphorism = APHORISMS[dayOfYear(now) % APHORISMS.length];
 
   return (
-    <div className="grid gap-4 px-5 py-4 lg:grid-cols-[2fr_1fr]">
-      {/* LEFT */}
-      <div>
-        {/* Frontispiece */}
-        <div className="cl-frame relative mb-3 px-5 py-4">
-          <div className="cl-cap absolute left-3 top-2 text-[9px] text-ink-mute">
-            FRONTISPIECE
+    <div className="mx-auto flex max-w-[1140px] flex-col gap-5 px-6 py-6">
+      {/* ── HERO ─────────────────────────────────────────────────────── */}
+      <section className="cl-frame flex flex-col gap-4 px-6 py-5 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="font-sans text-[40px] font-black leading-[0.95] tracking-[-0.02em] text-ink">
+            {greeting(now)}.
+          </h1>
+          <div className="cl-mono mt-2 text-[11px] uppercase tracking-[0.18em] text-ink-mute">
+            {fmtDate(now)} · JD {julianDay(now)}
           </div>
-          <div className="cl-cap absolute right-3 top-2 text-[9px] text-ink-mute">
-            PL. I
-          </div>
-          <div className="grid grid-cols-[auto_1fr] gap-6 pt-3">
-            <FrontispieceAnimation />
-            <div>
-              <div className="cl-cap cl-cap-wide text-[34px] font-bold leading-none">
-                WELCOME,
-                <br />
-                READER
-              </div>
-              <hr className="cl-rule-double my-[10px] mb-2 mt-[10px] border-accent" />
-              <p className="cl-serif m-0 text-[16px] italic leading-[1.5] text-ink-2">
-                You hold open a private codex. {totalEntries} folios indexed,{" "}
-                {totalLinks} cross-references, {totalTags} subjects distinct.
-                The clepsydra's water is{" "}
-                <span className="border-b border-dotted border-ink">
-                  three-quarters spent
-                </span>
-                ; let us proceed.
-              </p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  className="cl-btn"
-                  onClick={() => navigate({ to: "/journal" })}
-                >
-                  Today's Diurnal
-                </button>
-                {recent[0] && (
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="cl-btn"
+            onClick={() => navigate({ to: "/journal" })}
+          >
+            Open Diurnal
+          </button>
+          <button
+            type="button"
+            className="cl-btn cl-btn-hot"
+            onClick={() => setInscribeOpen(true)}
+          >
+            + Inscribe
+          </button>
+          <button type="button" className="cl-btn" onClick={openSearch}>
+            Search ⌘K
+          </button>
+        </div>
+      </section>
+
+      {/* ── STAT GRID ────────────────────────────────────────────────── */}
+      <section className="grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-3 lg:grid-cols-5">
+        <Stat label="Notes" value={stats?.pages} />
+        <Stat label="Links" value={stats?.links_total} />
+        <Stat label="Unresolved" value={stats?.links_unresolved} tone="warn" />
+        <Stat label="Tags" value={stats?.tags} />
+        <Stat label="Attachments" value={stats?.attachments} />
+      </section>
+
+      {/* ── ACTIVITY + TAGS | SKY + APHORISM ─────────────────────────── */}
+      <section className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
+        <div className="flex flex-col gap-5">
+          <Panel label={`Activity · ${heat.total} edits / 26wk`}>
+            <Heatmap weeks={heat.weeks} />
+          </Panel>
+          <Panel label="Subjects, by frequency">
+            {topTags.length === 0 ? (
+              <p className="cl-marg m-0">No tags yet.</p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {topTags.map((t) => (
                   <button
                     type="button"
-                    className="cl-btn"
+                    key={t.tag}
                     onClick={() =>
-                      openTab(
-                        "page",
-                        recent[0].path,
-                        recent[0].title || recent[0].path,
-                      )
+                      navigate({
+                        to: "/gazetteer",
+                        search: { tag: t.tag } as never,
+                      })
                     }
+                    className="group grid cursor-pointer grid-cols-[120px_1fr_36px] items-center gap-2 text-left"
                   >
-                    Resume Folio {shortFolio(recent[0].path)}
+                    <span className="cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-2 group-hover:text-accent">
+                      #{t.tag}
+                    </span>
+                    <span className="h-[8px] bg-rule-soft">
+                      <span
+                        className="block h-full bg-accent"
+                        style={{
+                          width: `${Math.max(4, (t.count / maxTag) * 100)}%`,
+                        }}
+                      />
+                    </span>
+                    <span className="cl-mono text-right text-[10px] tabular-nums text-ink-mute">
+                      {t.count}
+                    </span>
                   </button>
-                )}
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+
+        <div className="flex flex-col gap-5">
+          <Panel label="Sky">
+            <div className="cl-mono flex flex-col gap-1.5 text-[11px]">
+              <KVLine k="Phase" v={`${sky.moonGlyph} ${sky.moonName}`} />
+              <KVLine k="Sunrise" v={sky.sunrise} />
+              <KVLine k="Sunset" v={sky.sunset} />
+              <KVLine k="Light left" v={sky.lightLeft} />
+              {sky.place && <KVLine k="At" v={sky.place} />}
+            </div>
+          </Panel>
+          <Panel label="Aphorism">
+            <blockquote className="m-0 font-sans text-[15px] italic leading-[1.5] text-ink-2">
+              “{aphorism.text}”
+            </blockquote>
+            <div className="cl-mono mt-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute">
+              — {aphorism.who}
+            </div>
+          </Panel>
+          {bcl?.birth_date &&
+            bcl.bcl_date &&
+            bcl.remaining_seconds !== null && (
+              <Panel label="Brimley-Cocoon Line">
+                <div className="cl-mono text-[22px] leading-none text-accent">
+                  {fmtBclDuration(bcl.remaining_seconds)}
+                </div>
+                <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
+                  {bcl.remaining_seconds >= 0 ? "crosses" : "crossed"}{" "}
+                  {fmtBclDate(bcl.bcl_date)} · natal {bcl.birth_date}
+                </div>
+              </Panel>
+            )}
+        </div>
+      </section>
+
+      {/* ── RECENTLY INSCRIBED ───────────────────────────────────────── */}
+      <Panel label={`Recently inscribed · ${recent.length}`}>
+        {recent.length === 0 ? (
+          <p className="cl-marg m-0">∅ No folios yet inscribed.</p>
+        ) : (
+          <div className="flex flex-col">
+            {recent.map((n) => {
+              const kind = resolveKindFromPath(n.path);
+              return (
                 <button
                   type="button"
-                  className="cl-btn cl-btn-hot"
-                  onClick={() => setInscribeOpen(true)}
+                  key={n.path}
+                  onClick={() => openTab("page", n.path, n.title || n.path)}
+                  className="grid cursor-pointer grid-cols-[90px_1fr_160px_64px] items-baseline gap-2 border-b border-dotted border-rule-soft py-1.5 text-left hover:bg-paper-2"
                 >
-                  + Inscribe
+                  <span className="cl-mono flex items-center gap-1.5 text-[10px] text-ink-mute">
+                    <span
+                      className="inline-block h-[6px] w-[6px] flex-shrink-0"
+                      style={{ background: kindColorVar(kind) }}
+                    />
+                    {shortFolio(n.path)}
+                  </span>
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink">
+                    {n.title || n.path}
+                  </span>
+                  <span className="cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-accent">
+                    {(n.tags || [])
+                      .slice(0, 3)
+                      .map((t) => `#${t}`)
+                      .join(" ") || "—"}
+                  </span>
+                  <span className="cl-mono text-right text-[10px] text-ink-mute">
+                    {formatRelativeTime(n.updated_at)}
+                  </span>
                 </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Brimley-Cocoon Line — only when ~/.config/bcl (or vault copy) is present. */}
-        {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
-          <div className="cl-frame relative mb-3 px-5 py-3">
-            <div className="cl-cap absolute left-3 top-2 text-[9px] text-ink-mute">
-              § BRIMLEY-COCOON LINE
-            </div>
-            <div className="cl-cap absolute right-3 top-2 text-[9px] text-ink-mute">
-              PL. I bis
-            </div>
-            <div className="grid grid-cols-[auto_1fr] items-baseline gap-5 pt-3">
-              <div className="cl-mono text-[22px] leading-none text-accent-deep">
-                {fmtBclDuration(bcl.remaining_seconds)}
-              </div>
-              <div className="cl-leader">
-                <span className="cl-serif italic text-[12px]">
-                  {bcl.remaining_seconds >= 0
-                    ? "line to be crossed on"
-                    : "line crossed on"}{" "}
-                  {fmtBclDate(bcl.bcl_date)}
-                </span>
-                <span className="cl-leader-dots" />
-                <span className="cl-mono text-[10px] text-ink-mute">
-                  natal {bcl.birth_date}
-                </span>
-              </div>
-            </div>
+              );
+            })}
           </div>
         )}
+      </Panel>
 
-        {/* Recently Inscribed */}
-        <div className="cl-cap mb-1 flex items-baseline justify-between text-[10px]">
-          <span>§ Recently Inscribed</span>
-          <span className="text-[9px] text-ink-mute">
-            {romanLower(Math.min(recent.length, totalEntries))} of{" "}
-            {romanLower(totalEntries)}
-          </span>
-        </div>
-        <hr className="cl-rule-soft mt-1" />
-        <table className="mt-1 w-full border-collapse text-[12px]">
-          <thead>
-            <tr className="border-b border-rule border-t-[1.5px]">
-              <Th width={64}>FOL.</Th>
-              <Th>TITLE</Th>
-              <Th width={180}>SUBJECT</Th>
-              <Th width={60} align="right">
-                BACK.
-              </Th>
-              <Th width={80} align="right">
-                WHEN
-              </Th>
-            </tr>
-          </thead>
-          <tbody>
-            {recent.map((n) => (
-              <tr
-                key={n.path}
-                onClick={() => openTab("page", n.path, n.title || n.path)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter")
-                    openTab("page", n.path, n.title || n.path);
-                }}
-                className="cursor-pointer border-b border-dotted border-rule-soft"
-              >
-                <td className="cl-mono px-1 py-1 text-[11px] text-ink-mute">
-                  {shortFolio(n.path)}
-                </td>
-                <td className="cl-serif px-1 py-1">
-                  <span className="font-medium">{n.title || n.path}</span>
-                </td>
-                <td className="cl-mono px-1 py-1 text-[10px] text-accent-deep">
-                  {(n.tags || []).slice(0, 3).join(" · ") || "—"}
-                </td>
-                <td className="cl-mono px-1 py-1 text-right text-[10px]">
-                  {n.links?.length ?? 0}
-                </td>
-                <td className="cl-mono px-1 py-1 text-right text-[10px] text-ink-mute">
-                  {formatRelativeTime(n.updated_at)}
-                </td>
-              </tr>
-            ))}
-            {recent.length === 0 && (
-              <tr>
-                <td colSpan={5} className="cl-marg px-1 py-3 text-center">
-                  ⁂ no folios yet inscribed.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        {/* Reading + Inquiry */}
-        {showProspective && (
-          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div>
-              <div className="cl-cap mb-1 text-[10px]">§ Reading Continues</div>
-              <hr className="cl-rule-soft" />
-              <div className="mt-1 space-y-[2px]">
-                <Leader
-                  left={
-                    <span className="cl-serif italic">
-                      Calvino · Invisible Cities
-                    </span>
-                  }
-                  right="p. 84/165"
-                />
-                <Leader
-                  left={
-                    <span className="cl-serif italic">Borges · Ficciones</span>
-                  }
-                  right="p. 142/220"
-                />
-                <Leader
-                  left={
-                    <span className="cl-serif italic">
-                      Murray · APL — interactive approach
-                    </span>
-                  }
-                  right="p. 28/318"
-                />
-              </div>
-            </div>
-            <div>
-              <div className="cl-cap mb-1 text-[10px]">§ Inquiry, open</div>
-              <hr className="cl-rule-soft" />
-              <ul className="cl-serif m-0 list-none p-0 text-[12px]">
-                <li className="mb-[2px]">
-                  ◇{" "}
-                  <span className="italic">
-                    Why does Polars surprise on string ops?
-                  </span>
-                </li>
-                <li className="mb-[2px]">
-                  ◇ Test Maillard at 130°C against 150°C, same beef
-                </li>
-                <li className="mb-[2px]">
-                  ◆{" "}
-                  <span className="italic">
-                    What does Weil mean by "decreation"?
-                  </span>
-                </li>
-                <li>◇ Re-read the Babel piece; index by character</li>
-              </ul>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* RIGHT — marginalia */}
-      <div className="border-l border-rule-soft pl-4">
-        {/* Horologe */}
-        {showProspective && (
-          <div className="cl-frame mb-3 bg-paper-2 px-3 py-2">
-            <div className="cl-cap mb-1 text-[9px] text-ink-mute">HOROLOGE</div>
-            <div className="flex items-center gap-3">
-              <div className="relative h-[60px] w-[42px]">
-                {/* Hourglass silhouette via clipPath — keep inline (no utility for this). */}
-                <div
-                  className="absolute inset-0 border-[1.5px] border-ink"
-                  style={{
-                    clipPath:
-                      "polygon(0 0, 100% 0, 50% 50%, 100% 100%, 0 100%, 50% 50%)",
-                  }}
-                />
-                <div className="absolute inset-x-0 top-0 h-[18%] bg-paper" />
-                <div className="absolute inset-x-0 bottom-0 h-[56%] bg-accent opacity-80" />
-              </div>
-              <div>
-                <div className="cl-mono text-[18px]">{horoLabel.time}</div>
-                <div className="cl-marg">{horoLabel.remaining}</div>
-                {horoLabel.place && (
-                  <div className="cl-marg italic">at {horoLabel.place}</div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="cl-cap mb-1 text-[9px]">§ The Codex Contains</div>
-        <hr className="cl-rule" />
-        <div className="cl-serif mt-1 text-[11px]">
-          {(
-            [
-              ["Folios, total", String(stats?.pages ?? 0)],
-              ["Cross-references", String(stats?.links_total ?? 0)],
-              ["Unresolved", String(stats?.links_unresolved ?? 0)],
-              ["Subjects, distinct", String(stats?.tags ?? 0)],
-            ] as const
-          ).map(([k, v]) => (
-            <div className="cl-leader mb-[1px]" key={k}>
-              <span className="italic">{k}</span>
-              <span className="cl-leader-dots" />
-              <span className="cl-mono text-[10px]">{v}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="cl-cap mb-1 mt-4 text-[9px]">
-          § Subjects, by Frequency
-        </div>
-        <hr className="cl-rule" />
-        <div className="mt-2 flex flex-wrap gap-x-[6px] gap-y-[3px]">
-          {(tags ?? []).slice(0, 16).map((t) => (
-            <CLink
-              key={t.tag}
-              noNavigate
-              payload={{
-                title: `#${t.tag}`,
-                folio: "Subject",
-                excerpt: `${t.count} folio${t.count === 1 ? "" : "s"} indexed under #${t.tag}.`,
-                tags: [t.tag],
-              }}
-              onClick={() =>
-                navigate({ to: "/gazetteer", search: { tag: t.tag } as never })
-              }
-            >
-              <span className="cl-mono text-[11px] text-accent-deep">
-                #{t.tag}
-                <sup className="ml-[2px] text-ink-mute">{t.count}</sup>
-              </span>
-            </CLink>
-          ))}
-        </div>
-
-        <div className="mt-5 flex justify-center">
-          <div className="cl-stamp">Privatim · Lectori Suo</div>
-        </div>
-
-        <pre className="cl-ascii cl-ascii-faint mt-4 text-center text-[6px]">
-          {ASCII_COMPASS}
-        </pre>
-        <p className="cl-marg mt-1 text-center">
-          — fig. iii.{" "}
-          <span className="italic">compass rose, after Mercator —</span>
-        </p>
-      </div>
       {inscribeOpen && <InscribeModal onClose={() => setInscribeOpen(false)} />}
     </div>
   );
 }
 
-function FrontispieceAnimation() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+/* ── presentational ───────────────────────────────────────────────────── */
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-
-    if (!canvas) {
-      return;
-    }
-
-    const rootStyles = getComputedStyle(document.documentElement);
-    const animation = new MiniAsciiAnimation(canvas, {
-      background: cssVar(rootStyles, "--paper-2", "#e8e0cc"),
-      textColor: cssVar(rootStyles, "--accent", "#0c6cad"),
-      fontFamily: cssVar(rootStyles, "--font-mono", "monospace"),
-    });
-
-    animation.start();
-
-    return () => animation.stop();
-  }, []);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="block h-[190px] w-[190px] border border-rule-soft bg-paper-2"
-      aria-label="Animated ASCII frontispiece made from codex text"
-    />
-  );
-}
-
-/* helpers --------------------------------------------------------------- */
-
-function cssVar(styles: CSSStyleDeclaration, name: string, fallback: string) {
-  return styles.getPropertyValue(name).trim() || fallback;
-}
-
-function Th({
-  children,
-  width,
-  align = "left",
+function Stat({
+  label,
+  value,
+  tone,
 }: {
-  children: ReactNode;
-  width?: number;
-  align?: "left" | "right";
+  label: string;
+  value?: number | null;
+  tone?: "warn";
 }) {
   return (
-    <th
-      className={`cl-cap px-1 py-[3px] text-[9px] text-ink-mute ${align === "right" ? "text-right" : "text-left"}`}
-      style={width !== undefined ? { width } : undefined}
-    >
-      {children}
-    </th>
+    <div className="bg-paper px-4 py-3">
+      <div
+        className={`font-sans text-[28px] font-bold leading-none tabular-nums ${
+          tone === "warn" ? "text-warn" : "text-ink"
+        }`}
+      >
+        {value ?? "—"}
+      </div>
+      <div className="cl-mono mt-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+        {label}
+      </div>
+    </div>
   );
 }
 
-function Leader({ left, right }: { left: ReactNode; right: ReactNode }) {
+function Panel({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="cl-leader">
-      {left}
-      <span className="cl-leader-dots" />
-      <span className="cl-mono text-[10px]">{right}</span>
+    <div className="cl-frame px-4 py-3">
+      <div className="cl-mono mb-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+        § {label}
+      </div>
+      {children}
     </div>
   );
+}
+
+function KVLine({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+        {k}
+      </span>
+      <span className="text-ink-2">{v}</span>
+    </div>
+  );
+}
+
+const HEAT_LEVEL = [
+  "bg-rule-soft",
+  "bg-accent/25",
+  "bg-accent/50",
+  "bg-accent/75",
+  "bg-accent",
+];
+
+function Heatmap({ weeks }: { weeks: number[][] }) {
+  return (
+    <div className="cl-noscroll flex gap-[3px] overflow-x-auto">
+      {weeks.map((week, wi) => (
+        <div key={`w${wi}`} className="flex flex-col gap-[3px]">
+          {week.map((level, di) => (
+            <span
+              key={`d${di}`}
+              className={`h-[10px] w-[10px] ${HEAT_LEVEL[level]}`}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── data helpers ─────────────────────────────────────────────────────── */
+
+type HeatItem = { updated_at?: string | null; created_at?: string | null };
+
+function buildHeatmap(items: HeatItem[]): {
+  weeks: number[][];
+  total: number;
+} {
+  const DAYS = 26 * 7;
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const it of items) {
+    const ts = it.updated_at ?? it.created_at;
+    if (!ts) continue;
+    const key = ts.slice(0, 10); // YYYY-MM-DD
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    total += 1;
+  }
+  // End on today; align grid start to the Sunday on/before (today - 181d).
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(start.getDate() - (DAYS - 1));
+  start.setDate(start.getDate() - start.getDay()); // back to Sunday
+
+  const weeks: number[][] = [];
+  const cursor = new Date(start);
+  while (cursor <= today) {
+    const week: number[] = [];
+    for (let d = 0; d < 7; d++) {
+      const key = cursor.toISOString().slice(0, 10);
+      week.push(cursor <= today ? level(counts.get(key) ?? 0) : 0);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(week);
+  }
+  return { weeks, total };
+}
+
+function level(n: number): number {
+  if (n <= 0) return 0;
+  if (n === 1) return 1;
+  if (n <= 3) return 2;
+  if (n <= 6) return 3;
+  return 4;
+}
+
+function greeting(d: Date): string {
+  const h = d.getHours();
+  if (h < 5) return "Still awake";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  if (h < 22) return "Good evening";
+  return "Good night";
+}
+
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+}
+
+function julianDay(d: Date): number {
+  // Julian Day Number at 00:00 UTC for the given date.
+  const a = Math.floor((14 - (d.getMonth() + 1)) / 12);
+  const y = d.getFullYear() + 4800 - a;
+  const m = d.getMonth() + 1 + 12 * a - 3;
+  return (
+    d.getDate() +
+    Math.floor((153 * m + 2) / 5) +
+    365 * y +
+    Math.floor(y / 4) -
+    Math.floor(y / 100) +
+    Math.floor(y / 400) -
+    32045
+  );
+}
+
+function dayOfYear(d: Date): number {
+  const start = new Date(d.getFullYear(), 0, 0);
+  return Math.floor((d.getTime() - start.getTime()) / 86_400_000);
+}
+
+const MOON_PHASES: [string, string][] = [
+  ["🌑", "New"],
+  ["🌒", "Waxing crescent"],
+  ["🌓", "First quarter"],
+  ["🌔", "Waxing gibbous"],
+  ["🌕", "Full"],
+  ["🌖", "Waning gibbous"],
+  ["🌗", "Last quarter"],
+  ["🌘", "Waning crescent"],
+];
+
+function buildSky(
+  now: Date,
+  lat: number | null,
+  lon: number | null,
+  label: string | null,
+) {
+  const hasLoc = lat !== null && lon !== null;
+  const times = hasLoc
+    ? SunCalc.getTimes(now, lat, lon)
+    : { sunrise: dflt(now, 6), sunset: dflt(now, 20) };
+  const sunsetMs = times.sunset.getTime();
+  const remMin = Math.max(0, Math.floor((sunsetMs - now.getTime()) / 60_000));
+  const illum = SunCalc.getMoonIllumination(now);
+  const idx = Math.round(illum.phase * 8) % 8;
+  const [glyph, name] = MOON_PHASES[idx];
+  return {
+    moonGlyph: glyph,
+    moonName: name,
+    sunrise: fmtTime(times.sunrise),
+    sunset: fmtTime(times.sunset),
+    lightLeft: `${Math.floor(remMin / 60)}h ${pad(remMin % 60)}m`,
+    place: label,
+  };
+}
+
+function dflt(now: Date, h: number): Date {
+  const d = new Date(now);
+  d.setHours(h, 0, 0, 0);
+  return d;
+}
+
+function fmtTime(d: Date): string {
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+const APHORISMS: { text: string; who: string }[] = [
+  {
+    text: "Attention is the rarest and purest form of generosity.",
+    who: "Simone Weil",
+  },
+  {
+    text: "The smallest unit of memory is the willingness to return.",
+    who: "—",
+  },
+  {
+    text: "What is to give light must endure burning.",
+    who: "Viktor Frankl",
+  },
+  {
+    text: "We do not write in order to be understood; we write in order to understand.",
+    who: "C. Day-Lewis",
+  },
+  {
+    text: "The notebook is a net for catching days.",
+    who: "Annie Dillard",
+  },
+  {
+    text: "Order is not pressure imposed from without, but an equilibrium set up from within.",
+    who: "José Ortega y Gasset",
+  },
+  {
+    text: "A man should keep his little brain attic stocked with all the furniture that he is likely to use.",
+    who: "Arthur Conan Doyle",
+  },
+];
+
 function fmtBclDuration(totalSeconds: number): string {
   const past = totalSeconds < 0;
   const s = Math.abs(totalSeconds);
   const days = Math.floor(s / 86_400);
   const hours = Math.floor((s % 86_400) / 3_600);
-  const prefix = past ? "+" : "";
-  return `${prefix}${days.toLocaleString("en-US")}d · ${hours}h`;
+  return `${past ? "+" : ""}${days.toLocaleString("en-US")}d · ${hours}h`;
 }
 
 function fmtBclDate(yyyymmdd: string): string {
   const [y, m, d] = yyyymmdd.split("-").map((p) => Number.parseInt(p, 10));
   if (!y || !m || !d) return yyyymmdd;
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, {
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
     weekday: "long",
     day: "2-digit",
     month: "long",
     year: "numeric",
   });
-}
-
-const LOWERS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
-function romanLower(n: number): string {
-  if (n <= 0) return "—";
-  if (n < 11) return LOWERS[n - 1];
-  if (n < 100)
-    return `${Math.floor(n / 10)}·${LOWERS[(n % 10) - 1] || ""}`.replace(
-      /·$/,
-      "",
-    );
-  return `${Math.floor(n / 100)}·${Math.floor((n % 100) / 10)}·${n % 10 || ""}`.replace(
-    /·$/,
-    "",
-  );
 }
