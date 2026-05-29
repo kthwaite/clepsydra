@@ -5,10 +5,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { useBacklinks } from "#/api/index";
-import { usePage } from "#/api/pages";
-import { countWords, firstParagraph, shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import {
+  cancelHoverClose,
+  scheduleHoverClose,
+  usePreviewStore,
+} from "#/store/preview";
+
+const HOVER_DELAY = 220;
 
 export type CLinkPayload = {
   title?: string;
@@ -43,29 +47,37 @@ export function CLink({
   style,
 }: CLinkProps) {
   const [hover, setHover] = useState(false);
-  const [hoveredOnce, setHoveredOnce] = useState(false);
   const ref = useRef<HTMLSpanElement | null>(null);
+  const delayRef = useRef<number | null>(null);
   const openTab = useOpenTab();
+  const openHover = usePreviewStore((s) => s.openHover);
 
-  const { data: page } = usePage(hoveredOnce && path ? path : "");
-  const { data: backlinks } = useBacklinks(hoveredOnce && path ? path : "");
-
-  const note: CLinkPayload | null = page
-    ? {
-        title: page.meta.title || page.path,
-        folio: shortFolio(page.path),
-        tags: page.meta.tags ?? [],
-        excerpt: firstParagraph(page.body),
-        words: countWords(page.body),
-        backlinks: backlinks?.length ?? 0,
-      }
-    : (payload ?? null);
+  // Path-backed links route through the window manager; payload-only links
+  // (e.g. tag chips) keep the lightweight inline card.
+  const note: CLinkPayload | null = payload ?? null;
 
   const enter = () => {
-    setHoveredOnce(true);
-    setHover(true);
+    if (path) {
+      cancelHoverClose();
+      delayRef.current = window.setTimeout(() => {
+        const rect = ref.current?.getBoundingClientRect();
+        if (rect) openHover(path, rect);
+      }, HOVER_DELAY);
+    } else {
+      setHover(true);
+    }
   };
-  const leave = () => setHover(false);
+  const leave = () => {
+    if (path) {
+      if (delayRef.current !== null) {
+        window.clearTimeout(delayRef.current);
+        delayRef.current = null;
+      }
+      scheduleHoverClose();
+    } else {
+      setHover(false);
+    }
+  };
 
   const handleClick = (e: ReactMouseEvent) => {
     if (onClick) {
@@ -93,11 +105,11 @@ export function CLink({
     >
       {children}
       {hover && note && (
-        <span
-          className="absolute left-0 top-full z-40 mt-[6px] block w-[320px] cursor-default border-[1.5px] border-ink bg-paper px-[10px] py-2 text-left text-[12px] not-italic leading-[1.4] text-ink shadow-[4px_4px_0_0_var(--color-ink)] font-body"
-        >
+        <span className="absolute left-0 top-full z-40 mt-[6px] block w-[320px] cursor-default border-[1.5px] border-ink bg-paper px-[10px] py-2 text-left text-[12px] not-italic leading-[1.4] text-ink shadow-[4px_4px_0_0_var(--color-ink)] font-body">
           <span className="mb-1 flex items-baseline justify-between border-b border-rule-soft pb-[3px]">
-            <span className="cl-cap text-[9px] text-ink-mute">§ {note.folio || "Folio"}</span>
+            <span className="cl-cap text-[9px] text-ink-mute">
+              § {note.folio || "Folio"}
+            </span>
             <span className="cl-mono text-[9px] text-ink-mute">
               {note.words ?? "—"} wd · ↗{note.backlinks ?? 0}
             </span>
