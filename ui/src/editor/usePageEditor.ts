@@ -103,7 +103,8 @@ export function usePageEditor(path: string): PageEditorState {
     setTagsState(tg);
     setAliasesState(al);
     const shouldResetEditor =
-      editorValueRef.current.length === 0 || savedRef.current.body !== page.body;
+      editorValueRef.current.length === 0 ||
+      savedRef.current.body !== page.body;
     const nextValue = markdownToSlate(page.body);
     savedRef.current = { title: t, tags: tg, aliases: al, body: page.body };
     editorValueRef.current = nextValue;

@@ -3,8 +3,8 @@ import type { GraphEdge, GraphNode } from "#/api/types";
 export type FilterOptions = {
   orphansVisible: boolean;
   hideDaily: boolean;
-  depth: number | null;     // null = unlimited
-  anchorId: string | null;  // required when depth is set
+  depth: number | null; // null = unlimited
+  anchorId: string | null; // required when depth is set
 };
 
 export function applyFilters(
@@ -42,7 +42,10 @@ export function applyFilters(
       const next = new Set<string>();
       for (const id of frontier) {
         for (const nb of adj.get(id) ?? []) {
-          if (!seen.has(nb)) { seen.add(nb); next.add(nb); }
+          if (!seen.has(nb)) {
+            seen.add(nb);
+            next.add(nb);
+          }
         }
       }
       frontier = next;

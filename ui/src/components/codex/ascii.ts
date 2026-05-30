@@ -161,7 +161,10 @@ export class MiniAsciiAnimation {
   private frameId = 0;
   private running = false;
 
-  constructor(canvas: HTMLCanvasElement, options: MiniAsciiAnimationOptions = {}) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    options: MiniAsciiAnimationOptions = {},
+  ) {
     this.canvas = canvas;
     this.cols = options.cols ?? 30;
     this.rows = options.rows ?? 30;
@@ -268,7 +271,9 @@ export class MiniAsciiAnimation {
 
       for (let x = 0; x < this.cols; x++) {
         const normalizedX = (x * 2) / this.cols - 1;
-        const radius = sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+        const radius = sqrt(
+          normalizedX * normalizedX + normalizedY * normalizedY,
+        );
         const theta = atan2(normalizedY, normalizedX);
         const phaseRaw =
           (theta / (2 * PI)) * this.spiralArms +
@@ -297,7 +302,8 @@ export class MiniAsciiAnimation {
         const warpedX = cos(angle) * spiralRadius;
         const warpedY = sin(angle) * spiralRadius;
         const spiralSampleX = floor(((warpedX + 1) / 2) * this.cols);
-        const spiralSampleY = floor(((warpedY + 1) / 2) * this.rows) % this.rows;
+        const spiralSampleY =
+          floor(((warpedY + 1) / 2) * this.rows) % this.rows;
         const sampleX = floor(
           x * (1 - spiralProgress) + spiralSampleX * spiralProgress,
         );
@@ -311,7 +317,10 @@ export class MiniAsciiAnimation {
           sampleY >= this.rows
             ? " "
             : (this.source[sampleY]?.[sampleX] ?? " ");
-        const armAlpha = max(0.25, 0.35 + (1 - armDistance / this.armWidth) * 0.65);
+        const armAlpha = max(
+          0.25,
+          0.35 + (1 - armDistance / this.armWidth) * 0.65,
+        );
 
         ctx.globalAlpha = 1 * (1 - spiralProgress) + armAlpha * spiralProgress;
         ctx.fillStyle = this.textColor;

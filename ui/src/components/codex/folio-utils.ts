@@ -1,5 +1,31 @@
-const ROMANS_UPPER = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
-const ROMANS_LOWER = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"];
+const ROMANS_UPPER = [
+  "I",
+  "II",
+  "III",
+  "IV",
+  "V",
+  "VI",
+  "VII",
+  "VIII",
+  "IX",
+  "X",
+  "XI",
+  "XII",
+];
+const ROMANS_LOWER = [
+  "i",
+  "ii",
+  "iii",
+  "iv",
+  "v",
+  "vi",
+  "vii",
+  "viii",
+  "ix",
+  "x",
+  "xi",
+  "xii",
+];
 
 /** Hash a vault path into a stable Roman-numeral folio code like "VII·iii". */
 export function shortFolio(path: string): string {

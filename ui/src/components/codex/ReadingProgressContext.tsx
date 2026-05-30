@@ -1,4 +1,10 @@
-import { createContext, type PropsWithChildren, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  type PropsWithChildren,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 
 type Ctx = {
   progress: number;
@@ -11,7 +17,9 @@ export function ReadingProgressProvider({ children }: PropsWithChildren) {
   const [progress, setProgress] = useState(0);
   const value = useMemo(() => ({ progress, setProgress }), [progress]);
   return (
-    <ReadingProgressContext.Provider value={value}>{children}</ReadingProgressContext.Provider>
+    <ReadingProgressContext.Provider value={value}>
+      {children}
+    </ReadingProgressContext.Provider>
   );
 }
 

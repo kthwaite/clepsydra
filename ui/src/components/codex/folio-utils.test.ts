@@ -8,7 +8,10 @@ describe("countWordsFromSlate", () => {
 
   it("counts words across leaves", () => {
     const value = [
-      { type: "paragraph", children: [{ text: "the kettle has " }, { text: "stopped twice" }] },
+      {
+        type: "paragraph",
+        children: [{ text: "the kettle has " }, { text: "stopped twice" }],
+      },
       { type: "paragraph", children: [{ text: "outside, a pigeon" }] },
     ];
     expect(countWordsFromSlate(value)).toBe(8);
@@ -16,7 +19,10 @@ describe("countWordsFromSlate", () => {
 
   it("ignores empty leaves and whitespace-only text", () => {
     const value = [
-      { type: "paragraph", children: [{ text: "  " }, { text: "" }, { text: "one" }] },
+      {
+        type: "paragraph",
+        children: [{ text: "  " }, { text: "" }, { text: "one" }],
+      },
     ];
     expect(countWordsFromSlate(value)).toBe(1);
   });
@@ -29,7 +35,9 @@ describe("countWordsFromSlate", () => {
         children: [
           {
             type: "list-item",
-            children: [{ type: "paragraph", children: [{ text: "gamma delta" }] }],
+            children: [
+              { type: "paragraph", children: [{ text: "gamma delta" }] },
+            ],
           },
         ],
       },

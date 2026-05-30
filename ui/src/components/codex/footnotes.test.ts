@@ -29,6 +29,8 @@ describe("extractFootnoteDefinitions", () => {
 
   it("orders results by appearance, deduping by id (first wins)", () => {
     const md = "[^x]: first\n\n[^x]: second";
-    expect(extractFootnoteDefinitions(md)).toEqual([{ id: "x", text: "first" }]);
+    expect(extractFootnoteDefinitions(md)).toEqual([
+      { id: "x", text: "first" },
+    ]);
   });
 });
