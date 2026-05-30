@@ -1,8 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
+import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
+import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
 import { useUiStore } from "#/store/ui";
 import { Card } from "./Card";
@@ -12,6 +14,9 @@ import {
   deriveInventory,
   julianDay,
 } from "./atrium-data";
+import { DayArc } from "./DayArc";
+import { MoonDisc } from "./MoonDisc";
+import { moonPhase, sunArcPosition } from "./sky";
 
 export function Atrium() {
   const navigate = useNavigate();
@@ -21,6 +26,7 @@ export function Atrium() {
   const { data: bcl } = useBcl();
 
   const { data: journalToday } = useJournalToday();
+  const { data: location } = useLocation();
   const openSearch = useUiStore((s) => s.openSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
 
@@ -48,9 +54,25 @@ export function Atrium() {
     [stats, tags, items, now],
   );
 
-  const skyTimes = useMemo(() => {
-    return { sunrise: dfltTime(now, 6), sunset: dfltTime(now, 20) };
-  }, [now]);
+  const sky = useMemo(() => {
+    const lat = location?.latitude ?? null;
+    const lon = location?.longitude ?? null;
+    const hasLoc = lat !== null && lon !== null;
+    const times = hasLoc
+      ? SunCalc.getTimes(now, lat, lon)
+      : { sunrise: atHour(now, 6), sunset: atHour(now, 20) };
+    const arc = sunArcPosition(now, times.sunrise, times.sunset);
+    const moon = moonPhase(now);
+    const remMin = Math.max(0, Math.floor((times.sunset.getTime() - now.getTime()) / 60_000));
+    return {
+      moon,
+      sunrise: fmtTime(times.sunrise),
+      sunset: fmtTime(times.sunset),
+      lightLeft: `${Math.floor(remMin / 60)}h ${pad(remMin % 60)}m`,
+      arc,
+      place: location?.label ?? null,
+    };
+  }, [location, now]);
 
   const aphorism = APHORISMS[dayOfYear(now) % APHORISMS.length];
 
@@ -157,11 +179,25 @@ export function Atrium() {
         </div>
       </Card>
       <Card className="col-span-12 lg:col-span-5" label="Sky" caption="FIG. III">
-        {/* replaced in Task 11 */}
-        <div className="cl-mono flex flex-col gap-1.5 text-[11px]">
-          <KVLine k="Sunrise" v={fmtTime(skyTimes.sunrise)} />
-          <KVLine k="Sunset" v={fmtTime(skyTimes.sunset)} />
+        <div className="grid grid-cols-[96px_1fr] gap-4">
+          <MoonDisc info={sky.moon} />
+          <div className="cl-mono flex flex-col gap-1.5 text-[11px]">
+            <div className="border-b border-rule pb-1.5 font-medium uppercase tracking-[0.2em] text-ink">
+              {sky.moon.phaseName} · {sky.moon.illumPct}%
+            </div>
+            <KVLine k="Sunrise" v={sky.sunrise} />
+            <KVLine k="Sunset" v={sky.sunset} />
+            <KVLine k="Light left" v={sky.lightLeft} />
+            {sky.place && <KVLine k="At" v={sky.place} />}
+          </div>
         </div>
+        <DayArc
+          t={sky.arc.t}
+          x={sky.arc.x}
+          y={sky.arc.y}
+          sunriseLabel={sky.sunrise}
+          sunsetLabel={sky.sunset}
+        />
       </Card>
 
       {/* HEATMAP (col-8) + TAGS (col-4) */}
@@ -276,7 +312,7 @@ function fmtDate(d: Date): string {
   return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
 }
 
-function dfltTime(now: Date, h: number): Date {
+function atHour(now: Date, h: number): Date {
   const d = new Date(now);
   d.setHours(h, 0, 0, 0);
   return d;
