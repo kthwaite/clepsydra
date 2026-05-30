@@ -77,6 +77,18 @@ export interface BlockRefElement {
   children: CustomText[];
 }
 
+export interface FootnoteRefElement {
+  type: "footnote-ref";
+  identifier: string;
+  children: CustomText[];
+}
+
+export interface FootnoteDefElement {
+  type: "footnote-def";
+  identifier: string;
+  children: Descendant[];
+}
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -88,7 +100,9 @@ export type CustomElement =
   | ThematicBreakElement
   | WikilinkElement
   | LinkElement
-  | BlockRefElement;
+  | BlockRefElement
+  | FootnoteRefElement
+  | FootnoteDefElement;
 
 // --- Text type ---
 

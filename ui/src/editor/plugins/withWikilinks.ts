@@ -5,7 +5,9 @@ export function withWikilinks(editor: Editor): Editor {
 
   editor.isInline = (element) => {
     return SlateElement.isElement(element) &&
-      (element.type === "wikilink" || element.type === "block-ref")
+      (element.type === "wikilink" ||
+        element.type === "block-ref" ||
+        element.type === "footnote-ref")
       ? true
       : isInline(element);
   };
@@ -15,6 +17,7 @@ export function withWikilinks(editor: Editor): Editor {
       if (
         element.type === "wikilink" ||
         element.type === "block-ref" ||
+        element.type === "footnote-ref" ||
         element.type === "thematic-break"
       ) {
         return true;
