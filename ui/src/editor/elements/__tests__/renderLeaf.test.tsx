@@ -42,4 +42,16 @@ describe("renderLeaf", () => {
     expect(container.querySelector("strong")).not.toBeNull();
     expect(container.querySelector("u")).not.toBeNull();
   });
+
+  it("colours a known token leaf with its mapped CSS var", () => {
+    const { container } = render(leaf({ token: "keyword" }));
+    const span = container.querySelector("span[style]");
+    expect(span?.getAttribute("style")).toContain("var(--cool)");
+  });
+
+  it("falls back to inherit for an unknown token type", () => {
+    const { container } = render(leaf({ token: "not-a-real-token" }));
+    const span = container.querySelector("span[style]");
+    expect(span?.getAttribute("style")).toContain("inherit");
+  });
 });

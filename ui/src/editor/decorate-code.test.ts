@@ -13,6 +13,11 @@ describe("decorateCode", () => {
     expect(decorateCode([para as any, [0]])).toEqual([]);
   });
 
+  it("returns [] for a code-block with no language", () => {
+    const node = { type: "code-block" as const, children: [{ text: "const x = 1;" }] };
+    expect(decorateCode([node as any, [0]])).toEqual([]);
+  });
+
   it("returns [] for an unknown/unregistered language (no throw)", () => {
     const node = codeBlock("not-a-real-lang", "const x = 1;");
     expect(decorateCode([node as any, [0]])).toEqual([]);
