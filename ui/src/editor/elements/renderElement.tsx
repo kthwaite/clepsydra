@@ -7,6 +7,7 @@ import {
 import type { ListItemElement } from "#/editor/types";
 import { BlockRefElement } from "./BlockRefElement";
 import { CodeBlockElement } from "./CodeBlockElement";
+import { LinkElement } from "./LinkElement";
 import { WikilinkElement } from "./WikilinkElement";
 
 export function renderElement(props: RenderElementProps) {
@@ -78,23 +79,8 @@ export function renderElement(props: RenderElementProps) {
     case "block-ref":
       return <BlockRefElement {...props} element={element} />;
 
-    case "link": {
-      const isSafeUrl = /^https?:|^mailto:/i.test(element.url);
-      return (
-        <a
-          {...attributes}
-          href={isSafeUrl ? element.url : undefined}
-          className="underline decoration-1 underline-offset-2 hover:decoration-2"
-          onClick={(e) => {
-            if (!e.metaKey && !e.ctrlKey) {
-              e.preventDefault();
-            }
-          }}
-        >
-          {children}
-        </a>
-      );
-    }
+    case "link":
+      return <LinkElement {...props} element={element} />;
 
     case "paragraph":
     default:
