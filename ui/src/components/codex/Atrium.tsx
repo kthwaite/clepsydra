@@ -1,16 +1,22 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useBcl } from "#/api/bcl";
-import { useContentIndex, useTags } from "#/api/index";
+import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
 import { useClock } from "#/hooks/useClock";
 import { useUiStore } from "#/store/ui";
 import { Card } from "./Card";
-import { buildHeatmap, dayOfYear, julianDay } from "./atrium-data";
+import {
+  buildHeatmap,
+  dayOfYear,
+  deriveInventory,
+  julianDay,
+} from "./atrium-data";
 
 export function Atrium() {
   const navigate = useNavigate();
   const { data: tags } = useTags();
+  const { data: stats } = useStats();
   const { data: content } = useContentIndex(500);
   const { data: bcl } = useBcl();
 
@@ -36,6 +42,11 @@ export function Atrium() {
     [tags],
   );
   const maxTag = topTags[0]?.count ?? 1;
+
+  const inventory = useMemo(
+    () => deriveInventory(stats, tags, items, now),
+    [stats, tags, items, now],
+  );
 
   const skyTimes = useMemo(() => {
     return { sunrise: dfltTime(now, 6), sunset: dfltTime(now, 20) };
@@ -98,8 +109,43 @@ export function Atrium() {
         </div>
       </section>
 
-      {/* INVENTORY — col-12 (filled in Task 10) */}
-      <div className="col-span-12">{/* inventory placeholder, replaced in Task 10 */}</div>
+      {/* INVENTORY — col-12 */}
+      <Card
+        className="col-span-12"
+        label="Vessel · Inventory"
+        caption="FIG. I — STEADY-STATE TELEMETRY"
+        tight
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
+          {inventory.map((cell, i) => (
+            <div
+              key={cell.label}
+              className={
+                "flex flex-col gap-1 border-rule px-3.5 py-3 " +
+                (i % 8 !== 7 ? "border-r " : "") +
+                (i >= 4 ? "border-t lg:border-t-0 " : "")
+              }
+            >
+              <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
+                {cell.label}
+              </span>
+              <span
+                className={
+                  "font-sans text-[28px] font-bold leading-none tabular-nums " +
+                  (cell.tone === "warn" ? "text-warn" : "text-ink")
+                }
+              >
+                {cell.value}
+              </span>
+              {cell.sub ? (
+                <span className="cl-mono text-[9px] tracking-[0.12em] text-ink-mute">
+                  {cell.sub}
+                </span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </Card>
 
       {/* APHORISM (col-7) + SKY (col-5) */}
       <Card className="col-span-12 lg:col-span-7" label="Aphorism" pip="dim" caption="FIG. II">
