@@ -10,7 +10,6 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
-import { Card } from "./Card";
 import {
   buildHeatmap,
   dayOfYear,
@@ -18,6 +17,7 @@ import {
   julianDay,
   sortRecents,
 } from "./atrium-data";
+import { Card } from "./Card";
 import { formatRelativeTime } from "./codex-time";
 import { DayArc } from "./DayArc";
 import { shortFolio } from "./folio-utils";
@@ -41,7 +41,9 @@ export function Atrium() {
 
   const openTab = useOpenTab();
   const openHistory = useWorkspaceStore((s) => s.openHistory);
-  const [recentTab, setRecentTab] = useState<"edited" | "created" | "opened">("edited");
+  const [recentTab, setRecentTab] = useState<"edited" | "created" | "opened">(
+    "edited",
+  );
 
   const byPath = useMemo(() => {
     const m = new Map<string, (typeof items)[number]>();
@@ -97,7 +99,10 @@ export function Atrium() {
       : { sunrise: atHour(now, 6), sunset: atHour(now, 20) };
     const arc = sunArcPosition(now, times.sunrise, times.sunset);
     const moon = moonPhase(now);
-    const remMin = Math.max(0, Math.floor((times.sunset.getTime() - now.getTime()) / 60_000));
+    const remMin = Math.max(
+      0,
+      Math.floor((times.sunset.getTime() - now.getTime()) / 60_000),
+    );
     return {
       moon,
       sunrise: fmtTime(times.sunrise),
@@ -117,9 +122,13 @@ export function Atrium() {
         <div>
           <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
             <span className="text-accent">●</span>
-            <span>DAYSTART / <b className="font-medium text-ink">{todayLabel}</b></span>
+            <span>
+              DAYSTART / <b className="font-medium text-ink">{todayLabel}</b>
+            </span>
             <span>WEEK {week}</span>
-            <span>DAY {doy} / {yearDays}</span>
+            <span>
+              DAY {doy} / {yearDays}
+            </span>
             <span>JD {julianDay(now)}</span>
             <span className="tabular-nums">{clock} LOCAL</span>
           </div>
@@ -151,7 +160,9 @@ export function Atrium() {
               className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
             >
               Capture
-              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">⌘ N</div>
+              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">
+                ⌘ N
+              </div>
             </button>
             <button
               type="button"
@@ -159,7 +170,9 @@ export function Atrium() {
               className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
             >
               Search
-              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">⌘ K</div>
+              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">
+                ⌘ K
+              </div>
             </button>
           </div>
         </div>
@@ -230,7 +243,11 @@ export function Atrium() {
           </Card>
         )}
       </div>
-      <Card className="col-span-12 lg:col-span-5" label="Sky" caption="FIG. III">
+      <Card
+        className="col-span-12 lg:col-span-5"
+        label="Sky"
+        caption="FIG. III"
+      >
         <div className="grid grid-cols-[96px_1fr] gap-4">
           <MoonDisc info={sky.moon} />
           <div className="cl-mono flex flex-col gap-1.5 text-[11px]">
@@ -260,9 +277,17 @@ export function Atrium() {
         caption="FIG. IV — CAPTURES PER DAY · UTC"
       >
         <Heatmap weeks={heat.weeks} monthLabels={heat.monthLabels} />
-        <HeatmapFooter total={heat.total} longest={heat.longestStreak} current={heat.currentStreak} />
+        <HeatmapFooter
+          total={heat.total}
+          longest={heat.longestStreak}
+          current={heat.currentStreak}
+        />
       </Card>
-      <Card className="col-span-12 lg:col-span-4" label="Subjects, by frequency" caption="FIG. V">
+      <Card
+        className="col-span-12 lg:col-span-4"
+        label="Subjects, by frequency"
+        caption="FIG. V"
+      >
         {topTags.length === 0 ? (
           <p className="cl-marg m-0">No tags yet.</p>
         ) : (
@@ -272,7 +297,10 @@ export function Atrium() {
                 type="button"
                 key={t.tag}
                 onClick={() =>
-                  navigate({ to: "/gazetteer", search: { tag: t.tag } as never })
+                  navigate({
+                    to: "/gazetteer",
+                    search: { tag: t.tag } as never,
+                  })
                 }
                 className="group grid cursor-pointer grid-cols-[120px_1fr_36px] items-center gap-2 text-left"
               >
@@ -282,7 +310,9 @@ export function Atrium() {
                 <span className="h-[8px] bg-rule-soft">
                   <span
                     className="block h-full bg-accent"
-                    style={{ width: `${Math.max(4, (t.count / maxTag) * 100)}%` }}
+                    style={{
+                      width: `${Math.max(4, (t.count / maxTag) * 100)}%`,
+                    }}
                   />
                 </span>
                 <span className="cl-mono text-right text-[10px] tabular-nums text-ink-mute">
@@ -295,7 +325,7 @@ export function Atrium() {
       </Card>
 
       {/* RECENTS (col-7) */}
-      <section className="col-span-12 border border-rule bg-paper-2 lg:col-span-7">
+      <section className="col-span-12 flex h-[340px] flex-col border border-rule bg-paper-2 lg:col-span-7">
         <div className="flex items-center justify-between border-b border-rule bg-paper">
           <div className="flex">
             {(["edited", "created", "opened"] as const).map((t) => (
@@ -310,7 +340,11 @@ export function Atrium() {
                     : "text-ink-mute hover:text-ink")
                 }
               >
-                {t === "edited" ? "Recently edited" : t === "created" ? "Recently created" : "Opened"}
+                {t === "edited"
+                  ? "Recently edited"
+                  : t === "created"
+                    ? "Recently created"
+                    : "Opened"}
               </button>
             ))}
           </div>
@@ -324,48 +358,54 @@ export function Atrium() {
           </div>
         </div>
 
-        {recentRows.length === 0 ? (
-          <p className="cl-marg m-0 p-3.5">
-            {recentTab === "opened" ? "∅ Nothing opened yet this session." : "∅ No folios yet inscribed."}
-          </p>
-        ) : (
-          <div className="flex flex-col">
-            {recentRows.map((n, i) => {
-              const kind = resolveKindFromPath(n.path);
-              const ts =
-                recentTab === "created"
-                  ? n.created_at
-                  : recentTab === "opened"
-                    ? new Date(
-                        openHistoryMap.get(n.path) ?? Date.now(),
-                      ).toISOString()
-                    : n.updated_at;
-              return (
-                <button
-                  type="button"
-                  key={n.path}
-                  onClick={() => openTab("page", n.path, n.title || n.path)}
-                  className="grid cursor-pointer grid-cols-[18px_90px_1fr_72px] items-baseline gap-3 border-b border-dotted border-rule-soft px-3.5 py-2 text-left hover:bg-paper-edge"
-                >
-                  <span className="cl-mono text-[9px] tabular-nums text-ink-mute">{pad(i + 1)}</span>
-                  <span className="cl-mono flex items-center gap-1.5 text-[9px] text-ink-mute">
-                    <span
-                      className="inline-block h-[6px] w-[6px] flex-shrink-0"
-                      style={{ background: kindColorVar(kind) }}
-                    />
-                    {shortFolio(n.path)}
-                  </span>
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink">
-                    {n.title || n.path}
-                  </span>
-                  <span className="cl-mono text-right text-[9px] uppercase text-ink-mute">
-                    {formatRelativeTime(ts)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <div className="flex-1 overflow-y-auto">
+          {recentRows.length === 0 ? (
+            <p className="cl-marg m-0 p-3.5">
+              {recentTab === "opened"
+                ? "∅ Nothing opened yet this session."
+                : "∅ No folios yet inscribed."}
+            </p>
+          ) : (
+            <div className="flex flex-col">
+              {recentRows.map((n, i) => {
+                const kind = resolveKindFromPath(n.path);
+                const ts =
+                  recentTab === "created"
+                    ? n.created_at
+                    : recentTab === "opened"
+                      ? new Date(
+                          openHistoryMap.get(n.path) ?? Date.now(),
+                        ).toISOString()
+                      : n.updated_at;
+                return (
+                  <button
+                    type="button"
+                    key={n.path}
+                    onClick={() => openTab("page", n.path, n.title || n.path)}
+                    className="grid cursor-pointer grid-cols-[18px_90px_1fr_72px] items-baseline gap-3 border-b border-dotted border-rule-soft px-3.5 py-2 text-left hover:bg-paper-edge"
+                  >
+                    <span className="cl-mono text-[9px] tabular-nums text-ink-mute">
+                      {pad(i + 1)}
+                    </span>
+                    <span className="cl-mono flex items-center gap-1.5 text-[9px] text-ink-mute">
+                      <span
+                        className="inline-block h-[6px] w-[6px] flex-shrink-0"
+                        style={{ background: kindColorVar(kind) }}
+                      />
+                      {shortFolio(n.path)}
+                    </span>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink">
+                      {n.title || n.path}
+                    </span>
+                    <span className="cl-mono text-right text-[9px] uppercase text-ink-mute">
+                      {formatRelativeTime(ts)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </section>
     </div>
   );
@@ -425,7 +465,10 @@ function Heatmap({
           {weeks.map((week, wi) => (
             <div key={`w${wi}`} className="flex flex-col gap-[3px]">
               {week.map((lvl, di) => (
-                <span key={`d${di}`} className={`h-[12px] w-[12px] ${HEAT_LEVEL[lvl]}`} />
+                <span
+                  key={`d${di}`}
+                  className={`h-[12px] w-[12px] ${HEAT_LEVEL[lvl]}`}
+                />
               ))}
             </div>
           ))}
@@ -447,14 +490,18 @@ function HeatmapFooter({
   return (
     <div className="cl-mono mt-3 flex flex-wrap items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
       <span>
-        TOTAL <b className="font-medium text-ink">{total.toLocaleString("en-US")}</b> · LONGEST{" "}
-        <b className="font-medium text-ink">{longest}d</b> · CURRENT{" "}
+        TOTAL{" "}
+        <b className="font-medium text-ink">{total.toLocaleString("en-US")}</b>{" "}
+        · LONGEST <b className="font-medium text-ink">{longest}d</b> · CURRENT{" "}
         <b className="text-accent">{current}d</b>
       </span>
       <span className="flex items-center gap-1.5">
         LESS
         {HEAT_LEVEL.map((c, i) => (
-          <i key={`leg${i}`} className={`inline-block h-3 w-3 border border-rule ${c}`} />
+          <i
+            key={`leg${i}`}
+            className={`inline-block h-3 w-3 border border-rule ${c}`}
+          />
         ))}
         MORE
       </span>
