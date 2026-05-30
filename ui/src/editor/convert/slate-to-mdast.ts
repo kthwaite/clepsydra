@@ -153,6 +153,14 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
           } as PhrasingContent);
           break;
         }
+        case "footnote-ref": {
+          result.push({
+            type: "footnoteReference",
+            identifier: el.identifier,
+            label: el.identifier,
+          } as unknown as PhrasingContent);
+          break;
+        }
         default:
           // Unexpected inline element — treat its children as inline text
           result.push(...convertInlineChildren((el as CustomElement).children));
@@ -280,6 +288,30 @@ function convertElement(node: CustomElement): RootContent {
         ],
       };
       return p;
+    }
+
+    case "footnote-ref": {
+      // A footnote-ref at block level — wrap in paragraph
+      const p: Paragraph = {
+        type: "paragraph",
+        children: [
+          {
+            type: "footnoteReference",
+            identifier: node.identifier,
+            label: node.identifier,
+          } as unknown as PhrasingContent,
+        ],
+      };
+      return p;
+    }
+
+    case "footnote-def": {
+      return {
+        type: "footnoteDefinition",
+        identifier: node.identifier,
+        label: node.identifier,
+        children: convertBlockChildren(node.children),
+      } as unknown as RootContent;
     }
   }
 }

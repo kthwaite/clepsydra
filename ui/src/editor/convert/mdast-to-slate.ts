@@ -158,9 +158,15 @@ function convertBlockNode(
       return null;
     }
 
+    case "footnoteDefinition":
+      return {
+        type: "footnote-def",
+        identifier: (node as { identifier: string }).identifier,
+        children: convertChildren(node.children as RootContent[]),
+      };
+
     // Node types we intentionally skip
     case "definition":
-    case "footnoteDefinition":
     case "yaml":
     case "table":
       return null;
@@ -313,8 +319,13 @@ function convertPhrasingNode(
       return [textNode(node.alt ?? "", marks)];
 
     case "footnoteReference":
-      // Not supported in current schema
-      return [];
+      return [
+        {
+          type: "footnote-ref",
+          identifier: (node as { identifier: string }).identifier,
+          children: [{ text: "" }],
+        } as unknown as Descendant,
+      ];
 
     case "html":
       // Inline HTML — render as text

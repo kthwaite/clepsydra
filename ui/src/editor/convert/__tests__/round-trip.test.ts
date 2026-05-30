@@ -294,3 +294,20 @@ See [[Other Page]] for more.`;
     expect(mid2?.underline).toBe(true);
   });
 });
+
+describe("footnotes round-trip", () => {
+  it("parses a footnote reference into an inline footnote-ref and a footnote-def block", () => {
+    const slate = markdownToSlate("A claim.[^1]\n\n[^1]: The source.\n");
+    const json = JSON.stringify(slate);
+    expect(json).toContain('"type":"footnote-ref"');
+    expect(json).toContain('"identifier":"1"');
+    expect(json).toContain('"type":"footnote-def"');
+  });
+
+  it("round-trips a footnote ref + definition without dropping it", () => {
+    const md = "A claim.[^1]\n\n[^1]: The source.\n";
+    const back = slateToMarkdown(markdownToSlate(md));
+    expect(back).toContain("[^1]");
+    expect(back).toContain("[^1]: The source.");
+  });
+});
