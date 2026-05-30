@@ -201,8 +201,14 @@ export function Atrium() {
       </Card>
 
       {/* HEATMAP (col-8) + TAGS (col-4) */}
-      <Card className="col-span-12 lg:col-span-8" label={`Activity · ${heat.total} edits / 26wk`} pip="cool" caption="FIG. IV — CAPTURES PER DAY">
-        <Heatmap weeks={heat.weeks} />
+      <Card
+        className="col-span-12 lg:col-span-8"
+        label="Activity · Rolling 26 weeks"
+        pip="cool"
+        caption="FIG. IV — CAPTURES PER DAY · UTC"
+      >
+        <Heatmap weeks={heat.weeks} monthLabels={heat.monthLabels} />
+        <HeatmapFooter total={heat.total} longest={heat.longestStreak} current={heat.currentStreak} />
       </Card>
       <Card className="col-span-12 lg:col-span-4" label="Subjects, by frequency" caption="FIG. V">
         {topTags.length === 0 ? (
@@ -268,25 +274,78 @@ function KVLine({ k, v }: { k: string; v: string }) {
 
 const HEAT_LEVEL = [
   "bg-rule-soft",
-  "bg-accent/25",
-  "bg-accent/50",
-  "bg-accent/75",
+  "bg-accent/30",
+  "bg-accent/55",
+  "bg-accent/80",
+  "bg-warn",
   "bg-accent",
 ];
+const DOW_LABELS = ["M", "", "W", "", "F", "", "S"]; // Monday-first rows
 
-function Heatmap({ weeks }: { weeks: number[][] }) {
+function Heatmap({
+  weeks,
+  monthLabels,
+}: {
+  weeks: number[][];
+  monthLabels: string[];
+}) {
   return (
-    <div className="cl-noscroll flex gap-[3px] overflow-x-auto">
-      {weeks.map((week, wi) => (
-        <div key={`w${wi}`} className="flex flex-col gap-[3px]">
-          {week.map((level, di) => (
-            <span
-              key={`d${di}`}
-              className={`h-[10px] w-[10px] ${HEAT_LEVEL[level]}`}
-            />
+    <div>
+      <div className="mb-1.5 ml-[26px] flex">
+        {monthLabels.map((m, i) => (
+          <span
+            key={`m${i}`}
+            className="cl-mono min-w-0 flex-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute"
+          >
+            {m}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-[22px_1fr] gap-2">
+        <div className="cl-noscroll grid grid-rows-7 gap-[3px] pr-1 text-right text-[9px] text-ink-mute">
+          {DOW_LABELS.map((d, i) => (
+            <span key={`dow${i}`} className="h-[12px] leading-[12px]">
+              {d}
+            </span>
           ))}
         </div>
-      ))}
+        <div className="cl-noscroll flex gap-[3px] overflow-x-auto">
+          {weeks.map((week, wi) => (
+            <div key={`w${wi}`} className="flex flex-col gap-[3px]">
+              {week.map((lvl, di) => (
+                <span key={`d${di}`} className={`h-[12px] w-[12px] ${HEAT_LEVEL[lvl]}`} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeatmapFooter({
+  total,
+  longest,
+  current,
+}: {
+  total: number;
+  longest: number;
+  current: number;
+}) {
+  return (
+    <div className="cl-mono mt-3 flex flex-wrap items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+      <span>
+        TOTAL <b className="font-medium text-ink">{total.toLocaleString("en-US")}</b> · LONGEST{" "}
+        <b className="font-medium text-ink">{longest}d</b> · CURRENT{" "}
+        <b className="text-accent">{current}d</b>
+      </span>
+      <span className="flex items-center gap-1.5">
+        LESS
+        {HEAT_LEVEL.map((c, i) => (
+          <i key={`leg${i}`} className={`inline-block h-3 w-3 border border-rule ${c}`} />
+        ))}
+        MORE
+      </span>
     </div>
   );
 }
