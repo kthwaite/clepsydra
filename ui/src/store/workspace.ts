@@ -155,12 +155,19 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       activateTab(tabId) {
-        set((state) => ({
-          activeTabId: tabId,
-          tabs: state.tabs.map((t) =>
-            t.id === tabId ? { ...t, lastActiveAt: Date.now() } : t,
-          ),
-        }));
+        set((state) => {
+          const tab = state.tabs.find((t) => t.id === tabId);
+          return {
+            activeTabId: tabId,
+            tabs: state.tabs.map((t) =>
+              t.id === tabId ? { ...t, lastActiveAt: Date.now() } : t,
+            ),
+            openHistory:
+              tab?.type === "page" && tab.path
+                ? pushOpenHistory(state.openHistory, tab.path, Date.now())
+                : state.openHistory,
+          };
+        });
       },
 
       togglePin(tabId) {

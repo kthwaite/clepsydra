@@ -49,6 +49,12 @@ export function Atrium() {
     return m;
   }, [items]);
 
+  const openHistoryMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const h of openHistory) m.set(h.path, h.openedAt);
+    return m;
+  }, [openHistory]);
+
   const recentRows = useMemo(() => {
     if (recentTab === "opened") {
       return openHistory
@@ -68,7 +74,9 @@ export function Atrium() {
     ? `${journalToday.meta.id} · DAILY / ${fmtDate(now)}`
     : `DAILY / ${fmtDate(now)}`;
 
-  const heat = useMemo(() => buildHeatmap(items, now), [items, now]);
+  const dayKeyDep = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+
+  const heat = useMemo(() => buildHeatmap(items, now), [items, dayKeyDep]);
   const topTags = useMemo(
     () => [...(tags ?? [])].sort((a, b) => b.count - a.count).slice(0, 8),
     [tags],
@@ -77,7 +85,7 @@ export function Atrium() {
 
   const inventory = useMemo(
     () => deriveInventory(stats, tags, items, now),
-    [stats, tags, items, now],
+    [stats, tags, items, dayKeyDep],
   );
 
   const sky = useMemo(() => {
@@ -164,7 +172,7 @@ export function Atrium() {
         caption="FIG. I — STEADY-STATE TELEMETRY"
         tight
       >
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 [&>div:last-child]:border-r-0">
           {inventory.map((cell, i) => (
             <div
               key={cell.label}
@@ -288,9 +296,14 @@ export function Atrium() {
               </button>
             ))}
           </div>
-          <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            {recentRows.length} OF {items.length}
-          </span>
+          <div className="flex items-center gap-3 px-3 py-2">
+            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+              {recentRows.length} OF {items.length}
+            </span>
+            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+              FIG. VI
+            </span>
+          </div>
         </div>
 
         {recentRows.length === 0 ? (
@@ -301,7 +314,14 @@ export function Atrium() {
           <div className="flex flex-col">
             {recentRows.map((n, i) => {
               const kind = resolveKindFromPath(n.path);
-              const ts = recentTab === "created" ? n.created_at : n.updated_at;
+              const ts =
+                recentTab === "created"
+                  ? n.created_at
+                  : recentTab === "opened"
+                    ? new Date(
+                        openHistoryMap.get(n.path) ?? Date.now(),
+                      ).toISOString()
+                    : n.updated_at;
               return (
                 <button
                   type="button"

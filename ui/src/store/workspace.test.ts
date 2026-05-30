@@ -46,4 +46,16 @@ describe("useWorkspaceStore openTab wiring", () => {
       useWorkspaceStore.getState().openHistory.map((e) => e.path),
     ).toEqual(["note-a.md"]);
   });
+
+  it("activateTab records page-tab activations in openHistory", () => {
+    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    const store = useWorkspaceStore.getState();
+    store.addTab({ id: "t1", type: "page", path: "x.md", label: "X" });
+    store.addTab({ id: "t2", type: "graph", label: "Graph" });
+    useWorkspaceStore.getState().activateTab("t1");
+    useWorkspaceStore.getState().activateTab("t2");
+    expect(
+      useWorkspaceStore.getState().openHistory.map((e) => e.path),
+    ).toEqual(["x.md"]);
+  });
 });
