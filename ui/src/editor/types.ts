@@ -99,6 +99,8 @@ export interface CustomText {
   underline?: true;
   code?: true;
   strikethrough?: true;
+  /** Prism token type applied by code-block decorations (e.g. "keyword"). */
+  token?: string;
 }
 
 // --- Editor type ---
@@ -112,5 +114,8 @@ declare module "slate" {
     Editor: CustomEditor;
     Element: CustomElement;
     Text: CustomText;
+  }
+  interface BaseRange {
+    token?: string;
   }
 }
