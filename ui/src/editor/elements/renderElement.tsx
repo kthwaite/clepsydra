@@ -7,6 +7,7 @@ import {
 import type { ListItemElement } from "#/editor/types";
 import { BlockRefElement } from "./BlockRefElement";
 import { CodeBlockElement } from "./CodeBlockElement";
+import { FootnoteRefElement } from "./FootnoteRefElement";
 import { LinkElement } from "./LinkElement";
 import { WikilinkElement } from "./WikilinkElement";
 
@@ -82,6 +83,22 @@ export function renderElement(props: RenderElementProps) {
 
     case "link":
       return <LinkElement {...props} element={element} />;
+
+    case "footnote-ref":
+      return <FootnoteRefElement {...props} element={element} />;
+
+    case "footnote-def":
+      return (
+        <div
+          {...attributes}
+          className="cl-footnote-def mt-1 flex gap-2 border-t border-rule-soft pt-1 text-[0.85em] text-ink-mute"
+        >
+          <span contentEditable={false} className="cl-mono text-accent select-none">
+            [{element.identifier}]
+          </span>
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+      );
 
     case "paragraph":
     default:
