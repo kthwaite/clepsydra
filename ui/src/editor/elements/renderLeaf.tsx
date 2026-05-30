@@ -1,4 +1,5 @@
 import type { RenderLeafProps } from "slate-react";
+import { TOKEN_COLOR } from "../decorate-code";
 
 export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
   if (leaf.code) {
@@ -17,6 +18,13 @@ export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
   }
   if (leaf.strikethrough) {
     children = <del>{children}</del>;
+  }
+  if (leaf.token) {
+    children = (
+      <span style={{ color: TOKEN_COLOR[leaf.token] ?? "inherit" }}>
+        {children}
+      </span>
+    );
   }
   return <span {...attributes}>{children}</span>;
 }
