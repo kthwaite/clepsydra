@@ -10,19 +10,16 @@ const codeBlock = (language: string, text: string) => ({
 describe("decorateCode", () => {
   it("returns [] for non-code-block nodes", () => {
     const para = { type: "paragraph", children: [{ text: "hi" }] };
-    // biome-ignore lint/suspicious/noExplicitAny: test fixture
     expect(decorateCode([para as any, [0]])).toEqual([]);
   });
 
   it("returns [] for an unknown/unregistered language (no throw)", () => {
     const node = codeBlock("not-a-real-lang", "const x = 1;");
-    // biome-ignore lint/suspicious/noExplicitAny: test fixture
     expect(decorateCode([node as any, [0]])).toEqual([]);
   });
 
   it("emits token ranges into child text 0 with correct offsets", () => {
     const node = codeBlock("javascript", "const x = 1;");
-    // biome-ignore lint/suspicious/noExplicitAny: test fixture
     const ranges = decorateCode([node as any, [3]]);
     expect(ranges.length).toBeGreaterThan(0);
     for (const r of ranges) {
