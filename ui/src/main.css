@@ -595,6 +595,18 @@ body {
     animation: view-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
+/* Editor prose rhythm — vertical spacing between Slate blocks. Wrapped in
+   :where() so the rules stay at zero specificity and per-element utility
+   margins (e.g. the heading mt/mb set in renderElement) still take priority. */
+:where(.codex-prose [data-slate-editor] > * + *) {
+    margin-top: 0.9em;
+}
+
+/* Code blocks get more breathing room above and below than the base gap. */
+:where(.codex-prose [data-slate-editor] .cl-codeblock) {
+    margin-block: 1.25em;
+}
+
 /* Respect reduced motion across the app. */
 @media (prefers-reduced-motion: reduce) {
 

@@ -5,7 +5,7 @@ type Props = RenderElementProps & { element: CodeBlockElementType };
 
 export function CodeBlockElement({ attributes, children, element }: Props) {
   return (
-    <div {...attributes}>
+    <div {...attributes} className="cl-codeblock">
       <pre className="overflow-x-auto border border-border bg-muted p-4 font-mono text-sm">
         {element.language && (
           <span
