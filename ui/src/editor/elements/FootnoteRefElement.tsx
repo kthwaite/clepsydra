@@ -10,14 +10,17 @@ export function FootnoteRefElement({ attributes, children, element }: Props) {
   const [hover, setHover] = useState(false);
 
   // Resolve the matching footnote-def's text locally from the editor tree.
+  // Only walk on hover — avoids an O(doc) traversal per ref on every render.
   let preview = "";
-  for (const [node] of Node.elements(editor)) {
-    if (
-      (node as any).type === "footnote-def" &&
-      (node as any).identifier === element.identifier
-    ) {
-      preview = Node.string(node);
-      break;
+  if (hover) {
+    for (const [node] of Node.elements(editor)) {
+      if (
+        (node as any).type === "footnote-def" &&
+        (node as any).identifier === element.identifier
+      ) {
+        preview = Node.string(node);
+        break;
+      }
     }
   }
 
