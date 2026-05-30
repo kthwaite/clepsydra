@@ -4,2799 +4,2799 @@
  */
 
 export interface paths {
-    "/api/vault/academic/annotations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["create_annotation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+  "/api/vault/academic/annotations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/import/bibtex": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_bibtex"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["create_annotation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/import/bibtex": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/import/doi": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_doi"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["import_bibtex"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/import/doi": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/import/isbn": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_isbn_handler"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["import_doi"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/import/isbn": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/import/zotero": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_zotero_handler"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["import_isbn_handler"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/import/zotero": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/works": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_works"];
-        put?: never;
-        post: operations["create_work"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["import_zotero_handler"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/works": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/works/by-id/{uuid}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_work"];
-        put: operations["update_work"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_works"];
+    put?: never;
+    post: operations["create_work"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/works/by-id/{uuid}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/academic/works/by-id/{uuid}/annotations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_annotations"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["get_work"];
+    put: operations["update_work"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/academic/works/by-id/{uuid}/annotations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/attachments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_attachments"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_annotations"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/attachments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/attachments/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_attachment"];
-        put?: never;
-        post: operations["upload_attachment"];
-        delete: operations["delete_attachment"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_attachments"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/attachments/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/bcl": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_bcl"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["get_attachment"];
+    put?: never;
+    post: operations["upload_attachment"];
+    delete: operations["delete_attachment"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/bcl": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * SSE endpoint that streams [`SyncNotification`] events to connected clients.
-         * @description Lagged messages (when a client falls behind the broadcast buffer) are
-         *     silently dropped.
-         */
-        get: operations["event_stream"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["get_bcl"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/folders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_folders"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /**
+     * SSE endpoint that streams [`SyncNotification`] events to connected clients.
+     * @description Lagged messages (when a client falls behind the broadcast buffer) are
+     *     silently dropped.
+     */
+    get: operations["event_stream"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/folders": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/folders-move/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["move_folder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_folders"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/folders-move/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/folders/tree": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_folder_tree"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["move_folder"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/folders/tree": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/folders/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_folder_contents"];
-        put?: never;
-        post: operations["create_folder"];
-        delete: operations["delete_folder"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_folder_tree"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/folders/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/ambiguous": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ambiguous"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_folder_contents"];
+    put?: never;
+    post: operations["create_folder"];
+    delete: operations["delete_folder"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/ambiguous": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/backlinks/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["backlinks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["ambiguous"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/backlinks/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/content-index": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["content_index"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["backlinks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/content-index": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/create-from-link": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["create_from_link"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["content_index"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/create-from-link": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/graph": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["graph"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["create_from_link"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/graph": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/outlinks/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["outlinks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["graph"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/outlinks/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/preview-mutation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["preview_mutation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["outlinks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/preview-mutation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/rebuild": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["rebuild_index"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["preview_mutation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/rebuild": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["search"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["rebuild_index"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/similar/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["similar"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["search"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/similar/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["stats"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["similar"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/tags": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tags"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["stats"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/tags": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/unresolved": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["unresolved"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["tags"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/unresolved": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/index/warnings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["warnings"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["unresolved"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/index/warnings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/pages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_pages"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["warnings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/pages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/pages-move/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["move_page"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["list_pages"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/pages-move/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/pages/by-id/{uuid}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_page_by_id"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post: operations["move_page"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/pages/by-id/{uuid}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/vault/pages/{path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_page"];
-        put: operations["update_page"];
-        post: operations["create_page"];
-        delete: operations["delete_page"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get: operations["get_page_by_id"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/pages/{path}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
+    get: operations["get_page"];
+    put: operations["update_page"];
+    post: operations["create_page"];
+    delete: operations["delete_page"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        AmbiguousName: {
-            canonical_name: string;
-            page_ids: string[];
-        };
-        AnnotationDetail: {
-            annotation_type?: null | components["schemas"]["AnnotationType"];
-            body: string;
-            id: string;
-            path: string;
-            source_asset?: string | null;
-            source_location?: null | components["schemas"]["SourceLocation"];
-            tags?: string[];
-            work_id: string;
-            work_path?: string | null;
-        };
-        /**
-         * @description The kind of annotation attached to a work.
-         * @enum {string}
-         */
-        AnnotationType: "highlight" | "note";
-        /** @description Uniform error payload for all API responses. */
-        ApiError: {
-            detail?: unknown;
-            error: string;
-            hint?: string | null;
-            /** Format: int32 */
-            status: number;
-        };
-        AttachmentInfo: {
-            name: string;
-            path: string;
-            /** Format: int64 */
-            size: number;
-        };
-        BacklinkEntry: {
-            context: string;
-            kind: string;
-            source_id: string;
-            source_path: string;
-            source_title?: string | null;
-            target_raw: string;
-        };
-        BclResponse: {
-            /** @description Computed Brimley-Cocoon Line date, `YYYY-MM-DD`. `None` when unconfigured. */
-            bcl_date?: string | null;
-            /** @description Configured date of birth, `YYYY-MM-DD`. `None` when unconfigured. */
-            birth_date?: string | null;
-            /**
-             * Format: int64
-             * @description Seconds from now until the BCL. Negative once the line is crossed.
-             *     `None` when unconfigured.
-             */
-            remaining_seconds?: number | null;
-        };
-        CandidateEntry: {
-            page_id: string;
-            path: string;
-            title?: string | null;
-        };
-        /** @description Conflict detail returned for `Manual` conflict policy. */
-        ConflictDetail: {
-            fields: components["schemas"]["FieldDiff"][];
-        };
-        /**
-         * @description How to handle items that already exist locally.
-         * @enum {string}
-         */
-        ConflictPolicy: "skip" | "source_wins" | "manual";
-        ContentEntry: {
-            created_at?: string | null;
-            description: string;
-            links: string[];
-            path: string;
-            tags: string[];
-            title?: string | null;
-            updated_at?: string | null;
-            /** Format: int64 */
-            word_count?: number | null;
-        };
-        ContentIndexResponse: {
-            items: components["schemas"]["ContentEntry"][];
-            /** Format: int32 */
-            limit?: number | null;
-            /** Format: int32 */
-            offset: number;
-            /** Format: int32 */
-            total: number;
-        };
-        CreateAnnotationRequest: {
-            annotation_type?: null | components["schemas"]["AnnotationType"];
-            body?: string | null;
-            source_asset?: string | null;
-            source_location?: null | components["schemas"]["SourceLocation"];
-            tags?: string[];
-            work_id: string;
-        };
-        CreateFromLinkRequest: {
-            body?: string | null;
-            folder?: string;
-            target_raw: string;
-        };
-        CreatePageRequest: {
-            aliases?: string[] | null;
-            body?: string | null;
-            tags?: string[] | null;
-            title?: string | null;
-        };
-        CreateWorkRequest: {
-            aliases?: string[];
-            authors?: string[];
-            body?: string | null;
-            cite_key?: string | null;
-            external_ids?: null | components["schemas"]["ExternalIds"];
-            publisher?: string | null;
-            /** Format: int32 */
-            rating?: number | null;
-            status?: null | components["schemas"]["ReadingStatus"];
-            tags?: string[];
-            title: string;
-            urls?: null | components["schemas"]["WorkUrls"];
-            venue?: string | null;
-            work_type: components["schemas"]["WorkType"];
-            /** Format: int32 */
-            year?: number | null;
-        };
-        /** @description External identifiers for an academic work (DOI, ISBN, arXiv). */
-        ExternalIds: {
-            arxiv?: string | null;
-            doi?: string | null;
-            isbn?: string | null;
-        };
-        /** @description A single field-level difference between local and source metadata. */
-        FieldDiff: {
-            field: string;
-            local_value?: string | null;
-            source_value?: string | null;
-        };
-        FolderInfo: {
-            name: string;
-            path: string;
-        };
-        FolderListing: {
-            folders: components["schemas"]["FolderInfo"][];
-            pages: components["schemas"]["PageSummary"][];
-            path: string;
-        };
-        FolderTreeResponse: {
-            paths: string[];
-        };
-        GraphEdge: {
-            kind: string;
-            source: string;
-            target: string;
-        };
-        GraphNode: {
-            id: string;
-            path: string;
-            title?: string | null;
-        };
-        GraphResponse: {
-            edges: components["schemas"]["GraphEdge"][];
-            nodes: components["schemas"]["GraphNode"][];
-        };
-        ImportDoiRequest: {
-            doi: string;
-        };
-        ImportIsbnRequest: {
-            isbn: string;
-        };
-        ImportResponse: {
-            results: components["schemas"]["ImportResult"][];
-        };
-        ImportResult: {
-            cite_key: string;
-            conflict_detail?: null | components["schemas"]["ConflictDetail"];
-            error?: string | null;
-            page_path?: string | null;
-            status: string;
-        };
-        /** @description Request for importing from Zotero. */
-        ImportZoteroRequest: {
-            /**
-             * @description When true (default), automatically use the last checkpoint as `since`
-             *     if no explicit `since` is provided, and save a new checkpoint after
-             *     a successful import.
-             */
-            auto_checkpoint?: boolean;
-            collection?: string | null;
-            conflict_policy?: components["schemas"]["ConflictPolicy"];
-            database_path?: string | null;
-            dry_run?: boolean;
-            since?: string | null;
-        };
-        MoveFolderRequest: {
-            destination: string;
-        };
-        MovePageRequest: {
-            destination: string;
-        };
-        OutlinkEntry: {
-            kind: string;
-            source_field?: string | null;
-            target_id?: string | null;
-            target_path?: string | null;
-            target_raw: string;
-        };
-        /** @description OpenAPI schema for page detail responses. */
-        PageDetailResponse: {
-            body: string;
-            canonical_name: string;
-            meta: components["schemas"]["PageMetaResponse"];
-            path: string;
-        };
-        /** @description OpenAPI schema for page metadata exposed in `PageDetail`. */
-        PageMetaResponse: {
-            aliases?: string[] | null;
-            created_at?: string | null;
-            id: string;
-            tags?: string[] | null;
-            title?: string | null;
-            updated_at?: string | null;
-        };
-        PageSummary: {
-            canonical_name: string;
-            id: string;
-            path: string;
-            title?: string | null;
-        };
-        /** @description OpenAPI schema for paginated page listing. */
-        PageSummaryListResponse: {
-            items: components["schemas"]["PageSummary"][];
-            /** Format: int32 */
-            limit?: number | null;
-            /** Format: int32 */
-            offset: number;
-            /** Format: int32 */
-            total: number;
-        };
-        PreviewMutationRequest: {
-            destination?: string;
-            operation: string;
-            rewrite?: string;
-            source?: string;
-        };
-        /**
-         * @description Reading progress status for an academic work.
-         * @enum {string}
-         */
-        ReadingStatus: "unread" | "reading" | "done";
-        RebuildResponse: {
-            pages_indexed: number;
-            pages_removed: number;
-            pages_skipped: number;
-            warnings: string[];
-        };
-        SearchResultEntry: {
-            page_id: string;
-            path: string;
-            snippet: string;
-            title?: string | null;
-        };
-        SimilarEntry: {
-            path: string;
-            /** Format: double */
-            score: number;
-            shared_tags: string[];
-            title?: string | null;
-        };
-        SimilarResponse: {
-            items: components["schemas"]["SimilarEntry"][];
-        };
-        /** @description Location within a source document (page, quote, bounding rect). */
-        SourceLocation: {
-            /** Format: int32 */
-            page?: number | null;
-            quote?: string | null;
-            rect?: number[] | null;
-        };
-        /** @description A notification emitted after the vault index changes. */
-        SyncNotification: {
-            removed: string[];
-            /** @enum {string} */
-            type: "index_changed";
-            upserted: string[];
-        };
-        TagCount: {
-            /** Format: int64 */
-            count: number;
-            tag: string;
-        };
-        UnresolvedLink: {
-            candidates: components["schemas"]["CandidateEntry"][];
-            kind: string;
-            reason: string;
-            source_id: string;
-            source_path: string;
-            /** Format: int64 */
-            span_start: number;
-            target_canonical?: string | null;
-            target_raw: string;
-        };
-        UpdatePageRequest: {
-            aliases?: string[] | null;
-            body?: string | null;
-            tags?: string[] | null;
-            title?: string | null;
-        };
-        UpdateWorkRequest: {
-            aliases?: string[] | null;
-            authors?: string[] | null;
-            body?: string | null;
-            cite_key?: string | null;
-            external_ids?: null | components["schemas"]["ExternalIds"];
-            publisher?: string | null;
-            /** Format: int32 */
-            rating?: number | null;
-            status?: null | components["schemas"]["ReadingStatus"];
-            tags?: string[] | null;
-            title?: string | null;
-            urls?: null | components["schemas"]["WorkUrls"];
-            venue?: string | null;
-            /** Format: int32 */
-            year?: number | null;
-        };
-        VaultStats: {
-            /** Format: int64 */
-            attachments: number;
-            /** @description RFC3339 timestamp of the most recent `pages.updated_at`, or null on empty vault. */
-            last_indexed_at?: string | null;
-            /** Format: int64 */
-            links_resolved: number;
-            /** Format: int64 */
-            links_total: number;
-            /** Format: int64 */
-            links_unresolved: number;
-            /** Format: int64 */
-            pages: number;
-            /** Format: int64 */
-            tags: number;
-        };
-        WorkDetail: {
-            assets?: string[];
-            authors?: string[];
-            body: string;
-            cite_key?: string | null;
-            external_ids?: null | components["schemas"]["ExternalIds"];
-            id: string;
-            path: string;
-            publisher?: string | null;
-            /** Format: int32 */
-            rating?: number | null;
-            status?: null | components["schemas"]["ReadingStatus"];
-            tags?: string[];
-            title: string;
-            urls?: null | components["schemas"]["WorkUrls"];
-            venue?: string | null;
-            work_type: components["schemas"]["WorkType"];
-            /** Format: int32 */
-            year?: number | null;
-        };
-        WorkSummary: {
-            authors?: string[];
-            cite_key?: string | null;
-            id: string;
-            path: string;
-            status?: string | null;
-            tags?: string[];
-            title?: string | null;
-            work_type?: string | null;
-            /** Format: int32 */
-            year?: number | null;
-        };
-        WorkSummaryListResponse: {
-            items: components["schemas"]["WorkSummary"][];
-            /** Format: int32 */
-            limit?: number | null;
-            /** Format: int32 */
-            offset: number;
-            /** Format: int32 */
-            total: number;
-        };
-        /**
-         * @description The type of academic work.
-         * @enum {string}
-         */
-        WorkType: "paper" | "book" | "thesis" | "report" | "other";
-        /** @description URLs associated with an academic work. */
-        WorkUrls: {
-            landing?: string | null;
-            pdf?: string | null;
-        };
+  schemas: {
+    AmbiguousName: {
+      canonical_name: string;
+      page_ids: string[];
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    AnnotationDetail: {
+      annotation_type?: null | components["schemas"]["AnnotationType"];
+      body: string;
+      id: string;
+      path: string;
+      source_asset?: string | null;
+      source_location?: null | components["schemas"]["SourceLocation"];
+      tags?: string[];
+      work_id: string;
+      work_path?: string | null;
+    };
+    /**
+     * @description The kind of annotation attached to a work.
+     * @enum {string}
+     */
+    AnnotationType: "highlight" | "note";
+    /** @description Uniform error payload for all API responses. */
+    ApiError: {
+      detail?: unknown;
+      error: string;
+      hint?: string | null;
+      /** Format: int32 */
+      status: number;
+    };
+    AttachmentInfo: {
+      name: string;
+      path: string;
+      /** Format: int64 */
+      size: number;
+    };
+    BacklinkEntry: {
+      context: string;
+      kind: string;
+      source_id: string;
+      source_path: string;
+      source_title?: string | null;
+      target_raw: string;
+    };
+    BclResponse: {
+      /** @description Computed Brimley-Cocoon Line date, `YYYY-MM-DD`. `None` when unconfigured. */
+      bcl_date?: string | null;
+      /** @description Configured date of birth, `YYYY-MM-DD`. `None` when unconfigured. */
+      birth_date?: string | null;
+      /**
+       * Format: int64
+       * @description Seconds from now until the BCL. Negative once the line is crossed.
+       *     `None` when unconfigured.
+       */
+      remaining_seconds?: number | null;
+    };
+    CandidateEntry: {
+      page_id: string;
+      path: string;
+      title?: string | null;
+    };
+    /** @description Conflict detail returned for `Manual` conflict policy. */
+    ConflictDetail: {
+      fields: components["schemas"]["FieldDiff"][];
+    };
+    /**
+     * @description How to handle items that already exist locally.
+     * @enum {string}
+     */
+    ConflictPolicy: "skip" | "source_wins" | "manual";
+    ContentEntry: {
+      created_at?: string | null;
+      description: string;
+      links: string[];
+      path: string;
+      tags: string[];
+      title?: string | null;
+      updated_at?: string | null;
+      /** Format: int64 */
+      word_count?: number | null;
+    };
+    ContentIndexResponse: {
+      items: components["schemas"]["ContentEntry"][];
+      /** Format: int32 */
+      limit?: number | null;
+      /** Format: int32 */
+      offset: number;
+      /** Format: int32 */
+      total: number;
+    };
+    CreateAnnotationRequest: {
+      annotation_type?: null | components["schemas"]["AnnotationType"];
+      body?: string | null;
+      source_asset?: string | null;
+      source_location?: null | components["schemas"]["SourceLocation"];
+      tags?: string[];
+      work_id: string;
+    };
+    CreateFromLinkRequest: {
+      body?: string | null;
+      folder?: string;
+      target_raw: string;
+    };
+    CreatePageRequest: {
+      aliases?: string[] | null;
+      body?: string | null;
+      tags?: string[] | null;
+      title?: string | null;
+    };
+    CreateWorkRequest: {
+      aliases?: string[];
+      authors?: string[];
+      body?: string | null;
+      cite_key?: string | null;
+      external_ids?: null | components["schemas"]["ExternalIds"];
+      publisher?: string | null;
+      /** Format: int32 */
+      rating?: number | null;
+      status?: null | components["schemas"]["ReadingStatus"];
+      tags?: string[];
+      title: string;
+      urls?: null | components["schemas"]["WorkUrls"];
+      venue?: string | null;
+      work_type: components["schemas"]["WorkType"];
+      /** Format: int32 */
+      year?: number | null;
+    };
+    /** @description External identifiers for an academic work (DOI, ISBN, arXiv). */
+    ExternalIds: {
+      arxiv?: string | null;
+      doi?: string | null;
+      isbn?: string | null;
+    };
+    /** @description A single field-level difference between local and source metadata. */
+    FieldDiff: {
+      field: string;
+      local_value?: string | null;
+      source_value?: string | null;
+    };
+    FolderInfo: {
+      name: string;
+      path: string;
+    };
+    FolderListing: {
+      folders: components["schemas"]["FolderInfo"][];
+      pages: components["schemas"]["PageSummary"][];
+      path: string;
+    };
+    FolderTreeResponse: {
+      paths: string[];
+    };
+    GraphEdge: {
+      kind: string;
+      source: string;
+      target: string;
+    };
+    GraphNode: {
+      id: string;
+      path: string;
+      title?: string | null;
+    };
+    GraphResponse: {
+      edges: components["schemas"]["GraphEdge"][];
+      nodes: components["schemas"]["GraphNode"][];
+    };
+    ImportDoiRequest: {
+      doi: string;
+    };
+    ImportIsbnRequest: {
+      isbn: string;
+    };
+    ImportResponse: {
+      results: components["schemas"]["ImportResult"][];
+    };
+    ImportResult: {
+      cite_key: string;
+      conflict_detail?: null | components["schemas"]["ConflictDetail"];
+      error?: string | null;
+      page_path?: string | null;
+      status: string;
+    };
+    /** @description Request for importing from Zotero. */
+    ImportZoteroRequest: {
+      /**
+       * @description When true (default), automatically use the last checkpoint as `since`
+       *     if no explicit `since` is provided, and save a new checkpoint after
+       *     a successful import.
+       */
+      auto_checkpoint?: boolean;
+      collection?: string | null;
+      conflict_policy?: components["schemas"]["ConflictPolicy"];
+      database_path?: string | null;
+      dry_run?: boolean;
+      since?: string | null;
+    };
+    MoveFolderRequest: {
+      destination: string;
+    };
+    MovePageRequest: {
+      destination: string;
+    };
+    OutlinkEntry: {
+      kind: string;
+      source_field?: string | null;
+      target_id?: string | null;
+      target_path?: string | null;
+      target_raw: string;
+    };
+    /** @description OpenAPI schema for page detail responses. */
+    PageDetailResponse: {
+      body: string;
+      canonical_name: string;
+      meta: components["schemas"]["PageMetaResponse"];
+      path: string;
+    };
+    /** @description OpenAPI schema for page metadata exposed in `PageDetail`. */
+    PageMetaResponse: {
+      aliases?: string[] | null;
+      created_at?: string | null;
+      id: string;
+      tags?: string[] | null;
+      title?: string | null;
+      updated_at?: string | null;
+    };
+    PageSummary: {
+      canonical_name: string;
+      id: string;
+      path: string;
+      title?: string | null;
+    };
+    /** @description OpenAPI schema for paginated page listing. */
+    PageSummaryListResponse: {
+      items: components["schemas"]["PageSummary"][];
+      /** Format: int32 */
+      limit?: number | null;
+      /** Format: int32 */
+      offset: number;
+      /** Format: int32 */
+      total: number;
+    };
+    PreviewMutationRequest: {
+      destination?: string;
+      operation: string;
+      rewrite?: string;
+      source?: string;
+    };
+    /**
+     * @description Reading progress status for an academic work.
+     * @enum {string}
+     */
+    ReadingStatus: "unread" | "reading" | "done";
+    RebuildResponse: {
+      pages_indexed: number;
+      pages_removed: number;
+      pages_skipped: number;
+      warnings: string[];
+    };
+    SearchResultEntry: {
+      page_id: string;
+      path: string;
+      snippet: string;
+      title?: string | null;
+    };
+    SimilarEntry: {
+      path: string;
+      /** Format: double */
+      score: number;
+      shared_tags: string[];
+      title?: string | null;
+    };
+    SimilarResponse: {
+      items: components["schemas"]["SimilarEntry"][];
+    };
+    /** @description Location within a source document (page, quote, bounding rect). */
+    SourceLocation: {
+      /** Format: int32 */
+      page?: number | null;
+      quote?: string | null;
+      rect?: number[] | null;
+    };
+    /** @description A notification emitted after the vault index changes. */
+    SyncNotification: {
+      removed: string[];
+      /** @enum {string} */
+      type: "index_changed";
+      upserted: string[];
+    };
+    TagCount: {
+      /** Format: int64 */
+      count: number;
+      tag: string;
+    };
+    UnresolvedLink: {
+      candidates: components["schemas"]["CandidateEntry"][];
+      kind: string;
+      reason: string;
+      source_id: string;
+      source_path: string;
+      /** Format: int64 */
+      span_start: number;
+      target_canonical?: string | null;
+      target_raw: string;
+    };
+    UpdatePageRequest: {
+      aliases?: string[] | null;
+      body?: string | null;
+      tags?: string[] | null;
+      title?: string | null;
+    };
+    UpdateWorkRequest: {
+      aliases?: string[] | null;
+      authors?: string[] | null;
+      body?: string | null;
+      cite_key?: string | null;
+      external_ids?: null | components["schemas"]["ExternalIds"];
+      publisher?: string | null;
+      /** Format: int32 */
+      rating?: number | null;
+      status?: null | components["schemas"]["ReadingStatus"];
+      tags?: string[] | null;
+      title?: string | null;
+      urls?: null | components["schemas"]["WorkUrls"];
+      venue?: string | null;
+      /** Format: int32 */
+      year?: number | null;
+    };
+    VaultStats: {
+      /** Format: int64 */
+      attachments: number;
+      /** @description RFC3339 timestamp of the most recent `pages.updated_at`, or null on empty vault. */
+      last_indexed_at?: string | null;
+      /** Format: int64 */
+      links_resolved: number;
+      /** Format: int64 */
+      links_total: number;
+      /** Format: int64 */
+      links_unresolved: number;
+      /** Format: int64 */
+      pages: number;
+      /** Format: int64 */
+      tags: number;
+    };
+    WorkDetail: {
+      assets?: string[];
+      authors?: string[];
+      body: string;
+      cite_key?: string | null;
+      external_ids?: null | components["schemas"]["ExternalIds"];
+      id: string;
+      path: string;
+      publisher?: string | null;
+      /** Format: int32 */
+      rating?: number | null;
+      status?: null | components["schemas"]["ReadingStatus"];
+      tags?: string[];
+      title: string;
+      urls?: null | components["schemas"]["WorkUrls"];
+      venue?: string | null;
+      work_type: components["schemas"]["WorkType"];
+      /** Format: int32 */
+      year?: number | null;
+    };
+    WorkSummary: {
+      authors?: string[];
+      cite_key?: string | null;
+      id: string;
+      path: string;
+      status?: string | null;
+      tags?: string[];
+      title?: string | null;
+      work_type?: string | null;
+      /** Format: int32 */
+      year?: number | null;
+    };
+    WorkSummaryListResponse: {
+      items: components["schemas"]["WorkSummary"][];
+      /** Format: int32 */
+      limit?: number | null;
+      /** Format: int32 */
+      offset: number;
+      /** Format: int32 */
+      total: number;
+    };
+    /**
+     * @description The type of academic work.
+     * @enum {string}
+     */
+    WorkType: "paper" | "book" | "thesis" | "report" | "other";
+    /** @description URLs associated with an academic work. */
+    WorkUrls: {
+      landing?: string | null;
+      pdf?: string | null;
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    create_annotation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateAnnotationRequest"];
-            };
-        };
-        responses: {
-            /** @description Annotation created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnnotationDetail"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Work not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  create_annotation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    import_bibtex: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "text/plain": string;
-            };
-        };
-        responses: {
-            /** @description BibTeX import results */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResponse"];
-                };
-            };
-            /** @description Invalid BibTeX */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAnnotationRequest"];
+      };
     };
-    import_doi: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description Annotation created */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportDoiRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["AnnotationDetail"];
         };
-        responses: {
-            /** @description Work already exists */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResult"];
-                };
-            };
-            /** @description Work imported */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResult"];
-                };
-            };
-            /** @description Invalid DOI request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+      };
+      /** @description Invalid request */
+      400: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Work not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    import_isbn_handler: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportIsbnRequest"];
-            };
-        };
-        responses: {
-            /** @description Work already exists */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResult"];
-                };
-            };
-            /** @description Work imported */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResult"];
-                };
-            };
-            /** @description Invalid ISBN request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  import_bibtex: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    import_zotero_handler: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportZoteroRequest"];
-            };
-        };
-        responses: {
-            /** @description Import results */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "text/plain": string;
+      };
     };
-    list_works: {
-        parameters: {
-            query?: {
-                work_type?: string;
-                status?: string;
-                year?: number;
-                author?: string;
-                tag?: string;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description BibTeX import results */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description List works */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkSummaryListResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["ImportResponse"];
         };
+      };
+      /** @description Invalid BibTeX */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    create_work: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateWorkRequest"];
-            };
-        };
-        responses: {
-            /** @description Work created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkDetail"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Validation error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  import_doi: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    get_work: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Work UUID */
-                uuid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Work detail */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkDetail"];
-                };
-            };
-            /** @description Work not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportDoiRequest"];
+      };
     };
-    update_work: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Work UUID */
-                uuid: string;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Work already exists */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateWorkRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["ImportResult"];
         };
-        responses: {
-            /** @description Updated work */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkDetail"];
-                };
-            };
-            /** @description Work not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Cite key conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Validation error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+      };
+      /** @description Work imported */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["ImportResult"];
+        };
+      };
+      /** @description Invalid DOI request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    list_annotations: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Work UUID */
-                uuid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List annotations for work */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnnotationDetail"][];
-                };
-            };
-            /** @description Work not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  import_isbn_handler: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    list_attachments: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List attachments */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AttachmentInfo"][];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportIsbnRequest"];
+      };
     };
-    get_attachment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Attachment path relative to attachment folder */
-                path: string;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Work already exists */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Attachment bytes */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Attachment not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["ImportResult"];
         };
+      };
+      /** @description Work imported */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImportResult"];
+        };
+      };
+      /** @description Invalid ISBN request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    upload_attachment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Attachment path relative to attachment folder */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": string;
-            };
-        };
-        responses: {
-            /** @description Attachment uploaded */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AttachmentInfo"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Attachment already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  import_zotero_handler: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    delete_attachment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Attachment path relative to attachment folder */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Attachment deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Attachment not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImportZoteroRequest"];
+      };
     };
-    get_bcl: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description Import results */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description BCL countdown (fields null when unconfigured) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BclResponse"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["ImportResponse"];
         };
+      };
+      /** @description Invalid request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    event_stream: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Server-sent events stream */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
-                };
-            };
-        };
+  };
+  list_works: {
+    parameters: {
+      query?: {
+        work_type?: string;
+        status?: string;
+        year?: number;
+        author?: string;
+        tag?: string;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    list_folders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description List works */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description List top-level folders */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderInfo"][];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["WorkSummaryListResponse"];
         };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    move_folder: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Source folder path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MoveFolderRequest"];
-            };
-        };
-        responses: {
-            /** @description Folder moved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Folder not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Destination conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  create_work: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    list_folder_tree: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description All non-hidden folder paths */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderTreeResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateWorkRequest"];
+      };
     };
-    list_folder_contents: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative folder path */
-                path: string;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Work created */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Folder contents */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderListing"];
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Folder not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["WorkDetail"];
         };
+      };
+      /** @description Invalid request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    create_folder: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative folder path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Folder created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderInfo"];
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  get_work: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Work UUID */
+        uuid: string;
+      };
+      cookie?: never;
     };
-    delete_folder: {
-        parameters: {
-            query?: {
-                /** @description Delete non-empty folders recursively */
-                recursive?: boolean;
-            };
-            header?: never;
-            path: {
-                /** @description Vault-relative folder path */
-                path: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Work detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Folder deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Folder not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Folder not empty */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["WorkDetail"];
         };
+      };
+      /** @description Work not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    ambiguous: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Ambiguous canonical names */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AmbiguousName"][];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  update_work: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Work UUID */
+        uuid: string;
+      };
+      cookie?: never;
     };
-    backlinks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Backlinks */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BacklinkEntry"][];
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateWorkRequest"];
+      };
     };
-    content_index: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of entries */
-                limit?: number;
-                /** @description Entry offset */
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description Updated work */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Content index */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContentIndexResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["WorkDetail"];
         };
+      };
+      /** @description Work not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Cite key conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    create_from_link: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateFromLinkRequest"];
-            };
-        };
-        responses: {
-            /** @description Page created from unresolved link */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageDetailResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  list_annotations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Work UUID */
+        uuid: string;
+      };
+      cookie?: never;
     };
-    graph: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description List annotations for work */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Resolved link graph */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GraphResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["AnnotationDetail"][];
         };
+      };
+      /** @description Work not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    outlinks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Outlinks */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OutlinkEntry"][];
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  list_attachments: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    preview_mutation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description List attachments */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PreviewMutationRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["AttachmentInfo"][];
         };
-        responses: {
-            /** @description Mutation preview */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Invalid operation */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    rebuild_index: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Index rebuilt */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RebuildResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  get_attachment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Attachment path relative to attachment folder */
+        path: string;
+      };
+      cookie?: never;
     };
-    search: {
-        parameters: {
-            query?: {
-                /** @description Search query */
-                q?: string;
-                /** @description Maximum number of search results */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Attachment bytes */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Search results */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SearchResultEntry"][];
-                };
-            };
-            /** @description Invalid query */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/octet-stream": string;
         };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Attachment not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    similar: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Similar pages by tag overlap */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SimilarResponse"];
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  upload_attachment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Attachment path relative to attachment folder */
+        path: string;
+      };
+      cookie?: never;
     };
-    stats: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Vault statistics */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VaultStats"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+    requestBody: {
+      content: {
+        "multipart/form-data": string;
+      };
     };
-    tags: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description Attachment uploaded */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Tag counts */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TagCount"][];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["AttachmentInfo"];
         };
+      };
+      /** @description Invalid request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Attachment already exists */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    unresolved: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Unresolved links */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UnresolvedLink"][];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  delete_attachment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Attachment path relative to attachment folder */
+        path: string;
+      };
+      cookie?: never;
     };
-    warnings: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Attachment deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Index warnings */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string[];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content?: never;
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Attachment not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    list_pages: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of pages to return */
-                limit?: number;
-                /** @description Page offset for pagination */
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List pages */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageSummaryListResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  get_bcl: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    move_page: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Source page path */
-                path: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description BCL countdown (fields null when unconfigured) */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MovePageRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["BclResponse"];
         };
-        responses: {
-            /** @description Moved page */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageDetailResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Destination conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+      };
     };
-    get_page_by_id: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Page UUID */
-                uuid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Page detail */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageDetailResponse"];
-                };
-            };
-            /** @description Page not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  event_stream: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    get_page: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Server-sent events stream */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Page detail */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageDetailResponse"];
-                };
-            };
-            /** @description Invalid path */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+        content: {
+          "text/event-stream": string;
         };
+      };
     };
-    update_page: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdatePageRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated page */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageDetailResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  list_folders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    create_page: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description List top-level folders */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePageRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["FolderInfo"][];
         };
-        responses: {
-            /** @description Page created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PageDetailResponse"];
-                };
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
     };
-    delete_page: {
-        parameters: {
-            query?: {
-                /** @description Force delete despite backlinks */
-                force?: boolean;
-                /** @description Rewrite mode: plain_text, unlink, or none */
-                rewrite?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Vault-relative page path */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Page deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid input */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Page not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Conflict (backlinks exist) */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
+  };
+  move_folder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Source folder path */
+        path: string;
+      };
+      cookie?: never;
     };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MoveFolderRequest"];
+      };
+    };
+    responses: {
+      /** @description Folder moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid input */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Folder not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Destination conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  list_folder_tree: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description All non-hidden folder paths */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FolderTreeResponse"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  list_folder_contents: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative folder path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Folder contents */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FolderListing"];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Folder not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  create_folder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative folder path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Folder created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FolderInfo"];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  delete_folder: {
+    parameters: {
+      query?: {
+        /** @description Delete non-empty folders recursively */
+        recursive?: boolean;
+      };
+      header?: never;
+      path: {
+        /** @description Vault-relative folder path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Folder deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Folder not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Folder not empty */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  ambiguous: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ambiguous canonical names */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AmbiguousName"][];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  backlinks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Backlinks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BacklinkEntry"][];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  content_index: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of entries */
+        limit?: number;
+        /** @description Entry offset */
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Content index */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ContentIndexResponse"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  create_from_link: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateFromLinkRequest"];
+      };
+    };
+    responses: {
+      /** @description Page created from unresolved link */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page already exists */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  graph: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Resolved link graph */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GraphResponse"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  outlinks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Outlinks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutlinkEntry"][];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  preview_mutation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PreviewMutationRequest"];
+      };
+    };
+    responses: {
+      /** @description Mutation preview */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Invalid operation */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  rebuild_index: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Index rebuilt */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RebuildResponse"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  search: {
+    parameters: {
+      query?: {
+        /** @description Search query */
+        q?: string;
+        /** @description Maximum number of search results */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SearchResultEntry"][];
+        };
+      };
+      /** @description Invalid query */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  similar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Similar pages by tag overlap */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SimilarResponse"];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  stats: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Vault statistics */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VaultStats"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  tags: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Tag counts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagCount"][];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  unresolved: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unresolved links */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UnresolvedLink"][];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  warnings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Index warnings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": string[];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  list_pages: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of pages to return */
+        limit?: number;
+        /** @description Page offset for pagination */
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List pages */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageSummaryListResponse"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  move_page: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Source page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MovePageRequest"];
+      };
+    };
+    responses: {
+      /** @description Moved page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid input */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Destination conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  get_page_by_id: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Page UUID */
+        uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Page detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  get_page: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Page detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid path */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  update_page: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdatePageRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid input */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  create_page: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePageRequest"];
+      };
+    };
+    responses: {
+      /** @description Page created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid input */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page already exists */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  delete_page: {
+    parameters: {
+      query?: {
+        /** @description Force delete despite backlinks */
+        force?: boolean;
+        /** @description Rewrite mode: plain_text, unlink, or none */
+        rewrite?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Vault-relative page path */
+        path: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Page deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid input */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Conflict (backlinks exist) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
 }
