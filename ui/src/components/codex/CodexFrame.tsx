@@ -181,8 +181,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       {/* ── TICKER (diegetic chrome) ────────────────────────────────── */}
       {diegetic && <Ticker />}
 
-      {/* ── SHEAF (open files) ──────────────────────────────────────── */}
-      <Sheaf activeTabId={activeTabId} />
+      {/* ── SHEAF (open files) — hidden on the ATRIUM dashboard ─────── */}
+      {view !== "atrium" && <Sheaf activeTabId={activeTabId} />}
 
       {/* ── WORKSPACE ───────────────────────────────────────────────── */}
       <main className="cl-noscroll relative flex-1 overflow-auto">
