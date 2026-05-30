@@ -17,6 +17,7 @@ import type { BlockResponse } from "#/api/blocks";
 import { useAssignBlockId } from "#/api/blocks";
 import { usePages } from "#/api/pages";
 import { BlockRefCombobox } from "./BlockRefCombobox";
+import { decorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
@@ -518,6 +519,7 @@ export function SlateEditor({
         <Editable
           renderElement={renderElement}
           renderLeaf={renderLeaf}
+          decorate={decorateCode}
           onKeyDown={handleKeyDown}
           placeholder="Start writing..."
           className="min-h-[200px] outline-none"
