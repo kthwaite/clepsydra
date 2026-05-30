@@ -76,6 +76,20 @@ export function Folio({ tabId, path }: FolioProps) {
     setProgress(0);
   }, [setProgress]);
 
+  // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
+  // rails) — not just the editor body — and suppresses the browser dialog.
+  const saveNow = editor.saveNow;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        saveNow();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [saveNow]);
+
   const onScroll = () => {
     const el = bodyRef.current;
     if (!el) return;
@@ -224,6 +238,7 @@ export function Folio({ tabId, path }: FolioProps) {
               onTagsChange={editor.setTags}
               aliases={editor.aliases}
               onAliasesChange={editor.setAliases}
+              onSaveNow={editor.saveNow}
             />
           </div>
 

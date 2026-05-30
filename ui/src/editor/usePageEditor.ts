@@ -223,8 +223,13 @@ export function usePageEditor(path: string): PageEditorState {
     [scheduleSave],
   );
 
+  // Setters keep the corresponding ref in sync *synchronously* (in addition
+  // to the effects above, which cover server-load syncs). This lets a blur
+  // flush call saveNow() in the same tick and still serialize the just-set
+  // value instead of the stale one.
   const setTitle = useCallback(
     (t: string) => {
+      titleRef.current = t;
       setTitleState(t);
       metaEditGenRef.current += 1;
       scheduleSave();
@@ -234,6 +239,7 @@ export function usePageEditor(path: string): PageEditorState {
 
   const setTags = useCallback(
     (t: string[]) => {
+      tagsRef.current = t;
       setTagsState(t);
       metaEditGenRef.current += 1;
       scheduleSave();
@@ -243,6 +249,7 @@ export function usePageEditor(path: string): PageEditorState {
 
   const setAliases = useCallback(
     (a: string[]) => {
+      aliasesRef.current = a;
       setAliasesState(a);
       metaEditGenRef.current += 1;
       scheduleSave();

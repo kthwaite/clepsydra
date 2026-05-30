@@ -15,6 +15,8 @@ export interface TagInputProps {
   onChange: (values: string[]) => void;
   placeholder?: string;
   className?: string;
+  /** Called after the input loses focus (and any draft is committed). */
+  onBlur?: () => void;
 }
 
 export function TagInput({
@@ -23,6 +25,7 @@ export function TagInput({
   onChange,
   placeholder,
   className,
+  onBlur,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +51,12 @@ export function TagInput({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter" || e.key === ",") {
+        e.preventDefault();
+        addValue(inputValue);
+      } else if (e.key === "Tab" && inputValue.trim() !== "") {
+        // Commit the in-progress tag and keep the cursor here instead of
+        // letting Tab move focus to the next field. Empty input falls
+        // through so Tab still navigates normally.
         e.preventDefault();
         addValue(inputValue);
       } else if (
@@ -109,6 +118,7 @@ export function TagInput({
         onKeyDown={handleKeyDown}
         onBlur={() => {
           if (inputValue.trim()) addValue(inputValue);
+          onBlur?.();
         }}
         aria-label={`Add ${label.toLowerCase()}`}
         placeholder={values.length === 0 ? placeholder : undefined}

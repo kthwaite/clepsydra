@@ -8,6 +8,13 @@ interface PageEditorHeaderProps {
   onTagsChange: (tags: string[]) => void;
   aliases: string[];
   onAliasesChange: (aliases: string[]) => void;
+  /** Flush a save immediately — wired to title/tag blur. */
+  onSaveNow?: () => void;
+}
+
+/** Last path segment, e.g. "notes/ideas/my-note.md" → "my-note.md". */
+function filename(path: string): string {
+  return path.split("/").pop() || path;
 }
 
 export function PageEditorHeader({
@@ -18,6 +25,7 @@ export function PageEditorHeader({
   onTagsChange,
   aliases,
   onAliasesChange,
+  onSaveNow,
 }: PageEditorHeaderProps) {
   return (
     <div className="border-b border-border pb-4">
@@ -25,16 +33,16 @@ export function PageEditorHeader({
         type="text"
         value={title}
         onChange={(e) => onTitleChange(e.target.value)}
-        placeholder="Untitled"
+        onBlur={onSaveNow}
+        placeholder={filename(path)}
         className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground"
       />
-
-      <p className="mt-1 text-sm text-muted-foreground">{path}</p>
 
       <TagInput
         label="Tags"
         values={tags}
         onChange={onTagsChange}
+        onBlur={onSaveNow}
         placeholder="Add tag..."
         className="mt-2"
       />
@@ -44,6 +52,7 @@ export function PageEditorHeader({
           label="Aliases"
           values={aliases}
           onChange={onAliasesChange}
+          onBlur={onSaveNow}
           placeholder="Add alias..."
           className="mt-2"
         />
