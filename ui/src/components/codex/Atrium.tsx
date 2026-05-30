@@ -2,9 +2,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useTags } from "#/api/index";
+import { useJournalToday } from "#/api/journal";
 import { useClock } from "#/hooks/useClock";
+import { useUiStore } from "#/store/ui";
 import { Card } from "./Card";
-import { buildHeatmap, dayOfYear } from "./atrium-data";
+import { buildHeatmap, dayOfYear, julianDay } from "./atrium-data";
 
 export function Atrium() {
   const navigate = useNavigate();
@@ -12,8 +14,21 @@ export function Atrium() {
   const { data: content } = useContentIndex(500);
   const { data: bcl } = useBcl();
 
+  const { data: journalToday } = useJournalToday();
+  const openSearch = useUiStore((s) => s.openSearch);
+  const openInscribe = useUiStore((s) => s.openInscribe);
+
   const items = content?.items ?? [];
   const now = useClock();
+
+  const todayLabel = `${fmtDate(now)} (${WEEKDAYS[now.getDay()]})`;
+  const doy = dayOfYear(now);
+  const yearDays = isLeap(now.getFullYear()) ? 366 : 365;
+  const week = Math.ceil(doy / 7);
+  const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const journalSub = journalToday?.meta.id
+    ? `${journalToday.meta.id} · DAILY / ${fmtDate(now)}`
+    : `DAILY / ${fmtDate(now)}`;
 
   const heat = useMemo(() => buildHeatmap(items, now), [items, now]);
   const topTags = useMemo(
@@ -30,8 +45,58 @@ export function Atrium() {
 
   return (
     <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-4 py-4">
-      {/* HERO — col-12 (filled in Task 9) */}
-      <div className="col-span-12">{/* hero placeholder, replaced in Task 9 */}</div>
+      {/* HERO — col-12 */}
+      <section className="cl-grid-texture col-span-12 grid items-end gap-6 border border-rule bg-paper-2 px-6 py-5 md:grid-cols-[1fr_auto]">
+        <div>
+          <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
+            <span className="text-accent">●</span>
+            <span>DAYSTART / <b className="font-medium text-ink">{todayLabel}</b></span>
+            <span>WEEK {week}</span>
+            <span>DAY {doy} / {yearDays}</span>
+            <span>JD {julianDay(now)}</span>
+            <span className="tabular-nums">{clock} LOCAL</span>
+          </div>
+          <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
+            {greeting(now)}.
+          </h1>
+        </div>
+
+        <div className="flex min-w-[280px] flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/journal" })}
+            className="group grid grid-cols-[1fr_auto] items-center gap-4 border border-ink bg-ink px-4 py-3.5 text-left text-paper transition-colors hover:border-accent hover:bg-accent"
+          >
+            <div>
+              <div className="font-sans text-[12px] font-semibold uppercase tracking-[0.18em]">
+                Open today’s journal
+              </div>
+              <div className="cl-mono mt-1 text-[9px] uppercase tracking-[0.18em] opacity-75">
+                {journalSub}
+              </div>
+            </div>
+            <div className="text-[16px]">→</div>
+          </button>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              onClick={openInscribe}
+              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+            >
+              Capture
+              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">⌘ N</div>
+            </button>
+            <button
+              type="button"
+              onClick={openSearch}
+              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+            >
+              Search
+              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">⌘ K</div>
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* INVENTORY — col-12 (filled in Task 10) */}
       <div className="col-span-12">{/* inventory placeholder, replaced in Task 10 */}</div>
@@ -145,6 +210,25 @@ function Heatmap({ weeks }: { weeks: number[][] }) {
 }
 
 /* ── data helpers ─────────────────────────────────────────────────────── */
+
+const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+function isLeap(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+function greeting(d: Date): string {
+  const h = d.getHours();
+  if (h < 5) return "Still awake";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  if (h < 22) return "Good evening";
+  return "Good night";
+}
+
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+}
 
 function dfltTime(now: Date, h: number): Date {
   const d = new Date(now);
