@@ -1,24 +1,37 @@
 import type { RenderElementProps } from "slate-react";
+import { CLink } from "#/components/codex/CLink";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
-import { useOpenTab } from "#/hooks/useOpenTab";
 
 type Props = RenderElementProps & { element: WikilinkElementType };
 
 export function WikilinkElement({ attributes, children, element }: Props) {
-  const openTab = useOpenTab();
-  const displayText = element.alias ?? element.target;
+  const id = element.target;
+  const label =
+    element.alias && element.alias !== element.target ? element.alias : null;
 
   return (
     <span {...attributes}>
-      <span
-        contentEditable={false}
-        className="inline cursor-pointer border border-border bg-muted px-1.5 text-sm hover:bg-accent"
-        onClick={(e) => {
-          e.preventDefault();
-          openTab("page", element.target);
-        }}
-      >
-        {displayText}
+      <span contentEditable={false}>
+        <CLink
+          path={element.target}
+          className="cl-mono align-baseline text-[0.95em] text-ink hover:text-accent"
+        >
+          <span aria-hidden className="text-accent">
+            ⟦
+          </span>
+          <span className="px-[2px]">{id}</span>
+          {label && (
+            <>
+              <span aria-hidden className="text-ink-mute">
+                ·
+              </span>
+              <span className="px-[2px] not-italic">{label}</span>
+            </>
+          )}
+          <span aria-hidden className="text-accent">
+            ⟧
+          </span>
+        </CLink>
       </span>
       {children}
     </span>
