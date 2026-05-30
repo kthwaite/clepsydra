@@ -203,15 +203,33 @@ export function Atrium() {
         </div>
       </Card>
 
-      {/* APHORISM (col-7) + SKY (col-5) */}
-      <Card className="col-span-12 lg:col-span-7" label="Aphorism" pip="dim" caption="FIG. II">
-        <blockquote className="m-0 font-sans text-[18px] italic leading-[1.4] text-ink-2">
-          “{aphorism.text}”
-        </blockquote>
-        <div className="cl-mono mt-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute">
-          — {aphorism.who}
-        </div>
-      </Card>
+      {/* APHORISM + BCL (stacked, col-7) + SKY (col-5) */}
+      <div className="col-span-12 flex flex-col gap-3.5 lg:col-span-7">
+        <Card className="flex-1" label="Aphorism" pip="dim" caption="FIG. II">
+          <blockquote className="m-0 font-sans text-[18px] italic leading-[1.4] text-ink-2">
+            “{aphorism.text}”
+          </blockquote>
+          <div className="cl-mono mt-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute">
+            — {aphorism.who}
+          </div>
+        </Card>
+        {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
+          <Card
+            className="flex-1"
+            label="Brimley-Cocoon Line"
+            pip="dim"
+            caption="FIG. VII"
+          >
+            <div className="cl-mono text-[22px] leading-none text-accent">
+              {fmtBclDuration(bcl.remaining_seconds)}
+            </div>
+            <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
+              {bcl.remaining_seconds >= 0 ? "crosses" : "crossed"}{" "}
+              {fmtBclDate(bcl.bcl_date)} · natal {bcl.birth_date}
+            </div>
+          </Card>
+        )}
+      </div>
       <Card className="col-span-12 lg:col-span-5" label="Sky" caption="FIG. III">
         <div className="grid grid-cols-[96px_1fr] gap-4">
           <MoonDisc info={sky.moon} />
@@ -276,7 +294,7 @@ export function Atrium() {
         )}
       </Card>
 
-      {/* RECENTS (col-7, filled in Task 13) + BCL (col-5) */}
+      {/* RECENTS (col-7) */}
       <section className="col-span-12 border border-rule bg-paper-2 lg:col-span-7">
         <div className="flex items-center justify-between border-b border-rule bg-paper">
           <div className="flex">
@@ -349,17 +367,6 @@ export function Atrium() {
           </div>
         )}
       </section>
-      {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
-        <Card className="col-span-12 lg:col-span-5" label="Brimley-Cocoon Line" pip="dim" caption="FIG. VII">
-          <div className="cl-mono text-[22px] leading-none text-accent">
-            {fmtBclDuration(bcl.remaining_seconds)}
-          </div>
-          <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
-            {bcl.remaining_seconds >= 0 ? "crosses" : "crossed"}{" "}
-            {fmtBclDate(bcl.bcl_date)} · natal {bcl.birth_date}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
