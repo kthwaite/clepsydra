@@ -48,7 +48,7 @@ export function CommandPalette() {
   const runBoot = useUiStore((s) => s.runBoot);
   const navigate = useNavigate();
   const openTab = useOpenTab();
-  const { toggle: toggleTheme } = useTheme();
+  const { toggle: toggleTheme, diegetic, setDiegetic } = useTheme();
 
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -141,13 +141,29 @@ export function CommandPalette() {
       },
       {
         kind: "cmd",
+        icon: "◐",
+        label: "Toggle diegetic chrome",
+        hint: "sys.chrome",
+        action: () => setDiegetic(!diegetic),
+      },
+      {
+        kind: "cmd",
         icon: "⟳",
         label: "Re-run boot sequence",
         hint: "sys.boot",
         action: () => runBoot(),
       },
     ],
-    [navigate, openTab, toggleTheme, openInscribe, openSettings, runBoot],
+    [
+      navigate,
+      openTab,
+      toggleTheme,
+      openInscribe,
+      openSettings,
+      runBoot,
+      diegetic,
+      setDiegetic,
+    ],
   );
 
   const noteCommands = useMemo<Command[]>(() => {
