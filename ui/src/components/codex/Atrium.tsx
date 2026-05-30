@@ -1,20 +1,26 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
+import { useOpenTab } from "#/hooks/useOpenTab";
+import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { useUiStore } from "#/store/ui";
+import { useWorkspaceStore } from "#/store/workspace";
 import { Card } from "./Card";
 import {
   buildHeatmap,
   dayOfYear,
   deriveInventory,
   julianDay,
+  sortRecents,
 } from "./atrium-data";
+import { formatRelativeTime } from "./codex-time";
 import { DayArc } from "./DayArc";
+import { shortFolio } from "./folio-utils";
 import { MoonDisc } from "./MoonDisc";
 import { moonPhase, sunArcPosition } from "./sky";
 
@@ -32,6 +38,26 @@ export function Atrium() {
 
   const items = content?.items ?? [];
   const now = useClock();
+
+  const openTab = useOpenTab();
+  const openHistory = useWorkspaceStore((s) => s.openHistory);
+  const [recentTab, setRecentTab] = useState<"edited" | "created" | "opened">("edited");
+
+  const byPath = useMemo(() => {
+    const m = new Map<string, (typeof items)[number]>();
+    for (const it of items) m.set(it.path, it);
+    return m;
+  }, [items]);
+
+  const recentRows = useMemo(() => {
+    if (recentTab === "opened") {
+      return openHistory
+        .map((h) => byPath.get(h.path))
+        .filter((x): x is (typeof items)[number] => Boolean(x))
+        .slice(0, 8);
+    }
+    return sortRecents(items, recentTab);
+  }, [recentTab, openHistory, byPath, items]);
 
   const todayLabel = `${fmtDate(now)} (${WEEKDAYS[now.getDay()]})`;
   const doy = dayOfYear(now);
@@ -243,7 +269,66 @@ export function Atrium() {
       </Card>
 
       {/* RECENTS (col-7, filled in Task 13) + BCL (col-5) */}
-      <div className="col-span-12 lg:col-span-7">{/* recents placeholder, replaced in Task 13 */}</div>
+      <section className="col-span-12 border border-rule bg-paper-2 lg:col-span-7">
+        <div className="flex items-center justify-between border-b border-rule bg-paper">
+          <div className="flex">
+            {(["edited", "created", "opened"] as const).map((t) => (
+              <button
+                type="button"
+                key={t}
+                onClick={() => setRecentTab(t)}
+                className={
+                  "cl-mono border-r border-rule px-3.5 py-2 text-[9px] uppercase tracking-[0.22em] " +
+                  (recentTab === t
+                    ? "text-ink shadow-[inset_0_2px_0_var(--accent)]"
+                    : "text-ink-mute hover:text-ink")
+                }
+              >
+                {t === "edited" ? "Recently edited" : t === "created" ? "Recently created" : "Opened"}
+              </button>
+            ))}
+          </div>
+          <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+            {recentRows.length} OF {items.length}
+          </span>
+        </div>
+
+        {recentRows.length === 0 ? (
+          <p className="cl-marg m-0 p-3.5">
+            {recentTab === "opened" ? "∅ Nothing opened yet this session." : "∅ No folios yet inscribed."}
+          </p>
+        ) : (
+          <div className="flex flex-col">
+            {recentRows.map((n, i) => {
+              const kind = resolveKindFromPath(n.path);
+              const ts = recentTab === "created" ? n.created_at : n.updated_at;
+              return (
+                <button
+                  type="button"
+                  key={n.path}
+                  onClick={() => openTab("page", n.path, n.title || n.path)}
+                  className="grid cursor-pointer grid-cols-[18px_90px_1fr_72px] items-baseline gap-3 border-b border-dotted border-rule-soft px-3.5 py-2 text-left hover:bg-paper-edge"
+                >
+                  <span className="cl-mono text-[9px] tabular-nums text-ink-mute">{pad(i + 1)}</span>
+                  <span className="cl-mono flex items-center gap-1.5 text-[9px] text-ink-mute">
+                    <span
+                      className="inline-block h-[6px] w-[6px] flex-shrink-0"
+                      style={{ background: kindColorVar(kind) }}
+                    />
+                    {shortFolio(n.path)}
+                  </span>
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink">
+                    {n.title || n.path}
+                  </span>
+                  <span className="cl-mono text-right text-[9px] uppercase text-ink-mute">
+                    {formatRelativeTime(ts)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
       {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
         <Card className="col-span-12 lg:col-span-5" label="Brimley-Cocoon Line" pip="dim" caption="FIG. VII">
           <div className="cl-mono text-[22px] leading-none text-accent">
