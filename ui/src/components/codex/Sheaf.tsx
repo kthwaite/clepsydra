@@ -91,7 +91,7 @@ export function Sheaf({ activeTabId }: SheafProps) {
             >
               <Pin size={11} fill={t.pinned ? "currentColor" : "none"} />
             </span>
-            {pageTabs.length > 1 && !t.pinned && (
+            {!t.pinned && (
               <span
                 onClick={onClose}
                 onKeyDown={(e) => {
