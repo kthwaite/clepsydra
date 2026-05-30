@@ -4,17 +4,26 @@ import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { kindColorVar, kindLabel, resolveKindFromPath } from "#/lib/kind";
+import {
+  filterAndSortRows,
+  type GazetteerSort,
+} from "./gazetteer-filter";
 
 type Props = {
   initialTag?: string;
 };
 
-type Sort = "ts" | "id" | "title" | "words";
-
 export function Gazetteer({ initialTag }: Props) {
-  const [tag, setTag] = useState<string | null>(initialTag ?? null);
+  const [selectedTags, setSelectedTags] = useState<string[]>(
+    initialTag ? [initialTag] : [],
+  );
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<Sort>("ts");
+  const [sort, setSort] = useState<GazetteerSort>("ts");
+
+  const toggleTag = (t: string) =>
+    setSelectedTags((cur) =>
+      cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t],
+    );
   const { data: tagsData } = useTags();
   const { data: content } = useContentIndex(500);
   const openTab = useOpenTab();
@@ -22,31 +31,15 @@ export function Gazetteer({ initialTag }: Props) {
   const tags = tagsData ?? [];
   const items = content?.items ?? [];
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let out = items;
-    if (tag) out = out.filter((n) => (n.tags ?? []).includes(tag));
-    if (q) {
-      out = out.filter((n) =>
-        `${n.title ?? ""} ${n.path} ${n.description ?? ""} ${(n.tags ?? []).join(" ")}`
-          .toLowerCase()
-          .includes(q),
-      );
-    }
-    const sorted = [...out];
-    sorted.sort((a, b) => {
-      if (sort === "ts")
-        return (
-          (b.updated_at ? Date.parse(b.updated_at) : 0) -
-          (a.updated_at ? Date.parse(a.updated_at) : 0)
-        );
-      if (sort === "words") return (b.word_count ?? 0) - (a.word_count ?? 0);
-      if (sort === "title")
-        return (a.title ?? a.path).localeCompare(b.title ?? b.path);
-      return a.path.localeCompare(b.path);
-    });
-    return sorted;
-  }, [items, tag, query, sort]);
+  const rows = useMemo(
+    () => filterAndSortRows(items, { tags: selectedTags, query, sort }),
+    [items, selectedTags, query, sort],
+  );
+
+  const tagSummary =
+    selectedTags.length > 0
+      ? ` · ${selectedTags.map((t) => `#${t}`).join(" ")}`
+      : "";
 
   return (
     <div className="flex h-full flex-col">
@@ -56,7 +49,7 @@ export function Gazetteer({ initialTag }: Props) {
           Gazetteer<span className="text-accent"> / </span>Index
         </h1>
         <span className="cl-mono text-[10px] uppercase tracking-[0.16em] text-ink-mute">
-          {rows.length} entries{tag ? ` · #${tag}` : ""}
+          {rows.length} entries{tagSummary}
         </span>
         <div className="flex-1" />
         <label className="flex items-center gap-2 border border-rule-soft px-2 py-1">
@@ -69,7 +62,7 @@ export function Gazetteer({ initialTag }: Props) {
           />
         </label>
         <div className="cl-mono flex items-stretch border border-rule-soft text-[9px] uppercase tracking-[0.12em]">
-          {(["ts", "id", "title", "words"] as Sort[]).map((s) => (
+          {(["ts", "id", "title", "words"] as GazetteerSort[]).map((s) => (
             <button
               key={s}
               type="button"
@@ -86,16 +79,19 @@ export function Gazetteer({ initialTag }: Props) {
         </div>
       </div>
 
-      {/* tag rail */}
+      {/* tag rail — multi-select, AND semantics */}
       <div className="cl-noscroll flex flex-shrink-0 flex-wrap gap-x-2 gap-y-1.5 border-b border-rule-soft px-5 py-2">
-        <Chip active={tag === null} onClick={() => setTag(null)}>
+        <Chip
+          active={selectedTags.length === 0}
+          onClick={() => setSelectedTags([])}
+        >
           all · {items.length}
         </Chip>
         {tags.map((t) => (
           <Chip
             key={t.tag}
-            active={tag === t.tag}
-            onClick={() => setTag(tag === t.tag ? null : t.tag)}
+            active={selectedTags.includes(t.tag)}
+            onClick={() => toggleTag(t.tag)}
           >
             #{t.tag}
             <sup className="ml-[2px] text-ink-mute">{t.count}</sup>
@@ -172,7 +168,7 @@ export function Gazetteer({ initialTag }: Props) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="cl-marg px-3 py-6 text-center">
-                  ∅ no folios{tag ? ` under #${tag}` : ""}
+                  ∅ no folios{selectedTags.length > 0 ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}` : ""}
                   {query ? ` matching “${query}”` : ""}.
                 </td>
               </tr>
