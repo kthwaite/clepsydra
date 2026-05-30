@@ -539,6 +539,8 @@ function resolveKindAndColor(path: string) {
 function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
   const tabs = useWorkspaceStore((s) => s.tabs);
   const activateTab = useWorkspaceStore((s) => s.activateTab);
+  const togglePin = useWorkspaceStore((s) => s.togglePin);
+  const closeTab = useWorkspaceStore((s) => s.closeTab);
   const [open, setOpen] = useState(true);
 
   const pages = tabs.filter((t) => t.type === "page");
@@ -566,7 +568,9 @@ function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
                   key={t.id}
                   t={t}
                   active={t.id === activeTabId}
-                  onClick={() => activateTab(t.id)}
+                  onActivate={() => activateTab(t.id)}
+                  onTogglePin={() => togglePin(t.id)}
+                  onClose={() => closeTab(t.id)}
                 />
               ))}
             </Section>
@@ -580,7 +584,9 @@ function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
                   key={t.id}
                   t={t}
                   active={t.id === activeTabId}
-                  onClick={() => activateTab(t.id)}
+                  onActivate={() => activateTab(t.id)}
+                  onTogglePin={() => togglePin(t.id)}
+                  onClose={() => closeTab(t.id)}
                 />
               ))
             )}
@@ -611,27 +617,57 @@ function Section({
 function OpenRow({
   t,
   active,
-  onClick,
+  onActivate,
+  onTogglePin,
+  onClose,
 }: {
   t: TabDescriptor;
   active: boolean;
-  onClick: () => void;
+  onActivate: () => void;
+  onTogglePin: () => void;
+  onClose: () => void;
 }) {
   const kind = resolveKind({ path: t.path ?? "" });
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={t.path ?? t.label}
-      className={`flex w-full cursor-pointer items-center gap-1.5 py-[2px] text-left text-[11px] ${
-        active ? "text-ink" : "text-ink-mute hover:text-ink"
+    <div
+      className={`group flex w-full items-center gap-1.5 py-[2px] text-[11px] ${
+        active ? "text-ink" : "text-ink-mute"
       }`}
     >
-      <Pip kind={kind} />
-      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-        {t.label || t.path || "(untitled)"}
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={onActivate}
+        title={t.path ?? t.label}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left hover:text-ink"
+      >
+        <Pip kind={kind} />
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+          {t.label || t.path || "(untitled)"}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onTogglePin}
+        aria-label={t.pinned ? "Unpin tab" : "Pin tab"}
+        title={t.pinned ? "Unpin" : "Pin"}
+        className={`cl-mono flex-shrink-0 cursor-pointer px-1 text-[10px] ${
+          t.pinned
+            ? "text-accent"
+            : "text-ink-mute opacity-0 hover:text-ink group-hover:opacity-100"
+        }`}
+      >
+        ✶
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close tab"
+        title="Close"
+        className="cl-mono flex-shrink-0 cursor-pointer px-1 text-[11px] text-ink-mute opacity-0 hover:text-hot group-hover:opacity-100"
+      >
+        ×
+      </button>
+    </div>
   );
 }
 
