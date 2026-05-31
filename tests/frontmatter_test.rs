@@ -71,6 +71,8 @@ fn round_trip_preserves_fields() {
         created_at: Some(now),
         updated_at: Some(now),
         extra: HashMap::new(),
+        kind: None,
+        project: None,
     };
 
     let yaml = serde_yaml::to_string(&meta).unwrap();
@@ -95,6 +97,8 @@ fn skip_serializing_empty_fields() {
         created_at: None,
         updated_at: None,
         extra: HashMap::new(),
+        kind: None,
+        project: None,
     };
 
     let yaml = serde_yaml::to_string(&meta).unwrap();
@@ -144,6 +148,8 @@ fn write_page_content_round_trip() {
         created_at: None,
         updated_at: None,
         extra: HashMap::new(),
+        kind: None,
+        project: None,
     };
     let body = "# Test\n\nSome content.\n";
 
@@ -239,6 +245,8 @@ fn page_to_file_writes_correctly() {
         created_at: None,
         updated_at: None,
         extra: HashMap::new(),
+        kind: None,
+        project: None,
     };
     let body = "Hello world.\n".to_string();
     let raw_content = write_page_content(&meta, &body);
