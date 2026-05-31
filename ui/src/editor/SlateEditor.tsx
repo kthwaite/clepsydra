@@ -30,9 +30,16 @@ import {
   toggleCheckbox,
   withOutliner,
 } from "./plugins/withOutliner";
-import { withSchema } from "./schema/withSchema";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
-import type { BlockRefElement, WikilinkElement } from "./types";
+import { makeBlockquote } from "./schema/elements/blockquote";
+import { makeBlockRef } from "./schema/elements/blockRef";
+import { makeCodeBlock } from "./schema/elements/codeBlock";
+import { makeBulletedList, makeNumberedList } from "./schema/elements/list";
+import { makeParagraph } from "./schema/elements/paragraph";
+import { makeThematicBreak } from "./schema/elements/thematicBreak";
+import { makeWikilink } from "./schema/elements/wikilink";
+import { withSchema } from "./schema/withSchema";
+import type { HeadingElement, ListItemElement } from "./types";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 
 interface SlateEditorProps {
@@ -52,7 +59,10 @@ export function SlateEditor({
   onSaveNow,
 }: SlateEditorProps) {
   const editor = useMemo(
-    () => withReact(withHistory(withAutoformat(withOutliner(withSchema(createEditor()))))),
+    () =>
+      withReact(
+        withHistory(withAutoformat(withOutliner(withSchema(createEditor())))),
+      ),
     [],
   );
 
@@ -125,7 +135,7 @@ export function SlateEditor({
     });
     if (blockEntry) {
       const [block] = blockEntry;
-      if ((block as any).type === "paragraph") {
+      if (SlateElement.isElement(block) && block.type === "paragraph") {
         const fullText = Node.string(block);
         if (
           textBefore.startsWith("/") &&
@@ -160,11 +170,9 @@ export function SlateEditor({
     Transforms.select(editor, deleteRange);
     Transforms.delete(editor);
 
-    const wikilinkNode: WikilinkElement = {
-      type: "wikilink",
+    const wikilinkNode = makeWikilink({
       target: page.title ?? page.canonical_name,
-      children: [{ text: "" }],
-    };
+    });
 
     Transforms.insertNodes(editor, wikilinkNode);
     Transforms.move(editor);
@@ -186,11 +194,7 @@ export function SlateEditor({
     Transforms.select(editor, deleteRange);
     Transforms.delete(editor);
 
-    const blockRefNode: BlockRefElement = {
-      type: "block-ref",
-      blockId,
-      children: [{ text: "" }],
-    };
+    const blockRefNode = makeBlockRef({ blockId });
 
     Transforms.insertNodes(editor, blockRefNode);
     Transforms.move(editor);
@@ -259,37 +263,40 @@ export function SlateEditor({
             | 5
             | 6;
           const entry = Editor.above(editor, {
-            match: (n) =>
-              SlateElement.isElement(n) && (n as any).type === "paragraph",
+            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
           });
           if (entry) {
-            Transforms.setNodes(editor, { type: "heading", level } as any, {
-              at: entry[1],
-            });
+            Transforms.setNodes(
+              editor,
+              { type: "heading", level } satisfies Partial<HeadingElement>,
+              {
+                at: entry[1],
+              },
+            );
           }
           break;
         }
         case "bullet":
         case "number": {
-          const listType =
-            cmd.id === "bullet" ? "bulleted-list" : "numbered-list";
           const entry = Editor.above(editor, {
-            match: (n) =>
-              SlateElement.isElement(n) && (n as any).type === "paragraph",
+            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
           });
           if (entry) {
             const [, blockPath] = entry;
-            Transforms.setNodes(editor, { type: "list-item" } as any, {
+            Transforms.setNodes(
+              editor,
+              { type: "list-item" } satisfies Partial<ListItemElement>,
+              {
+                at: blockPath,
+              },
+            );
+            Transforms.wrapNodes(editor, makeParagraph({}), {
               at: blockPath,
+              match: (n) => Text.isText(n),
             });
             Transforms.wrapNodes(
               editor,
-              { type: "paragraph", children: [] } as any,
-              { at: blockPath, match: (n) => Text.isText(n) },
-            );
-            Transforms.wrapNodes(
-              editor,
-              { type: listType, children: [] } as any,
+              cmd.id === "bullet" ? makeBulletedList({}) : makeNumberedList({}),
               { at: blockPath },
             );
           }
@@ -297,56 +304,47 @@ export function SlateEditor({
         }
         case "task": {
           const entry = Editor.above(editor, {
-            match: (n) =>
-              SlateElement.isElement(n) && (n as any).type === "paragraph",
+            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
           });
           if (entry) {
             const [, blockPath] = entry;
             Transforms.setNodes(
               editor,
-              { type: "list-item", checked: false } as any,
+              {
+                type: "list-item",
+                checked: false,
+              } satisfies Partial<ListItemElement>,
               { at: blockPath },
             );
-            Transforms.wrapNodes(
-              editor,
-              { type: "paragraph", children: [] } as any,
-              { at: blockPath, match: (n) => Text.isText(n) },
-            );
-            Transforms.wrapNodes(
-              editor,
-              { type: "bulleted-list", children: [] } as any,
-              { at: blockPath },
-            );
+            Transforms.wrapNodes(editor, makeParagraph({}), {
+              at: blockPath,
+              match: (n) => Text.isText(n),
+            });
+            Transforms.wrapNodes(editor, makeBulletedList({}), {
+              at: blockPath,
+            });
           }
           break;
         }
         case "quote": {
           const entry = Editor.above(editor, {
-            match: (n) =>
-              SlateElement.isElement(n) && (n as any).type === "paragraph",
+            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
           });
           if (entry) {
-            Transforms.wrapNodes(
-              editor,
-              { type: "blockquote", children: [] } as any,
-              { at: entry[1] },
-            );
+            Transforms.wrapNodes(editor, makeBlockquote({}), { at: entry[1] });
           }
           break;
         }
         case "code": {
           const entry = Editor.above(editor, {
-            match: (n) =>
-              SlateElement.isElement(n) && (n as any).type === "paragraph",
+            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
           });
           if (entry) {
             const [, blockPath] = entry;
             Transforms.removeNodes(editor, { at: blockPath });
-            Transforms.insertNodes(
-              editor,
-              { type: "code-block", children: [{ text: "" }] } as any,
-              { at: blockPath },
-            );
+            Transforms.insertNodes(editor, makeCodeBlock({}), {
+              at: blockPath,
+            });
             Transforms.select(editor, {
               anchor: { path: [...blockPath, 0], offset: 0 },
               focus: { path: [...blockPath, 0], offset: 0 },
@@ -356,26 +354,16 @@ export function SlateEditor({
         }
         case "divider": {
           const entry = Editor.above(editor, {
-            match: (n) =>
-              SlateElement.isElement(n) && (n as any).type === "paragraph",
+            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
           });
           if (entry) {
             const [, blockPath] = entry;
             Transforms.removeNodes(editor, { at: blockPath });
-            Transforms.insertNodes(
-              editor,
-              {
-                type: "thematic-break",
-                children: [{ text: "" }],
-              } as any,
-              { at: blockPath },
-            );
+            Transforms.insertNodes(editor, makeThematicBreak({}), {
+              at: blockPath,
+            });
             const nextPath = Path.next(blockPath);
-            Transforms.insertNodes(
-              editor,
-              { type: "paragraph", children: [{ text: "" }] } as any,
-              { at: nextPath },
-            );
+            Transforms.insertNodes(editor, makeParagraph({}), { at: nextPath });
             Transforms.select(editor, {
               anchor: { path: [...nextPath, 0], offset: 0 },
               focus: { path: [...nextPath, 0], offset: 0 },
