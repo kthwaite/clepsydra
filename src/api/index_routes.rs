@@ -12,10 +12,9 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
-use super::pages::PageDetail;
+use super::pages::page_detail_from_meta;
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
-use crate::vault::canonical::CanonicalName;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::page::{Page, PageMeta, write_page_content};
@@ -806,27 +805,9 @@ pub async fn create_from_link(
         removed: vec![],
     });
 
-    let canonical = if let Some(ref title) = meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.stem())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
-    let project = meta.project.clone();
-
     Ok((
         StatusCode::CREATED,
-        Json(PageDetail {
-            path: vault_path.as_str().to_string(),
-            canonical_name: canonical.as_str().to_string(),
-            meta,
-            body: page_body,
-            kind: resolved_kind.as_str().to_string(),
-            inferred,
-            project,
-        }),
+        Json(page_detail_from_meta(&vault_path, meta, page_body)),
     )
         .into_response())
 }

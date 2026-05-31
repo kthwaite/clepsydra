@@ -147,6 +147,65 @@ pub fn move_router() -> Router<Arc<AppState>> {
 }
 
 // ---------------------------------------------------------------------------
+// Shared PageDetail constructors
+// ---------------------------------------------------------------------------
+
+/// Build a `PageDetail` from an owned `Page` (borrowed) and its `VaultPath`.
+///
+/// Callers MUST pass the page's OWN vault path (e.g. `move_page` passes the
+/// destination path). Resolves the kind from `vault_path` + `page.meta.kind`
+/// and derives the canonical name from the title (else the filename).
+pub(crate) fn page_detail_from_page(page: &Page, vault_path: &VaultPath) -> PageDetail {
+    let canonical = if let Some(ref title) = page.meta.title {
+        CanonicalName::from_title(title)
+    } else {
+        CanonicalName::from_filename(vault_path.filename())
+    };
+
+    let (resolved_kind, inferred) = crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
+
+    PageDetail {
+        path: vault_path.as_str().to_string(),
+        canonical_name: canonical.as_str().to_string(),
+        meta: page.meta.clone(),
+        body: page.body.clone(),
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project: page.meta.project.clone(),
+    }
+}
+
+/// Build a `PageDetail` from a (typically already-mutated/consumed) `PageMeta`
+/// plus an owned body string and its `VaultPath`.
+///
+/// Callers MUST pass the page's OWN vault path (create/update sites pass the
+/// new/destination path). `meta` is consumed into the returned struct.
+pub(crate) fn page_detail_from_meta(
+    vault_path: &VaultPath,
+    meta: PageMeta,
+    body: String,
+) -> PageDetail {
+    let canonical = if let Some(ref title) = meta.title {
+        CanonicalName::from_title(title)
+    } else {
+        CanonicalName::from_filename(vault_path.filename())
+    };
+
+    let (resolved_kind, inferred) = crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
+    let project = meta.project.clone();
+
+    PageDetail {
+        path: vault_path.as_str().to_string(),
+        canonical_name: canonical.as_str().to_string(),
+        meta,
+        body,
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -246,25 +305,7 @@ pub async fn get_page(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    let canonical = if let Some(ref title) = page.meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
-    let project = page.meta.project.clone();
-
-    Ok(Json(PageDetail {
-        path: vault_path.as_str().to_string(),
-        canonical_name: canonical.as_str().to_string(),
-        meta: page.meta,
-        body: page.body,
-        kind: resolved_kind.as_str().to_string(),
-        inferred,
-        project,
-    }))
+    Ok(Json(page_detail_from_page(&page, &vault_path)))
 }
 
 #[utoipa::path(
@@ -314,25 +355,7 @@ pub async fn get_page_by_id(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    let canonical = if let Some(ref title) = page.meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
-    let project = page.meta.project.clone();
-
-    Ok(Json(PageDetail {
-        path: vault_path.as_str().to_string(),
-        canonical_name: canonical.as_str().to_string(),
-        meta: page.meta,
-        body: page.body,
-        kind: resolved_kind.as_str().to_string(),
-        inferred,
-        project,
-    }))
+    Ok(Json(page_detail_from_page(&page, &vault_path)))
 }
 
 #[utoipa::path(
@@ -419,27 +442,9 @@ pub async fn create_page(
         removed: vec![],
     });
 
-    let canonical = if let Some(ref title) = meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
-    let project = meta.project.clone();
-
     Ok((
         StatusCode::CREATED,
-        Json(PageDetail {
-            path: vault_path.as_str().to_string(),
-            canonical_name: canonical.as_str().to_string(),
-            meta,
-            body: page_body,
-            kind: resolved_kind.as_str().to_string(),
-            inferred,
-            project,
-        }),
+        Json(page_detail_from_meta(&vault_path, meta, page_body)),
     )
         .into_response())
 }
@@ -525,25 +530,7 @@ pub async fn update_page(
         removed: vec![],
     });
 
-    let canonical = if let Some(ref title) = meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
-    let project = meta.project.clone();
-
-    Ok(Json(PageDetail {
-        path: vault_path.as_str().to_string(),
-        canonical_name: canonical.as_str().to_string(),
-        meta,
-        body: page_body,
-        kind: resolved_kind.as_str().to_string(),
-        inferred,
-        project,
-    }))
+    Ok(Json(page_detail_from_meta(&vault_path, meta, page_body)))
 }
 
 #[utoipa::path(
@@ -754,25 +741,7 @@ pub async fn move_page(
     let page = Page::from_file(&dest_abs, dest_vp.clone())
         .map_err(|e| ApiError::internal(format!("failed to read moved page: {e}")))?;
 
-    let canonical = if let Some(ref title) = page.meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(dest_vp.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(dest_vp.as_str(), page.meta.kind);
-    let project = page.meta.project.clone();
-
-    Ok(Json(PageDetail {
-        path: dest_vp.as_str().to_string(),
-        canonical_name: canonical.as_str().to_string(),
-        meta: page.meta,
-        body: page.body,
-        kind: resolved_kind.as_str().to_string(),
-        inferred,
-        project,
-    }))
+    Ok(Json(page_detail_from_page(&page, &dest_vp)))
 }
 
 // ---------------------------------------------------------------------------
@@ -873,5 +842,26 @@ Some quoted text.\n";
             Some("clepsydra"),
             "project should be clepsydra"
         );
+    }
+
+    #[tokio::test]
+    async fn detail_infers_kind_from_folder() {
+        let (state, _tmp) = make_state().await;
+
+        // No `type:` declared — kind should be inferred from the folder.
+        let page_dir = state.vault.root().join("journals");
+        std::fs::create_dir_all(&page_dir).unwrap();
+        std::fs::write(
+            page_dir.join("2026-05-31.md"),
+            "---\nid: 01900000-0000-7000-8000-000000000003\n---\nbody\n",
+        )
+        .unwrap();
+
+        let resp = get_page(State(state), Path("journals/2026-05-31.md".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.0.kind, "JOURNAL", "kind should be inferred as JOURNAL");
+        assert!(resp.0.inferred, "inferred should be true when type is absent");
     }
 }

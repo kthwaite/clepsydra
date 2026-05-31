@@ -14,10 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
-use super::pages::PageDetail;
+use super::pages::{PageDetail, page_detail_from_meta, page_detail_from_page};
 use super::tasks::TaskItem;
 use crate::api::events::SyncNotification;
-use crate::vault::canonical::CanonicalName;
 use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
@@ -89,29 +88,6 @@ fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
 fn journal_path(date: &str) -> Result<VaultPath, ApiError> {
     VaultPath::new(&format!("journals/{date}.md"))
         .map_err(|e| ApiError::internal(format!("invalid journal path: {e}")))
-}
-
-/// Build a PageDetail from a Page + VaultPath.
-fn page_detail(page: &Page, vault_path: &VaultPath) -> PageDetail {
-    let canonical = if let Some(ref title) = page.meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
-    let project = page.meta.project.clone();
-
-    PageDetail {
-        path: vault_path.as_str().to_string(),
-        canonical_name: canonical.as_str().to_string(),
-        meta: page.meta.clone(),
-        body: page.body.clone(),
-        kind: resolved_kind.as_str().to_string(),
-        inferred,
-        project,
-    }
 }
 
 /// Ensure a journal page exists for the given date. Returns the VaultPath and
@@ -200,7 +176,7 @@ async fn get_today(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    let detail = page_detail(&page, &vault_path);
+    let detail = page_detail_from_page(&page, &vault_path);
 
     // Query for carried-forward tasks: incomplete tasks from recent journals
     // (past 7 days, excluding today).
@@ -318,7 +294,7 @@ async fn get_by_date(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail(&page, &vault_path)))
+    Ok(Json(page_detail_from_page(&page, &vault_path)))
 }
 
 /// GET /journal/range?from=YYYY-MM-DD&to=YYYY-MM-DD — list journals in range.
@@ -454,27 +430,9 @@ async fn capture_today(
         removed: vec![],
     });
 
-    let canonical = if let Some(ref title) = meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
-    let project = meta.project.clone();
-
     Ok((
         StatusCode::OK,
-        Json(PageDetail {
-            path: vault_path.as_str().to_string(),
-            canonical_name: canonical.as_str().to_string(),
-            meta,
-            body: new_body,
-            kind: resolved_kind.as_str().to_string(),
-            inferred,
-            project,
-        }),
+        Json(page_detail_from_meta(&vault_path, meta, new_body)),
     )
         .into_response())
 }
