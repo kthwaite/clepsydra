@@ -500,10 +500,14 @@ impl VaultIndex {
         let created_at = page.meta.created_at.map(|dt| dt.to_rfc3339());
         let updated_at = page.meta.updated_at.map(|dt| dt.to_rfc3339());
         let journal_date = extract_journal_date(page.vault_path.as_str());
+        let (kind, kind_inferred) =
+            crate::vault::kind::resolve(page.vault_path.as_str(), page.meta.kind);
+        let kind_str = kind.as_str();
+        let project = page.meta.project.clone();
 
         tx.execute(
-            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                path = excluded.path,
                title = excluded.title,
@@ -512,7 +516,10 @@ impl VaultIndex {
                updated_at = excluded.updated_at,
                meta_json = excluded.meta_json,
                content_hash = excluded.content_hash,
-               journal_date = excluded.journal_date",
+               journal_date = excluded.journal_date,
+               kind = excluded.kind,
+               kind_inferred = excluded.kind_inferred,
+               project = excluded.project",
             params![
                 page_id,
                 page.vault_path.as_str(),
@@ -523,6 +530,9 @@ impl VaultIndex {
                 meta_json,
                 page.content_hash,
                 journal_date,
+                kind_str,
+                kind_inferred as i64,
+                project,
             ],
         )?;
 
@@ -1724,11 +1734,15 @@ fn upsert_indexed_page(
     let updated_at = pf.meta.updated_at.map(|dt| dt.to_rfc3339());
 
     let journal_date = extract_journal_date(pf.vault_path.as_str());
+    let (kind, kind_inferred) =
+        crate::vault::kind::resolve(pf.vault_path.as_str(), pf.meta.kind);
+    let kind_str = kind.as_str();
+    let project = pf.meta.project.clone();
 
     // Upsert into pages table
     tx.execute(
-        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET
            path = excluded.path,
            title = excluded.title,
@@ -1737,7 +1751,10 @@ fn upsert_indexed_page(
            updated_at = excluded.updated_at,
            meta_json = excluded.meta_json,
            content_hash = excluded.content_hash,
-           journal_date = excluded.journal_date",
+           journal_date = excluded.journal_date,
+           kind = excluded.kind,
+           kind_inferred = excluded.kind_inferred,
+           project = excluded.project",
         params![
             page_id,
             pf.vault_path.as_str(),
@@ -1748,6 +1765,9 @@ fn upsert_indexed_page(
             meta_json,
             pf.content_hash,
             journal_date,
+            kind_str,
+            kind_inferred as i64,
+            project,
         ],
     )?;
 
@@ -1904,5 +1924,75 @@ mod prop_link_tests {
     fn no_linkable_props_yields_nothing() {
         let meta = PageMeta::new();
         assert!(extract_prop_links(&meta, &[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod kind_index_tests {
+    use super::*;
+    use std::fs;
+
+    /// Create a temp vault dir, write `rel_path` with `content`, open `Vault`
+    /// + `VaultIndex`, call `index_page`, and return the index for inspection.
+    fn index_one(
+        tmp: &tempfile::TempDir,
+        index: &mut VaultIndex,
+        rel_path: &str,
+        content: &str,
+    ) {
+        let abs = tmp.path().join(rel_path);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&abs, content).unwrap();
+
+        let vault = Vault::open(tmp.path()).unwrap();
+        let vp = VaultPath::new(rel_path).unwrap();
+        index.index_page(&vault, &vp).unwrap();
+    }
+
+    #[test]
+    fn index_persists_resolved_kind_and_inferred_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join(".clepsydra/index.db");
+        let mut index = VaultIndex::open_bare(&db_path).unwrap();
+
+        // A page in journals/ with no declared type -> inferred JOURNAL.
+        index_one(
+            &tmp,
+            &mut index,
+            "journals/2026-05-31.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000001\n---\nbody",
+        );
+        // A page in notes/ with declared type: quote -> declared QUOTE, project set.
+        index_one(
+            &tmp,
+            &mut index,
+            "notes/q.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000002\ntype: quote\nproject: clepsydra\n---\nbody",
+        );
+
+        let conn = index.connection();
+
+        let (k1, inf1): (String, i64) = conn
+            .query_row(
+                "SELECT kind, kind_inferred FROM pages WHERE path = 'journals/2026-05-31.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(k1, "JOURNAL");
+        assert_eq!(inf1, 1);
+
+        let (k2, inf2, proj): (String, i64, Option<String>) = conn
+            .query_row(
+                "SELECT kind, kind_inferred, project FROM pages WHERE path = 'notes/q.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(k2, "QUOTE");
+        assert_eq!(inf2, 0);
+        assert_eq!(proj.as_deref(), Some("clepsydra"));
     }
 }
