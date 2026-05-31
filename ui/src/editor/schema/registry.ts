@@ -1,5 +1,5 @@
 import type { ElementDescriptor } from "./descriptor";
-import type { ElementType } from "./types";
+import type { CustomElement, ElementType } from "./types";
 import { paragraphDescriptor } from "./elements/paragraph";
 import { headingDescriptor } from "./elements/heading";
 import { codeBlockDescriptor } from "./elements/codeBlock";
@@ -36,6 +36,10 @@ export const REGISTRY = Object.fromEntries(
   ALL.map((d) => [d.type, d]),
 ) as Record<ElementType, ElementDescriptor>;
 
+export function getDescriptor<T extends ElementType>(
+  type: T,
+): ElementDescriptor<Extract<CustomElement, { type: T }>> | undefined;
+export function getDescriptor(type: ElementType): ElementDescriptor | undefined;
 export function getDescriptor(type: ElementType): ElementDescriptor | undefined {
   return REGISTRY[type];
 }
