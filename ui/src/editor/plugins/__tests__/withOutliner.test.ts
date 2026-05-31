@@ -15,12 +15,13 @@ import {
   toggleCheckbox,
   withOutliner,
 } from "../withOutliner";
+import { withSchema } from "../../schema/withSchema";
 
 // Import types so module augmentation is active
 import "../../types";
 
 function makeEditor(nodes: Descendant[]) {
-  const editor = withOutliner(withHistory(createEditor()));
+  const editor = withOutliner(withSchema(withHistory(createEditor())));
   editor.children = nodes;
   Editor.normalize(editor, { force: true });
   return editor;
@@ -450,7 +451,7 @@ describe("toggleCheckbox", () => {
 
 describe("withOutliner empty-children fallback", () => {
   it("inserts paragraph child (not bare text) into empty list-item", () => {
-    const editor = withOutliner(withHistory(createEditor()));
+    const editor = withOutliner(withSchema(withHistory(createEditor())));
     editor.children = [
       {
         type: "bulleted-list",

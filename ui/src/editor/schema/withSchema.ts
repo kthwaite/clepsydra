@@ -1,9 +1,9 @@
-import { type Editor, Element as SlateElement } from "slate";
+import { type Editor, Element as SlateElement, type NodeEntry } from "slate";
 import { kindIsInline, kindIsVoid } from "./descriptor";
 import { getDescriptor } from "./registry";
 
 export function withSchema(editor: Editor): Editor {
-  const { isInline, isVoid } = editor;
+  const { isInline, isVoid, normalizeNode } = editor;
 
   editor.isInline = (element) => {
     if (SlateElement.isElement(element)) {
@@ -19,6 +19,15 @@ export function withSchema(editor: Editor): Editor {
       if (desc) return kindIsVoid(desc.kind);
     }
     return isVoid(element);
+  };
+
+  editor.normalizeNode = (entry, options) => {
+    const [node] = entry;
+    if (SlateElement.isElement(node)) {
+      const desc = getDescriptor(node.type);
+      if (desc?.normalize?.(entry as NodeEntry<never>, editor)) return;
+    }
+    normalizeNode(entry, options);
   };
 
   return editor;

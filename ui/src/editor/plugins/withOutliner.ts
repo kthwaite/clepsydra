@@ -15,31 +15,7 @@ import { isListElement, isListItem } from "#/editor/plugins/listUtils";
  * children into adjacent text nodes, destroying nested list structure.
  */
 export function withOutliner(editor: Editor): Editor {
-  const { normalizeNode, deleteBackward } = editor;
-
-  editor.normalizeNode = (entry, options) => {
-    const [node, path] = entry;
-
-    // Allow list-items to hold both inline/text children and block children
-    // (i.e. a nested bulleted-list or numbered-list). Slate's built-in rule
-    // would otherwise flatten the blocks into text.
-    if (SlateElement.isElement(node) && node.type === "list-item") {
-      // Ensure at least one child exists (Slate requires it)
-      if (node.children.length === 0) {
-        Transforms.insertNodes(
-          editor,
-          { type: "paragraph", children: [{ text: "" }] } as any,
-          { at: [...path, 0] },
-        );
-        return;
-      }
-      // Skip the mixed-content normalization — everything else proceeds
-      // via the normal chain for each child.
-      return;
-    }
-
-    normalizeNode(entry, options);
-  };
+  const { deleteBackward } = editor;
 
   editor.deleteBackward = (unit) => {
     const { selection } = editor;

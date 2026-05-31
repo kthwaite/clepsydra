@@ -6,6 +6,7 @@ import type {
   ListItemElement,
   NumberedListElement,
 } from "../types";
+import { makeParagraph } from "./paragraph";
 
 // ---------------------------------------------------------------------------
 // ListItem — renders an interactive checkbox when `checked` is set
@@ -105,6 +106,17 @@ export const listItemDescriptor: ElementDescriptor<ListItemElement> = {
       {children}
     </ListItem>
   ),
+  normalize: (entry, editor) => {
+    const [node, path] = entry;
+    // Ensure at least one child exists (Slate requires it).
+    if (node.children.length === 0) {
+      Transforms.insertNodes(editor, makeParagraph({}), { at: [...path, 0] });
+      return true;
+    }
+    // Claim the node to suppress Slate's default block-flattening of mixed
+    // (text + nested list) content — preserves the outliner's nesting.
+    return true;
+  },
 };
 
 export const makeBulletedList = bulletedListDescriptor.create;
