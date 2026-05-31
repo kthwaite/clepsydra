@@ -1,4 +1,10 @@
-import { type Element, Transforms } from "slate";
+import {
+  type Editor,
+  type Element,
+  Element as SlateElement,
+  type NodeEntry,
+  Transforms,
+} from "slate";
 import { ReactEditor, type RenderElementProps, useSlateStatic } from "slate-react";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
@@ -59,6 +65,28 @@ function ListItem({
 }
 
 // ---------------------------------------------------------------------------
+// Shared list normalizer — wraps non-list-item children in a list-item
+// ---------------------------------------------------------------------------
+
+function normalizeList(
+  entry: NodeEntry<BulletedListElement | NumberedListElement>,
+  editor: Editor,
+): boolean {
+  const [node, path] = entry;
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (!(SlateElement.isElement(child) && child.type === "list-item")) {
+      // Wrap the stray child in a list-item at its position (one fix per pass).
+      Transforms.wrapNodes(editor, makeListItem({ children: [] }), {
+        at: [...path, i],
+      });
+      return true;
+    }
+  }
+  return false; // nothing to fix → fall through to defaults
+}
+
+// ---------------------------------------------------------------------------
 // Descriptors
 // ---------------------------------------------------------------------------
 
@@ -74,6 +102,7 @@ export const bulletedListDescriptor: ElementDescriptor<BulletedListElement> = {
       {children}
     </ul>
   ),
+  normalize: normalizeList,
 };
 
 export const numberedListDescriptor: ElementDescriptor<NumberedListElement> = {
@@ -88,6 +117,7 @@ export const numberedListDescriptor: ElementDescriptor<NumberedListElement> = {
       {children}
     </ol>
   ),
+  normalize: normalizeList,
 };
 
 export const listItemDescriptor: ElementDescriptor<ListItemElement> = {
