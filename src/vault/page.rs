@@ -8,6 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::path::VaultPath;
+use crate::vault::kind::Kind;
 
 // ---------------------------------------------------------------------------
 // PageMeta
@@ -23,6 +24,17 @@ pub struct PageMeta {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
+    /// Declared kind, from frontmatter `type:` (alias `kind:`). `None` => inferred.
+    #[serde(
+        default,
+        rename = "type",
+        alias = "kind",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<Kind>,
+    /// Optional project slug; forms a subfolder beneath the kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,6 +52,8 @@ impl PageMeta {
             title: None,
             tags: Vec::new(),
             aliases: Vec::new(),
+            kind: None,
+            project: None,
             created_at: Some(now),
             updated_at: Some(now),
             extra: HashMap::new(),
@@ -131,6 +145,10 @@ struct LoosePageMeta {
     tags: Vec<String>,
     #[serde(default)]
     aliases: Vec<String>,
+    #[serde(default, rename = "type", alias = "kind")]
+    kind: Option<Kind>,
+    #[serde(default)]
+    project: Option<String>,
     #[serde(default)]
     created_at: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -191,6 +209,8 @@ pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Op
                 title: loose.title,
                 tags: loose.tags,
                 aliases: loose.aliases,
+                kind: loose.kind,
+                project: loose.project,
                 created_at: loose.created_at,
                 updated_at: loose.updated_at,
                 extra: loose.extra,
@@ -225,6 +245,39 @@ pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod kind_field_tests {
+    use super::*;
+    use crate::vault::kind::Kind;
+
+    #[test]
+    fn parses_declared_type_into_kind_field() {
+        let yaml = "id: 0190f8a0-0000-7000-8000-000000000000\ntype: quote\nproject: clepsydra\n";
+        let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(meta.kind, Some(Kind::Quote));
+        assert_eq!(meta.project.as_deref(), Some("clepsydra"));
+        // type/project must NOT leak into the extra bucket
+        assert!(!meta.extra.contains_key("type"));
+        assert!(!meta.extra.contains_key("project"));
+    }
+
+    #[test]
+    fn kind_round_trips_back_to_type_key() {
+        let yaml = "id: 0190f8a0-0000-7000-8000-000000000000\ntype: BOOK\n";
+        let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
+        let out = serde_yaml::to_string(&meta).unwrap();
+        assert!(out.contains("type: BOOK"), "serialized as: {out}");
+    }
+
+    #[test]
+    fn absent_type_is_none() {
+        let yaml = "id: 0190f8a0-0000-7000-8000-000000000000\n";
+        let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(meta.kind, None);
+        assert_eq!(meta.project, None);
+    }
+}
 
 /// A vault page: its path, parsed metadata, body text, and raw content.
 #[derive(Debug)]
