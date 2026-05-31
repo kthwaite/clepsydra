@@ -131,7 +131,10 @@ CREATE TABLE IF NOT EXISTS pages (
     updated_at      TEXT,
     meta_json       TEXT NOT NULL,
     content_hash    TEXT NOT NULL,
-    journal_date    TEXT
+    journal_date    TEXT,
+    kind            TEXT NOT NULL DEFAULT 'NOTE',
+    kind_inferred   INTEGER NOT NULL DEFAULT 1,
+    project         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS canonical_names (
@@ -162,6 +165,8 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pages_journal_date ON pages(journal_date) WHERE journal_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pages_kind ON pages(kind);
+CREATE INDEX IF NOT EXISTS idx_pages_project ON pages(project) WHERE project IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pages_path ON pages(path);
 CREATE INDEX IF NOT EXISTS idx_pages_canonical_name ON pages(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_canonical_names_name ON canonical_names(canonical_name);
@@ -236,6 +241,7 @@ impl VaultIndex {
 
         // 4. Run pre-schema migrations (column additions required before index creation)
         migrate_links_add_target_block_id(&conn)?;
+        migrate_pages_add_kind_columns(&conn)?;
 
         // 5. Execute schema
         conn.execute_batch(SCHEMA)?;
@@ -266,6 +272,7 @@ impl VaultIndex {
         let conn = Connection::open(db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         migrate_links_add_target_block_id(&conn)?;
+        migrate_pages_add_kind_columns(&conn)?;
         conn.execute_batch(SCHEMA)?;
 
         // Migration: ensure links.target_id has ON DELETE SET NULL
@@ -1359,6 +1366,42 @@ pub(crate) fn find_body_start(content: &str) -> usize {
 ///
 /// Must run BEFORE the main SCHEMA batch, since SCHEMA creates an index on
 /// `target_block_id` and will fail if the column is missing on pre-existing DBs.
+fn migrate_pages_add_kind_columns(conn: &Connection) -> Result<(), IndexError> {
+    // If the pages table doesn't exist yet, nothing to migrate — SCHEMA will create it.
+    let table_exists: bool = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pages'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+
+    if !table_exists {
+        return Ok(());
+    }
+
+    let has_kind: bool = conn.prepare("SELECT kind FROM pages LIMIT 0").is_ok();
+    if !has_kind {
+        conn.execute_batch(
+            "ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'NOTE';",
+        )?;
+    }
+
+    let has_kind_inferred: bool = conn
+        .prepare("SELECT kind_inferred FROM pages LIMIT 0")
+        .is_ok();
+    if !has_kind_inferred {
+        conn.execute_batch(
+            "ALTER TABLE pages ADD COLUMN kind_inferred INTEGER NOT NULL DEFAULT 1;",
+        )?;
+    }
+
+    let has_project: bool = conn.prepare("SELECT project FROM pages LIMIT 0").is_ok();
+    if !has_project {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN project TEXT;")?;
+    }
+
+    Ok(())
+}
+
 fn migrate_links_add_target_block_id(conn: &Connection) -> Result<(), IndexError> {
     // If the links table doesn't exist yet, nothing to migrate — SCHEMA will create it.
     let table_exists: bool = conn.query_row(
@@ -1779,6 +1822,29 @@ fn yaml_value_to_strings(val: &serde_yaml::Value) -> Vec<String> {
             .filter_map(|v| v.as_str().map(String::from))
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+
+    #[test]
+    fn pages_table_has_kind_columns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let index = VaultIndex::open_bare(&db_path).unwrap();
+        let conn = index.connection();
+        let cols: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('pages')")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(cols.contains(&"kind".to_string()));
+        assert!(cols.contains(&"kind_inferred".to_string()));
+        assert!(cols.contains(&"project".to_string()));
     }
 }
 
