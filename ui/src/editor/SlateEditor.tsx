@@ -22,7 +22,6 @@ import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
-import { withLinks } from "./plugins/withLinks";
 import {
   indentListItem,
   moveBlockDown,
@@ -31,7 +30,7 @@ import {
   toggleCheckbox,
   withOutliner,
 } from "./plugins/withOutliner";
-import { withWikilinks } from "./plugins/withWikilinks";
+import { withSchema } from "./schema/withSchema";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import type { BlockRefElement, WikilinkElement } from "./types";
 import { WikilinkCombobox } from "./WikilinkCombobox";
@@ -53,14 +52,7 @@ export function SlateEditor({
   onSaveNow,
 }: SlateEditorProps) {
   const editor = useMemo(
-    () =>
-      withReact(
-        withHistory(
-          withAutoformat(
-            withOutliner(withLinks(withWikilinks(createEditor()))),
-          ),
-        ),
-      ),
+    () => withReact(withHistory(withAutoformat(withOutliner(withSchema(createEditor()))))),
     [],
   );
 

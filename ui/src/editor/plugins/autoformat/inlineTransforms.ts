@@ -197,7 +197,7 @@ function tryLinkTransform(editor: Editor): boolean {
       Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
       Transforms.delete(editor);
 
-      // Insert link element. withLinks marks link elements as inline.
+      // Insert link element. withSchema marks link elements as inline.
       const linkNode = {
         type: "link",
         url,

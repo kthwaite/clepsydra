@@ -1,11 +1,11 @@
 import { createEditor, type Editor, Transforms } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
-import { withLinks } from "../../withLinks";
+import { withSchema } from "../../../schema/withSchema";
 import { tryInlineTransform } from "../inlineTransforms";
 
 function editorWith(text: string, offset: number) {
-  const editor = withLinks(withHistory(createEditor()));
+  const editor = withSchema(withHistory(createEditor()));
   editor.children = [{ type: "paragraph", children: [{ text }] }];
   Transforms.select(editor, {
     anchor: { path: [0, 0], offset },
