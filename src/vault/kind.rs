@@ -22,8 +22,8 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// The one canonical folder a page of this kind is filed under (lowercase
-    /// plural). Distinct from the many-to-one inference map.
+    /// The one canonical folder a page of this kind is filed under (lowercase,
+    /// plural where natural). Distinct from the many-to-one inference map.
     pub fn canonical_folder(self) -> &'static str {
         match self {
             Kind::Note => "notes",
@@ -69,10 +69,10 @@ impl Kind {
         }
     }
 
-    /// Map a top-level folder name (lowercased) to a kind, accepting synonyms.
-    /// Unknown folder -> None (caller falls back to NOTE).
+    /// Map a top-level folder name to a kind, accepting synonyms. Case-folds
+    /// the input. Unknown folder -> None (caller falls back to NOTE).
     pub fn from_folder(folder: &str) -> Option<Kind> {
-        match folder {
+        match folder.to_ascii_lowercase().as_str() {
             "notes" | "note" => Some(Kind::Note),
             "projects" | "project" => Some(Kind::Project),
             "journals" | "journal" | "daily" | "dailies" | "diary" => Some(Kind::Journal),
@@ -134,6 +134,7 @@ mod tests {
         assert_eq!(Kind::Journal.canonical_folder(), "journals");
         assert_eq!(Kind::Todo.canonical_folder(), "todos");
         assert_eq!(Kind::Person.canonical_folder(), "people");
+        assert_eq!(Kind::Code.canonical_folder(), "code");
     }
 
     #[test]
@@ -154,5 +155,25 @@ mod tests {
     fn unknown_or_rootless_folder_infers_note() {
         assert_eq!(resolve("misc/x.md", None), (Kind::Note, true));
         assert_eq!(resolve("toplevel.md", None), (Kind::Note, true));
+    }
+
+    #[test]
+    fn as_str_and_from_token_are_symmetric() {
+        let all = [
+            Kind::Note, Kind::Project, Kind::Journal, Kind::Todo,
+            Kind::Quote, Kind::Book, Kind::Capture, Kind::Code, Kind::Person,
+        ];
+        for k in all {
+            assert_eq!(Kind::from_token(k.as_str()), Some(k),
+                "from_token(as_str()) round-trip failed for {k:?}");
+        }
+    }
+
+    #[test]
+    fn serde_round_trips() {
+        let encoded = serde_json::to_string(&Kind::Quote).unwrap();
+        assert_eq!(encoded, "\"QUOTE\"");
+        let decoded: Kind = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, Kind::Quote);
     }
 }
