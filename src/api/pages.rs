@@ -32,6 +32,11 @@ pub struct PageSummary {
     pub path: String,
     pub title: Option<String>,
     pub canonical_name: String,
+    pub kind: String,
+    pub inferred: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -158,21 +163,35 @@ pub async fn list_pages(
     let pages = state
         .index
         .with_index(move |index, _vault| {
-            let mut stmt = index
-                .connection()
-                .prepare("SELECT id, path, title, canonical_name FROM pages ORDER BY path")?;
+            let mut stmt = index.connection().prepare(
+                "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
+                        p.project,
+                        COALESCE((SELECT group_concat(t.tag, char(31))
+                                    FROM tags t WHERE t.page_id = p.id), '')
+                   FROM pages p
+                  ORDER BY p.path",
+            )?;
 
             let pages: Vec<PageSummary> = stmt
                 .query_map([], |row| {
+                    let tags_raw: String = row.get(7)?;
+                    let tags = if tags_raw.is_empty() {
+                        Vec::new()
+                    } else {
+                        tags_raw.split('\u{1f}').map(str::to_string).collect()
+                    };
                     Ok(PageSummary {
                         id: row.get(0)?,
                         path: row.get(1)?,
                         title: row.get(2)?,
                         canonical_name: row.get(3)?,
+                        kind: row.get(4)?,
+                        inferred: row.get::<_, i64>(5)? != 0,
+                        project: row.get(6)?,
+                        tags,
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             Ok::<_, rusqlite::Error>(pages)
         })
@@ -703,4 +722,72 @@ pub async fn move_page(
         meta: page.meta,
         body: page.body,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state_test_support::make_state;
+
+    #[tokio::test]
+    async fn list_returns_kind_inferred_project_and_tags() {
+        let (state, _tmp) = make_state().await;
+
+        // Write a page with type: quote, project, and tags
+        let page_dir = state.vault.root().join("notes");
+        std::fs::create_dir_all(&page_dir).unwrap();
+        let page_content = "\
+---\n\
+id: 01900000-0000-7000-8000-000000000001\n\
+type: quote\n\
+project: clepsydra\n\
+tags:\n\
+  - a\n\
+  - b\n\
+---\n\
+\n\
+Some quoted text.\n";
+        std::fs::write(page_dir.join("q.md"), page_content).unwrap();
+
+        // Index the page
+        let vp = VaultPath::new("notes/q.md").unwrap();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Call the handler
+        let resp = list_pages(
+            State(state),
+            Query(PaginationParams {
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let items = &resp.0.items;
+        assert_eq!(items.len(), 1, "expected exactly one page in listing");
+        let item = &items[0];
+        assert_eq!(item.kind, "QUOTE", "kind should be QUOTE");
+        assert!(!item.inferred, "kind should not be inferred when declared");
+        assert_eq!(
+            item.project.as_deref(),
+            Some("clepsydra"),
+            "project should be clepsydra"
+        );
+        let mut actual_tags = item.tags.clone();
+        actual_tags.sort();
+        assert_eq!(actual_tags, vec!["a".to_string(), "b".to_string()]);
+    }
 }

@@ -213,14 +213,28 @@ pub async fn list_folder_contents(
                 let summary: Option<PageSummary> = index
                     .connection()
                     .query_row(
-                        "SELECT id, path, title, canonical_name FROM pages WHERE path = ?1",
+                        "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
+                                p.project,
+                                COALESCE((SELECT group_concat(t.tag, char(31))
+                                            FROM tags t WHERE t.page_id = p.id), '')
+                           FROM pages p WHERE p.path = ?1",
                         params![vp.as_str()],
                         |row| {
+                            let tags_raw: String = row.get(7)?;
+                            let tags = if tags_raw.is_empty() {
+                                Vec::new()
+                            } else {
+                                tags_raw.split('\u{1f}').map(str::to_string).collect()
+                            };
                             Ok(PageSummary {
                                 id: row.get(0)?,
                                 path: row.get(1)?,
                                 title: row.get(2)?,
                                 canonical_name: row.get(3)?,
+                                kind: row.get(4)?,
+                                inferred: row.get::<_, i64>(5)? != 0,
+                                project: row.get(6)?,
+                                tags,
                             })
                         },
                     )
@@ -287,6 +301,10 @@ fn build_page_summary_fallback(name: &str, vp: &VaultPath) -> PageSummary {
         path: vp.as_str().to_string(),
         title: None,
         canonical_name: name.trim_end_matches(".md").to_string(),
+        kind: "NOTE".to_string(),
+        inferred: true,
+        project: None,
+        tags: Vec::new(),
     }
 }
 
@@ -388,12 +406,20 @@ mod tests {
                 path: "x/b".to_string(),
                 title: None,
                 canonical_name: "b".to_string(),
+                kind: "NOTE".to_string(),
+                inferred: true,
+                project: None,
+                tags: Vec::new(),
             },
             PageSummary {
                 id: String::new(),
                 path: "x/a".to_string(),
                 title: None,
                 canonical_name: "a".to_string(),
+                kind: "NOTE".to_string(),
+                inferred: true,
+                project: None,
+                tags: Vec::new(),
             },
         ];
         sort_folder_listing(&mut folders, &mut pages);
