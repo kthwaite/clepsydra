@@ -277,6 +277,15 @@ mod kind_field_tests {
         assert_eq!(meta.kind, None);
         assert_eq!(meta.project, None);
     }
+
+    #[test]
+    fn parses_kind_alias_key() {
+        let yaml = "id: 0190f8a0-0000-7000-8000-000000000000\nkind: journal\n";
+        let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(meta.kind, Some(Kind::Journal));
+        // must not appear in the flatten bucket
+        assert!(!meta.extra.contains_key("kind"));
+    }
 }
 
 /// A vault page: its path, parsed metadata, body text, and raw content.
