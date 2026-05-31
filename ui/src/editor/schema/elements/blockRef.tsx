@@ -1,13 +1,16 @@
+import { BlockRefElement } from "#/editor/elements/BlockRefElement";
 import type { ElementDescriptor } from "../descriptor";
-import type { BlockRefElement } from "../types";
+import type { BlockRefElement as BlockRefElementType } from "../types";
 
-export const blockRefDescriptor: ElementDescriptor<BlockRefElement> = {
+export const blockRefDescriptor: ElementDescriptor<BlockRefElementType> = {
   type: "block-ref",
   kind: "inline-void",
-  create: () => {
-    throw new Error("not implemented until phase 2");
-  },
-  render: () => {
-    throw new Error("not implemented until phase 2");
-  },
+  create: ({ blockId }) => ({
+    type: "block-ref",
+    blockId,
+    children: [{ text: "" }],
+  }),
+  render: (props) => <BlockRefElement {...props} element={props.element} />,
 };
+
+export const makeBlockRef = blockRefDescriptor.create;

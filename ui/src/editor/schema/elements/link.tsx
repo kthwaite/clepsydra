@@ -1,13 +1,16 @@
+import { LinkElement } from "#/editor/elements/LinkElement";
 import type { ElementDescriptor } from "../descriptor";
-import type { LinkElement } from "../types";
+import type { LinkElement as LinkElementType } from "../types";
 
-export const linkDescriptor: ElementDescriptor<LinkElement> = {
+export const linkDescriptor: ElementDescriptor<LinkElementType> = {
   type: "link",
   kind: "inline",
-  create: () => {
-    throw new Error("not implemented until phase 2");
-  },
-  render: () => {
-    throw new Error("not implemented until phase 2");
-  },
+  create: ({ url, children = [{ text: "" }] }) => ({
+    type: "link",
+    url,
+    children,
+  }),
+  render: (props) => <LinkElement {...props} element={props.element} />,
 };
+
+export const makeLink = linkDescriptor.create;

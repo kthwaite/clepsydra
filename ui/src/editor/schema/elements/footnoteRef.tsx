@@ -1,13 +1,16 @@
+import { FootnoteRefElement } from "#/editor/elements/FootnoteRefElement";
 import type { ElementDescriptor } from "../descriptor";
-import type { FootnoteRefElement } from "../types";
+import type { FootnoteRefElement as FootnoteRefElementType } from "../types";
 
-export const footnoteRefDescriptor: ElementDescriptor<FootnoteRefElement> = {
+export const footnoteRefDescriptor: ElementDescriptor<FootnoteRefElementType> = {
   type: "footnote-ref",
   kind: "inline-void",
-  create: () => {
-    throw new Error("not implemented until phase 2");
-  },
-  render: () => {
-    throw new Error("not implemented until phase 2");
-  },
+  create: ({ identifier }) => ({
+    type: "footnote-ref",
+    identifier,
+    children: [{ text: "" }],
+  }),
+  render: (props) => <FootnoteRefElement {...props} element={props.element} />,
 };
+
+export const makeFootnoteRef = footnoteRefDescriptor.create;

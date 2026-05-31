@@ -1,13 +1,15 @@
-import type { ElementDescriptor } from "../descriptor";
+import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type { ParagraphElement } from "../types";
 
 export const paragraphDescriptor: ElementDescriptor<ParagraphElement> = {
   type: "paragraph",
   kind: "block",
-  create: () => {
-    throw new Error("not implemented until phase 2");
-  },
-  render: () => {
-    throw new Error("not implemented until phase 2");
-  },
+  create: ({ children = [{ text: "" }], ...rest }: CreateProps<ParagraphElement>) => ({
+    type: "paragraph",
+    children,
+    ...rest,
+  }),
+  render: ({ attributes, children }) => <p {...attributes}>{children}</p>,
 };
+
+export const makeParagraph = paragraphDescriptor.create;
