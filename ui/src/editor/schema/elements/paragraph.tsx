@@ -1,3 +1,4 @@
+import type { Paragraph } from "mdast";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type { ParagraphElement } from "../types";
 
@@ -10,6 +11,15 @@ export const paragraphDescriptor: ElementDescriptor<ParagraphElement> = {
     ...rest,
   }),
   render: ({ attributes, children }) => <p {...attributes}>{children}</p>,
+  toMdast: (node, ctx) => {
+    const children = ctx.inlineChildren(node.children);
+    ctx.appendBlockMetadata(children, node);
+    const p: Paragraph = {
+      type: "paragraph",
+      children,
+    };
+    return p;
+  },
 };
 
 export const makeParagraph = paragraphDescriptor.create;

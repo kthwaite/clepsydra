@@ -1,3 +1,4 @@
+import type { RootContent } from "mdast";
 import type { ElementDescriptor } from "../descriptor";
 import type { FootnoteDefElement } from "../types";
 
@@ -20,6 +21,14 @@ export const footnoteDefDescriptor: ElementDescriptor<FootnoteDefElement> = {
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   ),
+  toMdast: (node, ctx) =>
+    // footnoteDefinition is a GFM extension node, not in the base mdast RootContent union.
+    ({
+      type: "footnoteDefinition",
+      identifier: node.identifier,
+      label: node.identifier,
+      children: ctx.blockChildren(node.children),
+    }) as unknown as RootContent,
 };
 
 export const makeFootnoteDef = footnoteDefDescriptor.create;

@@ -1,7 +1,8 @@
+import type { Code } from "mdast";
 import { type Editor, Element as SlateElement, Node, Transforms, type NodeEntry } from "slate";
 import { CodeBlockElement } from "#/editor/elements/CodeBlockElement";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
-import type { CodeBlockElement as CodeBlockElementType } from "../types";
+import type { CodeBlockElement as CodeBlockElementType, CustomText } from "../types";
 
 const CODE_MARKS = ["bold", "italic", "underline", "code", "strikethrough"] as const;
 
@@ -34,6 +35,15 @@ export const codeBlockDescriptor: ElementDescriptor<CodeBlockElementType> = {
   }),
   render: (props) => <CodeBlockElement {...props} element={props.element} />,
   normalize: normalizeCodeBlock,
+  toMdast: (node) => {
+    const value = node.children.map((c) => (c as CustomText).text).join("");
+    const code: Code = {
+      type: "code",
+      lang: node.language ?? null,
+      value,
+    };
+    return code;
+  },
 };
 
 export const makeCodeBlock = codeBlockDescriptor.create;

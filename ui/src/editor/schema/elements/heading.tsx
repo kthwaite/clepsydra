@@ -1,3 +1,4 @@
+import type { Heading } from "mdast";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type { HeadingElement } from "../types";
 
@@ -26,6 +27,16 @@ export const headingDescriptor: ElementDescriptor<HeadingElement> = {
         {children}
       </Tag>
     );
+  },
+  toMdast: (node, ctx) => {
+    const children = ctx.inlineChildren(node.children);
+    ctx.appendBlockMetadata(children, node);
+    const h: Heading = {
+      type: "heading",
+      depth: node.level,
+      children,
+    };
+    return h;
   },
 };
 

@@ -1,3 +1,4 @@
+import type { List } from "mdast";
 import {
   type Editor,
   type Element,
@@ -103,6 +104,15 @@ export const bulletedListDescriptor: ElementDescriptor<BulletedListElement> = {
     </ul>
   ),
   normalize: normalizeList,
+  toMdast: (node, ctx) => {
+    const list: List = {
+      type: "list",
+      ordered: false,
+      spread: false,
+      children: node.children.map(ctx.listItem),
+    };
+    return list;
+  },
 };
 
 export const numberedListDescriptor: ElementDescriptor<NumberedListElement> = {
@@ -118,6 +128,16 @@ export const numberedListDescriptor: ElementDescriptor<NumberedListElement> = {
     </ol>
   ),
   normalize: normalizeList,
+  toMdast: (node, ctx) => {
+    const list: List = {
+      type: "list",
+      ordered: true,
+      start: 1,
+      spread: false,
+      children: node.children.map(ctx.listItem),
+    };
+    return list;
+  },
 };
 
 export const listItemDescriptor: ElementDescriptor<ListItemElement> = {
@@ -146,6 +166,17 @@ export const listItemDescriptor: ElementDescriptor<ListItemElement> = {
     // Claim the node to suppress Slate's default block-flattening of mixed
     // (text + nested list) content — preserves the outliner's nesting.
     return true;
+  },
+  toMdast: (node, ctx) => {
+    // list-item at top level is unusual; wrap in unordered list
+    const li = ctx.listItem(node);
+    const list: List = {
+      type: "list",
+      ordered: false,
+      spread: false,
+      children: [li],
+    };
+    return list;
   },
 };
 

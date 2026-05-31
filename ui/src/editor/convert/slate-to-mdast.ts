@@ -1,35 +1,21 @@
 import type {
   BlockContent,
-  Code,
-  Heading,
   InlineCode,
-  List,
   ListItem,
   Nodes,
-  Paragraph,
   PhrasingContent,
   Root,
   RootContent,
-  ThematicBreak,
 } from "mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
 import type { Options } from "mdast-util-to-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
 import type { Descendant } from "slate";
 import { Text as SlateText } from "slate";
+import type { SerializeCtx } from "#/editor/schema/descriptor";
+import { getDescriptor } from "#/editor/schema/registry";
 import type { CustomElement, CustomText } from "#/editor/types";
-
-// ---------------------------------------------------------------------------
-// Custom wikiLink mdast node (not in the standard mdast typings)
-// ---------------------------------------------------------------------------
-
-interface WikiLinkMdast {
-  type: "wikiLink";
-  data: {
-    alias?: string;
-    permalink: string;
-  };
-}
+import type { WikiLinkMdast } from "./mdastTypes";
 
 // ---------------------------------------------------------------------------
 // toMarkdown extension for wikilinks
@@ -171,149 +157,10 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
 }
 
 function convertElement(node: CustomElement): RootContent {
-  switch (node.type) {
-    case "paragraph": {
-      const children = convertInlineChildren(node.children);
-      appendBlockMetadataSuffix(children, node);
-      const p: Paragraph = {
-        type: "paragraph",
-        children,
-      };
-      return p;
-    }
-
-    case "heading": {
-      const children = convertInlineChildren(node.children);
-      appendBlockMetadataSuffix(children, node);
-      const h: Heading = {
-        type: "heading",
-        depth: node.level,
-        children,
-      };
-      return h;
-    }
-
-    case "code-block": {
-      const value = node.children.map((c) => (c as CustomText).text).join("");
-      const code: Code = {
-        type: "code",
-        lang: node.language ?? null,
-        value,
-      };
-      return code;
-    }
-
-    case "blockquote": {
-      return {
-        type: "blockquote",
-        children: convertBlockChildren(node.children),
-      };
-    }
-
-    case "bulleted-list": {
-      const list: List = {
-        type: "list",
-        ordered: false,
-        spread: false,
-        children: node.children.map(convertListItem),
-      };
-      return list;
-    }
-
-    case "numbered-list": {
-      const list: List = {
-        type: "list",
-        ordered: true,
-        start: 1,
-        spread: false,
-        children: node.children.map(convertListItem),
-      };
-      return list;
-    }
-
-    case "thematic-break": {
-      const tb: ThematicBreak = { type: "thematicBreak" };
-      return tb;
-    }
-
-    case "list-item": {
-      // list-item at top level is unusual; wrap in unordered list
-      const li = convertListItem(node);
-      const list: List = {
-        type: "list",
-        ordered: false,
-        spread: false,
-        children: [li],
-      };
-      return list;
-    }
-
-    case "link": {
-      // A link at block level — wrap in paragraph
-      const p: Paragraph = {
-        type: "paragraph",
-        children: [
-          {
-            type: "link",
-            url: node.url,
-            children: convertInlineChildren(node.children),
-          },
-        ],
-      };
-      return p;
-    }
-
-    case "wikilink": {
-      // A wikilink at block level — wrap in paragraph
-      const wl: WikiLinkMdast = {
-        type: "wikiLink",
-        data: {
-          permalink: node.target,
-          alias: node.alias,
-        },
-      };
-      const p: Paragraph = {
-        type: "paragraph",
-        children: [wl as unknown as PhrasingContent],
-      };
-      return p;
-    }
-
-    case "block-ref": {
-      // A block-ref at block level — wrap in paragraph
-      const p: Paragraph = {
-        type: "paragraph",
-        children: [
-          { type: "text", value: `((${node.blockId}))` } as PhrasingContent,
-        ],
-      };
-      return p;
-    }
-
-    case "footnote-ref": {
-      // A footnote-ref at block level — wrap in paragraph
-      const p: Paragraph = {
-        type: "paragraph",
-        children: [
-          {
-            type: "footnoteReference",
-            identifier: node.identifier,
-            label: node.identifier,
-          } as unknown as PhrasingContent,
-        ],
-      };
-      return p;
-    }
-
-    case "footnote-def": {
-      return {
-        type: "footnoteDefinition",
-        identifier: node.identifier,
-        label: node.identifier,
-        children: convertBlockChildren(node.children),
-      } as unknown as RootContent;
-    }
-  }
+  const desc = getDescriptor(node.type);
+  if (desc?.toMdast) return desc.toMdast(node as never, ctx);
+  // Fallback mirrors the old default: serialize children as a paragraph.
+  return { type: "paragraph", children: convertInlineChildren(node.children) };
 }
 
 function convertListItem(
@@ -423,6 +270,17 @@ function convertBlockChildren(children: Descendant[]): Array<BlockContent> {
   }
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Serialization context — recursive helpers handed to each descriptor.toMdast
+// ---------------------------------------------------------------------------
+
+const ctx: SerializeCtx = {
+  inlineChildren: convertInlineChildren,
+  blockChildren: convertBlockChildren,
+  appendBlockMetadata: appendBlockMetadataSuffix,
+  listItem: convertListItem,
+};
 
 // ---------------------------------------------------------------------------
 // Public API

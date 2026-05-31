@@ -17,6 +17,10 @@ export const blockquoteDescriptor: ElementDescriptor<BlockquoteElement> = {
       {children}
     </blockquote>
   ),
+  toMdast: (node, ctx) => ({
+    type: "blockquote",
+    children: ctx.blockChildren(node.children),
+  }),
 };
 
 export const makeBlockquote = blockquoteDescriptor.create;

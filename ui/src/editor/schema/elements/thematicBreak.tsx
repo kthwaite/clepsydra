@@ -1,3 +1,4 @@
+import type { ThematicBreak } from "mdast";
 import type { ElementDescriptor } from "../descriptor";
 import type { ThematicBreakElement } from "../types";
 
@@ -11,6 +12,10 @@ export const thematicBreakDescriptor: ElementDescriptor<ThematicBreakElement> = 
       {children}
     </div>
   ),
+  toMdast: () => {
+    const tb: ThematicBreak = { type: "thematicBreak" };
+    return tb;
+  },
 };
 
 export const makeThematicBreak = thematicBreakDescriptor.create;

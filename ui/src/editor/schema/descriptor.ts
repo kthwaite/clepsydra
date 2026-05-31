@@ -1,7 +1,7 @@
 import type { Descendant, Editor, NodeEntry } from "slate";
 import type { RenderElementProps } from "slate-react";
-import type { BlockContent, PhrasingContent, RootContent } from "mdast";
-import type { CustomElement, CustomText, ElementType } from "./types";
+import type { BlockContent, ListItem, PhrasingContent, RootContent } from "mdast";
+import type { CustomElement, CustomText, ElementType, ListItemElement } from "./types";
 
 export type ElementKind = "block" | "inline" | "void-block" | "inline-void";
 
@@ -21,6 +21,7 @@ export interface SerializeCtx {
     children: PhrasingContent[],
     element: { properties?: Record<string, string>; blockId?: string },
   ): void;
+  listItem(node: ListItemElement): ListItem;
 }
 
 export interface ElementDescriptor<T extends CustomElement = CustomElement> {
