@@ -196,8 +196,8 @@ export function Constellation() {
           {(
             [
               ["▪", "PROJECT", "project"],
-              ["▲", "TASK", "task"],
-              ["◦", "DAILY", "daily"],
+              ["▲", "TODO", "todo"],
+              ["◦", "JOURNAL", "journal"],
               ["•", "NOTE", "other"],
             ] as [string, Kind, string][]
           ).map(([glyph, kind, label]) => (

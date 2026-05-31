@@ -14,14 +14,14 @@ import { useCallback, useEffect, useRef } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
 
-/** Kind-coded node glyph: square=PROJECT, triangle=TASK, ring=DAILY, dot=other. */
+/** Kind-coded node glyph: square=PROJECT, triangle=TODO, ring=JOURNAL, dot=other. */
 function nodeShape(kind: Kind): { d: string; filled: boolean } {
   const s = 6;
   if (kind === "PROJECT")
     return { d: `M${-s} ${-s}h${2 * s}v${2 * s}h${-2 * s}Z`, filled: true };
-  if (kind === "TASK")
+  if (kind === "TODO")
     return { d: `M0 ${-s}L${s} ${s}L${-s} ${s}Z`, filled: true };
-  if (kind === "DAILY")
+  if (kind === "JOURNAL")
     return {
       d: `M${-s} 0a${s} ${s} 0 1 0 ${2 * s} 0a${s} ${s} 0 1 0 ${-2 * s} 0`,
       filled: false,

@@ -1,23 +1,22 @@
 // Note "kind" — a first-class taxonomy driving the coloured pips across
 // GAZETTEER, CONSTELLATION, SHEAF, and link previews.
 //
-// There is no backend `kind` field yet. Near-term resolution is:
+// The kind set mirrors the backend (authoritative) enum exactly. Resolution is:
 //   explicit kind  →  frontmatter `type`/`kind`  →  top-level folder  →  NOTE
-// The shape is forward-compatible: when the backend exposes a real `kind`,
-// pass it as `kind` and it wins. List endpoints currently expose only `path`,
-// so list-level callers use `resolveKindFromPath`.
+// When the backend supplies a real `kind`, pass it as `kind` and it wins; the
+// folder/frontmatter heuristics remain only as the fallback for callers that
+// lack a backend kind.
 
 export const KINDS = [
-  "FRAGMENT",
-  "DAILY",
-  "TASK",
+  "NOTE",
+  "PROJECT",
+  "JOURNAL",
+  "TODO",
   "QUOTE",
   "BOOK",
-  "PROJECT",
   "CAPTURE",
   "CODE",
   "PERSON",
-  "NOTE",
 ] as const;
 
 export type Kind = (typeof KINDS)[number];
@@ -34,9 +33,8 @@ export type KindMeta = {
 // --cool (secondary), --warn (attention), with neutral ink ramps for the rest.
 export const KIND_META: Record<Kind, KindMeta> = {
   PROJECT: { label: "PROJECT", color: "var(--accent)" },
-  TASK: { label: "TASK", color: "var(--warn)" },
-  DAILY: { label: "DAILY", color: "var(--cool)" },
-  FRAGMENT: { label: "FRAGMENT", color: "var(--ink-2)" },
+  TODO: { label: "TODO", color: "var(--warn)" },
+  JOURNAL: { label: "JOURNAL", color: "var(--cool)" },
   QUOTE: { label: "QUOTE", color: "var(--warn)" },
   BOOK: { label: "BOOK", color: "var(--accent-deep)" },
   CODE: { label: "CODE", color: "var(--ink)" },
@@ -51,35 +49,35 @@ export const kindColorVar = (kind: Kind): string => KIND_META[kind].color;
 // Top-level folder → kind. Keys are lowercased folder names; several synonyms
 // map to the same kind.
 const FOLDER_KIND: Record<string, Kind> = {
-  daily: "DAILY",
-  dailies: "DAILY",
-  journal: "DAILY",
-  journals: "DAILY",
-  diary: "DAILY",
+  journals: "JOURNAL",
+  journal: "JOURNAL",
+  daily: "JOURNAL",
+  dailies: "JOURNAL",
+  diary: "JOURNAL",
+  todos: "TODO",
+  todo: "TODO",
+  tasks: "TODO",
+  task: "TODO",
+  notes: "NOTE",
+  note: "NOTE",
   projects: "PROJECT",
   project: "PROJECT",
-  tasks: "TASK",
-  task: "TASK",
-  todo: "TASK",
-  todos: "TASK",
   quotes: "QUOTE",
   quote: "QUOTE",
   books: "BOOK",
   book: "BOOK",
   reading: "BOOK",
   library: "BOOK",
-  code: "CODE",
-  snippets: "CODE",
-  people: "PERSON",
-  persons: "PERSON",
-  contacts: "PERSON",
   captures: "CAPTURE",
   capture: "CAPTURE",
   inbox: "CAPTURE",
   clippings: "CAPTURE",
-  fragments: "FRAGMENT",
-  fragment: "FRAGMENT",
-  zettel: "FRAGMENT",
+  code: "CODE",
+  snippets: "CODE",
+  people: "PERSON",
+  persons: "PERSON",
+  person: "PERSON",
+  contacts: "PERSON",
 };
 
 export function resolveKindFromPath(path: string): Kind {

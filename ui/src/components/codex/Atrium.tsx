@@ -73,8 +73,8 @@ export function Atrium() {
   const week = Math.ceil(doy / 7);
   const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   const journalSub = journalToday?.meta.id
-    ? `${journalToday.meta.id} · DAILY / ${fmtDate(now)}`
-    : `DAILY / ${fmtDate(now)}`;
+    ? `${journalToday.meta.id} · JOURNAL / ${fmtDate(now)}`
+    : `JOURNAL / ${fmtDate(now)}`;
 
   const dayKeyDep = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
 

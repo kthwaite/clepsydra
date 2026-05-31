@@ -11,16 +11,16 @@ import {
 
 describe("resolveKindFromPath", () => {
   it("maps known top-level folders to kinds (case-insensitive)", () => {
-    expect(resolveKindFromPath("daily/2026-05-29.md")).toBe("DAILY");
-    expect(resolveKindFromPath("journals/2026-05-29.md")).toBe("DAILY");
+    expect(resolveKindFromPath("daily/2026-05-29.md")).toBe("JOURNAL");
+    expect(resolveKindFromPath("journals/2026-05-29.md")).toBe("JOURNAL");
     expect(resolveKindFromPath("projects/vessel.md")).toBe("PROJECT");
     expect(resolveKindFromPath("People/kit.md")).toBe("PERSON");
     expect(resolveKindFromPath("reading/some-book.md")).toBe("BOOK");
-    expect(resolveKindFromPath("tasks/x.md")).toBe("TASK");
+    expect(resolveKindFromPath("tasks/x.md")).toBe("TODO");
   });
 
   it("tolerates leading slashes and nested paths", () => {
-    expect(resolveKindFromPath("/journal/2026/05/29.md")).toBe("DAILY");
+    expect(resolveKindFromPath("/journal/2026/05/29.md")).toBe("JOURNAL");
   });
 
   it("falls back to NOTE for unknown or rootless paths", () => {
@@ -37,7 +37,7 @@ describe("parseFrontmatterKind", () => {
   });
 
   it("also accepts a `kind` key", () => {
-    expect(parseFrontmatterKind("---\nkind: Task\n---\nbody")).toBe("TASK");
+    expect(parseFrontmatterKind("---\nkind: Todo\n---\nbody")).toBe("TODO");
   });
 
   it("returns null when there is no frontmatter", () => {
@@ -61,7 +61,7 @@ describe("resolveKind", () => {
   });
 
   it("falls back to folder, then NOTE", () => {
-    expect(resolveKind({ path: "daily/x.md" })).toBe("DAILY");
+    expect(resolveKind({ path: "daily/x.md" })).toBe("JOURNAL");
     expect(resolveKind({ path: "scratch.md" })).toBe("NOTE");
   });
 });
@@ -71,7 +71,9 @@ describe("resolveKind prefers backend kind", () => {
     expect(resolveKind({ path: "projects/x.md", kind: "QUOTE" })).toBe("QUOTE");
   });
   it("falls back to path inference only when kind is absent", () => {
-    expect(resolveKind({ path: "journals/2026-05-31.md", kind: null })).toBe("DAILY");
+    expect(resolveKind({ path: "journals/2026-05-31.md", kind: null })).toBe(
+      "JOURNAL",
+    );
   });
 });
 
