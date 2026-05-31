@@ -1362,10 +1362,10 @@ pub(crate) fn find_body_start(content: &str) -> usize {
     }
 }
 
-/// Add `target_block_id` column to `links` if it doesn't exist.
+/// Add `kind`, `kind_inferred`, and `project` columns to `pages` if they don't exist.
 ///
-/// Must run BEFORE the main SCHEMA batch, since SCHEMA creates an index on
-/// `target_block_id` and will fail if the column is missing on pre-existing DBs.
+/// Must run BEFORE the main SCHEMA batch, since SCHEMA creates indexes on `kind`
+/// and `project` and will fail if the columns are missing on pre-existing DBs.
 fn migrate_pages_add_kind_columns(conn: &Connection) -> Result<(), IndexError> {
     // If the pages table doesn't exist yet, nothing to migrate — SCHEMA will create it.
     let table_exists: bool = conn.query_row(
@@ -1829,19 +1829,55 @@ fn yaml_value_to_strings(val: &serde_yaml::Value) -> Vec<String> {
 mod schema_tests {
     use super::*;
 
+    /// Old-shape `pages` table (pre kind/kind_inferred/project columns).
+    const OLD_PAGES_SCHEMA: &str = "CREATE TABLE pages (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, title TEXT, canonical_name TEXT NOT NULL, created_at TEXT, updated_at TEXT, meta_json TEXT NOT NULL, content_hash TEXT NOT NULL, journal_date TEXT)";
+
+    fn pages_columns(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT name FROM pragma_table_info('pages')")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
     #[test]
     fn pages_table_has_kind_columns() {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("test.db");
         let index = VaultIndex::open_bare(&db_path).unwrap();
-        let conn = index.connection();
-        let cols: Vec<String> = conn
-            .prepare("SELECT name FROM pragma_table_info('pages')")
-            .unwrap()
-            .query_map([], |r| r.get::<_, String>(0))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
+        let cols = pages_columns(index.connection());
+        assert!(cols.contains(&"kind".to_string()));
+        assert!(cols.contains(&"kind_inferred".to_string()));
+        assert!(cols.contains(&"project".to_string()));
+    }
+
+    #[test]
+    fn migrates_existing_pages_table_adding_kind_columns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("old.db");
+
+        // Build a pre-existing DB with the OLD pages schema (no new columns).
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(OLD_PAGES_SCHEMA).unwrap();
+            let cols = pages_columns(&conn);
+            assert!(!cols.contains(&"kind".to_string()));
+            assert!(!cols.contains(&"kind_inferred".to_string()));
+            assert!(!cols.contains(&"project".to_string()));
+        } // conn dropped/closed here
+
+        // Opening through the real constructor runs the ALTER migration.
+        let index = VaultIndex::open_bare(&db_path).unwrap();
+        let cols = pages_columns(index.connection());
+        assert!(cols.contains(&"kind".to_string()));
+        assert!(cols.contains(&"kind_inferred".to_string()));
+        assert!(cols.contains(&"project".to_string()));
+        drop(index);
+
+        // Re-opening an already-migrated DB is idempotent (no error, columns persist).
+        let index = VaultIndex::open_bare(&db_path).unwrap();
+        let cols = pages_columns(index.connection());
         assert!(cols.contains(&"kind".to_string()));
         assert!(cols.contains(&"kind_inferred".to_string()));
         assert!(cols.contains(&"project".to_string()));
