@@ -45,6 +45,10 @@ pub struct PageDetail {
     pub canonical_name: String,
     pub meta: PageMeta,
     pub body: String,
+    pub kind: String,
+    pub inferred: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// OpenAPI schema for page metadata exposed in `PageDetail`.
@@ -244,11 +248,18 @@ pub async fn get_page(
         CanonicalName::from_filename(vault_path.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
+    let project = page.meta.project.clone();
+
     Ok(Json(PageDetail {
         path: vault_path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
         meta: page.meta,
         body: page.body,
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project,
     }))
 }
 
@@ -305,11 +316,18 @@ pub async fn get_page_by_id(
         CanonicalName::from_filename(vault_path.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
+    let project = page.meta.project.clone();
+
     Ok(Json(PageDetail {
         path: vault_path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
         meta: page.meta,
         body: page.body,
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project,
     }))
 }
 
@@ -403,6 +421,10 @@ pub async fn create_page(
         CanonicalName::from_filename(vault_path.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
+    let project = meta.project.clone();
+
     Ok((
         StatusCode::CREATED,
         Json(PageDetail {
@@ -410,6 +432,9 @@ pub async fn create_page(
             canonical_name: canonical.as_str().to_string(),
             meta,
             body: page_body,
+            kind: resolved_kind.as_str().to_string(),
+            inferred,
+            project,
         }),
     )
         .into_response())
@@ -502,11 +527,18 @@ pub async fn update_page(
         CanonicalName::from_filename(vault_path.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
+    let project = meta.project.clone();
+
     Ok(Json(PageDetail {
         path: vault_path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
         meta,
         body: page_body,
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project,
     }))
 }
 
@@ -724,11 +756,18 @@ pub async fn move_page(
         CanonicalName::from_filename(dest_vp.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(dest_vp.as_str(), page.meta.kind);
+    let project = page.meta.project.clone();
+
     Ok(Json(PageDetail {
         path: dest_vp.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
         meta: page.meta,
         body: page.body,
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project,
     }))
 }
 
@@ -797,5 +836,38 @@ Some quoted text.\n";
         let mut actual_tags = item.tags.clone();
         actual_tags.sort();
         assert_eq!(actual_tags, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn detail_returns_kind_and_project() {
+        let (state, _tmp) = make_state().await;
+
+        // Write a page with type: quote and project: clepsydra
+        let page_dir = state.vault.root().join("notes");
+        std::fs::create_dir_all(&page_dir).unwrap();
+        let page_content = "\
+---\n\
+id: 01900000-0000-7000-8000-000000000002\n\
+type: quote\n\
+project: clepsydra\n\
+---\n\
+\n\
+Some quoted text.\n";
+        std::fs::write(page_dir.join("q.md"), page_content).unwrap();
+
+        let resp = get_page(
+            State(state),
+            Path("notes/q.md".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.0.kind, "QUOTE", "resolved kind should be QUOTE");
+        assert!(!resp.0.inferred, "inferred should be false when type is declared");
+        assert_eq!(
+            resp.0.project.as_deref(),
+            Some("clepsydra"),
+            "project should be clepsydra"
+        );
     }
 }

@@ -812,6 +812,10 @@ pub async fn create_from_link(
         CanonicalName::from_filename(vault_path.stem())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
+    let project = meta.project.clone();
+
     Ok((
         StatusCode::CREATED,
         Json(PageDetail {
@@ -819,6 +823,9 @@ pub async fn create_from_link(
             canonical_name: canonical.as_str().to_string(),
             meta,
             body: page_body,
+            kind: resolved_kind.as_str().to_string(),
+            inferred,
+            project,
         }),
     )
         .into_response())

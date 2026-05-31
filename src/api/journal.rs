@@ -99,11 +99,18 @@ fn page_detail(page: &Page, vault_path: &VaultPath) -> PageDetail {
         CanonicalName::from_filename(vault_path.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
+    let project = page.meta.project.clone();
+
     PageDetail {
         path: vault_path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
         meta: page.meta.clone(),
         body: page.body.clone(),
+        kind: resolved_kind.as_str().to_string(),
+        inferred,
+        project,
     }
 }
 
@@ -453,6 +460,10 @@ async fn capture_today(
         CanonicalName::from_filename(vault_path.filename())
     };
 
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
+    let project = meta.project.clone();
+
     Ok((
         StatusCode::OK,
         Json(PageDetail {
@@ -460,6 +471,9 @@ async fn capture_today(
             canonical_name: canonical.as_str().to_string(),
             meta,
             body: new_body,
+            kind: resolved_kind.as_str().to_string(),
+            inferred,
+            project,
         }),
     )
         .into_response())
