@@ -1,6 +1,7 @@
 import { WikilinkElement } from "#/editor/elements/WikilinkElement";
 import type { ElementDescriptor } from "../descriptor";
 import type { WikilinkElement as WikilinkElementType } from "../types";
+import { makeVoidIntegrityRule } from "./voidInline";
 
 export const wikilinkDescriptor: ElementDescriptor<WikilinkElementType> = {
   type: "wikilink",
@@ -12,6 +13,7 @@ export const wikilinkDescriptor: ElementDescriptor<WikilinkElementType> = {
     children: [{ text: "" }],
   }),
   render: (props) => <WikilinkElement {...props} element={props.element} />,
+  normalize: makeVoidIntegrityRule<WikilinkElementType>("target"),
 };
 
 export const makeWikilink = wikilinkDescriptor.create;
