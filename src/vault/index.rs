@@ -1995,4 +1995,56 @@ mod kind_index_tests {
         assert_eq!(inf2, 0);
         assert_eq!(proj.as_deref(), Some("clepsydra"));
     }
+
+    /// The full-vault scan (`build` -> `upsert_indexed_page`) is a SEPARATE
+    /// insert site from `index_page`; this guards both paths against future
+    /// divergence on the kind/inferred/project persistence contract.
+    #[test]
+    fn build_persists_resolved_kind_and_inferred_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join(".clepsydra/index.db");
+
+        // Write fixtures directly into the vault tree (no per-file index call).
+        let write = |rel: &str, content: &str| {
+            let abs = tmp.path().join(rel);
+            fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            fs::write(&abs, content).unwrap();
+        };
+        write(
+            "journals/2026-05-31.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000011\n---\nbody",
+        );
+        write(
+            "notes/q.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000012\ntype: quote\nproject: clepsydra\n---\nbody",
+        );
+
+        // Full build over the populated vault (exercises upsert_indexed_page).
+        let mut index = VaultIndex::open_bare(&db_path).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let conn = index.connection();
+
+        let (k1, inf1): (String, i64) = conn
+            .query_row(
+                "SELECT kind, kind_inferred FROM pages WHERE path = 'journals/2026-05-31.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(k1, "JOURNAL");
+        assert_eq!(inf1, 1);
+
+        let (k2, inf2, proj): (String, i64, Option<String>) = conn
+            .query_row(
+                "SELECT kind, kind_inferred, project FROM pages WHERE path = 'notes/q.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(k2, "QUOTE");
+        assert_eq!(inf2, 0);
+        assert_eq!(proj.as_deref(), Some("clepsydra"));
+    }
 }
