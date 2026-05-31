@@ -3,7 +3,7 @@ import { useContentIndex, useTags } from "#/api/index";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { kindColorVar, kindLabel, resolveKindFromPath } from "#/lib/kind";
+import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import {
   filterAndSortRows,
   type GazetteerSort,
@@ -118,7 +118,7 @@ export function Gazetteer({ initialTag }: Props) {
           </thead>
           <tbody>
             {rows.map((n, i) => {
-              const kind = resolveKindFromPath(n.path);
+              const kind = resolveKind({ path: n.path });
               return (
                 <tr
                   key={n.path}

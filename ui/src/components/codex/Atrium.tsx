@@ -7,7 +7,7 @@ import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
+import { kindColorVar, resolveKind } from "#/lib/kind";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import {
@@ -368,7 +368,7 @@ export function Atrium() {
           ) : (
             <div className="flex flex-col">
               {recentRows.map((n, i) => {
-                const kind = resolveKindFromPath(n.path);
+                const kind = resolveKind({ path: n.path });
                 const ts =
                   recentTab === "created"
                     ? n.created_at

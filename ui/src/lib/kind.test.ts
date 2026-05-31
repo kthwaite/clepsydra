@@ -66,6 +66,15 @@ describe("resolveKind", () => {
   });
 });
 
+describe("resolveKind prefers backend kind", () => {
+  it("uses an explicit backend kind verbatim, ignoring path", () => {
+    expect(resolveKind({ path: "projects/x.md", kind: "QUOTE" })).toBe("QUOTE");
+  });
+  it("falls back to path inference only when kind is absent", () => {
+    expect(resolveKind({ path: "journals/2026-05-31.md", kind: null })).toBe("DAILY");
+  });
+});
+
 describe("KIND_META", () => {
   it("has a label and color var for every kind", () => {
     for (const k of KINDS) {

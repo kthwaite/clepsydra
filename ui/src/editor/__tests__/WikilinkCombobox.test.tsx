@@ -25,6 +25,9 @@ const pages: PageSummary[] = [
     title: "Design Notes",
     canonical_name: "design-notes",
     path: "notes/design-notes.md",
+    kind: "NOTE",
+    inferred: true,
+    tags: [],
   },
 ];
 
