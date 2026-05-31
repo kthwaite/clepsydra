@@ -1,20 +1,20 @@
 import type { ElementDescriptor } from "./descriptor";
-import type { CustomElement, ElementType } from "./types";
-import { paragraphDescriptor } from "./elements/paragraph";
-import { headingDescriptor } from "./elements/heading";
-import { codeBlockDescriptor } from "./elements/codeBlock";
 import { blockquoteDescriptor } from "./elements/blockquote";
+import { blockRefDescriptor } from "./elements/blockRef";
+import { codeBlockDescriptor } from "./elements/codeBlock";
+import { footnoteDefDescriptor } from "./elements/footnoteDef";
+import { footnoteRefDescriptor } from "./elements/footnoteRef";
+import { headingDescriptor } from "./elements/heading";
+import { linkDescriptor } from "./elements/link";
 import {
   bulletedListDescriptor,
   listItemDescriptor,
   numberedListDescriptor,
 } from "./elements/list";
+import { paragraphDescriptor } from "./elements/paragraph";
 import { thematicBreakDescriptor } from "./elements/thematicBreak";
 import { wikilinkDescriptor } from "./elements/wikilink";
-import { linkDescriptor } from "./elements/link";
-import { blockRefDescriptor } from "./elements/blockRef";
-import { footnoteRefDescriptor } from "./elements/footnoteRef";
-import { footnoteDefDescriptor } from "./elements/footnoteDef";
+import type { CustomElement, ElementType } from "./types";
 
 const ALL: ElementDescriptor[] = [
   paragraphDescriptor,
@@ -40,6 +40,8 @@ export function getDescriptor<T extends ElementType>(
   type: T,
 ): ElementDescriptor<Extract<CustomElement, { type: T }>> | undefined;
 export function getDescriptor(type: ElementType): ElementDescriptor | undefined;
-export function getDescriptor(type: ElementType): ElementDescriptor | undefined {
+export function getDescriptor(
+  type: ElementType,
+): ElementDescriptor | undefined {
   return REGISTRY[type];
 }

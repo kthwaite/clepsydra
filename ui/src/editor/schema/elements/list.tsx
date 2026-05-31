@@ -2,11 +2,15 @@ import type { List } from "mdast";
 import {
   type Editor,
   type Element,
-  Element as SlateElement,
   type NodeEntry,
+  Element as SlateElement,
   Transforms,
 } from "slate";
-import { ReactEditor, type RenderElementProps, useSlateStatic } from "slate-react";
+import {
+  ReactEditor,
+  type RenderElementProps,
+  useSlateStatic,
+} from "slate-react";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
   BulletedListElement,

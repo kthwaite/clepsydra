@@ -1,7 +1,17 @@
+import type {
+  BlockContent,
+  ListItem,
+  PhrasingContent,
+  RootContent,
+} from "mdast";
 import type { Descendant, Editor, NodeEntry } from "slate";
 import type { RenderElementProps } from "slate-react";
-import type { BlockContent, ListItem, PhrasingContent, RootContent } from "mdast";
-import type { CustomElement, CustomText, ElementType, ListItemElement } from "./types";
+import type {
+  CustomElement,
+  CustomText,
+  ElementType,
+  ListItemElement,
+} from "./types";
 
 export type ElementKind = "block" | "inline" | "void-block" | "inline-void";
 
@@ -38,7 +48,10 @@ export interface ElementDescriptor<T extends CustomElement = CustomElement> {
 }
 
 /** create() input: the node minus type/children (children defaulted by the factory). */
-export type CreateProps<T extends CustomElement> = Omit<T, "type" | "children"> &
+export type CreateProps<T extends CustomElement> = Omit<
+  T,
+  "type" | "children"
+> &
   Partial<Pick<T, "children">>;
 
 export type { CustomElement, CustomText, ElementType };

@@ -1,4 +1,4 @@
-import { Editor, Element as SlateElement, type NodeEntry } from "slate";
+import { Editor, type NodeEntry, Element as SlateElement } from "slate";
 import { kindIsInline, kindIsVoid } from "./descriptor";
 import { runDocumentRules } from "./documentRules";
 import { getDescriptor } from "./registry";

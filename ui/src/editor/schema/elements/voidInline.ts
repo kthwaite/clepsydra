@@ -1,4 +1,9 @@
-import { type Editor, Element as SlateElement, type NodeEntry, Transforms } from "slate";
+import {
+  type Editor,
+  type NodeEntry,
+  Element as SlateElement,
+  Transforms,
+} from "slate";
 import type { CustomElement } from "../types";
 
 /**
@@ -7,7 +12,9 @@ import type { CustomElement } from "../types";
  * removed; its only child is an empty text node, so the surrounding text is
  * unaffected.
  */
-export function makeVoidIntegrityRule<T extends CustomElement>(keyField: keyof T & string) {
+export function makeVoidIntegrityRule<T extends CustomElement>(
+  keyField: keyof T & string,
+) {
   return (entry: NodeEntry<T>, editor: Editor): boolean => {
     const [node, path] = entry;
     if (!SlateElement.isElement(node)) return false;

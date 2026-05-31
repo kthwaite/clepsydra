@@ -15,8 +15,8 @@ export function FootnoteRefElement({ attributes, children, element }: Props) {
   if (hover) {
     for (const [node] of Node.elements(editor)) {
       if (
-        (node as any).type === "footnote-def" &&
-        (node as any).identifier === element.identifier
+        node.type === "footnote-def" &&
+        node.identifier === element.identifier
       ) {
         preview = Node.string(node);
         break;

@@ -4,7 +4,10 @@ import type { BlockquoteElement } from "../types";
 export const blockquoteDescriptor: ElementDescriptor<BlockquoteElement> = {
   type: "blockquote",
   kind: "block",
-  create: ({ children = [{ text: "" }], ...rest }: CreateProps<BlockquoteElement>) => ({
+  create: ({
+    children = [{ text: "" }],
+    ...rest
+  }: CreateProps<BlockquoteElement>) => ({
     type: "blockquote",
     children,
     ...rest,

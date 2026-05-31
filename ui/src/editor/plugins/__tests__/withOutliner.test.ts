@@ -7,6 +7,7 @@ import {
 } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
+import { withSchema } from "../../schema/withSchema";
 import {
   indentListItem,
   moveBlockDown,
@@ -15,7 +16,6 @@ import {
   toggleCheckbox,
   withOutliner,
 } from "../withOutliner";
-import { withSchema } from "../../schema/withSchema";
 
 // Import types so module augmentation is active
 import "../../types";

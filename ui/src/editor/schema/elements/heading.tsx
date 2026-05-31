@@ -14,7 +14,11 @@ const HEADING_CLASSES: Record<number, string> = {
 export const headingDescriptor: ElementDescriptor<HeadingElement> = {
   type: "heading",
   kind: "block",
-  create: ({ level, children = [{ text: "" }], ...rest }: CreateProps<HeadingElement>) => ({
+  create: ({
+    level,
+    children = [{ text: "" }],
+    ...rest
+  }: CreateProps<HeadingElement>) => ({
     type: "heading",
     level,
     children,

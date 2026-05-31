@@ -2,7 +2,6 @@ import { createEditor, Editor } from "slate";
 import { describe, expect, it } from "vitest";
 import { withSchema } from "../withSchema";
 
-
 describe("code-block purity invariant", () => {
   it("strips marks from code-block text children", () => {
     const editor = withSchema(createEditor());
@@ -10,7 +9,9 @@ describe("code-block purity invariant", () => {
       { type: "code-block", children: [{ text: "x", bold: true }] },
     ] as never;
     Editor.normalize(editor, { force: true });
-    const cb = editor.children[0] as unknown as { children: Record<string, unknown>[] };
+    const cb = editor.children[0] as unknown as {
+      children: Record<string, unknown>[];
+    };
     expect(cb.children[0].bold).toBeUndefined();
   });
 

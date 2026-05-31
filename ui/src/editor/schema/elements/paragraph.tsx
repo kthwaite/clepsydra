@@ -5,7 +5,10 @@ import type { ParagraphElement } from "../types";
 export const paragraphDescriptor: ElementDescriptor<ParagraphElement> = {
   type: "paragraph",
   kind: "block",
-  create: ({ children = [{ text: "" }], ...rest }: CreateProps<ParagraphElement>) => ({
+  create: ({
+    children = [{ text: "" }],
+    ...rest
+  }: CreateProps<ParagraphElement>) => ({
     type: "paragraph",
     children,
     ...rest,

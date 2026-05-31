@@ -10,7 +10,9 @@ describe("footnote document rules", () => {
       { type: "footnote-def", identifier: "1", children: [{ text: "b" }] },
     ] as never;
     Editor.normalize(editor, { force: true });
-    const ids = editor.children.map((n) => (n as { identifier: string }).identifier);
+    const ids = editor.children.map(
+      (n) => (n as { identifier: string }).identifier,
+    );
     expect(new Set(ids).size).toBe(2);
   });
 
@@ -21,7 +23,9 @@ describe("footnote document rules", () => {
       { type: "footnote-def", identifier: "2", children: [{ text: "b" }] },
     ] as never;
     Editor.normalize(editor, { force: true });
-    const ids = editor.children.map((n) => (n as { identifier: string }).identifier);
+    const ids = editor.children.map(
+      (n) => (n as { identifier: string }).identifier,
+    );
     expect(ids).toEqual(["1", "2"]);
   });
 });
