@@ -74,6 +74,10 @@ pub struct PageDetailResponse {
     pub canonical_name: String,
     pub meta: PageMetaResponse,
     pub body: String,
+    pub kind: String,
+    pub inferred: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// OpenAPI schema for paginated page listing.
