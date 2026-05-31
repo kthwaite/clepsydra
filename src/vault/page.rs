@@ -24,11 +24,12 @@ pub struct PageMeta {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
-    /// Declared kind, from frontmatter `type:` (alias `kind:`). `None` => inferred.
+    /// Declared kind, from frontmatter `type:` only. `None` => inferred.
+    /// NOTE: `kind:` is intentionally NOT an alias here; the academic subsystem
+    /// uses `kind: work` with a different meaning, and we must not hijack it.
     #[serde(
         default,
         rename = "type",
-        alias = "kind",
         skip_serializing_if = "Option::is_none"
     )]
     pub kind: Option<Kind>,
@@ -145,7 +146,7 @@ struct LoosePageMeta {
     tags: Vec<String>,
     #[serde(default)]
     aliases: Vec<String>,
-    #[serde(default, rename = "type", alias = "kind")]
+    #[serde(default, rename = "type")]
     kind: Option<Kind>,
     #[serde(default)]
     project: Option<String>,
@@ -279,12 +280,13 @@ mod kind_field_tests {
     }
 
     #[test]
-    fn parses_kind_alias_key() {
-        let yaml = "id: 0190f8a0-0000-7000-8000-000000000000\nkind: journal\n";
+    fn bare_kind_key_is_not_consumed_as_page_kind() {
+        // The academic subsystem uses `kind: work` with a different meaning; the
+        // page-kind field must only bind to `type:`, never `kind:`.
+        let yaml = "id: 0190f8a0-0000-7000-8000-000000000000\nkind: work\n";
         let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(meta.kind, Some(Kind::Journal));
-        // must not appear in the flatten bucket
-        assert!(!meta.extra.contains_key("kind"));
+        assert_eq!(meta.kind, None); // not consumed as a page Kind
+        assert!(meta.extra.contains_key("kind")); // stays in the flatten bucket
     }
 }
 
