@@ -458,8 +458,43 @@ async fn build_server_state() -> Result<(Arc<AppState>, Settings), Box<dyn std::
     let cwd = std::env::current_dir()?;
     let (settings, config_path) = Settings::load(&cwd)?;
     let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
-    let state = build_app_state(&vault_root).await?;
+    info!(
+        config = %config_path.display(),
+        vault_root = %vault_root.display(),
+        vault_root_config = %settings.vault.root,
+        "resolved configuration; opening vault"
+    );
+    let state = build_app_state(&vault_root)
+        .await
+        .map_err(|e| explain_startup_error(e, &vault_root))?;
     Ok((state, settings))
+}
+
+/// Add actionable context to an opaque startup error.
+///
+/// The early vault-open path propagates bare `io::Error`s (e.g. from
+/// `Path::canonicalize`) via `?`, which Debug-print with no path or hint. When
+/// the underlying error is `PermissionDenied`, surface the offending vault root
+/// and call out the most common cause on macOS: TCC privacy protection of
+/// `~/Documents`, `~/Desktop`, and `~/Downloads`.
+fn explain_startup_error(
+    err: Box<dyn std::error::Error>,
+    vault_root: &Path,
+) -> Box<dyn std::error::Error> {
+    if let Some(io) = err.downcast_ref::<std::io::Error>()
+        && io.kind() == std::io::ErrorKind::PermissionDenied
+    {
+        return format!(
+            "permission denied accessing vault root {root}: {io}\n\
+             hint: on macOS, ~/Documents, ~/Desktop and ~/Downloads are protected by \
+             privacy controls (TCC). Grant your terminal access under System Settings → \
+             Privacy & Security → Files and Folders (or Full Disk Access) and restart it, \
+             or move the vault outside those folders and update [vault].root in config.toml.",
+            root = vault_root.display(),
+        )
+        .into();
+    }
+    err
 }
 
 /// Load the rustls config from resolved cert/key paths.
@@ -612,6 +647,30 @@ mod tests {
     fn expand_tilde_returns_none_for_non_tilde() {
         assert!(expand_tilde("./vault").is_none());
         assert!(expand_tilde("/absolute/path").is_none());
+    }
+
+    #[test]
+    fn explain_startup_error_adds_tcc_hint_for_permission_denied() {
+        let io = std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Operation not permitted",
+        );
+        let explained =
+            explain_startup_error(Box::new(io), Path::new("/Users/kit/Documents/vault"));
+        let msg = explained.to_string();
+        assert!(
+            msg.contains("/Users/kit/Documents/vault"),
+            "missing path: {msg}"
+        );
+        assert!(msg.contains("TCC"), "missing macOS TCC hint: {msg}");
+    }
+
+    #[test]
+    fn explain_startup_error_passes_through_other_errors() {
+        let io = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        let explained = explain_startup_error(Box::new(io), Path::new("/some/vault"));
+        // Non-permission errors are returned unchanged (no synthetic hint text).
+        assert_eq!(explained.to_string(), "no such file");
     }
 }
 

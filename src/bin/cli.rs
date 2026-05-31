@@ -130,9 +130,16 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let code = run_cli(Cli::parse()).await?;
-    std::process::exit(code);
+async fn main() {
+    // Display-print errors (real newlines, no quotes) instead of letting the
+    // runtime Debug-print the returned `Err`, so multi-line hints stay readable.
+    match run_cli(Cli::parse()).await {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]
