@@ -142,6 +142,31 @@ pub fn move_router() -> Router<Arc<AppState>> {
 // Handlers
 // ---------------------------------------------------------------------------
 
+/// Map a `pages` row to a `PageSummary`. Both `list_pages` and the folder
+/// listing query rely on this shared mapper, so their SELECT statements MUST
+/// use the same column order:
+/// `id, path, title, canonical_name, kind, kind_inferred, project, <tags subquery>`.
+/// The tags subquery is a `group_concat` joined by the unit separator (`char(31)`)
+/// so commas in tag text don't fragment the split.
+pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageSummary> {
+    let tags_raw: String = row.get(7)?;
+    let tags = if tags_raw.is_empty() {
+        Vec::new()
+    } else {
+        tags_raw.split('\u{1f}').map(str::to_string).collect()
+    };
+    Ok(PageSummary {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        title: row.get(2)?,
+        canonical_name: row.get(3)?,
+        kind: row.get(4)?,
+        inferred: row.get::<_, i64>(5)? != 0,
+        project: row.get(6)?,
+        tags,
+    })
+}
+
 #[utoipa::path(
     get,
     path = "/pages",
@@ -173,24 +198,7 @@ pub async fn list_pages(
             )?;
 
             let pages: Vec<PageSummary> = stmt
-                .query_map([], |row| {
-                    let tags_raw: String = row.get(7)?;
-                    let tags = if tags_raw.is_empty() {
-                        Vec::new()
-                    } else {
-                        tags_raw.split('\u{1f}').map(str::to_string).collect()
-                    };
-                    Ok(PageSummary {
-                        id: row.get(0)?,
-                        path: row.get(1)?,
-                        title: row.get(2)?,
-                        canonical_name: row.get(3)?,
-                        kind: row.get(4)?,
-                        inferred: row.get::<_, i64>(5)? != 0,
-                        project: row.get(6)?,
-                        tags,
-                    })
-                })?
+                .query_map([], page_summary_from_row)?
                 .collect::<Result<_, _>>()?;
 
             Ok::<_, rusqlite::Error>(pages)

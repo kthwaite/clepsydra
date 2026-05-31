@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use super::pages::PageSummary;
+use super::pages::{PageSummary, page_summary_from_row};
 use crate::api::events::SyncNotification;
 use crate::vault::mutation::{MutationOp, MutationPlanner};
 use crate::vault::page::{Page, PageMeta};
@@ -219,24 +219,7 @@ pub async fn list_folder_contents(
                                             FROM tags t WHERE t.page_id = p.id), '')
                            FROM pages p WHERE p.path = ?1",
                         params![vp.as_str()],
-                        |row| {
-                            let tags_raw: String = row.get(7)?;
-                            let tags = if tags_raw.is_empty() {
-                                Vec::new()
-                            } else {
-                                tags_raw.split('\u{1f}').map(str::to_string).collect()
-                            };
-                            Ok(PageSummary {
-                                id: row.get(0)?,
-                                path: row.get(1)?,
-                                title: row.get(2)?,
-                                canonical_name: row.get(3)?,
-                                kind: row.get(4)?,
-                                inferred: row.get::<_, i64>(5)? != 0,
-                                project: row.get(6)?,
-                                tags,
-                            })
-                        },
+                        page_summary_from_row,
                     )
                     .ok();
 
@@ -386,6 +369,10 @@ mod tests {
         assert_eq!(summary.id, "");
         assert!(summary.title.is_none());
         assert_eq!(summary.path, "a/Note.md");
+        assert_eq!(summary.kind, "NOTE");
+        assert!(summary.inferred);
+        assert!(summary.project.is_none());
+        assert!(summary.tags.is_empty());
     }
 
     #[test]
