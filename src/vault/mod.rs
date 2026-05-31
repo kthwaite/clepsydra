@@ -17,6 +17,7 @@ pub mod import_doi;
 pub mod import_isbn;
 pub mod import_zotero;
 pub mod index;
+pub mod kind;
 pub mod index_handle;
 pub mod init;
 pub mod link;
