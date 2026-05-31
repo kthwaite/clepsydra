@@ -6,38 +6,30 @@ import {
   useRef,
   useState,
 } from "react";
-import { useSearch, useStats, useTags } from "#/api/index";
+import { useSearch, useTags } from "#/api/index";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useUiStore } from "#/store/ui";
 
-type Command =
-  | {
-      kind: "cmd";
-      icon: string;
-      label: string;
-      hint?: string;
-      sub?: string;
-      action: () => void;
-    }
-  | {
-      kind: "note";
-      icon: string;
-      label: string;
-      hint?: string;
-      sub?: string;
-      action: () => void;
-    }
-  | {
-      kind: "tag";
-      icon: string;
-      label: string;
-      hint?: string;
-      sub?: string;
-      action: () => void;
-    };
+type Command = {
+  /** Drives the KIND column tag: cmd → CMD, note → FILE, tag → TAG. */
+  kind: "cmd" | "note" | "tag";
+  /** ID column — machine id, keybinding, or short folio path. */
+  id: string;
+  /** TITLE column. */
+  title: string;
+  /** Optional dimmed sub-line beneath the title (e.g. search snippet). */
+  sub?: string;
+  action: () => void;
+};
+
+const KIND_LABEL: Record<Command["kind"], string> = {
+  cmd: "CMD",
+  note: "FILE",
+  tag: "TAG",
+};
 
 export function CommandPalette() {
   const open = useUiStore((s) => s.isSearchOpen);
@@ -60,7 +52,6 @@ export function CommandPalette() {
     12,
   );
   const { data: tags } = useTags();
-  const { data: stats } = useStats();
 
   // ⌘K / Ctrl+K
   useEffect(() => {
@@ -90,67 +81,58 @@ export function CommandPalette() {
     () => [
       {
         kind: "cmd",
-        icon: "›",
-        label: "Open Atrium",
-        hint: "⌘H",
+        id: "⌘H",
+        title: "Open Atrium",
         action: () => navigate({ to: "/" }),
       },
       {
         kind: "cmd",
-        icon: "›",
-        label: "Open Diurnal",
-        hint: "⌘D",
+        id: "⌘D",
+        title: "Open Diurnal",
         action: () => navigate({ to: "/journal" }),
       },
       {
         kind: "cmd",
-        icon: "›",
-        label: "Open Constellation (graph)",
-        hint: "⌘G",
+        id: "⌘G",
+        title: "Open Constellation (graph)",
         action: () => {
           openTab("graph");
         },
       },
       {
         kind: "cmd",
-        icon: "›",
-        label: "Open Gazetteer (index)",
-        hint: "⌘I",
+        id: "⌘I",
+        title: "Open Gazetteer (index)",
         action: () => navigate({ to: "/gazetteer" }),
       },
       {
         kind: "cmd",
-        icon: "▣",
-        label: "Inscribe new folio",
-        hint: "⌘N",
+        id: "⌘N",
+        title: "Inscribe new folio",
         action: () => openInscribe(),
       },
       {
         kind: "cmd",
-        icon: "›",
-        label: "Open Status / preferences",
-        hint: "⌘,",
+        id: "⌘,",
+        title: "Open Status / preferences",
         action: () => openSettings("appearance"),
       },
       {
         kind: "cmd",
-        icon: "›",
-        label: "Toggle dark mode",
-        hint: "⌘\\",
+        id: "⌘\\",
+        title: "Toggle dark mode",
         action: () => toggleTheme(),
       },
       {
         kind: "cmd",
-        icon: "◐",
-        label: "Toggle diegetic chrome",
-        hint: "sys.chrome",
+        id: "sys.chrome",
+        title: "Toggle diegetic chrome",
         action: () => setDiegetic(!diegetic),
       },
       {
         kind: "cmd",
-        icon: "⟳",
-        label: "Re-run boot sequence",
-        hint: "sys.boot",
+        id: "sys.boot",
+        title: "Re-run boot sequence",
         action: () => runBoot(),
       },
     ],
@@ -170,9 +152,8 @@ export function CommandPalette() {
     if (!searchResults) return [];
     return searchResults.map((r) => ({
       kind: "note" as const,
-      icon: "¶",
-      label: r.title || r.path,
-      hint: shortFolio(r.path),
+      id: shortFolio(r.path),
+      title: r.title || r.path,
       sub: r.snippet?.replace(/<\/?mark>/g, "") || r.path,
       action: () => openTab("page", r.path, r.title || r.path),
     }));
@@ -182,9 +163,8 @@ export function CommandPalette() {
     if (!tags) return [];
     return tags.slice(0, 12).map((t) => ({
       kind: "tag" as const,
-      icon: "#",
-      label: t.tag,
-      hint: String(t.count ?? 0),
+      id: `tag.${t.tag}`,
+      title: `${t.tag} · ${t.count ?? 0}`,
       action: () =>
         navigate({ to: "/gazetteer", search: { tag: t.tag } as never }),
     }));
@@ -195,11 +175,10 @@ export function CommandPalette() {
     const ql = q.toLowerCase();
     const verbsMatch = verbCommands.filter(
       (c) =>
-        c.label.toLowerCase().includes(ql) ||
-        (c.hint?.toLowerCase().includes(ql) ?? false),
+        c.title.toLowerCase().includes(ql) || c.id.toLowerCase().includes(ql),
     );
     const tagsMatch = tagCommands.filter((c) =>
-      c.label.toLowerCase().includes(ql),
+      c.title.toLowerCase().includes(ql),
     );
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
   }, [q, verbCommands, noteCommands, tagCommands]);
@@ -223,8 +202,6 @@ export function CommandPalette() {
 
   if (!open) return null;
 
-  const indexed = stats?.pages ?? 0;
-
   return (
     <div
       onMouseDown={close}
@@ -235,71 +212,75 @@ export function CommandPalette() {
         onKeyDown={onKey}
         role="dialog"
         aria-label="Command console"
-        className="w-[88%] max-w-[560px] border-[1.5px] border-ink bg-paper text-ink shadow-[8px_8px_0_0_var(--color-ink)] font-body"
+        className="flex w-[92%] max-w-[680px] flex-col border-[1.5px] border-ink bg-paper text-ink font-body"
       >
-        {/* header */}
-        <div className="flex items-center justify-between border-b border-ink px-[10px] py-[5px]">
-          <div className="cl-cap text-[10px]">Clepsydra · Console</div>
-          <div className="cl-mono text-[9px] tracking-[0.08em] text-ink-mute">
-            esc to close · ↵ select · ↑↓ move
-          </div>
-        </div>
-        {/* prompt */}
-        <div className="flex items-center gap-2 border-b border-ink px-3 py-[10px]">
-          <span className="cl-mono text-[13px] font-medium tracking-[0.08em] text-accent">
+        {/* header / channel */}
+        <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
+          <span className="cl-mono text-[9px] tracking-[0.16em] text-ink-mute">
+            CHANNEL
+          </span>
+          <span className="cl-mono text-[13px] font-bold tracking-[0.08em] text-accent">
             CLP&gt;
           </span>
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="invoke …"
-            className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none"
+            placeholder="grep | go | id | tag — ⏎ to dispatch · esc to close"
+            className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
           />
-          <span className="cl-mono text-[10px] text-ink-mute">
-            {filtered.length}/
-            {verbCommands.length + noteCommands.length + tagCommands.length}
+          <span className="cl-mono border border-ink/40 px-[6px] py-[1px] text-[10px] tracking-[0.08em] text-ink-mute">
+            ESC
           </span>
         </div>
         {/* results */}
-        <div className="cl-noscroll max-h-[340px] overflow-auto">
+        <div className="cl-noscroll max-h-[340px] overflow-auto py-[4px]">
           {filtered.length === 0 && (
-            <div className="cl-mono px-3 py-[14px] text-center text-[11px] text-ink-mute">
-              ⁂ no entry matches "{q}". try `tag:` `recipe` `borges`
+            <div className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint">
+              — NO RESULTS —
             </div>
           )}
           {filtered.map((c, i) => {
             const active = i === sel;
-            const labelClasses =
-              c.kind === "cmd"
-                ? "font-serif-sc text-[11px] uppercase tracking-[0.16em] font-semibold"
-                : "font-body text-[13px] font-medium";
             return (
               <button
                 type="button"
-                key={`${c.kind}:${c.label}:${i}`}
+                key={`${c.kind}:${c.id}:${i}`}
                 onMouseEnter={() => setSel(i)}
                 onClick={() => {
                   c.action();
                   close();
                 }}
-                className={`grid w-full cursor-pointer grid-cols-[18px_1fr_auto] items-center gap-2 border-b border-dotted border-ink/15 px-3 py-[5px] text-left ${
-                  active ? "bg-ink text-paper" : "text-ink"
+                className={`grid w-full cursor-pointer grid-cols-[50px_112px_1fr_20px] items-center gap-[10px] px-[14px] py-[4px] text-left leading-[1.4] ${
+                  active ? "bg-ink" : ""
                 }`}
               >
-                <span className="cl-mono text-center text-[12px] text-accent">
-                  {c.icon}
+                <span
+                  className={`cl-mono text-[9px] tracking-[0.16em] ${
+                    active ? "text-paper" : "text-accent"
+                  }`}
+                >
+                  {KIND_LABEL[c.kind]}
                 </span>
-                <span className="flex flex-col overflow-hidden">
+                <span
+                  className={`cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] tracking-[0.04em] ${
+                    active ? "text-paper" : "text-ink-2"
+                  }`}
+                >
+                  {c.id}
+                </span>
+                <span className="flex min-w-0 flex-col">
                   <span
-                    className={`${labelClasses} overflow-hidden text-ellipsis whitespace-nowrap`}
+                    className={`cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] uppercase tracking-[0.02em] ${
+                      active ? "text-paper" : "text-ink"
+                    }`}
                   >
-                    {c.label}
+                    {c.title}
                   </span>
                   {c.sub && (
                     <span
-                      className={`cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] ${
-                        active ? "text-paper" : "text-ink-mute"
+                      className={`cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] normal-case ${
+                        active ? "text-paper/75" : "text-ink-mute"
                       }`}
                     >
                       {c.sub}
@@ -307,20 +288,34 @@ export function CommandPalette() {
                   )}
                 </span>
                 <span
-                  className={`cl-mono text-[9px] tracking-[0.05em] ${
-                    active ? "text-paper" : "text-ink-mute"
+                  className={`text-[10px] ${
+                    active ? "text-paper" : "text-ink-faint"
                   }`}
                 >
-                  {c.hint}
+                  ⏎
                 </span>
               </button>
             );
           })}
         </div>
-        {/* footer */}
-        <div className="cl-mono flex justify-between border-t border-ink px-[10px] py-1 text-[9px] tracking-[0.05em] text-ink-mute">
-          <span>console.clepsydra · v{__APP_VERSION__}</span>
-          <span>idx loaded {indexed} entries</span>
+        {/* footer / keycap legend */}
+        <div className="cl-mono flex items-center gap-[18px] border-t border-ink px-[14px] py-[6px] text-[9px] uppercase tracking-[0.14em] text-ink-faint">
+          <span>
+            <span className="border border-ink/40 px-[4px] py-[1px]">↑</span>
+            <span className="ml-[3px] border border-ink/40 px-[4px] py-[1px]">
+              ↓
+            </span>{" "}
+            nav
+          </span>
+          <span>
+            <span className="border border-ink/40 px-[4px] py-[1px]">⏎</span>{" "}
+            dispatch
+          </span>
+          <span>
+            <span className="border border-ink/40 px-[4px] py-[1px]">ESC</span>{" "}
+            close
+          </span>
+          <span className="ml-auto">{filtered.length} HITS</span>
         </div>
       </div>
     </div>
