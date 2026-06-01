@@ -555,6 +555,12 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
                 |row| row.get(0),
             )?;
 
+            // Inbound arm (`l.target_id = p.id`) is inherently resolved-only:
+            // an unresolved link has `target_id IS NULL`, and `NULL = p.id` is
+            // never true, so dangling rows are excluded without an explicit
+            // guard. The outbound arm below must spell out `target_id IS NOT
+            // NULL` because `l.source_id` is set on every row regardless of
+            // resolution — both arms thus measure the *resolved* graph.
             let orphan_pages: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM pages p
                   WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.target_id = p.id)",
