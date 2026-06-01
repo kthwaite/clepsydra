@@ -521,6 +521,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/pages-assign-bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["assign_bulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/pages-assign/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["assign_page"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/pages-move/{path}": {
         parameters: {
             query?: never;
@@ -601,6 +633,20 @@ export interface components {
             /** Format: int32 */
             status: number;
         };
+        AssignRequest: {
+            /** @description Clear the page's `project` frontmatter. Takes precedence over `project`. */
+            clear_project?: boolean;
+            /**
+             * @description Declared kind token (case-insensitive, e.g. `QUOTE`). When present and
+             *     valid it overwrites the page's `type` frontmatter.
+             */
+            kind?: string | null;
+            /**
+             * @description Declared project. When present (and `clear_project` is false) it
+             *     overwrites the page's `project` frontmatter.
+             */
+            project?: string | null;
+        };
         AttachmentInfo: {
             name: string;
             path: string;
@@ -626,6 +672,30 @@ export interface components {
              *     `None` when unconfigured.
              */
             remaining_seconds?: number | null;
+        };
+        BulkAssignRequest: {
+            /** @description Clear the project on every path (see `AssignRequest::clear_project`). */
+            clear_project?: boolean;
+            /** @description Declared kind token applied to every path (see `AssignRequest::kind`). */
+            kind?: string | null;
+            /** @description Page paths to assign. Each is processed independently. */
+            paths: string[];
+            /** @description Declared project applied to every path (see `AssignRequest::project`). */
+            project?: string | null;
+        };
+        BulkAssignResponse: {
+            /** @description `path -> error` for failures (best-effort: one bad page doesn't abort). */
+            failed: [
+                string,
+                string
+            ][];
+            /** @description `original -> final` for each page that actually relocated. */
+            moved: [
+                string,
+                string
+            ][];
+            /** @description Paths that were assigned successfully but did NOT relocate. */
+            unchanged: string[];
         };
         CandidateEntry: {
             page_id: string;
@@ -2522,6 +2592,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PageSummaryListResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    assign_bulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkAssignRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-path assign results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkAssignResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    assign_page: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Page path to assign */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignRequest"];
+            };
+        };
+        responses: {
+            /** @description Assigned + reconciled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid path or unknown kind */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal server error */
