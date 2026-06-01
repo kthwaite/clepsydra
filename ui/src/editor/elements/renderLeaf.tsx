@@ -19,6 +19,12 @@ export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
   if (leaf.strikethrough) {
     children = <del>{children}</del>;
   }
+  if (leaf.superscript) {
+    children = <sup>{children}</sup>;
+  }
+  if (leaf.subscript) {
+    children = <sub>{children}</sub>;
+  }
   if (leaf.token) {
     children = (
       <span style={{ color: TOKEN_COLOR[leaf.token] ?? "inherit" }}>

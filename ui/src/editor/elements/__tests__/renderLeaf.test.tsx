@@ -43,6 +43,18 @@ describe("renderLeaf", () => {
     expect(container.querySelector("u")).not.toBeNull();
   });
 
+  it("renders superscript with sup tag", () => {
+    const { container } = render(leaf({ superscript: true }));
+    expect(container.querySelector("sup")).not.toBeNull();
+    expect(container.textContent).toBe("hello");
+  });
+
+  it("renders subscript with sub tag", () => {
+    const { container } = render(leaf({ subscript: true }));
+    expect(container.querySelector("sub")).not.toBeNull();
+    expect(container.textContent).toBe("hello");
+  });
+
   it("colours a known token leaf with its mapped CSS var", () => {
     const { container } = render(leaf({ token: "keyword" }));
     const span = container.querySelector("span[style]");
