@@ -108,8 +108,9 @@ fn load_vault_root_from_config_with_env(
 /// - Loads vault root from app config (`config.toml` in CWD, then XDG config)
 /// - Opens the configured vault (fails if invalid/missing)
 /// - Uses `vault.default_page_folder` from `.clepsydra/config.toml`
-/// - Generates a filename from `title` via [`VaultPath::from_title`]
-/// - Writes a markdown file with fresh [`PageMeta`] (UUID + timestamps)
+/// - Generates a canonical `<yyyymmdd>.<slug>.<shortid>.md` filename
+/// - Writes a markdown file with fresh [`PageMeta`] (UUID + timestamps),
+///   where the frontmatter `created_at` agrees with the filename date prefix
 pub fn create_new_note(
     start_dir: &Path,
     title: &str,
@@ -131,9 +132,18 @@ fn create_new_note_in_vault(
 
     let vault = Vault::open(vault_root).map_err(|e| NewNoteError::VaultOpen(e.to_string()))?;
 
-    let vault_path = build_note_path(&vault, title)?;
+    // Single timestamp shared between the filename's date prefix and the
+    // frontmatter `created_at`/`updated_at`, so they always agree.
+    let created = chrono::Utc::now();
+
+    let vault_path = build_note_path(&vault, title, created)?;
     let abs_path = vault.resolve(&vault_path);
 
+    // Defensive last-resort guard: with the random short-id in the filename a
+    // collision is ~1-in-62^8, so this is effectively unreachable via
+    // create_new_note — kept as a cheap stat() backstop rather than removing the
+    // public NewNoteError::AlreadyExists variant (which the API error-mapping
+    // layer depends on).
     if abs_path.exists() {
         return Err(NewNoteError::AlreadyExists(vault_path.as_str().to_string()));
     }
@@ -144,6 +154,8 @@ fn create_new_note_in_vault(
 
     let mut meta = PageMeta::new();
     meta.title = Some(title.to_string());
+    meta.created_at = Some(created);
+    meta.updated_at = Some(created);
 
     let content = write_page_content(&meta, body.unwrap_or_default());
     fs::write(&abs_path, content)?;
@@ -154,8 +166,13 @@ fn create_new_note_in_vault(
     })
 }
 
-fn build_note_path(vault: &Vault, title: &str) -> Result<VaultPath, NewNoteError> {
-    let generated = VaultPath::from_title(title);
+fn build_note_path(
+    vault: &Vault,
+    title: &str,
+    created: chrono::DateTime<chrono::Utc>,
+) -> Result<VaultPath, NewNoteError> {
+    let short_id = crate::vault::block_id::generate_short_id();
+    let filename = crate::vault::page_filename::page_filename(created, title, &short_id);
 
     let folder = vault
         .config()
@@ -164,11 +181,11 @@ fn build_note_path(vault: &Vault, title: &str) -> Result<VaultPath, NewNoteError
         .trim()
         .trim_matches('/');
 
-    if folder.is_empty() {
-        return Ok(generated);
-    }
-
-    let combined = format!("{folder}/{}", generated.as_str());
+    let combined = if folder.is_empty() {
+        filename
+    } else {
+        format!("{folder}/{filename}")
+    };
     VaultPath::new(&combined).map_err(|e| NewNoteError::InvalidPath(e.to_string()))
 }
 
@@ -256,7 +273,10 @@ mod tests {
         .unwrap();
 
         let created = create_new_note(&cwd, "My Note", None).unwrap();
-        assert_eq!(created.vault_path.as_str(), "notes/My Note.md");
+        assert!(created.vault_path.as_str().starts_with("notes/"));
+        assert!(crate::vault::path::is_canonical_page_filename(
+            created.vault_path.filename()
+        ));
 
         let abs_path = created.vault_root.join(created.vault_path.as_str());
         assert!(abs_path.exists());
@@ -267,10 +287,21 @@ mod tests {
         assert!(page.meta.created_at.is_some());
         assert!(page.meta.updated_at.is_some());
         assert_eq!(page.body, "");
+
+        // The filename's date prefix must agree with the frontmatter created_at.
+        let date_prefix = created
+            .vault_path
+            .filename()
+            .split('.')
+            .next()
+            .unwrap()
+            .to_string();
+        let meta_date = page.meta.created_at.unwrap().format("%Y%m%d").to_string();
+        assert_eq!(date_prefix, meta_date);
     }
 
     #[test]
-    fn create_new_note_rejects_existing_path() {
+    fn new_note_filename_is_canonical() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().join("cwd");
         let root = dir.path().join("vault");
@@ -283,10 +314,47 @@ mod tests {
         )
         .unwrap();
 
-        let _ = create_new_note(&cwd, "Same Title", None).unwrap();
-        let err = create_new_note(&cwd, "Same Title", None).unwrap_err();
+        fs::write(
+            root.join(".clepsydra/config.toml"),
+            "[vault]\ndefault_page_folder = \"notes\"\n",
+        )
+        .unwrap();
 
-        assert!(matches!(err, NewNoteError::AlreadyExists(_)));
+        let created = create_new_note(&cwd, "My Note", None).unwrap();
+        let fname = created.vault_path.filename();
+        assert!(
+            crate::vault::path::is_canonical_page_filename(fname),
+            "filename was: {fname}"
+        );
+        assert!(created.vault_path.as_str().starts_with("notes/"));
+    }
+
+    #[test]
+    fn create_new_note_allows_duplicate_titles_with_unique_filenames() {
+        // Canonical filenames carry a random short id, so two notes sharing a
+        // title no longer collide — they land at distinct paths.
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("cwd");
+        let root = dir.path().join("vault");
+        fs::create_dir_all(&cwd).unwrap();
+        init_vault(&root).unwrap();
+
+        fs::write(
+            cwd.join("config.toml"),
+            format!("[vault]\nroot = \"{}\"\n", root.display()),
+        )
+        .unwrap();
+
+        let first = create_new_note(&cwd, "Same Title", None).unwrap();
+        let second = create_new_note(&cwd, "Same Title", None).unwrap();
+
+        assert_ne!(first.vault_path.as_str(), second.vault_path.as_str());
+        assert!(crate::vault::path::is_canonical_page_filename(
+            first.vault_path.filename()
+        ));
+        assert!(crate::vault::path::is_canonical_page_filename(
+            second.vault_path.filename()
+        ));
     }
 
     #[test]
