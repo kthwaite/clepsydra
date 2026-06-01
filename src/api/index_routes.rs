@@ -96,6 +96,10 @@ pub struct VaultStats {
     links_total: i64,
     links_resolved: i64,
     links_unresolved: i64,
+    /// Pages with zero inbound (resolved) links — the canonical "orphan".
+    orphan_pages: i64,
+    /// Pages with no resolved links inbound or outbound.
+    isolated_pages: i64,
     tags: i64,
     attachments: i64,
     /// RFC3339 timestamp of the most recent `pages.updated_at`, or null on empty vault.
@@ -520,7 +524,16 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
         0
     };
 
-    let (pages, links_total, links_resolved, links_unresolved, tags_count, last_indexed_at) = state
+    let (
+        pages,
+        links_total,
+        links_resolved,
+        links_unresolved,
+        orphan_pages,
+        isolated_pages,
+        tags_count,
+        last_indexed_at,
+    ) = state
         .index
         .with_index(move |index, _vault| {
             let conn = index.connection();
@@ -542,6 +555,21 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
                 |row| row.get(0),
             )?;
 
+            let orphan_pages: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pages p
+                  WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.target_id = p.id)",
+                [],
+                |row| row.get(0),
+            )?;
+
+            let isolated_pages: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pages p
+                  WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.target_id = p.id)
+                    AND NOT EXISTS (SELECT 1 FROM links l WHERE l.source_id = p.id)",
+                [],
+                |row| row.get(0),
+            )?;
+
             let tags_count: i64 =
                 conn.query_row("SELECT COUNT(DISTINCT tag) FROM tags", [], |row| row.get(0))?;
 
@@ -557,6 +585,8 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
                 links_total,
                 links_resolved,
                 links_unresolved,
+                orphan_pages,
+                isolated_pages,
                 tags_count,
                 last_indexed_at,
             ))
@@ -570,6 +600,8 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
         links_total,
         links_resolved,
         links_unresolved,
+        orphan_pages,
+        isolated_pages,
         tags: tags_count,
         attachments,
         last_indexed_at,
@@ -1020,6 +1052,81 @@ Some quoted text.\n";
             item.project.as_deref(),
             Some("clepsydra"),
             "project should be clepsydra"
+        );
+    }
+
+    #[tokio::test]
+    async fn stats_reports_orphan_and_isolated_pages() {
+        let (state, _tmp) = make_state().await;
+
+        let page_dir = state.vault.root().join("notes");
+        std::fs::create_dir_all(&page_dir).unwrap();
+
+        // Page A links to B; B has no links; C is fully disconnected.
+        // After resolution:
+        //   A: 0 inbound, 1 outbound -> orphan, NOT isolated
+        //   B: 1 inbound (from A), 0 outbound -> not orphan, not isolated
+        //   C: 0 inbound, 0 outbound -> orphan AND isolated
+        std::fs::write(
+            page_dir.join("a.md"),
+            "\
+---\n\
+id: 01900000-0000-7000-8000-000000000020\n\
+---\n\
+\n\
+see [[B]] for context\n",
+        )
+        .unwrap();
+        std::fs::write(
+            page_dir.join("B.md"),
+            "\
+---\n\
+id: 01900000-0000-7000-8000-000000000021\n\
+title: B\n\
+---\n\
+\n\
+nothing here\n",
+        )
+        .unwrap();
+        std::fs::write(
+            page_dir.join("c.md"),
+            "\
+---\n\
+id: 01900000-0000-7000-8000-000000000022\n\
+---\n\
+\n\
+all alone\n",
+        )
+        .unwrap();
+
+        for name in ["notes/a.md", "notes/B.md", "notes/c.md"] {
+            let vp = VaultPath::new(name).unwrap();
+            state
+                .index
+                .with_index(move |index, vault| {
+                    index.index_page(vault, &vp)?;
+                    Ok::<_, IndexError>(())
+                })
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        // CRITICAL: index_page leaves target_id NULL; resolve before counting.
+        state.index.resolve_links().await.unwrap();
+
+        let s = stats(State(state)).await.unwrap().0;
+
+        // Guard: the [[B]] wikilink must have actually resolved, otherwise the
+        // orphan/isolated counts below are measuring an unresolved corpus.
+        assert_eq!(
+            s.links_resolved, 1,
+            "the [[B]] wikilink should resolve to exactly one target"
+        );
+        assert_eq!(s.orphan_pages, 2, "A and C have no inbound resolved links");
+        assert_eq!(
+            s.isolated_pages, 1,
+            "only C has neither inbound nor outbound resolved links"
         );
     }
 }
