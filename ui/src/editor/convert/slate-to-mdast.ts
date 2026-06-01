@@ -93,6 +93,23 @@ function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
     ];
   }
 
+  // Superscript/subscript have no native markdown; emit as inline HTML
+  // <sup>…</sup> / <sub>…</sub> so they roundtrip through save/reload.
+  if (leaf.superscript) {
+    return [
+      { type: "html", value: "<sup>" } as unknown as PhrasingContent,
+      node,
+      { type: "html", value: "</sup>" } as unknown as PhrasingContent,
+    ];
+  }
+  if (leaf.subscript) {
+    return [
+      { type: "html", value: "<sub>" } as unknown as PhrasingContent,
+      node,
+      { type: "html", value: "</sub>" } as unknown as PhrasingContent,
+    ];
+  }
+
   return node;
 }
 

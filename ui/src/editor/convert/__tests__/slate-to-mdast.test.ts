@@ -21,6 +21,27 @@ describe("slateToMarkdown", () => {
     );
   });
 
+  it("serialises superscript and subscript as inline <sup>/<sub> html", () => {
+    const sup: Descendant[] = [
+      {
+        type: "paragraph",
+        children: [{ text: "x" }, { text: "2", superscript: true }],
+      },
+    ];
+    expect(slateToMarkdown(sup)).toContain("<sup>2</sup>");
+    const sub: Descendant[] = [
+      {
+        type: "paragraph",
+        children: [
+          { text: "H" },
+          { text: "2", subscript: true },
+          { text: "O" },
+        ],
+      },
+    ];
+    expect(slateToMarkdown(sub)).toContain("<sub>2</sub>");
+  });
+
   it("converts bold text", () => {
     const slate: Descendant[] = [
       {
