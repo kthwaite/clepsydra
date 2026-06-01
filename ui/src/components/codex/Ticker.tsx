@@ -79,6 +79,7 @@ export function Ticker() {
       <Cell label="links" value={stats?.links_total ?? "—"} />
       <Cell label="tags" value={stats?.tags ?? "—"} />
       <Cell label="unresolved" value={stats?.links_unresolved ?? "—"} />
+      <Cell label="orphans" value={stats?.orphan_pages ?? "—"} />
       <Cell label="attach" value={stats?.attachments ?? "—"} />
       <span className="flex-1" />
       <Cell label="uptime" value={uptime} />

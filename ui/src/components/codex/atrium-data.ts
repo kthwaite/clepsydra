@@ -38,6 +38,8 @@ interface StatsLike {
   links_total: number;
   links_unresolved: number;
   tags: number;
+  orphan_pages: number;
+  isolated_pages: number;
 }
 
 interface TagLike {
@@ -196,6 +198,16 @@ export function deriveInventory(
       value: n(stats.links_unresolved),
       sub: `${pct}% of links`,
       tone: stats.links_unresolved > 0 ? "warn" : undefined,
+    });
+    cells.push({
+      label: "Orphans",
+      value: n(stats.orphan_pages),
+      sub: "pages, 0 backlinks",
+    });
+    cells.push({
+      label: "Isolated",
+      value: n(stats.isolated_pages),
+      sub: "pages, no links",
     });
   }
 

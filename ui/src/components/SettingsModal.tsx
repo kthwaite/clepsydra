@@ -228,6 +228,8 @@ function CorpusPanel() {
     ["Links, total", stats?.links_total ?? "—"],
     ["Links, resolved", stats?.links_resolved ?? "—"],
     ["Links, unresolved", stats?.links_unresolved ?? "—"],
+    ["Pages, orphaned", stats?.orphan_pages ?? "—"],
+    ["Pages, isolated", stats?.isolated_pages ?? "—"],
     ["Tags", stats?.tags ?? "—"],
     ["Attachments", stats?.attachments ?? "—"],
     ["Last collated", formatRelativeTime(stats?.last_indexed_at)],

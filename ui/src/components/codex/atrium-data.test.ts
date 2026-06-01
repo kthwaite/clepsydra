@@ -76,6 +76,8 @@ describe("deriveInventory", () => {
     tags: 20,
     attachments: 5,
     last_indexed_at: null,
+    orphan_pages: 4,
+    isolated_pages: 1,
   };
   const tags = [
     { tag: "epistemics", count: 5 },
@@ -97,6 +99,9 @@ describe("deriveInventory", () => {
     expect(byLabel.Tags.sub).toBe("hapax 2");
     expect(byLabel.Unresolved.value).toBe("12");
     expect(byLabel.Unresolved.tone).toBe("warn");
+    expect(byLabel.Orphans.value).toBe("4");
+    expect(byLabel.Isolated.value).toBe("1");
+    expect(byLabel.Orphans.tone).toBeUndefined(); // informational, not a warning
   });
 
   it("derives today/7d cells from item timestamps", () => {
