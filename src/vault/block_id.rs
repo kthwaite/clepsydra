@@ -112,10 +112,37 @@ fn random_seed() -> u64 {
     if seed == 0 { 1 } else { seed }
 }
 
+/// A standalone 8-character random base62 token, for globally-unique page
+/// filenames (see docs/adr/0002-page-filename-identity.md). Not time-sorted —
+/// the filename's `yyyymmdd` prefix carries ordering.
+pub fn generate_short_id() -> String {
+    let mut buf = [0u8; 8];
+    fill_random_base62(&mut buf);
+    String::from_utf8(buf.to_vec()).expect("base62 is always valid UTF-8")
+}
+
 /// xorshift64 PRNG — fast, good enough for non-cryptographic random IDs.
 fn xorshift64(mut state: u64) -> u64 {
     state ^= state << 13;
     state ^= state >> 7;
     state ^= state << 17;
     state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_id_is_eight_base62_chars() {
+        let id = generate_short_id();
+        assert_eq!(id.len(), 8);
+        assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn short_ids_vary() {
+        // Not a strong randomness test — just that two draws differ.
+        assert_ne!(generate_short_id(), generate_short_id());
+    }
 }
