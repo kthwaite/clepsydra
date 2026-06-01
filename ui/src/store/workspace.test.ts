@@ -91,4 +91,23 @@ describe("useWorkspaceStore updateTabPath", () => {
     expect(t1?.path).toBe("projects/x.md");
     expect(t1?.label).toBe("Moved");
   });
+
+  it("removes the old path from openHistory and adds the new one", () => {
+    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    const store = useWorkspaceStore.getState();
+    // openTab seeds openHistory for page tabs.
+    store.openTab("page", "notes/x.md", "X");
+    expect(
+      useWorkspaceStore.getState().openHistory.map((e) => e.path),
+    ).toEqual(["notes/x.md"]);
+
+    const tabId = useWorkspaceStore.getState().tabs[0].id;
+    useWorkspaceStore.getState().updateTabPath(tabId, "projects/x.md");
+
+    const paths = useWorkspaceStore
+      .getState()
+      .openHistory.map((e) => e.path);
+    expect(paths).toContain("projects/x.md");
+    expect(paths).not.toContain("notes/x.md");
+  });
 });

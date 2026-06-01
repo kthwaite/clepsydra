@@ -195,13 +195,26 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       updateTabPath(tabId, path, label) {
-        set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.id === tabId
-              ? { ...t, path, ...(label !== undefined ? { label } : {}) }
-              : t,
-          ),
-        }));
+        set((state) => {
+          const tab = state.tabs.find((t) => t.id === tabId);
+          const oldPath = tab?.path;
+          const nextHistory =
+            tab?.type === "page" && oldPath && oldPath !== path
+              ? pushOpenHistory(
+                  state.openHistory.filter((e) => e.path !== oldPath),
+                  path,
+                  Date.now(),
+                )
+              : state.openHistory;
+          return {
+            tabs: state.tabs.map((t) =>
+              t.id === tabId
+                ? { ...t, path, ...(label !== undefined ? { label } : {}) }
+                : t,
+            ),
+            openHistory: nextHistory,
+          };
+        });
       },
 
       setNavigationMode(mode) {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Button,
   ComboBox,
@@ -28,7 +28,17 @@ export function ProjectCombo({
   // Enter/blur.
   const [draft, setDraft] = useState(value ?? "");
 
+  // A listbox pick fires onSelectionChange (→ onAssign) and then a blur, whose
+  // commit() would call onAssign a second time (the slug !== value guard still
+  // passes because `value` hasn't propagated yet) — a redundant mutate racing
+  // the in-flight rename. This flag suppresses the immediate post-select blur.
+  const justSelectedRef = useRef(false);
+
   const commit = () => {
+    if (justSelectedRef.current) {
+      justSelectedRef.current = false;
+      return;
+    }
     const slug = draft.trim();
     if (slug && slug !== value) onAssign(slug);
   };
@@ -41,7 +51,10 @@ export function ProjectCombo({
         defaultInputValue={value ?? ""}
         onInputChange={setDraft}
         onSelectionChange={(k) => {
-          if (k) onAssign(String(k));
+          if (k) {
+            justSelectedRef.current = true;
+            onAssign(String(k));
+          }
         }}
         className="min-w-0 flex-1"
       >

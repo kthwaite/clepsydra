@@ -176,6 +176,7 @@ export function Folio({ tabId, path }: FolioProps) {
               k="Project"
               v={
                 <ProjectCombo
+                  key={project ?? ""}
                   value={project}
                   options={projects}
                   onAssign={(slug) =>
