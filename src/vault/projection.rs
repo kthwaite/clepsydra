@@ -30,8 +30,8 @@ pub fn project_path(
     };
     // Declared project forces the subfolder; absent keeps the current one.
     let expected_sub = match declared_project {
-        Some(p) => Some(p.to_string()),
-        None => current_sub,
+        Some(p) if !p.is_empty() => Some(p.to_string()),
+        _ => current_sub,
     };
 
     let mut expected = String::new();
@@ -86,6 +86,12 @@ mod tests {
             project_path("notes/x.md", Some(Kind::Quote), Some("clep")).as_deref(),
             Some("quotes/clep/x.md")
         );
+    }
+    #[test]
+    fn empty_project_is_treated_as_absent() {
+        // An empty project slug must not produce a malformed `notes//x.md`; treat
+        // it as absent (conservative — keep the current subfolder, so no move).
+        assert_eq!(project_path("notes/x.md", None, Some("")), None);
     }
     #[test]
     fn root_level_file_with_declared_kind() {
