@@ -243,6 +243,50 @@ fn truncate_safe(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// Lowercased, hyphen-joined, length-capped slug for the human-readable middle
+/// segment of a page filename. ASCII-folds spaces and punctuation to `-`,
+/// collapses runs, trims, and truncates to at most `max_len` characters on a `-`
+/// boundary. Empty/punctuation-only input yields `"untitled"`.
+pub fn slugify_title(title: &str, max_len: usize) -> String {
+    let lower = title.nfc().collect::<String>().to_lowercase();
+    let mut slug = String::with_capacity(lower.len());
+    let mut prev_dash = false;
+    for ch in lower.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+            prev_dash = false;
+        } else if !prev_dash {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = slug.trim_matches('-');
+    let out: String = trimmed.chars().take(max_len).collect();
+    let out = out.trim_end_matches('-');
+    if out.is_empty() {
+        "untitled".to_string()
+    } else {
+        out.to_string()
+    }
+}
+
+/// True if `name` already matches the canonical page filename shape
+/// `<yyyymmdd>.<slug>.<8 base62>.md`. Used to make relabel idempotent.
+pub fn is_canonical_page_filename(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".md") else {
+        return false;
+    };
+    let parts: Vec<&str> = stem.split('.').collect();
+    if parts.len() < 3 {
+        return false;
+    }
+    let date = parts[0];
+    let token = parts[parts.len() - 1];
+    let date_ok = date.len() == 8 && date.chars().all(|c| c.is_ascii_digit());
+    let token_ok = token.len() == 8 && token.chars().all(|c| c.is_ascii_alphanumeric());
+    date_ok && token_ok
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +299,33 @@ mod tests {
         assert_eq!(truncate_safe(s, 5), "abc");
         // max_bytes = 6 keeps "abc%25"
         assert_eq!(truncate_safe(s, 6), "abc%25");
+    }
+
+    #[test]
+    fn slugify_lowercases_hyphenates_and_truncates() {
+        assert_eq!(slugify_title("Redesign Retro!", 40), "redesign-retro");
+        assert_eq!(
+            slugify_title("  Multiple   Spaces  ", 40),
+            "multiple-spaces"
+        );
+        // truncation does not leave a trailing dash
+        assert_eq!(slugify_title("abcdefghij", 5), "abcde");
+        assert_eq!(slugify_title("ab cd ef", 5), "ab-cd");
+        // empty / punctuation-only title -> stable fallback
+        assert_eq!(slugify_title("", 40), "untitled");
+        assert_eq!(slugify_title("!!!", 40), "untitled");
+    }
+
+    #[test]
+    fn detects_canonical_page_filename() {
+        assert!(is_canonical_page_filename(
+            "20260531.redesign-retro.3kF9a2bQ.md"
+        ));
+        assert!(is_canonical_page_filename("20260531.a.0000aaaa.md"));
+        // old-style names are not canonical
+        assert!(!is_canonical_page_filename("My Note.md"));
+        assert!(!is_canonical_page_filename("2026-wang.pdf"));
+        // wrong token length / missing parts
+        assert!(!is_canonical_page_filename("20260531.x.short.md"));
     }
 }
