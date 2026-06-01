@@ -1,3 +1,4 @@
+import { refractor } from "refractor";
 import { describe, expect, it } from "vitest";
 import {
   COMMON_LANGUAGES,
@@ -39,5 +40,23 @@ describe("code-languages", () => {
 
   it("filterLanguages returns [] for no matches", () => {
     expect(filterLanguages("zzzznotalang")).toEqual([]);
+  });
+
+  it("collapses aliases to their canonical name", () => {
+    const ids = listLanguageIds();
+    expect(ids).toContain("javascript");
+    expect(ids).not.toContain("js");
+    expect(ids).not.toContain("ts");
+  });
+
+  it("lists each grammar at most once", () => {
+    const ids = listLanguageIds();
+    const grammars = refractor.languages as Record<string, object>;
+    const seen = new Set<object>();
+    for (const id of ids) {
+      const g = grammars[id];
+      expect(seen.has(g)).toBe(false);
+      seen.add(g);
+    }
   });
 });

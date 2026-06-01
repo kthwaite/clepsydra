@@ -24,16 +24,35 @@ export function displayLabel(id: string): string {
 }
 
 /**
- * All refractor-registered language ids, with the registered subset of
+ * All refractor-registered grammars, with the registered subset of
  * COMMON_LANGUAGES pinned to the front (in COMMON order) and the rest
- * following alphabetically. Deduplicated.
+ * following alphabetically. Aliases are collapsed to a single canonical
+ * name per grammar, so each grammar appears at most once.
  */
 export function listLanguageIds(): string[] {
   const registered = refractor.listLanguages();
   const registeredSet = new Set(registered);
   const common = COMMON_LANGUAGES.filter((id) => registeredSet.has(id));
-  const commonSet = new Set<string>(common);
-  const rest = registered.filter((id) => !commonSet.has(id)).sort();
+
+  // refractor.listLanguages() returns aliases (e.g. "js", "ts") as flat peers
+  // of their canonical grammar ("javascript", "typescript"). Collapse them so
+  // the picker lists each grammar once. Aliases share grammar-object identity
+  // with their canonical name.
+  const grammars = refractor.languages as Record<string, object>;
+  const claimed = new Set<object>(common.map((id) => grammars[id]));
+
+  const chosen = new Map<object, string>();
+  for (const id of registered) {
+    const grammar = grammars[id];
+    if (claimed.has(grammar)) continue; // already represented by a common entry
+    const current = chosen.get(grammar);
+    // Prefer the longest name as the canonical label (e.g. "javascript" > "js").
+    if (current === undefined || id.length > current.length) {
+      chosen.set(grammar, id);
+    }
+  }
+
+  const rest = [...chosen.values()].sort();
   return [...common, ...rest];
 }
 
