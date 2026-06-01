@@ -29,6 +29,7 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::pages::update_page,
         crate::api::pages::delete_page,
         crate::api::pages::move_page,
+        crate::api::pages::assign_page,
         // Folders
         crate::api::folders::list_folders,
         crate::api::folders::list_folder_tree,
@@ -86,6 +87,7 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::pages::CreatePageRequest,
             crate::api::pages::UpdatePageRequest,
             crate::api::pages::MovePageRequest,
+            crate::api::pages::AssignRequest,
             // Folders
             crate::api::folders::FolderInfo,
             crate::api::folders::FolderListing,
