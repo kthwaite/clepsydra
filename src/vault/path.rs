@@ -272,6 +272,13 @@ pub fn slugify_title(title: &str, max_len: usize) -> String {
 
 /// True if `name` already matches the canonical page filename shape
 /// `<yyyymmdd>.<slug>.<8 base62>.md`. Used to make relabel idempotent.
+///
+/// This is a *structural* shape check, not a calendar validator: it confirms an
+/// 8-digit leading segment and an 8-char alphanumeric trailing token, but does
+/// not range-check the date (`20260231` or `99999999` would pass). That is
+/// intentional — names that reach this function are produced by
+/// [`super::page_filename::page_filename`], which only ever emits real dates, so
+/// the looser check costs nothing and keeps the detector dependency-free.
 pub fn is_canonical_page_filename(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".md") else {
         return false;
