@@ -1390,9 +1390,7 @@ fn migrate_pages_add_kind_columns(conn: &Connection) -> Result<(), IndexError> {
 
     let has_kind: bool = conn.prepare("SELECT kind FROM pages LIMIT 0").is_ok();
     if !has_kind {
-        conn.execute_batch(
-            "ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'NOTE';",
-        )?;
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'NOTE';")?;
     }
 
     let has_kind_inferred: bool = conn
@@ -1734,8 +1732,7 @@ fn upsert_indexed_page(
     let updated_at = pf.meta.updated_at.map(|dt| dt.to_rfc3339());
 
     let journal_date = extract_journal_date(pf.vault_path.as_str());
-    let (kind, kind_inferred) =
-        crate::vault::kind::resolve(pf.vault_path.as_str(), pf.meta.kind);
+    let (kind, kind_inferred) = crate::vault::kind::resolve(pf.vault_path.as_str(), pf.meta.kind);
     let kind_str = kind.as_str();
     let project = pf.meta.project.clone();
 
@@ -1934,12 +1931,7 @@ mod kind_index_tests {
 
     /// Create a temp vault dir, write `rel_path` with `content`, open `Vault`
     /// + `VaultIndex`, call `index_page`, and return the index for inspection.
-    fn index_one(
-        tmp: &tempfile::TempDir,
-        index: &mut VaultIndex,
-        rel_path: &str,
-        content: &str,
-    ) {
+    fn index_one(tmp: &tempfile::TempDir, index: &mut VaultIndex, rel_path: &str, content: &str) {
         let abs = tmp.path().join(rel_path);
         if let Some(parent) = abs.parent() {
             fs::create_dir_all(parent).unwrap();

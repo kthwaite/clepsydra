@@ -146,7 +146,10 @@ mod tests {
 
     #[test]
     fn folder_is_inferred_with_synonyms() {
-        assert_eq!(resolve("journals/2026-05-31.md", None), (Kind::Journal, true));
+        assert_eq!(
+            resolve("journals/2026-05-31.md", None),
+            (Kind::Journal, true)
+        );
         assert_eq!(resolve("diary/x.md", None), (Kind::Journal, true));
         assert_eq!(resolve("tasks/x.md", None), (Kind::Todo, true));
     }
@@ -160,12 +163,22 @@ mod tests {
     #[test]
     fn as_str_and_from_token_are_symmetric() {
         let all = [
-            Kind::Note, Kind::Project, Kind::Journal, Kind::Todo,
-            Kind::Quote, Kind::Book, Kind::Capture, Kind::Code, Kind::Person,
+            Kind::Note,
+            Kind::Project,
+            Kind::Journal,
+            Kind::Todo,
+            Kind::Quote,
+            Kind::Book,
+            Kind::Capture,
+            Kind::Code,
+            Kind::Person,
         ];
         for k in all {
-            assert_eq!(Kind::from_token(k.as_str()), Some(k),
-                "from_token(as_str()) round-trip failed for {k:?}");
+            assert_eq!(
+                Kind::from_token(k.as_str()),
+                Some(k),
+                "from_token(as_str()) round-trip failed for {k:?}"
+            );
         }
     }
 

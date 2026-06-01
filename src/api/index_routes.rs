@@ -856,24 +856,23 @@ pub async fn content_index(
         .with_index(move |index, vault| {
             let conn = index.connection();
 
-            let mut page_stmt = conn.prepare(
-                "SELECT id, path, title, kind, kind_inferred, project FROM pages",
-            )?;
+            let mut page_stmt =
+                conn.prepare("SELECT id, path, title, kind, kind_inferred, project FROM pages")?;
 
             type PageRow = (String, String, Option<String>, String, i64, Option<String>);
             let pages: Vec<PageRow> = page_stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get(0)?,
-                            row.get(1)?,
-                            row.get(2)?,
-                            row.get(3)?,
-                            row.get(4)?,
-                            row.get(5)?,
-                        ))
-                    })?
-                    .filter_map(|r| r.ok())
-                    .collect();
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
 
             // Bulk-load tags grouped by page_id (was N+1 per page).
             let mut tags_by_page: std::collections::HashMap<String, Vec<String>> =

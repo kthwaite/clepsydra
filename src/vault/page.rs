@@ -27,11 +27,7 @@ pub struct PageMeta {
     /// Declared kind, from frontmatter `type:` only. `None` => inferred.
     /// NOTE: `kind:` is intentionally NOT an alias here; the academic subsystem
     /// uses `kind: work` with a different meaning, and we must not hijack it.
-    #[serde(
-        default,
-        rename = "type",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     pub kind: Option<Kind>,
     /// Optional project slug; forms a subfolder beneath the kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]

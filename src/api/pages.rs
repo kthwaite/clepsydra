@@ -162,7 +162,8 @@ pub(crate) fn page_detail_from_page(page: &Page, vault_path: &VaultPath) -> Page
         CanonicalName::from_filename(vault_path.filename())
     };
 
-    let (resolved_kind, inferred) = crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
+    let (resolved_kind, inferred) =
+        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
 
     PageDetail {
         path: vault_path.as_str().to_string(),
@@ -828,15 +829,15 @@ project: clepsydra\n\
 Some quoted text.\n";
         std::fs::write(page_dir.join("q.md"), page_content).unwrap();
 
-        let resp = get_page(
-            State(state),
-            Path("notes/q.md".to_string()),
-        )
-        .await
-        .unwrap();
+        let resp = get_page(State(state), Path("notes/q.md".to_string()))
+            .await
+            .unwrap();
 
         assert_eq!(resp.0.kind, "QUOTE", "resolved kind should be QUOTE");
-        assert!(!resp.0.inferred, "inferred should be false when type is declared");
+        assert!(
+            !resp.0.inferred,
+            "inferred should be false when type is declared"
+        );
         assert_eq!(
             resp.0.project.as_deref(),
             Some("clepsydra"),
@@ -862,6 +863,9 @@ Some quoted text.\n";
             .unwrap();
 
         assert_eq!(resp.0.kind, "JOURNAL", "kind should be inferred as JOURNAL");
-        assert!(resp.0.inferred, "inferred should be true when type is absent");
+        assert!(
+            resp.0.inferred,
+            "inferred should be true when type is absent"
+        );
     }
 }
