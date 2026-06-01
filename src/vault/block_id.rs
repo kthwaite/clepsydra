@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -86,13 +87,34 @@ fn encode_base62(mut value: u64, buf: &mut [u8]) {
     }
 }
 
-/// Fill `buf` with random base62 characters using a simple xorshift64
-/// seeded from the system clock and memory address entropy.
-fn fill_random_base62(buf: &mut [u8]) {
-    let mut state = random_seed();
-    for slot in buf.iter_mut() {
+thread_local! {
+    /// Per-thread xorshift state. Seeded lazily from the clock + stack entropy
+    /// on first use, then *advanced* on every draw and carried across calls.
+    /// Carrying the state is what guarantees that two rapid consecutive draws
+    /// differ — a fresh per-call clock seed can repeat within a nanosecond
+    /// window (identical time and identical stack address), which previously
+    /// made `generate_short_id` collision-prone.
+    static RNG_STATE: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Draw the next xorshift64 value from the persistent per-thread stream.
+fn next_random() -> u64 {
+    RNG_STATE.with(|cell| {
+        let mut state = cell.get();
+        if state == 0 {
+            state = random_seed();
+        }
         state = xorshift64(state);
-        *slot = BASE62[(state % 62) as usize];
+        cell.set(state);
+        state
+    })
+}
+
+/// Fill `buf` with random base62 characters drawn from the persistent
+/// per-thread xorshift64 stream (see [`next_random`]).
+fn fill_random_base62(buf: &mut [u8]) {
+    for slot in buf.iter_mut() {
+        *slot = BASE62[(next_random() % 62) as usize];
     }
 }
 
@@ -142,7 +164,10 @@ mod tests {
 
     #[test]
     fn short_ids_vary() {
-        // Not a strong randomness test — just that two draws differ.
-        assert_ne!(generate_short_id(), generate_short_id());
+        // The persistent per-thread stream guarantees consecutive draws differ
+        // (no reliance on clock resolution). Draw many and require all unique.
+        use std::collections::HashSet;
+        let ids: HashSet<String> = (0..1000).map(|_| generate_short_id()).collect();
+        assert_eq!(ids.len(), 1000, "expected all short ids to be distinct");
     }
 }
