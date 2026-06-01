@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
+import { useAssignPage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
+import { KindSelect } from "#/components/codex/KindSelect";
+import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import {
   formatAbsoluteDate,
   formatRelativeTime,
@@ -17,6 +20,8 @@ import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { presentationFor } from "#/lib/kindPresentation";
+import { useProjects } from "#/lib/useProjects";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type FolioProps = {
@@ -33,8 +38,19 @@ export function Folio({ tabId, path }: FolioProps) {
   const { data: outlinks } = useOutlinks(path);
   const { data: similar } = useSimilar(path);
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
+  const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
+  const assign = useAssignPage();
+  const projects = useProjects();
   const { setProgress } = useReadingProgress();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  // Assigning a kind/project writes frontmatter AND moves the file, so the
+  // page path changes. Repoint the open tab to the new path; because FOLIO is
+  // keyed on the tab path (TabContent), this remounts the editor at the new
+  // location — the entire follow mechanism.
+  const followMove = (data: { path?: string }) => {
+    if (data.path && data.path !== path) updateTabPath(tabId, data.path);
+  };
 
   const left = useCollapsibleRail({
     storageKey: "clp.folio.l",
@@ -99,9 +115,11 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const folioCode = shortFolio(path);
   const kind = useMemo(
-    () => resolveKind({ path, body: editor.bodyMarkdown }),
-    [path, editor.bodyMarkdown],
+    () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
+    [path, editor.kind, editor.bodyMarkdown],
   );
+  const inferred = editor.inferred;
+  const project = editor.project;
   const wordCount = useMemo(
     () => countWordsFromSlate(editor.initialValue),
     [editor.initialValue],
@@ -142,10 +160,40 @@ export function Folio({ tabId, path }: FolioProps) {
             <KV
               k="Kind"
               v={
-                <span className="inline-flex items-center gap-1.5">
-                  <Pip kind={kind} />
-                  {kindLabel(kind)}
-                </span>
+                <KindSelect
+                  value={kind}
+                  inferred={inferred}
+                  onAssign={(k) =>
+                    assign.mutate(
+                      { params: { path: { path } }, body: { kind: k } },
+                      { onSuccess: followMove },
+                    )
+                  }
+                />
+              }
+            />
+            <KV
+              k="Project"
+              v={
+                <ProjectCombo
+                  value={project}
+                  options={projects}
+                  onAssign={(slug) =>
+                    assign.mutate(
+                      { params: { path: { path } }, body: { project: slug } },
+                      { onSuccess: followMove },
+                    )
+                  }
+                  onClear={() =>
+                    assign.mutate(
+                      {
+                        params: { path: { path } },
+                        body: { clear_project: true },
+                      },
+                      { onSuccess: followMove },
+                    )
+                  }
+                />
               }
             />
             <KV
@@ -196,6 +244,15 @@ export function Folio({ tabId, path }: FolioProps) {
             <KV k="Backlinks" v={backlinks?.length ?? 0} />
             <KV k="Links" v={outlinks?.length ?? 0} />
           </Block>
+
+          {(() => {
+            const Extras = presentationFor(kind).metaExtras;
+            return Extras ? (
+              <Block label="Details">
+                <Extras path={path} />
+              </Block>
+            ) : null;
+          })()}
 
           <OpenFilesAccordion activeTabId={tabId} />
 

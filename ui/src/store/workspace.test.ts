@@ -59,3 +59,36 @@ describe("useWorkspaceStore openTab wiring", () => {
     ).toEqual(["x.md"]);
   });
 });
+
+describe("useWorkspaceStore updateTabPath", () => {
+  it("updates the target tab's path and leaves other tabs untouched", () => {
+    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    const store = useWorkspaceStore.getState();
+    store.addTab({ id: "t1", type: "page", path: "notes/x.md", label: "X" });
+    store.addTab({ id: "t2", type: "page", path: "notes/y.md", label: "Y" });
+
+    useWorkspaceStore.getState().updateTabPath("t1", "projects/x.md");
+
+    const tabs = useWorkspaceStore.getState().tabs;
+    const t1 = tabs.find((t) => t.id === "t1");
+    const t2 = tabs.find((t) => t.id === "t2");
+    expect(t1?.path).toBe("projects/x.md");
+    // label preserved when not supplied
+    expect(t1?.label).toBe("X");
+    // sibling untouched
+    expect(t2?.path).toBe("notes/y.md");
+  });
+
+  it("updates the label too when one is supplied", () => {
+    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    useWorkspaceStore
+      .getState()
+      .addTab({ id: "t1", type: "page", path: "notes/x.md", label: "X" });
+
+    useWorkspaceStore.getState().updateTabPath("t1", "projects/x.md", "Moved");
+
+    const t1 = useWorkspaceStore.getState().tabs.find((t) => t.id === "t1");
+    expect(t1?.path).toBe("projects/x.md");
+    expect(t1?.label).toBe("Moved");
+  });
+});

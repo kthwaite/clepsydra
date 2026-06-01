@@ -25,6 +25,9 @@ interface PageEditorState {
   createdAt: string | null;
   updatedAt: string | null;
   bodyMarkdown: string;
+  kind: string | null;
+  inferred: boolean;
+  project: string | null;
 }
 
 export function usePageEditor(path: string): PageEditorState {
@@ -289,5 +292,8 @@ export function usePageEditor(path: string): PageEditorState {
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
     bodyMarkdown: page?.body ?? "",
+    kind: page?.kind ?? null,
+    inferred: page?.inferred ?? true,
+    project: page?.project ?? null,
   };
 }

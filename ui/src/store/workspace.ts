@@ -48,6 +48,7 @@ interface WorkspaceActions {
   togglePin: (tabId: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   updateTabLabel: (tabId: string, label: string) => void;
+  updateTabPath: (tabId: string, path: string, label?: string) => void;
   setNavigationMode: (mode: NavigationMode) => void;
 }
 
@@ -190,6 +191,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       updateTabLabel(tabId, label) {
         set((state) => ({
           tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, label } : t)),
+        }));
+      },
+
+      updateTabPath(tabId, path, label) {
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === tabId
+              ? { ...t, path, ...(label !== undefined ? { label } : {}) }
+              : t,
+          ),
         }));
       },
 
