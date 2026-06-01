@@ -767,6 +767,27 @@ pub async fn move_page(
     Ok(Json(page_detail_from_page(&page, &dest_vp)))
 }
 
+/// Validate a `project` slug before it is persisted to frontmatter and used to
+/// build a folder path. Defense-in-depth: `VaultPath::new` rejects `..`
+/// downstream, but the value is persisted and Project is defined as a slug, so
+/// we reject anything non-slug at the boundary.
+fn validate_project_slug(p: &str) -> Result<(), String> {
+    if p.is_empty()
+        || p.contains("..")
+        || p.starts_with('/')
+        || p.ends_with('/')
+        || p.chars().any(|c| c.is_control() || c == '\0')
+    {
+        return Err("invalid project name".to_string());
+    }
+    if p.chars()
+        .any(|c| !(c.is_alphanumeric() || c == '-' || c == '_' || c == '/'))
+    {
+        return Err("invalid project name".to_string());
+    }
+    Ok(())
+}
+
 #[utoipa::path(
     post,
     path = "/pages-assign/{path}",
@@ -811,6 +832,7 @@ pub async fn assign_page(
     if body.clear_project {
         page.meta.project = None;
     } else if let Some(ref project) = body.project {
+        validate_project_slug(project).map_err(ApiError::bad_request)?;
         page.meta.project = Some(project.clone());
     }
 
@@ -829,6 +851,8 @@ pub async fn assign_page(
     // Hooks (e.g. AcademicMoveHook) fire on a reconcile move, so forward them.
     let path_for_index = path.clone();
     let hooks = Arc::clone(&state.hooks);
+    let clear_project = body.clear_project;
+    let declared_kind = page.meta.kind;
     let final_path = state
         .index
         .with_index(move |index, vault| {
@@ -836,8 +860,25 @@ pub async fn assign_page(
                 .map_err(|e| crate::vault::index::IndexError::Other(e.to_string()))?;
             index.index_page(vault, &vp)?;
             index.resolve_links_for_page(&vp)?;
-            let moved =
-                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index, &hooks)?;
+            // An explicit clear_project strips the subfolder (deliberate user
+            // action). The conservative sweep — reconcile_page via project_path
+            // — never strips on absent project, so route explicit clears
+            // through project_path_cleared + move_page_to instead.
+            let moved = if clear_project {
+                match crate::vault::projection::project_path_cleared(&path_for_index, declared_kind)
+                {
+                    Some(dest) => crate::vault::reconcile::move_page_to(
+                        vault,
+                        index,
+                        &path_for_index,
+                        &dest,
+                        &hooks,
+                    )?,
+                    None => None,
+                }
+            } else {
+                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index, &hooks)?
+            };
             Ok::<_, crate::vault::index::IndexError>(moved.unwrap_or(path_for_index))
         })
         .await
@@ -1150,10 +1191,10 @@ Some quoted text.\n";
     }
 
     #[tokio::test]
-    async fn assign_clear_project_keeps_subfolder_and_clears_meta() {
-        // project_path with declared_project=None KEEPS the current subfolder
-        // (conservative invariant), so clearing `project` does NOT relocate the
-        // page. We assert no move, and that meta.project is now None.
+    async fn assign_clear_project_moves_up() {
+        // An explicit clear_project strips the subfolder and moves the page up
+        // to the top folder (deliberate user action — unlike the conservative
+        // passive sweep, which never strips on absent project).
         let (state, _tmp) = make_state().await;
         seed_and_index(
             &state,
@@ -1174,22 +1215,53 @@ Some quoted text.\n";
         .await
         .unwrap();
 
-        // Conservative: clearing project leaves the subfolder in place.
-        assert_eq!(resp.0.path, "notes/clep/x.md");
+        assert_eq!(resp.0.path, "notes/x.md");
         assert_eq!(resp.0.meta.project, None, "project should be cleared in meta");
-        assert!(
-            state
-                .vault
-                .resolve(&VaultPath::new("notes/clep/x.md").unwrap())
-                .exists(),
-            "page should still live at notes/clep/x.md"
-        );
         assert!(
             !state
                 .vault
+                .resolve(&VaultPath::new("notes/clep/x.md").unwrap())
+                .exists(),
+            "source should be gone after the clear move"
+        );
+        assert!(
+            state
+                .vault
                 .resolve(&VaultPath::new("notes/x.md").unwrap())
                 .exists(),
-            "page must NOT have been moved up to notes/x.md"
+            "page should now live at notes/x.md"
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_rejects_traversal_project() {
+        let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "notes/q.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000013\n---\nbody\n",
+        )
+        .await;
+
+        let err = assign_page(
+            State(Arc::clone(&state)),
+            Path("notes/q.md".to_string()),
+            Json(AssignRequest {
+                kind: None,
+                project: Some("../evil".to_string()),
+                clear_project: false,
+            }),
+        )
+        .await
+        .expect_err("traversal project must be rejected");
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST.as_u16());
+        // File untouched; no escape attempt persisted.
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("notes/q.md").unwrap())
+                .exists()
         );
     }
 }

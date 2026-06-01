@@ -29,9 +29,29 @@ pub fn reconcile_page(
     let Some(dest) = project_path(path, page.meta.kind, page.meta.project.as_deref()) else {
         return Ok(None);
     };
+    move_page_to(vault, index, path, &dest, hooks)
+}
+
+/// Move `source` to a caller-computed `dest` via the MovePage planner:
+/// collision-guarded (skips if dest already exists or equals source), fires
+/// `hooks`, rewrites inbound links. Returns `Some(dest)` if moved, else `None`.
+/// Use when the destination is computed outside the conservative projection
+/// rule (e.g. explicit clear_project).
+pub fn move_page_to(
+    vault: &Vault,
+    index: &mut VaultIndex,
+    source: &str,
+    dest: &str,
+    hooks: &[Box<dyn PostMoveHook>],
+) -> Result<Option<String>, IndexError> {
+    if dest == source {
+        return Ok(None);
+    }
     // Collision-free by construction (Plan 2), but guard anyway.
-    let dest_vp = VaultPath::new(&dest).map_err(|e| IndexError::Other(e.to_string()))?;
-    if vault.resolve(&dest_vp).exists() {
+    if vault
+        .resolve(&VaultPath::new(dest).map_err(|e| IndexError::Other(e.to_string()))?)
+        .exists()
+    {
         return Ok(None);
     }
     // Plan the move; the planner's immutable borrow of `index` ends when `plan`
@@ -39,12 +59,12 @@ pub fn reconcile_page(
     let plan = {
         let planner = MutationPlanner::new(vault, index);
         planner.plan(&MutationOp::MovePage {
-            source: path.to_string(),
-            destination: dest.clone(),
+            source: source.to_string(),
+            destination: dest.to_string(),
         })?
     };
     plan.execute(vault, index, hooks)?;
-    Ok(Some(dest))
+    Ok(Some(dest.to_string()))
 }
 
 /// Reconcile every page in the index. Returns the number moved. Best-effort:

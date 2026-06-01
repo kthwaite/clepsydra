@@ -52,6 +52,35 @@ pub fn project_path(
     }
 }
 
+/// Like `project_path`, but for an *explicit* project clear: strip the page's
+/// subfolder entirely, keeping only the top folder (forced by `declared_kind`
+/// if present, else the current top) plus the filename. Returns `None` if the
+/// page is already at top level. NOT used by the conservative sweep — only by
+/// an explicit clear_project assign (a deliberate user action, unlike passive
+/// drift, which must never strip an unmanaged subfolder).
+pub fn project_path_cleared(current: &str, declared_kind: Option<Kind>) -> Option<String> {
+    let trimmed = current.trim_start_matches('/');
+    let comps: Vec<&str> = trimmed.split('/').filter(|s| !s.is_empty()).collect();
+    let filename = (*comps.last()?).to_string();
+    let dirs = &comps[..comps.len() - 1];
+    let current_top = dirs.first().copied();
+    let expected_top = match declared_kind {
+        Some(k) => Some(k.canonical_folder().to_string()),
+        None => current_top.map(str::to_string),
+    };
+    let mut expected = String::new();
+    if let Some(t) = &expected_top {
+        expected.push_str(t);
+        expected.push('/');
+    }
+    expected.push_str(&filename);
+    if expected == trimmed {
+        None
+    } else {
+        Some(expected)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +129,28 @@ mod tests {
             Some("notes/x.md")
         );
         assert_eq!(project_path("x.md", None, None), None);
+    }
+
+    #[test]
+    fn cleared_strips_subfolder() {
+        assert_eq!(
+            project_path_cleared("notes/clep/x.md", None).as_deref(),
+            Some("notes/x.md")
+        );
+    }
+    #[test]
+    fn cleared_with_kind_uses_kind_top() {
+        assert_eq!(
+            project_path_cleared("notes/clep/x.md", Some(Kind::Quote)).as_deref(),
+            Some("quotes/x.md")
+        );
+    }
+    #[test]
+    fn cleared_already_top_returns_none() {
+        assert_eq!(project_path_cleared("notes/x.md", None), None);
+    }
+    #[test]
+    fn cleared_root_file_returns_none() {
+        assert_eq!(project_path_cleared("x.md", None), None);
     }
 }
