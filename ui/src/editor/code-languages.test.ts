@@ -49,6 +49,20 @@ describe("code-languages", () => {
     expect(ids).not.toContain("ts");
   });
 
+  it("registers tsx and jsx (curated commons absent from the base bundle)", () => {
+    const ids = listLanguageIds();
+    expect(ids).toContain("tsx");
+    expect(ids).toContain("jsx");
+  });
+
+  it("excludes the plaintext family (the Plain text reset covers that)", () => {
+    const ids = listLanguageIds();
+    expect(ids).not.toContain("plaintext");
+    expect(ids).not.toContain("txt");
+    expect(ids).not.toContain("text");
+    expect(ids).not.toContain("plain");
+  });
+
   it("lists each grammar at most once", () => {
     const ids = listLanguageIds();
     const grammars = refractor.languages as Record<string, object>;

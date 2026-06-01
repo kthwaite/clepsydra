@@ -30,6 +30,7 @@ function renderInEditor(language?: string) {
       <Editable renderElement={renderElement} />
     </Slate>,
   );
+  return editor;
 }
 
 describe("CodeBlockElement", () => {
@@ -48,5 +49,25 @@ describe("CodeBlockElement", () => {
     expect(screen.queryByPlaceholderText("Search language…")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "RUST" }));
     expect(screen.getByPlaceholderText("Search language…")).toBeDefined();
+  });
+
+  it("selecting a language updates the code block's language", () => {
+    const editor = renderInEditor("rust");
+    fireEvent.click(screen.getByRole("button", { name: "RUST" }));
+    const input = screen.getByPlaceholderText("Search language…");
+    fireEvent.change(input, { target: { value: "python" } });
+    fireEvent.mouseDown(screen.getByText("PYTHON"));
+    expect((editor.children[0] as { language?: string }).language).toBe(
+      "python",
+    );
+  });
+
+  it("selecting Plain text clears the code block's language", () => {
+    const editor = renderInEditor("rust");
+    fireEvent.click(screen.getByRole("button", { name: "RUST" }));
+    fireEvent.mouseDown(screen.getByText("Plain text"));
+    expect(
+      (editor.children[0] as { language?: string }).language,
+    ).toBeUndefined();
   });
 });

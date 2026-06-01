@@ -1,4 +1,4 @@
-import { refractor } from "refractor";
+import { refractor } from "#/editor/refractor-languages";
 
 /** Common languages surfaced first in the picker, in priority order. */
 export const COMMON_LANGUAGES = [
@@ -27,10 +27,18 @@ export function displayLabel(id: string): string {
  * All refractor-registered grammars, with the registered subset of
  * COMMON_LANGUAGES pinned to the front (in COMMON order) and the rest
  * following alphabetically. Aliases are collapsed to a single canonical
- * name per grammar, so each grammar appears at most once.
+ * name per grammar, so each grammar appears at most once. The plaintext
+ * family (plain/plaintext/text/txt — all the same empty grammar) is
+ * excluded; the picker's dedicated "Plain text" reset row covers it.
  */
 export function listLanguageIds(): string[] {
-  const registered = refractor.listLanguages();
+  // Drop the plaintext family by grammar identity (plain/plaintext/text/txt
+  // all map to the same empty grammar object), so they vanish in one filter.
+  const grammars = refractor.languages as Record<string, object>;
+  const plainGrammar = grammars.plaintext;
+  const registered = refractor
+    .listLanguages()
+    .filter((id) => grammars[id] !== plainGrammar);
   const registeredSet = new Set(registered);
   const common = COMMON_LANGUAGES.filter((id) => registeredSet.has(id));
 
@@ -38,7 +46,6 @@ export function listLanguageIds(): string[] {
   // of their canonical grammar ("javascript", "typescript"). Collapse them so
   // the picker lists each grammar once. Aliases share grammar-object identity
   // with their canonical name.
-  const grammars = refractor.languages as Record<string, object>;
   const claimed = new Set<object>(common.map((id) => grammars[id]));
 
   const chosen = new Map<object, string>();
