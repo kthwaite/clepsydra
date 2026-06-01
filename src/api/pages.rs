@@ -137,6 +137,29 @@ pub struct AssignRequest {
     pub clear_project: bool,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BulkAssignRequest {
+    /// Page paths to assign. Each is processed independently.
+    pub paths: Vec<String>,
+    /// Declared kind token applied to every path (see `AssignRequest::kind`).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Declared project applied to every path (see `AssignRequest::project`).
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Clear the project on every path (see `AssignRequest::clear_project`).
+    #[serde(default)]
+    pub clear_project: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BulkAssignResponse {
+    /// `from -> to` for each moved page.
+    pub moved: Vec<(String, String)>,
+    /// `path -> error` for failures (best-effort: one bad page doesn't abort).
+    pub failed: Vec<(String, String)>,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -905,6 +928,37 @@ pub async fn assign_page(
     Ok(Json(page_detail_from_page(&page, &final_vp)))
 }
 
+#[utoipa::path(
+    post,
+    path = "/pages-assign-bulk",
+    context_path = "/api/vault",
+    tag = "Pages",
+    request_body = BulkAssignRequest,
+    responses(
+        (status = 200, description = "Per-path assign results", body = BulkAssignResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn assign_bulk(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BulkAssignRequest>,
+) -> Result<Json<BulkAssignResponse>, ApiError> {
+    let mut moved = Vec::new();
+    let mut failed = Vec::new();
+    for path in body.paths {
+        let req = AssignRequest {
+            kind: body.kind.clone(),
+            project: body.project.clone(),
+            clear_project: body.clear_project,
+        };
+        match assign_page(State(Arc::clone(&state)), Path(path.clone()), Json(req)).await {
+            Ok(detail) => moved.push((path, detail.0.path)),
+            Err(e) => failed.push((path, e.error)),
+        }
+    }
+    Ok(Json(BulkAssignResponse { moved, failed }))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1263,5 +1317,76 @@ Some quoted text.\n";
                 .resolve(&VaultPath::new("notes/q.md").unwrap())
                 .exists()
         );
+    }
+
+    #[tokio::test]
+    async fn bulk_assign_moves_all_and_reports() {
+        let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "notes/a.md",
+            "---\nid: 0190f8a0-0000-7000-8000-00000000000e\n---\nb\n",
+        )
+        .await;
+        seed_and_index(
+            &state,
+            "notes/b.md",
+            "---\nid: 0190f8a0-0000-7000-8000-00000000000f\n---\nb\n",
+        )
+        .await;
+
+        let resp = assign_bulk(
+            State(Arc::clone(&state)),
+            Json(BulkAssignRequest {
+                paths: vec!["notes/a.md".into(), "notes/b.md".into()],
+                kind: Some("QUOTE".into()),
+                project: Some("clep".into()),
+                clear_project: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.0.moved.len(), 2);
+        assert!(resp.0.failed.is_empty());
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("quotes/clep/a.md").unwrap())
+                .exists()
+        );
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("quotes/clep/b.md").unwrap())
+                .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_assign_reports_failures() {
+        let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "notes/a.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000011\n---\nb\n",
+        )
+        .await;
+
+        let resp = assign_bulk(
+            State(Arc::clone(&state)),
+            Json(BulkAssignRequest {
+                paths: vec!["notes/a.md".into(), "notes/missing.md".into()],
+                kind: Some("QUOTE".into()),
+                project: None,
+                clear_project: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.0.moved.len(), 1, "the valid page should move");
+        assert_eq!(resp.0.failed.len(), 1, "the missing page should fail");
+        assert_eq!(resp.0.failed[0].0, "notes/missing.md");
     }
 }
