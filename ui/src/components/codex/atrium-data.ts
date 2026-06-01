@@ -202,12 +202,12 @@ export function deriveInventory(
     cells.push({
       label: "Orphans",
       value: n(stats.orphan_pages),
-      sub: "pages, 0 backlinks",
+      sub: "no backlinks",
     });
     cells.push({
       label: "Isolated",
       value: n(stats.isolated_pages),
-      sub: "pages, no links",
+      sub: "no links in or out",
     });
   }
 

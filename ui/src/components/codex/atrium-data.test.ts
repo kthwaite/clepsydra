@@ -102,6 +102,9 @@ describe("deriveInventory", () => {
     expect(byLabel.Orphans.value).toBe("4");
     expect(byLabel.Isolated.value).toBe("1");
     expect(byLabel.Orphans.tone).toBeUndefined(); // informational, not a warning
+    expect(byLabel.Isolated.tone).toBeUndefined();
+    expect(byLabel.Orphans.sub).toBe("no backlinks");
+    expect(byLabel.Isolated.sub).toBe("no links in or out");
   });
 
   it("derives today/7d cells from item timestamps", () => {
