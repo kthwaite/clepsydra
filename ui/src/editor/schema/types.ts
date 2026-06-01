@@ -115,6 +115,8 @@ export interface CustomText {
   underline?: true;
   code?: true;
   strikethrough?: true;
+  superscript?: true;
+  subscript?: true;
   /** Prism token type applied by code-block decorations (e.g. "keyword"). */
   token?: string;
 }

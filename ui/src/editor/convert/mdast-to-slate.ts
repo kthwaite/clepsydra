@@ -25,6 +25,8 @@ interface Marks {
   underline?: true;
   code?: true;
   strikethrough?: true;
+  superscript?: true;
+  subscript?: true;
 }
 
 /**
