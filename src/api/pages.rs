@@ -866,6 +866,10 @@ pub async fn assign_page(
     page.meta.updated_at = Some(Utc::now());
 
     // 3. Write the updated frontmatter back to the file in place.
+    // Note: there is a bounded window between this write and the index update
+    // below — if the process dies in between, the on-disk frontmatter is ahead
+    // of the index. This is self-healing: the next serve-startup sweep re-reads
+    // the (correct) frontmatter and reconciles from it, so the drift resolves.
     let content = write_page_content(&page.meta, &page.body);
     std::fs::write(&abs, &content)
         .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
