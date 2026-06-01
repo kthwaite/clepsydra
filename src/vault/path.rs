@@ -317,6 +317,13 @@ mod tests {
     }
 
     #[test]
+    fn stem_strips_only_trailing_md_for_dotted_filenames() {
+        let vp = VaultPath::new("notes/20260531.redesign-retro.3kF9a2bQ.md").unwrap();
+        assert_eq!(vp.stem(), "20260531.redesign-retro.3kF9a2bQ");
+        assert_eq!(vp.filename(), "20260531.redesign-retro.3kF9a2bQ.md");
+    }
+
+    #[test]
     fn detects_canonical_page_filename() {
         assert!(is_canonical_page_filename(
             "20260531.redesign-retro.3kF9a2bQ.md"
