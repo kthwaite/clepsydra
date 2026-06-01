@@ -565,7 +565,9 @@ pub async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<VaultStats
             let isolated_pages: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM pages p
                   WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.target_id = p.id)
-                    AND NOT EXISTS (SELECT 1 FROM links l WHERE l.source_id = p.id)",
+                    AND NOT EXISTS (SELECT 1 FROM links l
+                                     WHERE l.source_id = p.id
+                                       AND l.target_id IS NOT NULL)",
                 [],
                 |row| row.get(0),
             )?;
@@ -1062,11 +1064,15 @@ Some quoted text.\n";
         let page_dir = state.vault.root().join("notes");
         std::fs::create_dir_all(&page_dir).unwrap();
 
-        // Page A links to B; B has no links; C is fully disconnected.
+        // Page A links to B; B has no links; C is fully disconnected;
+        // D's only outbound link is dangling (unresolved).
         // After resolution:
-        //   A: 0 inbound, 1 outbound -> orphan, NOT isolated
+        //   A: 0 inbound, 1 resolved outbound -> orphan, NOT isolated
         //   B: 1 inbound (from A), 0 outbound -> not orphan, not isolated
         //   C: 0 inbound, 0 outbound -> orphan AND isolated
+        //   D: 0 inbound, 0 *resolved* outbound -> orphan AND isolated
+        //      (its [[Nonexistent]] link stays unresolved, so it is
+        //       disconnected from the resolved graph)
         std::fs::write(
             page_dir.join("a.md"),
             "\
@@ -1098,8 +1104,18 @@ id: 01900000-0000-7000-8000-000000000022\n\
 all alone\n",
         )
         .unwrap();
+        std::fs::write(
+            page_dir.join("d.md"),
+            "\
+---\n\
+id: 01900000-0000-7000-8000-000000000023\n\
+---\n\
+\n\
+points to [[Nonexistent]]\n",
+        )
+        .unwrap();
 
-        for name in ["notes/a.md", "notes/B.md", "notes/c.md"] {
+        for name in ["notes/a.md", "notes/B.md", "notes/c.md", "notes/d.md"] {
             let vp = VaultPath::new(name).unwrap();
             state
                 .index
@@ -1117,16 +1133,27 @@ all alone\n",
 
         let s = stats(State(state)).await.unwrap().0;
 
-        // Guard: the [[B]] wikilink must have actually resolved, otherwise the
-        // orphan/isolated counts below are measuring an unresolved corpus.
+        // Guard: only [[B]] resolves; D's [[Nonexistent]] stays unresolved.
+        // This proves the corpus is resolved (not all-NULL) AND that D
+        // contributes a dangling outbound row — the case that distinguishes
+        // "isolated counts outbound rows" from "isolated counts the resolved
+        // graph".
         assert_eq!(
             s.links_resolved, 1,
             "the [[B]] wikilink should resolve to exactly one target"
         );
-        assert_eq!(s.orphan_pages, 2, "A and C have no inbound resolved links");
+        assert!(
+            s.links_unresolved >= 1,
+            "D's [[Nonexistent]] link should remain unresolved (target_id NULL)"
+        );
         assert_eq!(
-            s.isolated_pages, 1,
-            "only C has neither inbound nor outbound resolved links"
+            s.orphan_pages, 3,
+            "A, C, and D have zero inbound resolved links"
+        );
+        assert_eq!(
+            s.isolated_pages, 2,
+            "C and D are disconnected from the resolved graph \
+             (D's only outbound link is unresolved)"
         );
     }
 }
