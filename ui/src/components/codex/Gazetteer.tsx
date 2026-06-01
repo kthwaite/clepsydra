@@ -1,13 +1,35 @@
 import { useMemo, useState } from "react";
+import {
+  ListBox,
+  ListBoxItem,
+  Popover,
+  Select,
+  Button as SelectButton,
+} from "react-aria-components";
 import { useContentIndex, useTags } from "#/api/index";
+import { useAssignBulk } from "#/api/pages";
+import type { components } from "#/api/schema";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { cn } from "#/components/ui/utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { KINDS, type Kind, kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { useProjects } from "#/lib/useProjects";
 import {
   filterAndSortRows,
   type GazetteerSort,
 } from "./gazetteer-filter";
+
+type BulkAssignResponse = components["schemas"]["BulkAssignResponse"];
+
+/** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
+export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
 
 type Props = {
   initialTag?: string;
@@ -19,6 +41,8 @@ export function Gazetteer({ initialTag }: Props) {
   );
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<GazetteerSort>("ts");
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [failures, setFailures] = useState<[string, string][]>([]);
 
   const toggleTag = (t: string) =>
     setSelectedTags((cur) =>
@@ -27,6 +51,8 @@ export function Gazetteer({ initialTag }: Props) {
   const { data: tagsData } = useTags();
   const { data: content } = useContentIndex(500);
   const openTab = useOpenTab();
+  const bulk = useAssignBulk();
+  const projects = useProjects();
 
   const tags = tagsData ?? [];
   const items = content?.items ?? [];
@@ -35,6 +61,50 @@ export function Gazetteer({ initialTag }: Props) {
     () => filterAndSortRows(items, { tags: selectedTags, query, sort }),
     [items, selectedTags, query, sort],
   );
+
+  const selected = [...selectedPaths];
+
+  const toggleRow = (path: string) =>
+    setSelectedPaths((cur) => toggleInSet(cur, path));
+
+  const clearSelection = () => {
+    setSelectedPaths(new Set());
+    setFailures([]);
+  };
+
+  const allVisibleSelected =
+    rows.length > 0 && rows.every((n) => selectedPaths.has(n.path));
+
+  const toggleAllVisible = () =>
+    setSelectedPaths(
+      allVisibleSelected ? new Set() : new Set(rows.map((n) => n.path)),
+    );
+
+  const onBulkDone = (data: BulkAssignResponse) => {
+    setSelectedPaths(new Set());
+    setFailures(data.failed.length > 0 ? data.failed : []);
+  };
+
+  const startBulk = () => setFailures([]);
+
+  const applyKind = (kind: Kind) => {
+    startBulk();
+    bulk.mutate({ body: { paths: selected, kind } }, { onSuccess: onBulkDone });
+  };
+  const applyProject = (project: string) => {
+    startBulk();
+    bulk.mutate(
+      { body: { paths: selected, project } },
+      { onSuccess: onBulkDone },
+    );
+  };
+  const applyClearProject = () => {
+    startBulk();
+    bulk.mutate(
+      { body: { paths: selected, clear_project: true } },
+      { onSuccess: onBulkDone },
+    );
+  };
 
   const tagSummary =
     selectedTags.length > 0
@@ -99,11 +169,83 @@ export function Gazetteer({ initialTag }: Props) {
         ))}
       </div>
 
+      {/* bulk action bar — only when rows are selected */}
+      {selected.length > 0 && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-rule bg-paper-2 px-5 py-2">
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="cl-mono cursor-pointer text-[10px] uppercase tracking-[0.12em] text-ink-mute transition-colors hover:text-hot"
+          >
+            ✕ {selected.length} selected
+          </button>
+          <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+            ↦ assign
+          </span>
+          <Select
+            aria-label="Set kind for selection"
+            isDisabled={bulk.isPending}
+            onSelectionChange={(k) => k && applyKind(k as Kind)}
+          >
+            <SelectButton
+              className={cn(
+                "cl-mono inline-flex cursor-pointer items-center gap-1.5 border border-rule px-1.5 py-[2px] text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none transition-colors",
+                "data-[hovered]:border-accent data-[hovered]:text-ink",
+                "data-[focus-visible]:outline data-[focus-visible]:outline-1 data-[focus-visible]:outline-accent",
+                "data-[disabled]:cursor-default data-[disabled]:text-ink-mute",
+              )}
+            >
+              Set kind…
+            </SelectButton>
+            <Popover className="border border-rule bg-paper outline-none">
+              <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
+                {KINDS.map((k) => (
+                  <ListBoxItem
+                    key={k}
+                    id={k}
+                    className={cn(
+                      "cursor-pointer px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none",
+                      "data-[hovered]:bg-highlight data-[hovered]:text-ink",
+                      "data-[focused]:bg-highlight data-[focused]:text-ink",
+                    )}
+                  >
+                    {kindLabel(k)}
+                  </ListBoxItem>
+                ))}
+              </ListBox>
+            </Popover>
+          </Select>
+          <div className="w-[180px]">
+            <ProjectCombo
+              value={null}
+              options={projects}
+              onAssign={applyProject}
+              onClear={applyClearProject}
+            />
+          </div>
+          {failures.length > 0 && (
+            <span className="cl-mono text-[10px] text-hot">
+              ⚠ {failures.length} failed: {shortFolio(failures[0][0])} —{" "}
+              {failures[0][1]}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* table */}
       <div className="cl-noscroll min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-left">
           <thead className="sticky top-0 z-10 bg-paper">
             <tr className="cl-mono border-b border-rule text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+              <th className="w-[36px] px-3 py-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible rows"
+                  checked={allVisibleSelected}
+                  onChange={toggleAllVisible}
+                  className="cursor-pointer accent-accent"
+                />
+              </th>
               <Th w="48px">№</Th>
               <Th w="150px">File-ID</Th>
               <Th>Title · excerpt</Th>
@@ -125,6 +267,19 @@ export function Gazetteer({ initialTag }: Props) {
                   onClick={() => openTab("page", n.path, n.title || n.path)}
                   className="cursor-pointer border-b border-dotted border-rule-soft align-baseline hover:bg-paper-2"
                 >
+                  <td
+                    className="px-3 py-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${n.title || n.path}`}
+                      checked={selectedPaths.has(n.path)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleRow(n.path)}
+                      className="cursor-pointer accent-accent"
+                    />
+                  </td>
                   <td className="cl-mono px-3 py-1.5 text-[10px] tabular-nums text-ink-mute">
                     {String(i + 1).padStart(3, "0")}
                   </td>
@@ -167,7 +322,7 @@ export function Gazetteer({ initialTag }: Props) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="cl-marg px-3 py-6 text-center">
+                <td colSpan={7} className="cl-marg px-3 py-6 text-center">
                   ∅ no folios{selectedTags.length > 0 ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}` : ""}
                   {query ? ` matching “${query}”` : ""}.
                 </td>
