@@ -827,6 +827,10 @@ pub struct ContentEntry {
     description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     word_count: Option<i64>,
+    kind: String,
+    inferred: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project: Option<String>,
 }
 
 #[utoipa::path(
@@ -852,12 +856,24 @@ pub async fn content_index(
         .with_index(move |index, vault| {
             let conn = index.connection();
 
-            let mut page_stmt = conn.prepare("SELECT id, path, title FROM pages")?;
+            let mut page_stmt = conn.prepare(
+                "SELECT id, path, title, kind, kind_inferred, project FROM pages",
+            )?;
 
-            let pages: Vec<(String, String, Option<String>)> = page_stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
+            type PageRow = (String, String, Option<String>, String, i64, Option<String>);
+            let pages: Vec<PageRow> = page_stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        ))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
 
             // Bulk-load tags grouped by page_id (was N+1 per page).
             let mut tags_by_page: std::collections::HashMap<String, Vec<String>> =
@@ -890,7 +906,7 @@ pub async fn content_index(
 
             let mut entries = Vec::with_capacity(pages.len());
 
-            for (page_id, path, title) in &pages {
+            for (page_id, path, title, kind, kind_inferred, project) in &pages {
                 let tags = tags_by_page.remove(page_id).unwrap_or_default();
                 let links = links_by_page.remove(page_id).unwrap_or_default();
 
@@ -923,6 +939,9 @@ pub async fn content_index(
                     updated_at,
                     description,
                     word_count,
+                    kind: kind.clone(),
+                    inferred: *kind_inferred != 0,
+                    project: project.clone(),
                 });
             }
 
@@ -933,6 +952,77 @@ pub async fn content_index(
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(PaginatedResponse::from_vec(entries, &pagination)))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::{Query, State};
+
+    use super::*;
+    use crate::api::pagination::PaginationParams;
+    use crate::state_test_support::make_state;
+    use crate::vault::index::IndexError;
+    use crate::vault::path::VaultPath;
+
+    #[tokio::test]
+    async fn content_index_returns_kind_inferred_project() {
+        let (state, _tmp) = make_state().await;
+
+        // Write a page with type: quote and project: clepsydra
+        let page_dir = state.vault.root().join("notes");
+        std::fs::create_dir_all(&page_dir).unwrap();
+        let page_content = "\
+---\n\
+id: 01900000-0000-7000-8000-000000000010\n\
+type: quote\n\
+project: clepsydra\n\
+---\n\
+\n\
+Some quoted text.\n";
+        std::fs::write(page_dir.join("q.md"), page_content).unwrap();
+
+        // Index the page
+        let vp = VaultPath::new("notes/q.md").unwrap();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                Ok::<_, IndexError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Call the handler
+        let resp = content_index(
+            State(state),
+            Query(PaginationParams {
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let item = resp
+            .0
+            .items
+            .iter()
+            .find(|e| e.path == "notes/q.md")
+            .expect("notes/q.md not found in content-index");
+
+        assert_eq!(item.kind, "QUOTE", "kind should be QUOTE");
+        assert!(!item.inferred, "kind should not be inferred when declared");
+        assert_eq!(
+            item.project.as_deref(),
+            Some("clepsydra"),
+            "project should be clepsydra"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
