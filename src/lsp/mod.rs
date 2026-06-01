@@ -168,7 +168,20 @@ impl LanguageServer for LspBackend {
             Err(e) | Ok(Err(e)) => {
                 tracing::warn!("did_save reconcile failed for {path}: {e}");
             }
-            Ok(Ok(_)) => {}
+            Ok(Ok(Some(new_path))) => {
+                // The file moved on disk; the editor's open buffer still points
+                // at the old URI. Full rename plumbing (workspace/didRenameFiles)
+                // is a v1 follow-up — for now just notify the operator. Best-effort.
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!(
+                            "clepsydra: moved {path} → {new_path} (folder follows kind/project)"
+                        ),
+                    )
+                    .await;
+            }
+            Ok(Ok(None)) => {}
         }
 
         // Refresh canonical name snapshot
