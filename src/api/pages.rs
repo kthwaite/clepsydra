@@ -154,8 +154,10 @@ pub struct BulkAssignRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BulkAssignResponse {
-    /// `from -> to` for each moved page.
+    /// `original -> final` for each page that actually relocated.
     pub moved: Vec<(String, String)>,
+    /// Paths that were assigned successfully but did NOT relocate.
+    pub unchanged: Vec<String>,
     /// `path -> error` for failures (best-effort: one bad page doesn't abort).
     pub failed: Vec<(String, String)>,
 }
@@ -944,6 +946,7 @@ pub async fn assign_bulk(
     Json(body): Json<BulkAssignRequest>,
 ) -> Result<Json<BulkAssignResponse>, ApiError> {
     let mut moved = Vec::new();
+    let mut unchanged = Vec::new();
     let mut failed = Vec::new();
     for path in body.paths {
         let req = AssignRequest {
@@ -952,11 +955,21 @@ pub async fn assign_bulk(
             clear_project: body.clear_project,
         };
         match assign_page(State(Arc::clone(&state)), Path(path.clone()), Json(req)).await {
-            Ok(detail) => moved.push((path, detail.0.path)),
+            Ok(detail) => {
+                if detail.0.path != path {
+                    moved.push((path, detail.0.path));
+                } else {
+                    unchanged.push(path);
+                }
+            }
             Err(e) => failed.push((path, e.error)),
         }
     }
-    Ok(Json(BulkAssignResponse { moved, failed }))
+    Ok(Json(BulkAssignResponse {
+        moved,
+        unchanged,
+        failed,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,6 +1361,7 @@ Some quoted text.\n";
         .unwrap();
 
         assert_eq!(resp.0.moved.len(), 2);
+        assert!(resp.0.unchanged.is_empty());
         assert!(resp.0.failed.is_empty());
         assert!(
             state
@@ -1388,5 +1402,33 @@ Some quoted text.\n";
         assert_eq!(resp.0.moved.len(), 1, "the valid page should move");
         assert_eq!(resp.0.failed.len(), 1, "the missing page should fail");
         assert_eq!(resp.0.failed[0].0, "notes/missing.md");
+    }
+
+    #[tokio::test]
+    async fn bulk_assign_noop_goes_to_unchanged() {
+        let (state, _tmp) = make_state().await;
+        // Already in its projected folder for kind=QUOTE, so assign is a no-op move.
+        seed_and_index(
+            &state,
+            "quotes/q.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000012\n---\nb\n",
+        )
+        .await;
+
+        let resp = assign_bulk(
+            State(Arc::clone(&state)),
+            Json(BulkAssignRequest {
+                paths: vec!["quotes/q.md".into()],
+                kind: Some("QUOTE".into()),
+                project: None,
+                clear_project: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(resp.0.moved.is_empty(), "no relocation should occur");
+        assert_eq!(resp.0.unchanged, vec!["quotes/q.md".to_string()]);
+        assert!(resp.0.failed.is_empty());
     }
 }
