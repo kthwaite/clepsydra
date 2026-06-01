@@ -40,7 +40,10 @@ export function ProjectCombo({
       return;
     }
     const slug = draft.trim();
-    if (slug && slug !== value) onAssign(slug);
+    if (slug && slug !== value) {
+      justSelectedRef.current = true;
+      onAssign(slug);
+    }
   };
 
   return (

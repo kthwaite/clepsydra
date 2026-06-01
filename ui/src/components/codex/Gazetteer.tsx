@@ -8,7 +8,7 @@ import {
 } from "react-aria-components";
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
-import type { components } from "#/api/schema";
+import type { BulkAssignResponse } from "#/api/types";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
@@ -20,8 +20,6 @@ import {
   filterAndSortRows,
   type GazetteerSort,
 } from "./gazetteer-filter";
-
-type BulkAssignResponse = components["schemas"]["BulkAssignResponse"];
 
 /** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
 export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
@@ -64,8 +62,10 @@ export function Gazetteer({ initialTag }: Props) {
 
   const selected = [...selectedPaths];
 
-  const toggleRow = (path: string) =>
+  const toggleRow = (path: string) => {
+    setFailures([]);
     setSelectedPaths((cur) => toggleInSet(cur, path));
+  };
 
   const clearSelection = () => {
     setSelectedPaths(new Set());
@@ -75,10 +75,13 @@ export function Gazetteer({ initialTag }: Props) {
   const allVisibleSelected =
     rows.length > 0 && rows.every((n) => selectedPaths.has(n.path));
 
-  const toggleAllVisible = () =>
+  const toggleAllVisible = () => {
+    if (rows.length === 0) return;
+    setFailures([]);
     setSelectedPaths(
       allVisibleSelected ? new Set() : new Set(rows.map((n) => n.path)),
     );
+  };
 
   const onBulkDone = (data: BulkAssignResponse) => {
     setSelectedPaths(new Set());
@@ -88,10 +91,12 @@ export function Gazetteer({ initialTag }: Props) {
   const startBulk = () => setFailures([]);
 
   const applyKind = (kind: Kind) => {
+    if (bulk.isPending) return;
     startBulk();
     bulk.mutate({ body: { paths: selected, kind } }, { onSuccess: onBulkDone });
   };
   const applyProject = (project: string) => {
+    if (bulk.isPending) return;
     startBulk();
     bulk.mutate(
       { body: { paths: selected, project } },
@@ -99,6 +104,7 @@ export function Gazetteer({ initialTag }: Props) {
     );
   };
   const applyClearProject = () => {
+    if (bulk.isPending) return;
     startBulk();
     bulk.mutate(
       { body: { paths: selected, clear_project: true } },
@@ -243,6 +249,7 @@ export function Gazetteer({ initialTag }: Props) {
                   aria-label="Select all visible rows"
                   checked={allVisibleSelected}
                   onChange={toggleAllVisible}
+                  disabled={rows.length === 0}
                   className="cursor-pointer accent-accent"
                 />
               </th>

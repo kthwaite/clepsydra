@@ -69,3 +69,6 @@ export type SearchResponse = JsonResponse<
   operations["search"]["responses"][200]
 >;
 export type SearchQueryParams = operations["search"]["parameters"]["query"];
+
+export type BulkAssignRequest = components["schemas"]["BulkAssignRequest"];
+export type BulkAssignResponse = components["schemas"]["BulkAssignResponse"];
