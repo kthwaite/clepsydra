@@ -604,4 +604,29 @@ See [[Other Page]] for more.`;
       ]);
     });
   });
+
+  describe("superscript / subscript", () => {
+    type Leaf = {
+      text?: string;
+      superscript?: true;
+      subscript?: true;
+      children?: Leaf[];
+    };
+
+    it("parses inline <sup>/<sub> back into marks", () => {
+      const result = markdownToSlate("H<sub>2</sub>O and x<sup>2</sup>");
+      const leaves: Leaf[] = [];
+      const walk = (n: Leaf) => {
+        if (n.text !== undefined) leaves.push(n);
+        for (const child of n.children ?? []) walk(child);
+      };
+      for (const node of result) walk(node as Leaf);
+      expect(leaves.some((l) => l.subscript === true && l.text === "2")).toBe(
+        true,
+      );
+      expect(leaves.some((l) => l.superscript === true && l.text === "2")).toBe(
+        true,
+      );
+    });
+  });
 });

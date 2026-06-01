@@ -157,6 +157,20 @@ function convertBlockNode(
         };
         return el;
       }
+      const supMatch = value.match(/^<sup\s*>([\s\S]*?)<\/sup\s*>$/i);
+      if (supMatch) {
+        return {
+          type: "paragraph" as const,
+          children: [{ text: supMatch[1], superscript: true } as CustomText],
+        };
+      }
+      const subMatch = value.match(/^<sub\s*>([\s\S]*?)<\/sub\s*>$/i);
+      if (subMatch) {
+        return {
+          type: "paragraph" as const,
+          children: [{ text: subMatch[1], subscript: true } as CustomText],
+        };
+      }
       return null;
     }
 
@@ -216,6 +230,14 @@ function convertListItem(node: {
 const U_OPEN_RE = /^<u\s*>$/i;
 /** Match an isolated </u> closing tag (case-insensitive, optional whitespace). */
 const U_CLOSE_RE = /^<\/u\s*>$/i;
+/** Match an isolated <sup> opening tag (case-insensitive, optional whitespace). */
+const SUP_OPEN_RE = /^<sup\s*>$/i;
+/** Match an isolated </sup> closing tag (case-insensitive, optional whitespace). */
+const SUP_CLOSE_RE = /^<\/sup\s*>$/i;
+/** Match an isolated <sub> opening tag (case-insensitive, optional whitespace). */
+const SUB_OPEN_RE = /^<sub\s*>$/i;
+/** Match an isolated </sub> closing tag (case-insensitive, optional whitespace). */
+const SUB_CLOSE_RE = /^<\/sub\s*>$/i;
 
 function convertPhrasingContent(
   nodes: readonly (RootContent | WikiLinkMdastNode)[],
@@ -223,6 +245,8 @@ function convertPhrasingContent(
 ): Descendant[] {
   const result: Descendant[] = [];
   let underlineDepth = 0;
+  let superscriptDepth = 0;
+  let subscriptDepth = 0;
 
   for (const node of nodes) {
     if (node.type === "html") {
@@ -235,9 +259,29 @@ function convertPhrasingContent(
         if (underlineDepth > 0) underlineDepth--;
         continue;
       }
+      if (SUP_OPEN_RE.test(value)) {
+        superscriptDepth++;
+        continue;
+      }
+      if (SUP_CLOSE_RE.test(value)) {
+        if (superscriptDepth > 0) superscriptDepth--;
+        continue;
+      }
+      if (SUB_OPEN_RE.test(value)) {
+        subscriptDepth++;
+        continue;
+      }
+      if (SUB_CLOSE_RE.test(value)) {
+        if (subscriptDepth > 0) subscriptDepth--;
+        continue;
+      }
     }
-    const effectiveMarks: Marks =
-      underlineDepth > 0 ? { ...marks, underline: true } : marks;
+    const effectiveMarks: Marks = {
+      ...marks,
+      ...(underlineDepth > 0 ? { underline: true } : {}),
+      ...(superscriptDepth > 0 ? { superscript: true } : {}),
+      ...(subscriptDepth > 0 ? { subscript: true } : {}),
+    };
     const converted = convertPhrasingNode(node, effectiveMarks);
     for (const item of converted) {
       result.push(item);
@@ -349,6 +393,8 @@ function textNode(text: string, marks: Marks): CustomText {
   if (marks.underline) node.underline = true;
   if (marks.code) node.code = true;
   if (marks.strikethrough) node.strikethrough = true;
+  if (marks.superscript) node.superscript = true;
+  if (marks.subscript) node.subscript = true;
   return node;
 }
 
