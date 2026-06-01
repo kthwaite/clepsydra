@@ -25,6 +25,10 @@ use vault::index_handle::IndexHandle;
 use vault::sync::ChangeEvent;
 use vault::sync::watcher::VaultWatcher;
 
+/// Vault-relative path to the on-disk index/cache database. Shared by every
+/// callsite that opens a [`VaultIndex`] so they cannot drift.
+const INDEX_DB_RELATIVE: &str = ".clepsydra/cache.db";
+
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub server: ServerSettings,
@@ -342,7 +346,7 @@ pub(crate) async fn build_app_state(
     let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
     let cas = vault::cas::ContentStore::open(&cas_path)?;
 
-    let db_path = vault.root().join(".clepsydra/cache.db");
+    let db_path = vault.root().join(INDEX_DB_RELATIVE);
     let mut index = VaultIndex::open(&db_path)?;
 
     let stats = index.build(&vault)?;
@@ -450,6 +454,28 @@ fn maybe_spawn_lsp(enable_lsp: bool, state: &Arc<AppState>) {
             std::process::exit(0);
         });
     }
+}
+
+/// Resolve config + vault root the same way the server does, then open the vault
+/// and build a fully-derived [`VaultIndex`] (full deriver chain, links resolved).
+///
+/// Returns the owned `Vault` + `VaultIndex` for one-shot CLI commands (e.g.
+/// `relabel`) that need a `&mut VaultIndex` with a populated `links` table —
+/// mirroring the vault/index portion of [`build_app_state`] without spawning the
+/// index handle, watcher, or HTTP server.
+pub fn open_vault_and_index() -> Result<(Vault, VaultIndex), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let (settings, config_path) = Settings::load(&cwd)?;
+    let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+
+    let vault = Vault::open(&vault_root).map_err(|e| explain_startup_error(e, &vault_root))?;
+
+    let db_path = vault.root().join(INDEX_DB_RELATIVE);
+    let mut index = VaultIndex::open(&db_path)?;
+    index.build(&vault)?;
+    index.resolve_links()?;
+
+    Ok((vault, index))
 }
 
 /// Build the application state + settings for the server (cwd, config load,

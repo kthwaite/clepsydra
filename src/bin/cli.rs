@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use clepsydra::diagnostics::{self, DoctorOpts};
-use clepsydra::run_server;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::new_note::create_new_note;
+use clepsydra::{open_vault_and_index, run_server};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -78,6 +78,13 @@ enum Commands {
         #[arg(long)]
         lsp: bool,
     },
+    /// Rename authored pages to the canonical `yyyymmdd.slug.shortid.md` scheme.
+    #[command(about = "Relabel page filenames to the canonical identity scheme")]
+    Relabel {
+        /// Plan and print renames without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+    },
     #[command(
         about = "Print version",
         long_about = "Print the clepsydra version string. Equivalent to `clepsydra --version`."
@@ -120,6 +127,20 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Serve { lsp } => {
             run_server(lsp).await?;
+            Ok(0)
+        }
+        Commands::Relabel { dry_run } => {
+            // Open vault + a fully-derived index (full deriver chain, links
+            // resolved) via the same config path the server uses, so inbound
+            // wikilinks get rewritten on rename.
+            let (vault, mut index) = open_vault_and_index()?;
+            let report = clepsydra::vault::relabel::relabel(&vault, &mut index, dry_run)?;
+            println!(
+                "relabel: {} renamed, {} skipped{}",
+                report.renamed,
+                report.skipped,
+                if dry_run { " (dry run)" } else { "" }
+            );
             Ok(0)
         }
         Commands::Version => {
@@ -240,6 +261,22 @@ mod cli_tests {
         // assert that dispatch + human rendering succeeded — a render error
         // would surface as Err via `?`.
         assert!(result.is_ok(), "doctor dispatch/render failed: {result:?}");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn relabel_dry_run_returns_zero() {
+        let (_dir, root) = vault_in_tempdir();
+        // Seed one old-style (non-canonical) note so the index has something the
+        // dry run would plan to relabel.
+        std::fs::write(
+            root.join("Relabel Me.md"),
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000c1\ntitle: Relabel Me\ncreated_at: 2026-05-31T12:00:00Z\n---\nbody\n",
+        )
+        .unwrap();
+        let cli = Cli::try_parse_from(["clepsydra", "relabel", "--dry-run"]).unwrap();
+        let result = run_cli_in(&root, cli).await;
+        assert_eq!(result.unwrap(), 0);
     }
 
     #[tokio::test]
