@@ -796,6 +796,12 @@ pub async fn assign_page(
     let mut page = Page::from_file(&abs, vp.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
+    // No-op guard: nothing to assign means nothing to write/reconcile. Return
+    // the current detail without touching the file or the index.
+    if body.kind.is_none() && body.project.is_none() && !body.clear_project {
+        return Ok(Json(page_detail_from_page(&page, &vp)));
+    }
+
     // 2. Mutate declared kind/project in the loaded meta.
     if let Some(ref token) = body.kind {
         let parsed = crate::vault::kind::Kind::from_token(token)
@@ -808,23 +814,30 @@ pub async fn assign_page(
         page.meta.project = Some(project.clone());
     }
 
+    // Stamp updated_at (mirrors update_page). created_at is left intact —
+    // Plan 2's filename-date projection derives from created_at.
+    page.meta.updated_at = Some(Utc::now());
+
     // 3. Write the updated frontmatter back to the file in place.
     let content = write_page_content(&page.meta, &page.body);
     std::fs::write(&abs, &content)
         .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
 
-    // 4 + 5. Reindex at the current path, then reconcile (may move the page +
-    // rewrite inbound links). `reconcile_page` needs the `&mut` index, so both
-    // steps run inside the same `with_index` closure.
+    // 4 + 5. Reindex at the current path, resolve its links, then reconcile
+    // (may move the page + rewrite inbound links). `reconcile_page` needs the
+    // `&mut` index, so all steps run inside the same `with_index` closure.
+    // Hooks (e.g. AcademicMoveHook) fire on a reconcile move, so forward them.
     let path_for_index = path.clone();
+    let hooks = Arc::clone(&state.hooks);
     let final_path = state
         .index
         .with_index(move |index, vault| {
             let vp = VaultPath::new(&path_for_index)
                 .map_err(|e| crate::vault::index::IndexError::Other(e.to_string()))?;
             index.index_page(vault, &vp)?;
+            index.resolve_links_for_page(&vp)?;
             let moved =
-                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index)?;
+                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index, &hooks)?;
             Ok::<_, crate::vault::index::IndexError>(moved.unwrap_or(path_for_index))
         })
         .await
@@ -1031,6 +1044,152 @@ Some quoted text.\n";
                 .resolve(&VaultPath::new("quotes/q.md").unwrap())
                 .exists(),
             "page should now live at quotes/q.md"
+        );
+    }
+
+    /// Seed a page on disk and index it. Shared by the assign tests below.
+    async fn seed_and_index(state: &Arc<AppState>, rel: &str, content: &str) {
+        let abs = state.vault.root().join(rel);
+        std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+        std::fs::write(&abs, content).unwrap();
+        let vp = VaultPath::new(rel).unwrap();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn assign_unknown_kind_returns_400() {
+        let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "notes/q.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000010\n---\nbody\n",
+        )
+        .await;
+
+        let err = assign_page(
+            State(Arc::clone(&state)),
+            Path("notes/q.md".to_string()),
+            Json(AssignRequest {
+                kind: Some("BOGUS".to_string()),
+                project: None,
+                clear_project: false,
+            }),
+        )
+        .await
+        .expect_err("unknown kind must be rejected");
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST.as_u16());
+        // The source file must be untouched on rejection.
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("notes/q.md").unwrap())
+                .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_missing_page_returns_404() {
+        let (state, _tmp) = make_state().await;
+
+        let err = assign_page(
+            State(Arc::clone(&state)),
+            Path("notes/nope.md".to_string()),
+            Json(AssignRequest {
+                kind: Some("QUOTE".to_string()),
+                project: None,
+                clear_project: false,
+            }),
+        )
+        .await
+        .expect_err("missing page must 404");
+
+        assert_eq!(err.status, StatusCode::NOT_FOUND.as_u16());
+    }
+
+    #[tokio::test]
+    async fn assign_kind_no_move_when_already_in_folder() {
+        let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "quotes/x.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000011\n---\nbody\n",
+        )
+        .await;
+
+        let resp = assign_page(
+            State(Arc::clone(&state)),
+            Path("quotes/x.md".to_string()),
+            Json(AssignRequest {
+                kind: Some("QUOTE".to_string()),
+                project: None,
+                clear_project: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Already in the canonical folder: no move.
+        assert_eq!(resp.0.path, "quotes/x.md");
+        assert_eq!(resp.0.kind, "QUOTE");
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("quotes/x.md").unwrap())
+                .exists(),
+            "page should still exist at quotes/x.md"
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_clear_project_keeps_subfolder_and_clears_meta() {
+        // project_path with declared_project=None KEEPS the current subfolder
+        // (conservative invariant), so clearing `project` does NOT relocate the
+        // page. We assert no move, and that meta.project is now None.
+        let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "notes/clep/x.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000012\nproject: clep\n---\nbody\n",
+        )
+        .await;
+
+        let resp = assign_page(
+            State(Arc::clone(&state)),
+            Path("notes/clep/x.md".to_string()),
+            Json(AssignRequest {
+                kind: None,
+                project: None,
+                clear_project: true,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Conservative: clearing project leaves the subfolder in place.
+        assert_eq!(resp.0.path, "notes/clep/x.md");
+        assert_eq!(resp.0.meta.project, None, "project should be cleared in meta");
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("notes/clep/x.md").unwrap())
+                .exists(),
+            "page should still live at notes/clep/x.md"
+        );
+        assert!(
+            !state
+                .vault
+                .resolve(&VaultPath::new("notes/x.md").unwrap())
+                .exists(),
+            "page must NOT have been moved up to notes/x.md"
         );
     }
 }

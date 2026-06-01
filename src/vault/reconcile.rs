@@ -3,6 +3,7 @@
 //! the read-only index build — only from serve startup, LSP save, and assign.
 
 use super::Vault;
+use super::hooks::PostMoveHook;
 use super::index::{IndexError, VaultIndex};
 use super::mutation::{MutationOp, MutationPlanner};
 use super::page::Page;
@@ -10,11 +11,14 @@ use super::path::VaultPath;
 use super::projection::project_path;
 
 /// Reconcile a single page. Returns `Some(new_path)` if it was moved, else
-/// `None`. Reads declared kind/project from the file's frontmatter.
+/// `None`. Reads declared kind/project from the file's frontmatter. `hooks`
+/// fire after a move (e.g. `AcademicMoveHook` rewrites work paths in
+/// annotations); pass `&[]` when no post-move side effects are wanted.
 pub fn reconcile_page(
     vault: &Vault,
     index: &mut VaultIndex,
     path: &str,
+    hooks: &[Box<dyn PostMoveHook>],
 ) -> Result<Option<String>, IndexError> {
     let vp = VaultPath::new(path).map_err(|e| IndexError::Other(e.to_string()))?;
     let abs = vault.resolve(&vp);
@@ -39,13 +43,18 @@ pub fn reconcile_page(
             destination: dest.clone(),
         })?
     };
-    plan.execute(vault, index, &[])?;
+    plan.execute(vault, index, hooks)?;
     Ok(Some(dest))
 }
 
 /// Reconcile every page in the index. Returns the number moved. Best-effort:
 /// a page that fails to reconcile is logged and skipped, and the sweep continues.
-pub fn reconcile_all(vault: &Vault, index: &mut VaultIndex) -> Result<usize, IndexError> {
+/// `hooks` are forwarded to every per-page reconcile (see `reconcile_page`).
+pub fn reconcile_all(
+    vault: &Vault,
+    index: &mut VaultIndex,
+    hooks: &[Box<dyn PostMoveHook>],
+) -> Result<usize, IndexError> {
     // Snapshot the page paths up front so we don't hold a borrow of the index
     // (or iterate a table we are concurrently mutating) during the moves.
     let paths: Vec<String> = {
@@ -57,7 +66,7 @@ pub fn reconcile_all(vault: &Vault, index: &mut VaultIndex) -> Result<usize, Ind
     };
     let mut moved = 0;
     for path in paths {
-        match reconcile_page(vault, index, &path) {
+        match reconcile_page(vault, index, &path, hooks) {
             Ok(Some(_)) => moved += 1,
             Ok(None) => {}
             Err(e) => tracing::warn!("reconcile: skipping {path}: {e}"),
@@ -99,10 +108,10 @@ mod tests {
             "notes/q.md",
             "---\nid: 0190f8a0-0000-7000-8000-00000000000c\ntype: quote\n---\nbody",
         )]);
-        let dest = reconcile_page(&vault, &mut index, "notes/q.md").unwrap();
+        let dest = reconcile_page(&vault, &mut index, "notes/q.md", &[]).unwrap();
         assert_eq!(dest.as_deref(), Some("quotes/q.md"));
         assert_eq!(
-            reconcile_page(&vault, &mut index, "quotes/q.md").unwrap(),
+            reconcile_page(&vault, &mut index, "quotes/q.md", &[]).unwrap(),
             None
         );
     }
@@ -114,7 +123,7 @@ mod tests {
             "---\nid: 0190f8a0-0000-7000-8000-00000000000d\n---\nbody",
         )]);
         assert_eq!(
-            reconcile_page(&vault, &mut index, "notes/sub/x.md").unwrap(),
+            reconcile_page(&vault, &mut index, "notes/sub/x.md", &[]).unwrap(),
             None
         );
     }
@@ -133,7 +142,10 @@ mod tests {
                 "---\nid: 0190f8a0-0000-7000-8000-00000000000f\n---\noccupied",
             ),
         ]);
-        assert_eq!(reconcile_page(&vault, &mut index, "notes/q.md").unwrap(), None);
+        assert_eq!(
+            reconcile_page(&vault, &mut index, "notes/q.md", &[]).unwrap(),
+            None
+        );
         // Source untouched; destination not overwritten.
         assert!(vault.resolve(&VaultPath::new("notes/q.md").unwrap()).exists());
         let dest_body =
