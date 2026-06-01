@@ -42,11 +42,6 @@ export function KindSelect({ value, inferred, onAssign }: KindSelectProps) {
             <ListBoxItem
               key={k}
               id={k}
-              // textValue feeds react-aria's hidden autofill <select> options
-              // (HiddenSelect). Keeping it distinct from the visible label
-              // avoids a duplicate text node so the visible trigger is the sole
-              // "QUOTE" in the DOM; the visible listbox text below is the label.
-              textValue={k.toLowerCase()}
               className={cn(
                 "cursor-pointer px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none",
                 "data-[hovered]:bg-highlight data-[hovered]:text-ink",
