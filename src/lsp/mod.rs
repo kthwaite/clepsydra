@@ -147,8 +147,28 @@ impl LanguageServer for LspBackend {
             tracing::error!("index flush on save failed: {e}");
             return;
         }
+        let path = vault_path.as_str().to_string();
         if let Err(e) = self.state.index.resolve_links_for_page(vault_path).await {
             tracing::error!("link resolution on save failed: {e}");
+        }
+
+        // Best-effort reconcile: a page whose declared kind/project points to a
+        // different folder is moved (and inbound links rewritten). Conservative
+        // (undeclared pages are untouched). A failure is logged, never fatal.
+        let hooks = self.state.hooks.clone();
+        let reconcile_path = path.clone();
+        let reconcile = self
+            .state
+            .index
+            .with_index(move |index, vault| {
+                crate::vault::reconcile::reconcile_page(vault, index, &reconcile_path, &hooks)
+            })
+            .await;
+        match reconcile {
+            Err(e) | Ok(Err(e)) => {
+                tracing::warn!("did_save reconcile failed for {path}: {e}");
+            }
+            Ok(Ok(_)) => {}
         }
 
         // Refresh canonical name snapshot
@@ -1284,6 +1304,27 @@ mod tests {
         backend.did_save(params).await; // drives index_page + resolve_links + republish
         let docs = backend.documents.lock().await;
         assert!(!docs.get(&uri).unwrap().dirty);
+    }
+
+    #[tokio::test]
+    async fn did_save_reconciles_declared_kind() {
+        let (backend, tmp) = make_backend(&[("notes/q.md", "---\ntype: quote\n---\nbody\n")]);
+        let uri = uri_for(&backend, "notes/q.md");
+        open_doc(&backend, &uri, "---\ntype: quote\n---\nbody\n").await;
+        let params = DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text: None,
+        };
+        backend.did_save(params).await;
+        let root = tmp.path().join("vault");
+        assert!(
+            !root.join("notes/q.md").exists(),
+            "source path should be gone after reconcile"
+        );
+        assert!(
+            root.join("quotes/q.md").exists(),
+            "page should be moved to projected folder"
+        );
     }
 
     #[tokio::test]
