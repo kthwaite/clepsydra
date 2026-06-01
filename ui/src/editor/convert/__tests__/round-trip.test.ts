@@ -130,6 +130,13 @@ See [[Other Page]] for more.`;
     expect(normalize(roundTrip(input))).toBe(normalize(input));
   });
 
+  it("preserves superscript and subscript as inline <sup>/<sub> HTML", () => {
+    const input = "x<sup>2</sup> and H<sub>2</sub>O";
+    const result = roundTrip(input);
+    expect(result).toContain("<sup>2</sup>");
+    expect(result).toContain("<sub>2</sub>");
+  });
+
   it("preserves underline as inline <u> HTML", () => {
     const input = "Some <u>underlined</u> text";
     const result = normalize(roundTrip(input));
