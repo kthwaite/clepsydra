@@ -118,7 +118,7 @@ export function Gazetteer({ initialTag }: Props) {
           </thead>
           <tbody>
             {rows.map((n, i) => {
-              const kind = resolveKind({ path: n.path });
+              const kind = resolveKind({ path: n.path, kind: n.kind });
               return (
                 <tr
                   key={n.path}

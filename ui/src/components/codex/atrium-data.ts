@@ -30,6 +30,7 @@ export interface RecentItem {
   tags?: string[] | null;
   created_at?: string | null;
   updated_at?: string | null;
+  kind?: string | null;
 }
 
 interface StatsLike {

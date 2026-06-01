@@ -644,8 +644,11 @@ export interface components {
         ContentEntry: {
             created_at?: string | null;
             description: string;
+            inferred: boolean;
+            kind: string;
             links: string[];
             path: string;
+            project?: string | null;
             tags: string[];
             title?: string | null;
             updated_at?: string | null;

@@ -368,7 +368,7 @@ export function Atrium() {
           ) : (
             <div className="flex flex-col">
               {recentRows.map((n, i) => {
-                const kind = resolveKind({ path: n.path });
+                const kind = resolveKind({ path: n.path, kind: n.kind });
                 const ts =
                   recentTab === "created"
                     ? n.created_at
