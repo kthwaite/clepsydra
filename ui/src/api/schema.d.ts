@@ -994,6 +994,11 @@ export interface components {
         VaultStats: {
             /** Format: int64 */
             attachments: number;
+            /**
+             * Format: int64
+             * @description Pages with no resolved links inbound or outbound.
+             */
+            isolated_pages: number;
             /** @description RFC3339 timestamp of the most recent `pages.updated_at`, or null on empty vault. */
             last_indexed_at?: string | null;
             /** Format: int64 */
@@ -1002,6 +1007,11 @@ export interface components {
             links_total: number;
             /** Format: int64 */
             links_unresolved: number;
+            /**
+             * Format: int64
+             * @description Pages with zero inbound (resolved) links — the canonical "orphan".
+             */
+            orphan_pages: number;
             /** Format: int64 */
             pages: number;
             /** Format: int64 */
