@@ -567,9 +567,37 @@ async fn serve(app: Router, settings: &Settings) -> Result<(), Box<dyn std::erro
     }
 }
 
+/// One-shot reconcile sweep run at `serve` startup, after the index is built and
+/// `state` exists but before the server accepts connections, to heal folder
+/// drift (a page whose declared kind/project no longer matches its folder is
+/// moved, inbound links rewritten). Conservative: undeclared pages are untouched.
+///
+/// Serve-only by construction — this is called solely from [`run_server`]. The
+/// read-only index build (`open_vault_and_index`) and `doctor`
+/// (`diagnostics::run`) never reach it, preserving the read-only boundary
+/// (ADR 0001). Best-effort: failures are logged via tracing and never abort
+/// startup. Real `state.hooks` are forwarded so startup moves of academic work
+/// pages fire `AcademicMoveHook`, mirroring `move_page` and LSP `did_save`.
+pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
+    let hooks = Arc::clone(&state.hooks);
+    match state
+        .index
+        .with_index(move |index, vault| {
+            crate::vault::reconcile::reconcile_all(vault, index, &hooks)
+        })
+        .await
+    {
+        Ok(Ok(n)) if n > 0 => tracing::info!("reconcile sweep moved {n} drifted page(s)"),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!("reconcile sweep failed: {e}"),
+        Err(e) => tracing::warn!("reconcile sweep failed: {e}"),
+    }
+}
+
 pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (state, settings) = build_server_state().await?;
+    run_startup_reconcile(&state).await;
     maybe_spawn_lsp(enable_lsp, &state);
     let _watcher = spawn_sync_watcher(&state)?;
     let archive_body_limit =
@@ -761,6 +789,43 @@ mod state_tests {
         crate::vault::init::init_vault(&root).unwrap();
         let state = build_app_state(&root).await.unwrap();
         assert!(state.vault.root().exists());
+    }
+}
+
+#[cfg(test)]
+mod startup_reconcile_tests {
+    use super::*;
+
+    /// The one-shot startup sweep must heal folder drift: a page declaring
+    /// `type: quote` that still lives under `notes/` is moved to `quotes/`.
+    /// Built over the same `build_app_state` constructor the serve path uses.
+    #[tokio::test]
+    async fn serve_startup_reconciles_drifted_pages() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+
+        // A drifted page: declares `type: quote` but lives under notes/.
+        let drifted = root.join("notes").join("q.md");
+        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
+        std::fs::write(
+            &drifted,
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nbody",
+        )
+        .unwrap();
+
+        let state = build_app_state(&root).await.unwrap();
+
+        run_startup_reconcile(&state).await;
+
+        assert!(
+            root.join("quotes").join("q.md").exists(),
+            "drifted page should have moved to quotes/q.md"
+        );
+        assert!(
+            !root.join("notes").join("q.md").exists(),
+            "source notes/q.md should be gone after the sweep"
+        );
     }
 }
 
