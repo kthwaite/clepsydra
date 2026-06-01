@@ -43,7 +43,8 @@ pub fn reconcile_page(
     Ok(Some(dest))
 }
 
-/// Reconcile every page in the index. Returns the number moved.
+/// Reconcile every page in the index. Returns the number moved. Best-effort:
+/// a page that fails to reconcile is logged and skipped, and the sweep continues.
 pub fn reconcile_all(vault: &Vault, index: &mut VaultIndex) -> Result<usize, IndexError> {
     // Snapshot the page paths up front so we don't hold a borrow of the index
     // (or iterate a table we are concurrently mutating) during the moves.
@@ -56,8 +57,10 @@ pub fn reconcile_all(vault: &Vault, index: &mut VaultIndex) -> Result<usize, Ind
     };
     let mut moved = 0;
     for path in paths {
-        if reconcile_page(vault, index, &path)?.is_some() {
-            moved += 1;
+        match reconcile_page(vault, index, &path) {
+            Ok(Some(_)) => moved += 1,
+            Ok(None) => {}
+            Err(e) => tracing::warn!("reconcile: skipping {path}: {e}"),
         }
     }
     Ok(moved)
@@ -114,5 +117,27 @@ mod tests {
             reconcile_page(&vault, &mut index, "notes/sub/x.md").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn skips_when_destination_exists() {
+        // `notes/q.md` declares `type: quote` (projects to `quotes/q.md`), but a
+        // file already lives there. The collision guard must refuse the move.
+        let (_tmp, vault, mut index) = fixture_with_pages(&[
+            (
+                "notes/q.md",
+                "---\nid: 0190f8a0-0000-7000-8000-00000000000e\ntype: quote\n---\nbody",
+            ),
+            (
+                "quotes/q.md",
+                "---\nid: 0190f8a0-0000-7000-8000-00000000000f\n---\noccupied",
+            ),
+        ]);
+        assert_eq!(reconcile_page(&vault, &mut index, "notes/q.md").unwrap(), None);
+        // Source untouched; destination not overwritten.
+        assert!(vault.resolve(&VaultPath::new("notes/q.md").unwrap()).exists());
+        let dest_body =
+            fs::read_to_string(vault.resolve(&VaultPath::new("quotes/q.md").unwrap())).unwrap();
+        assert!(dest_body.contains("occupied"), "destination overwritten: {dest_body}");
     }
 }
