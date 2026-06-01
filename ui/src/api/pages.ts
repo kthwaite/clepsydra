@@ -48,3 +48,17 @@ export function useUpdatePage() {
     onSuccess: () => invalidatePageContent(qc),
   });
 }
+
+export function useAssignPage() {
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/vault/pages-assign/{path}", {
+    onSuccess: () => invalidatePageStructure(qc),
+  });
+}
+
+export function useAssignBulk() {
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/vault/pages-assign-bulk", {
+    onSuccess: () => invalidatePageStructure(qc),
+  });
+}
