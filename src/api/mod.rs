@@ -60,6 +60,7 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .route("/events", axum::routing::get(events::event_stream))
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())
+        .nest("/pages-assign", pages::assign_router())
         .nest("/folders", folders::router())
         .nest("/folders-move", folders::move_router())
         .nest("/attachments", attachments::router())

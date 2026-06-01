@@ -122,6 +122,21 @@ pub struct MovePageRequest {
     pub destination: String,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AssignRequest {
+    /// Declared kind token (case-insensitive, e.g. `QUOTE`). When present and
+    /// valid it overwrites the page's `type` frontmatter.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Declared project. When present (and `clear_project` is false) it
+    /// overwrites the page's `project` frontmatter.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Clear the page's `project` frontmatter. Takes precedence over `project`.
+    #[serde(default)]
+    pub clear_project: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -144,6 +159,13 @@ pub fn router() -> Router<Arc<AppState>> {
 /// possible. Instead we use `POST /pages-move/{*path}`.
 pub fn move_router() -> Router<Arc<AppState>> {
     Router::new().route("/{*path}", post(move_page))
+}
+
+/// Separate router for assign operations, nested at `/pages-assign`.
+/// Like `move_router`, the wildcard must terminate the route, so we use
+/// `POST /pages-assign/{*path}`.
+pub fn assign_router() -> Router<Arc<AppState>> {
+    Router::new().route("/{*path}", post(assign_page))
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +767,90 @@ pub async fn move_page(
     Ok(Json(page_detail_from_page(&page, &dest_vp)))
 }
 
+#[utoipa::path(
+    post,
+    path = "/pages-assign/{path}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("path" = String, Path, description = "Page path to assign")),
+    request_body = AssignRequest,
+    responses(
+        (status = 200, description = "Assigned + reconciled", body = PageDetailResponse),
+        (status = 400, description = "Invalid path or unknown kind", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn assign_page(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+    Json(body): Json<AssignRequest>,
+) -> Result<Json<PageDetail>, ApiError> {
+    // 1. Validate + load the page at its current path.
+    let vp =
+        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let abs = state.vault.resolve(&vp);
+    if !abs.exists() {
+        return Err(ApiError::not_found(format!("page not found: {path}")));
+    }
+    let mut page = Page::from_file(&abs, vp.clone())
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+
+    // 2. Mutate declared kind/project in the loaded meta.
+    if let Some(ref token) = body.kind {
+        let parsed = crate::vault::kind::Kind::from_token(token)
+            .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))?;
+        page.meta.kind = Some(parsed);
+    }
+    if body.clear_project {
+        page.meta.project = None;
+    } else if let Some(ref project) = body.project {
+        page.meta.project = Some(project.clone());
+    }
+
+    // 3. Write the updated frontmatter back to the file in place.
+    let content = write_page_content(&page.meta, &page.body);
+    std::fs::write(&abs, &content)
+        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+
+    // 4 + 5. Reindex at the current path, then reconcile (may move the page +
+    // rewrite inbound links). `reconcile_page` needs the `&mut` index, so both
+    // steps run inside the same `with_index` closure.
+    let path_for_index = path.clone();
+    let final_path = state
+        .index
+        .with_index(move |index, vault| {
+            let vp = VaultPath::new(&path_for_index)
+                .map_err(|e| crate::vault::index::IndexError::Other(e.to_string()))?;
+            index.index_page(vault, &vp)?;
+            let moved =
+                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index)?;
+            Ok::<_, crate::vault::index::IndexError>(moved.unwrap_or(path_for_index))
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("assign failed: {e}")))?
+        .map_err(|e| ApiError::internal(format!("assign failed: {e}")))?;
+
+    // 6. Broadcast the change. If the page moved, the old path was removed.
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![final_path.clone()],
+        removed: if final_path != path {
+            vec![path.clone()]
+        } else {
+            vec![]
+        },
+    });
+
+    // 7. Return the PageDetail at the FINAL path.
+    let final_vp = VaultPath::new(&final_path)
+        .map_err(|e| ApiError::internal(format!("invalid final path: {e}")))?;
+    let final_abs = state.vault.resolve(&final_vp);
+    let page = Page::from_file(&final_abs, final_vp.clone())
+        .map_err(|e| ApiError::internal(format!("failed to read assigned page: {e}")))?;
+
+    Ok(Json(page_detail_from_page(&page, &final_vp)))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -866,6 +972,65 @@ Some quoted text.\n";
         assert!(
             resp.0.inferred,
             "inferred should be true when type is absent"
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_kind_writes_frontmatter_and_moves() {
+        let (state, _tmp) = make_state().await;
+
+        // Seed a note that lives under notes/ with no declared kind.
+        let page_dir = state.vault.root().join("notes");
+        std::fs::create_dir_all(&page_dir).unwrap();
+        std::fs::write(
+            page_dir.join("q.md"),
+            "---\nid: 0190f8a0-0000-7000-8000-00000000000c\n---\nbody\n",
+        )
+        .unwrap();
+
+        // Index the page so reconcile can plan a move against it.
+        let vp = VaultPath::new("notes/q.md").unwrap();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        let resp = assign_page(
+            State(Arc::clone(&state)),
+            Path("notes/q.md".to_string()),
+            Json(AssignRequest {
+                kind: Some("QUOTE".to_string()),
+                project: None,
+                clear_project: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Declaring kind=QUOTE projects the page into quotes/.
+        assert_eq!(resp.0.path, "quotes/q.md");
+        assert_eq!(resp.0.kind, "QUOTE");
+        assert!(!resp.0.inferred, "kind is declared, so not inferred");
+        assert_eq!(resp.0.meta.kind, Some(crate::vault::kind::Kind::Quote));
+
+        assert!(
+            !state
+                .vault
+                .resolve(&VaultPath::new("notes/q.md").unwrap())
+                .exists(),
+            "source file should be gone after reconcile move"
+        );
+        assert!(
+            state
+                .vault
+                .resolve(&VaultPath::new("quotes/q.md").unwrap())
+                .exists(),
+            "page should now live at quotes/q.md"
         );
     }
 }
