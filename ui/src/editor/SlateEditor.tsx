@@ -485,6 +485,28 @@ export function SlateEditor({
           }
           return;
         }
+        case ".": {
+          event.preventDefault();
+          const marks = Editor.marks(editor);
+          if (marks?.superscript) {
+            Editor.removeMark(editor, "superscript");
+          } else {
+            Editor.removeMark(editor, "subscript");
+            Editor.addMark(editor, "superscript", true);
+          }
+          return;
+        }
+        case ",": {
+          event.preventDefault();
+          const marks = Editor.marks(editor);
+          if (marks?.subscript) {
+            Editor.removeMark(editor, "subscript");
+          } else {
+            Editor.removeMark(editor, "superscript");
+            Editor.addMark(editor, "subscript", true);
+          }
+          return;
+        }
       }
     }
   };
