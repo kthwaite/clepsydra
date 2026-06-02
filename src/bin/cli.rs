@@ -194,7 +194,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Tree { json } => {
             let (vault, index) = open_vault_and_index()?;
-            let meta = clepsydra::vault::tree::load_note_meta(&vault, &index)?;
+            let meta = clepsydra::vault::tree::load_note_meta(&index)?;
             let root = clepsydra::vault::tree::build(&vault, &meta);
             if json {
                 clepsydra::vault::tree::render_json(&root, &mut std::io::stdout().lock())?;

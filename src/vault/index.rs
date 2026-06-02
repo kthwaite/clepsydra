@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS pages (
     journal_date    TEXT,
     kind            TEXT NOT NULL DEFAULT 'NOTE',
     kind_inferred   INTEGER NOT NULL DEFAULT 1,
-    project         TEXT
+    project         TEXT,
+    word_count      INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS canonical_names (
@@ -504,10 +505,11 @@ impl VaultIndex {
             crate::vault::kind::resolve(page.vault_path.as_str(), page.meta.kind);
         let kind_str = kind.as_str();
         let project = page.meta.project.clone();
+        let word_count = page.body.split_whitespace().count() as i64;
 
         tx.execute(
-            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, word_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                path = excluded.path,
                title = excluded.title,
@@ -519,7 +521,8 @@ impl VaultIndex {
                journal_date = excluded.journal_date,
                kind = excluded.kind,
                kind_inferred = excluded.kind_inferred,
-               project = excluded.project",
+               project = excluded.project,
+               word_count = excluded.word_count",
             params![
                 page_id,
                 page.vault_path.as_str(),
@@ -533,6 +536,7 @@ impl VaultIndex {
                 kind_str,
                 kind_inferred as i64,
                 project,
+                word_count,
             ],
         )?;
 
@@ -1407,6 +1411,13 @@ fn migrate_pages_add_kind_columns(conn: &Connection) -> Result<(), IndexError> {
         conn.execute_batch("ALTER TABLE pages ADD COLUMN project TEXT;")?;
     }
 
+    // Nullable: existing rows stay NULL until the next index build re-upserts
+    // them with a computed count.
+    let has_word_count: bool = conn.prepare("SELECT word_count FROM pages LIMIT 0").is_ok();
+    if !has_word_count {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN word_count INTEGER;")?;
+    }
+
     Ok(())
 }
 
@@ -1735,11 +1746,12 @@ fn upsert_indexed_page(
     let (kind, kind_inferred) = crate::vault::kind::resolve(pf.vault_path.as_str(), pf.meta.kind);
     let kind_str = kind.as_str();
     let project = pf.meta.project.clone();
+    let word_count = pf.body.split_whitespace().count() as i64;
 
     // Upsert into pages table
     tx.execute(
-        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, word_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET
            path = excluded.path,
            title = excluded.title,
@@ -1751,7 +1763,8 @@ fn upsert_indexed_page(
            journal_date = excluded.journal_date,
            kind = excluded.kind,
            kind_inferred = excluded.kind_inferred,
-           project = excluded.project",
+           project = excluded.project,
+           word_count = excluded.word_count",
         params![
             page_id,
             pf.vault_path.as_str(),
@@ -1765,6 +1778,7 @@ fn upsert_indexed_page(
             kind_str,
             kind_inferred as i64,
             project,
+            word_count,
         ],
     )?;
 
@@ -2038,5 +2052,34 @@ mod kind_index_tests {
         assert_eq!(k2, "QUOTE");
         assert_eq!(inf2, 0);
         assert_eq!(proj.as_deref(), Some("clepsydra"));
+    }
+
+    #[test]
+    fn build_persists_word_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join(".clepsydra/index.db");
+
+        let abs = tmp.path().join("notes/wc.md");
+        fs::create_dir_all(abs.parent().unwrap()).unwrap();
+        // Frontmatter is stripped before counting; the body has five words.
+        fs::write(
+            &abs,
+            "---\nid: 0190f8a0-0000-7000-8000-000000000013\n---\none two three four five",
+        )
+        .unwrap();
+
+        let mut index = VaultIndex::open_bare(&db_path).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let wc: Option<i64> = index
+            .connection()
+            .query_row(
+                "SELECT word_count FROM pages WHERE path = 'notes/wc.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(wc, Some(5));
     }
 }

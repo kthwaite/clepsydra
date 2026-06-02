@@ -9,8 +9,6 @@ use serde::Serialize;
 use crate::VESSEL_ACCENT as ACCENT;
 use crate::vault::Vault;
 use crate::vault::index::VaultIndex;
-use crate::vault::page::Page;
-use crate::vault::path::VaultPath;
 
 /// Metadata attached to an indexed note in the tree.
 #[derive(Debug, Clone, Serialize, Default)]
@@ -28,13 +26,12 @@ pub struct NoteMeta {
 }
 
 /// Bulk-load note metadata keyed by the vault-relative path (the `pages.path`
-/// column, which equals each note's path under the vault root). Kind/title come
-/// from `pages`, tags from `tags`; dates and word count require reading each
-/// file (as the HTTP content index does).
-pub fn load_note_meta(
-    vault: &Vault,
-    index: &VaultIndex,
-) -> Result<HashMap<String, NoteMeta>, rusqlite::Error> {
+/// column, which equals each note's path under the vault root). Every field is
+/// sourced from the index — kind/title/dates/word-count from `pages`, tags from
+/// `tags` — so no note files are read. `created_at`/`updated_at`/`word_count`
+/// are populated during index build (`word_count` is NULL only for rows indexed
+/// before the column existed, until the next build re-upserts them).
+pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, rusqlite::Error> {
     let conn = index.connection();
 
     // Tags grouped by page_id.
@@ -49,35 +46,35 @@ pub fn load_note_meta(
         }
     }
 
-    let mut stmt = conn.prepare("SELECT id, path, title, kind FROM pages")?;
-    type Row = (String, String, Option<String>, String);
+    let mut stmt = conn
+        .prepare("SELECT id, path, title, kind, created_at, updated_at, word_count FROM pages")?;
+    type Row = (
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+    );
     let rows: Vec<Row> = stmt
         .query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+            ))
         })?
         .filter_map(|r| r.ok())
         .collect();
 
     let mut out = HashMap::with_capacity(rows.len());
-    for (page_id, path, title, kind) in rows {
+    for (page_id, path, title, kind, created_at, updated_at, word_count) in rows {
         let tags = tags_by_page.remove(&page_id).unwrap_or_default();
-        // Silent fallback: a note whose file is missing, unreadable, or has an
-        // invalid path simply loses its dates/word-count rather than failing the
-        // whole listing. This degradation is deliberate for a read-only tree view.
-        let (created_at, updated_at, word_count) = match VaultPath::new(&path) {
-            Ok(vp) => {
-                let abs = vault.resolve(&vp);
-                match Page::from_file(&abs, vp) {
-                    Ok(page) => (
-                        page.meta.created_at.map(|d| d.to_rfc3339()),
-                        page.meta.updated_at.map(|d| d.to_rfc3339()),
-                        Some(page.body.split_whitespace().count() as i64),
-                    ),
-                    Err(_) => (None, None, None),
-                }
-            }
-            Err(_) => (None, None, None),
-        };
         out.insert(
             path,
             NoteMeta {
@@ -308,8 +305,8 @@ mod tests {
 
     #[test]
     fn load_note_meta_carries_kind_and_tags() {
-        let (_dir, vault, index) = fixture();
-        let meta = load_note_meta(&vault, &index).unwrap();
+        let (_dir, _vault, index) = fixture();
+        let meta = load_note_meta(&index).unwrap();
         let alpha = meta.get("Alpha.md").expect("Alpha.md indexed");
         assert_eq!(alpha.kind, "NOTE");
         assert!(alpha.tags.contains(&"physics".to_string()));
@@ -327,7 +324,7 @@ mod tests {
     #[test]
     fn build_excludes_dotfiles_and_clepsydra() {
         let (_dir, vault, index) = fixture();
-        let meta = load_note_meta(&vault, &index).unwrap();
+        let meta = load_note_meta(&index).unwrap();
         let root = build(&vault, &meta);
         let mut all = Vec::new();
         names(&root, &mut all);
@@ -344,7 +341,7 @@ mod tests {
     #[test]
     fn build_classifies_note_and_file() {
         let (_dir, vault, index) = fixture();
-        let meta = load_note_meta(&vault, &index).unwrap();
+        let meta = load_note_meta(&index).unwrap();
         let root = build(&vault, &meta);
 
         fn find<'a>(node: &'a TreeNode, name: &str) -> Option<&'a TreeNode> {
@@ -363,7 +360,7 @@ mod tests {
     #[test]
     fn render_human_draws_branches_and_metadata() {
         let (_dir, vault, index) = fixture();
-        let meta = load_note_meta(&vault, &index).unwrap();
+        let meta = load_note_meta(&index).unwrap();
         let root = build(&vault, &meta);
         let mut buf: Vec<u8> = Vec::new();
         render_human(&root, &mut buf).unwrap();
@@ -377,7 +374,7 @@ mod tests {
     #[test]
     fn render_json_round_trips() {
         let (_dir, vault, index) = fixture();
-        let meta = load_note_meta(&vault, &index).unwrap();
+        let meta = load_note_meta(&index).unwrap();
         let root = build(&vault, &meta);
         let mut buf: Vec<u8> = Vec::new();
         render_json(&root, &mut buf).unwrap();
