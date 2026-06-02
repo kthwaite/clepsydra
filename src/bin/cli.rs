@@ -86,6 +86,27 @@ enum Commands {
         dry_run: bool,
     },
     #[command(
+        about = "Full-text search the vault index",
+        long_about = "Search the vault's full-text index and print matches ranked by relevance.\n\nThe query is treated as a literal phrase by default; pass --raw to use FTS5 operator syntax (phrases, AND/OR, NEAR, prefix *).",
+        after_help = "Examples:\n  clepsydra grep \"spaced repetition\"\n  clepsydra grep chloroplast --limit 5\n  clepsydra grep \"foo OR bar\" --raw"
+    )]
+    Grep {
+        #[arg(value_name = "QUERY", help = "Text to search for")]
+        query: String,
+        #[arg(
+            short = 'n',
+            long,
+            value_name = "N",
+            default_value_t = 20,
+            help = "Maximum number of results"
+        )]
+        limit: usize,
+        #[arg(long, help = "Pass QUERY straight to FTS5 (enables operator syntax)")]
+        raw: bool,
+        #[arg(long, help = "Emit results as JSON instead of styled text")]
+        json: bool,
+    },
+    #[command(
         about = "Print version",
         long_about = "Print the clepsydra version string. Equivalent to `clepsydra --version`."
     )]
@@ -117,10 +138,14 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Doctor { json, strict, full } => {
             let report = diagnostics::run(DoctorOpts { full }).await;
-            let mut stdout = std::io::stdout().lock();
             if json {
-                report.render_json(&mut stdout)?;
+                // Machine-readable output stays raw — never styled.
+                report.render_json(&mut std::io::stdout().lock())?;
             } else {
+                // AutoStream resolves colour from TTY detection plus
+                // NO_COLOR/CLICOLOR/CLICOLOR_FORCE, stripping the ANSI codes
+                // `render_human` emits whenever colour is unwanted.
+                let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
                 report.render_human(&mut stdout)?;
             }
             Ok(report.exit_code(strict))
@@ -141,6 +166,22 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 report.skipped,
                 if dry_run { " (dry run)" } else { "" }
             );
+            Ok(0)
+        }
+        Commands::Grep {
+            query,
+            limit,
+            raw,
+            json,
+        } => {
+            let (_vault, index) = open_vault_and_index()?;
+            let results = clepsydra::vault::grep::run(&index, &query, limit, raw)?;
+            if json {
+                clepsydra::vault::grep::render_json(&results, &mut std::io::stdout().lock())?;
+            } else {
+                let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
+                clepsydra::vault::grep::render_human(&results, &mut stdout)?;
+            }
             Ok(0)
         }
         Commands::Version => {
@@ -291,5 +332,28 @@ mod cli_tests {
             result.is_ok(),
             "doctor --json dispatch/render failed: {result:?}"
         );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn grep_returns_zero() {
+        let (_dir, root) = vault_in_tempdir();
+        std::fs::write(
+            root.join("Searchme.md"),
+            "---\ntitle: Searchme\n---\nuniquetoken here\n",
+        )
+        .unwrap();
+        let cli = Cli::try_parse_from(["clepsydra", "grep", "uniquetoken"]).unwrap();
+        let result = run_cli_in(&root, cli).await;
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn grep_json_returns_zero() {
+        let (_dir, root) = vault_in_tempdir();
+        let cli = Cli::try_parse_from(["clepsydra", "grep", "anything", "--json"]).unwrap();
+        let result = run_cli_in(&root, cli).await;
+        assert_eq!(result.unwrap(), 0);
     }
 }
