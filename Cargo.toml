@@ -8,6 +8,7 @@ name = "clepsydra"
 path = "src/bin/cli.rs"
 
 [dependencies]
+anstream = "1.0.0"
 axum = { version = "0.8.8", features = ["multipart"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64 = "0.22"
@@ -21,6 +22,7 @@ glob = "0.3"
 mime_guess = "2"
 notify = "8"
 notify-debouncer-mini = "0.5"
+owo-colors = "4.3.0"
 parking_lot = "0.12"
 percent-encoding = "2"
 pulldown-cmark = "0.12"
