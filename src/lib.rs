@@ -1,6 +1,6 @@
 pub mod api;
 pub mod app_config;
-pub mod diagnostics;
+pub mod doctor;
 pub mod lsp;
 pub mod vault;
 

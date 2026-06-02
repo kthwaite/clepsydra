@@ -12,6 +12,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::Settings;
+use crate::VESSEL_ACCENT as ACCENT;
 use crate::app_config;
 use crate::default_tls_paths;
 use crate::expand_tilde;
@@ -101,37 +102,57 @@ impl Report {
         0
     }
 
+    /// Render the report as styled, human-readable text.
+    ///
+    /// ANSI styling (via `owo-colors`) is emitted unconditionally; the caller
+    /// is expected to wrap a real terminal in an [`anstream::AutoStream`],
+    /// which strips the codes when colour is unwanted (piped output,
+    /// `NO_COLOR`, a non-TTY, etc.). Styles always wrap whole tokens, so plain
+    /// substring matches against this output remain valid even when codes are
+    /// present.
     pub fn render_human(&self, w: &mut impl io::Write) -> io::Result<()> {
+        use owo_colors::OwoColorize;
+
         let mut current_section: Option<&'static str> = None;
         for r in &self.results {
             if Some(r.section) != current_section {
                 if current_section.is_some() {
                     writeln!(w)?;
                 }
-                writeln!(w, "{}", r.section)?;
+                writeln!(
+                    w,
+                    "{}",
+                    r.section.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).bold()
+                )?;
                 current_section = Some(r.section);
             }
-            let tag = match r.status {
-                Status::Ok => "[OK]  ",
-                Status::Warn => "[WARN]",
-                Status::Err => "[ERR] ",
-                Status::Info => "[INFO]",
-                Status::Skip => "[SKIP]",
+            // Pad the tag to a fixed width *before* styling so the ANSI codes
+            // don't throw off alignment.
+            let (tag, detail) = (format!("{:<6}", status_tag(r.status)), r.detail.dimmed());
+            let styled_tag = match r.status {
+                Status::Ok => tag.green().bold().to_string(),
+                Status::Warn => tag.yellow().bold().to_string(),
+                Status::Err => tag.red().bold().to_string(),
+                Status::Info => tag.blue().bold().to_string(),
+                Status::Skip => tag.dimmed().to_string(),
             };
-            writeln!(w, "  {} {:<22} {}", tag, r.name, r.detail)?;
+            writeln!(w, "  {} {:<22} {}", styled_tag, r.name, detail)?;
             if let Some(hint) = &r.hint {
-                writeln!(w, "         hint: {hint}")?;
+                writeln!(w, "{}", format!("         hint: {hint}").dimmed())?;
             }
         }
         writeln!(w)?;
         writeln!(
             w,
             "Summary: {} ok, {} warn, {} err ({} info, {} skip)",
-            self.summary.ok,
-            self.summary.warn,
-            self.summary.err,
-            self.summary.info,
-            self.summary.skip,
+            severity_count(self.summary.ok, self.summary.ok.green().to_string()),
+            severity_count(
+                self.summary.warn,
+                self.summary.warn.yellow().bold().to_string()
+            ),
+            severity_count(self.summary.err, self.summary.err.red().bold().to_string()),
+            severity_count(self.summary.info, self.summary.info.blue().to_string()),
+            self.summary.skip.dimmed(),
         )?;
         Ok(())
     }
@@ -140,6 +161,27 @@ impl Report {
         serde_json::to_writer_pretty(&mut *w, self).map_err(io::Error::other)?;
         writeln!(w)?;
         Ok(())
+    }
+}
+
+/// Fixed-width-free status tag for a check (padding is applied by the caller).
+fn status_tag(status: Status) -> &'static str {
+    match status {
+        Status::Ok => "[OK]",
+        Status::Warn => "[WARN]",
+        Status::Err => "[ERR]",
+        Status::Info => "[INFO]",
+        Status::Skip => "[SKIP]",
+    }
+}
+
+/// Render a summary count: the pre-styled (coloured) form when non-zero, an
+/// unadorned `0` otherwise, so a clean report doesn't paint its zeroes.
+fn severity_count(count: usize, styled: String) -> String {
+    if count == 0 {
+        count.to_string()
+    } else {
+        styled
     }
 }
 
@@ -2031,5 +2073,28 @@ mod render_tests {
         assert!(text.contains("try doing the other thing"));
         assert!(text.contains("Summary:"));
         assert!(text.contains("things"));
+    }
+
+    #[test]
+    fn render_human_emits_ansi_styling() {
+        let mut report = Report::default();
+        report.push(ok("sect", "good", "all clear"));
+        report.push(err("sect", "bad", "broken"));
+
+        let mut buf = Vec::new();
+        report.render_human(&mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+
+        // `render_human` always emits codes; the AutoStream in the CLI strips
+        // them when colour is unwanted. Here (raw buffer) they must be present.
+        assert!(text.contains('\u{1b}'), "expected ANSI escapes in output");
+        // Green for OK, red for ERR, and the barbican-orange accent (38;2;…)
+        // on the section header.
+        assert!(text.contains("\u{1b}[32m"), "expected green OK tag");
+        assert!(text.contains("\u{1b}[31m"), "expected red ERR tag");
+        assert!(
+            text.contains("\u{1b}[38;2;238;119;51m"),
+            "expected accent-coloured section header"
+        );
     }
 }
