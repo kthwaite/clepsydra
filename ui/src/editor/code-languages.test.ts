@@ -1,0 +1,76 @@
+import { refractor } from "refractor";
+import { describe, expect, it } from "vitest";
+import {
+  COMMON_LANGUAGES,
+  displayLabel,
+  filterLanguages,
+  listLanguageIds,
+} from "#/editor/code-languages";
+
+describe("code-languages", () => {
+  it("displayLabel uppercases the id", () => {
+    expect(displayLabel("rust")).toBe("RUST");
+    expect(displayLabel("tsx")).toBe("TSX");
+  });
+
+  it("listLanguageIds pins registered common languages first, in order", () => {
+    const ids = listLanguageIds();
+    const expectedCommon = COMMON_LANGUAGES.filter((id) => ids.includes(id));
+    expect(ids.slice(0, expectedCommon.length)).toEqual(expectedCommon);
+  });
+
+  it("listLanguageIds has no duplicates", () => {
+    const ids = listLanguageIds();
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("listLanguageIds includes well-known grammars", () => {
+    const ids = listLanguageIds();
+    expect(ids).toContain("rust");
+    expect(ids).toContain("javascript");
+  });
+
+  it("filterLanguages('') returns the full ordering", () => {
+    expect(filterLanguages("")).toEqual(listLanguageIds());
+  });
+
+  it("filterLanguages matches case-insensitive substrings", () => {
+    expect(filterLanguages("RUS")).toContain("rust");
+  });
+
+  it("filterLanguages returns [] for no matches", () => {
+    expect(filterLanguages("zzzznotalang")).toEqual([]);
+  });
+
+  it("collapses aliases to their canonical name", () => {
+    const ids = listLanguageIds();
+    expect(ids).toContain("javascript");
+    expect(ids).not.toContain("js");
+    expect(ids).not.toContain("ts");
+  });
+
+  it("registers tsx and jsx (curated commons absent from the base bundle)", () => {
+    const ids = listLanguageIds();
+    expect(ids).toContain("tsx");
+    expect(ids).toContain("jsx");
+  });
+
+  it("excludes the plaintext family (the Plain text reset covers that)", () => {
+    const ids = listLanguageIds();
+    expect(ids).not.toContain("plaintext");
+    expect(ids).not.toContain("txt");
+    expect(ids).not.toContain("text");
+    expect(ids).not.toContain("plain");
+  });
+
+  it("lists each grammar at most once", () => {
+    const ids = listLanguageIds();
+    const grammars = refractor.languages as Record<string, object>;
+    const seen = new Set<object>();
+    for (const id of ids) {
+      const g = grammars[id];
+      expect(seen.has(g)).toBe(false);
+      seen.add(g);
+    }
+  });
+});

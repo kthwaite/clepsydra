@@ -17,11 +17,21 @@ from the rendered code block.
 
 ## Decisions
 
+> **Post-implementation correction (2026-06-01):** the "~270 registered
+> grammars" figure below was wrong. The *common* refractor bundle we import
+> registers only **38 distinct grammars** (and notably omits `tsx`/`jsx`). The
+> searchable popover remains the right control, but the sizing rationale was
+> inaccurate. Resolution: we kept the lightweight common bundle and explicitly
+> registered `jsx`/`tsx` on top (see `ui/src/editor/refractor-languages.ts`);
+> the `plaintext` family is excluded from the list since the "Plain text" reset
+> row covers it. Switching to `refractor/all` (~292 grammars) remains the lever
+> if broader coverage is wanted later.
+
 These were settled during brainstorming:
 
 1. **Control style:** a searchable popover anchored to the language label —
    a type-to-filter, keyboard-navigable list. Chosen over a short dropdown or
-   inline text field because refractor supports ~270 registered grammars.
+   inline text field because refractor supports many registered grammars.
 2. **Language scope:** a curated set of common languages pinned at the top,
    with search across the full set.
 3. **Reset:** a single **Plain text** entry in the picker that clears
