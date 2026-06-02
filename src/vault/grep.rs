@@ -28,7 +28,7 @@ pub fn run(
 /// and double any embedded `"`. This makes arbitrary input safe to pass to
 /// `MATCH` — stray quotes or bare operators become literal tokens instead of
 /// FTS5 syntax errors.
-pub fn fts_quote(query: &str) -> String {
+pub(crate) fn fts_quote(query: &str) -> String {
     let escaped = query.replace('"', "\"\"");
     format!("\"{escaped}\"")
 }
