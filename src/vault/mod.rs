@@ -11,6 +11,7 @@ pub mod config;
 pub mod context;
 pub mod derivation;
 pub mod derivers;
+pub mod grep;
 pub mod hooks;
 pub mod import;
 pub mod import_doi;
@@ -32,6 +33,7 @@ pub mod reconcile;
 pub mod relabel;
 pub mod rewriter;
 pub mod sync;
+pub mod tree;
 
 use std::path::{Path, PathBuf};
 
