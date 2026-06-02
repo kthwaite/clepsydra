@@ -1,7 +1,9 @@
 //! Vault tree listing for the `clepsydra tree` CLI subcommand.
 
 use std::collections::HashMap;
+use std::io::{self, Write};
 
+use owo_colors::OwoColorize;
 use serde::Serialize;
 
 use crate::vault::Vault;
@@ -187,6 +189,93 @@ fn read_dir_sorted(
     dirs
 }
 
+/// Barbican orange — the Vessel primary accent (matches diagnostics).
+const ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
+
+/// Render the tree as styled, box-drawing text. The root line is the vault
+/// directory name; children are drawn with `├──`/`└──` connectors. Wrap `w` in
+/// `anstream::AutoStream` to honour `NO_COLOR` / non-TTY.
+pub fn render_human(root: &TreeNode, w: &mut impl Write) -> io::Result<()> {
+    writeln!(w, "{}", root.name.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).bold())?;
+    let count = root.children.len();
+    for (i, child) in root.children.iter().enumerate() {
+        render_node(child, "", i + 1 == count, w)?;
+    }
+    Ok(())
+}
+
+fn render_node(
+    node: &TreeNode,
+    prefix: &str,
+    last: bool,
+    w: &mut impl Write,
+) -> io::Result<()> {
+    let connector = if last { "└── " } else { "├── " };
+    writeln!(w, "{prefix}{}{}", connector.dimmed(), node_label(node))?;
+    let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
+    let count = node.children.len();
+    for (i, child) in node.children.iter().enumerate() {
+        render_node(child, &child_prefix, i + 1 == count, w)?;
+    }
+    Ok(())
+}
+
+/// The styled label for a single node, excluding the tree connector.
+fn node_label(node: &TreeNode) -> String {
+    match &node.entry {
+        NodeEntry::Dir => node
+            .name
+            .truecolor(ACCENT.0, ACCENT.1, ACCENT.2)
+            .bold()
+            .to_string(),
+        NodeEntry::File { size } => {
+            format!("{}  {}", node.name, human_size(*size).dimmed())
+        }
+        NodeEntry::Note(m) => {
+            let mut s = node.name.clone();
+            s.push(' ');
+            s.push_str(&format!("[{}]", m.kind).dimmed().to_string());
+            if let Some(t) = &m.title
+                && Some(t.as_str()) != node.name.strip_suffix(".md")
+            {
+                s.push_str(&format!(" {t}"));
+            }
+            if !m.tags.is_empty() {
+                let tags = m.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
+                s.push(' ');
+                s.push_str(&tags.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).to_string());
+            }
+            if let Some(wc) = m.word_count {
+                s.push(' ');
+                s.push_str(&format!("({wc}w)").dimmed().to_string());
+            }
+            s
+        }
+    }
+}
+
+/// Format a byte count as a short human-readable size (e.g. `1.2K`, `3.4M`).
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes}{}", UNITS[0])
+    } else {
+        format!("{size:.1}{}", UNITS[unit])
+    }
+}
+
+/// Render the tree as pretty-printed JSON.
+pub fn render_json(root: &TreeNode, w: &mut impl Write) -> io::Result<()> {
+    serde_json::to_writer_pretty(&mut *w, root)?;
+    writeln!(w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +353,31 @@ mod tests {
         assert!(matches!(alpha.entry, NodeEntry::Note(_)));
         let png = find(&root, "diagram.png").unwrap();
         assert!(matches!(png.entry, NodeEntry::File { .. }));
+    }
+
+    #[test]
+    fn render_human_draws_branches_and_metadata() {
+        let (_dir, vault, index) = fixture();
+        let meta = load_note_meta(&vault, &index).unwrap();
+        let root = build(&vault, &meta);
+        let mut buf: Vec<u8> = Vec::new();
+        render_human(&root, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("Alpha.md"));
+        assert!(out.contains("NOTE")); // kind tag
+        assert!(out.contains("diagram.png"));
+        assert!(out.contains("├──") || out.contains("└──")); // branch glyphs
+    }
+
+    #[test]
+    fn render_json_round_trips() {
+        let (_dir, vault, index) = fixture();
+        let meta = load_note_meta(&vault, &index).unwrap();
+        let root = build(&vault, &meta);
+        let mut buf: Vec<u8> = Vec::new();
+        render_json(&root, &mut buf).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["type"], "dir");
+        assert!(v["children"].is_array());
     }
 }
