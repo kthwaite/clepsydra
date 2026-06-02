@@ -60,6 +60,9 @@ pub fn load_note_meta(
     let mut out = HashMap::with_capacity(rows.len());
     for (page_id, path, title, kind) in rows {
         let tags = tags_by_page.remove(&page_id).unwrap_or_default();
+        // Silent fallback: a note whose file is missing, unreadable, or has an
+        // invalid path simply loses its dates/word-count rather than failing the
+        // whole listing. This degradation is deliberate for a read-only tree view.
         let (created_at, updated_at, word_count) = match VaultPath::new(&path) {
             Ok(vp) => {
                 let abs = vault.resolve(&vp);
