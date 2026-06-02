@@ -199,7 +199,11 @@ const ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
 /// directory name; children are drawn with `├──`/`└──` connectors. Wrap `w` in
 /// `anstream::AutoStream` to honour `NO_COLOR` / non-TTY.
 pub fn render_human(root: &TreeNode, w: &mut impl Write) -> io::Result<()> {
-    writeln!(w, "{}", root.name.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).bold())?;
+    writeln!(
+        w,
+        "{}",
+        root.name.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).bold()
+    )?;
     let count = root.children.len();
     for (i, child) in root.children.iter().enumerate() {
         render_node(child, "", i + 1 == count, w)?;
@@ -207,12 +211,7 @@ pub fn render_human(root: &TreeNode, w: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
-fn render_node(
-    node: &TreeNode,
-    prefix: &str,
-    last: bool,
-    w: &mut impl Write,
-) -> io::Result<()> {
+fn render_node(node: &TreeNode, prefix: &str, last: bool, w: &mut impl Write) -> io::Result<()> {
     let connector = if last { "└── " } else { "├── " };
     writeln!(w, "{prefix}{}{}", connector.dimmed(), node_label(node))?;
     let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
@@ -244,7 +243,12 @@ fn node_label(node: &TreeNode) -> String {
                 s.push_str(&format!(" {t}"));
             }
             if !m.tags.is_empty() {
-                let tags = m.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
+                let tags = m
+                    .tags
+                    .iter()
+                    .map(|t| format!("#{t}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 s.push(' ');
                 s.push_str(&tags.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).to_string());
             }

@@ -16,7 +16,11 @@ pub fn run(
     limit: usize,
     raw: bool,
 ) -> Result<Vec<SearchResult>, IndexError> {
-    let prepared = if raw { query.to_string() } else { fts_quote(query) };
+    let prepared = if raw {
+        query.to_string()
+    } else {
+        fts_quote(query)
+    };
     index.search(&prepared, limit)
 }
 
@@ -45,7 +49,12 @@ pub fn render_human(results: &[SearchResult], w: &mut impl Write) -> io::Result<
             Some(t) => format!(" {}", t.bold()),
             None => String::new(),
         };
-        writeln!(w, "{}{}", r.path.truecolor(ACCENT.0, ACCENT.1, ACCENT.2), title)?;
+        writeln!(
+            w,
+            "{}{}",
+            r.path.truecolor(ACCENT.0, ACCENT.1, ACCENT.2),
+            title
+        )?;
         writeln!(w, "  {}", paint_snippet(&r.snippet))?;
     }
     Ok(())
@@ -61,7 +70,12 @@ fn paint_snippet(snippet: &str) -> String {
         rest = &rest[open + "<mark>".len()..];
         if let Some(close) = rest.find("</mark>") {
             let marked = &rest[..close];
-            out.push_str(&marked.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).bold().to_string());
+            out.push_str(
+                &marked
+                    .truecolor(ACCENT.0, ACCENT.1, ACCENT.2)
+                    .bold()
+                    .to_string(),
+            );
             rest = &rest[close + "</mark>".len()..];
         } else {
             out.push_str(rest);
@@ -120,8 +134,8 @@ mod tests {
         assert_eq!(fts_quote("foo OR bar"), "\"foo OR bar\"");
     }
 
-    use crate::vault::index::VaultIndex;
     use crate::vault::Vault;
+    use crate::vault::index::VaultIndex;
 
     /// Build a temp vault with one note, return (TempDir, Vault, VaultIndex).
     fn vault_with_note(filename: &str, body: &str) -> (tempfile::TempDir, Vault, VaultIndex) {
@@ -150,10 +164,8 @@ mod tests {
 
     #[test]
     fn run_literal_query_with_quotes_does_not_error() {
-        let (_dir, _vault, index) = vault_with_note(
-            "Quote.md",
-            "---\ntitle: Quote\n---\nbody text\n",
-        );
+        let (_dir, _vault, index) =
+            vault_with_note("Quote.md", "---\ntitle: Quote\n---\nbody text\n");
         // Without --raw, an embedded quote must not produce an FTS5 error.
         let results = run(&index, "stray \" quote", 20, false).unwrap();
         assert!(results.is_empty());
