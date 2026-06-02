@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
+use crate::VESSEL_ACCENT as ACCENT;
 use crate::vault::index::{IndexError, SearchResult, VaultIndex};
 
 /// Run an FTS search. When `raw` is false the query is quoted as a literal
@@ -32,9 +33,6 @@ pub(crate) fn fts_quote(query: &str) -> String {
     let escaped = query.replace('"', "\"\"");
     format!("\"{escaped}\"")
 }
-
-/// Barbican orange — the Vessel primary accent (matches diagnostics).
-const ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
 
 /// Render results as styled human-readable text, in rank order. `<mark>` spans
 /// in the snippet are painted with the accent colour; the surrounding text is

@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
+use crate::VESSEL_ACCENT as ACCENT;
 use crate::vault::Vault;
 use crate::vault::index::VaultIndex;
 use crate::vault::page::Page;
@@ -191,9 +192,6 @@ fn read_dir_sorted(
     dirs.extend(files);
     dirs
 }
-
-/// Barbican orange — the Vessel primary accent (matches diagnostics).
-const ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
 
 /// Render the tree as styled, box-drawing text. The root line is the vault
 /// directory name; children are drawn with `├──`/`└──` connectors. Wrap `w` in

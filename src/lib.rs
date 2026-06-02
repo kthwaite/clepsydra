@@ -29,6 +29,12 @@ use vault::sync::watcher::VaultWatcher;
 /// callsite that opens a [`VaultIndex`] so they cannot drift.
 const INDEX_DB_RELATIVE: &str = ".clepsydra/cache.db";
 
+/// Barbican orange — the Vessel primary accent, as an RGB triple. Shared by
+/// every terminal renderer (`grep`, `tree`, diagnostics) so the accent cannot
+/// drift between commands. `anstream` down-samples this truecolor value to the
+/// nearest palette entry on 16/256-colour terminals.
+pub(crate) const VESSEL_ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
+
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub server: ServerSettings,
