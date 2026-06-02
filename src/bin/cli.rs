@@ -107,6 +107,14 @@ enum Commands {
         json: bool,
     },
     #[command(
+        about = "List the vault tree with per-note metadata",
+        long_about = "Walk the vault directory and print a tree. Indexed notes are annotated with their kind, title, tags, and word count; other files show their size. Dotfiles and the .clepsydra directory are hidden."
+    )]
+    Tree {
+        #[arg(long, help = "Emit the tree as JSON instead of styled text")]
+        json: bool,
+    },
+    #[command(
         about = "Print version",
         long_about = "Print the clepsydra version string. Equivalent to `clepsydra --version`."
     )]
@@ -181,6 +189,18 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             } else {
                 let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
                 clepsydra::vault::grep::render_human(&results, &mut stdout)?;
+            }
+            Ok(0)
+        }
+        Commands::Tree { json } => {
+            let (vault, index) = open_vault_and_index()?;
+            let meta = clepsydra::vault::tree::load_note_meta(&vault, &index)?;
+            let root = clepsydra::vault::tree::build(&vault, &meta);
+            if json {
+                clepsydra::vault::tree::render_json(&root, &mut std::io::stdout().lock())?;
+            } else {
+                let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
+                clepsydra::vault::tree::render_human(&root, &mut stdout)?;
             }
             Ok(0)
         }
@@ -353,6 +373,25 @@ mod cli_tests {
     async fn grep_json_returns_zero() {
         let (_dir, root) = vault_in_tempdir();
         let cli = Cli::try_parse_from(["clepsydra", "grep", "anything", "--json"]).unwrap();
+        let result = run_cli_in(&root, cli).await;
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tree_returns_zero() {
+        let (_dir, root) = vault_in_tempdir();
+        std::fs::write(root.join("Note.md"), "---\ntitle: Note\n---\nbody\n").unwrap();
+        let cli = Cli::try_parse_from(["clepsydra", "tree"]).unwrap();
+        let result = run_cli_in(&root, cli).await;
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tree_json_returns_zero() {
+        let (_dir, root) = vault_in_tempdir();
+        let cli = Cli::try_parse_from(["clepsydra", "tree", "--json"]).unwrap();
         let result = run_cli_in(&root, cli).await;
         assert_eq!(result.unwrap(), 0);
     }
