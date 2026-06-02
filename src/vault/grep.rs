@@ -189,6 +189,26 @@ mod tests {
     }
 
     #[test]
+    fn run_raw_true_passes_operators_to_fts5() {
+        // Body contains "alpha" but not "zzzznotpresent".
+        let (_dir, _vault, index) = vault_with_note(
+            "Alpha.md",
+            "---\ntitle: Alpha\n---\nThe word alpha appears here.\n",
+        );
+        // raw=true: FTS5 interprets OR as an operator — should match via "alpha".
+        let raw_results = run(&index, "alpha OR zzzznotpresent", 20, true).unwrap();
+        assert_eq!(raw_results.len(), 1, "raw OR query should match the note");
+        assert_eq!(raw_results[0].path, "Alpha.md");
+
+        // raw=false: the whole string is quoted as a literal phrase — no match.
+        let quoted_results = run(&index, "alpha OR zzzznotpresent", 20, false).unwrap();
+        assert!(
+            quoted_results.is_empty(),
+            "quoted literal phrase should not match"
+        );
+    }
+
+    #[test]
     fn render_json_emits_array_with_fields() {
         let mut buf: Vec<u8> = Vec::new();
         render_json(&sample(), &mut buf).unwrap();
