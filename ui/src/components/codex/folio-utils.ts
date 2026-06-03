@@ -1,39 +1,27 @@
-const ROMANS_UPPER = [
-  "I",
-  "II",
-  "III",
-  "IV",
-  "V",
-  "VI",
-  "VII",
-  "VIII",
-  "IX",
-  "X",
-  "XI",
-  "XII",
-];
-const ROMANS_LOWER = [
-  "i",
-  "ii",
-  "iii",
-  "iv",
-  "v",
-  "vi",
-  "vii",
-  "viii",
-  "ix",
-  "x",
-  "xi",
-  "xii",
-];
+/** FNV-1a 32-bit hash of a string, rendered as a 7-char base-36 code. */
+function hashFolio(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36).padStart(7, "0");
+}
 
-/** Hash a vault path into a stable Roman-numeral folio code like "VII·iii". */
+/**
+ * Folio code for a vault path. Page filenames carry an embedded 8-char base62
+ * short id in the shape `<yyyymmdd>.<title-slug>.<shortid>.md` (ADR 0002), so
+ * use that directly. Paths without one (e.g. journal/aggregate paths) fall back
+ * to a hash of the path.
+ */
 export function shortFolio(path: string): string {
-  let h = 0;
-  for (let i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) | 0;
-  const a = Math.abs(h) % ROMANS_UPPER.length;
-  const b = Math.abs(h >> 5) % ROMANS_LOWER.length;
-  return `${ROMANS_UPPER[a]}·${ROMANS_LOWER[b]}`;
+  const base = (path.split("/").pop() ?? path).replace(/\.md$/i, "");
+  const parts = base.split(".");
+  if (parts.length >= 3) {
+    const id = parts[parts.length - 1];
+    if (/^[0-9A-Za-z]{8}$/.test(id)) return id;
+  }
+  return hashFolio(path);
 }
 
 /** Strip YAML frontmatter and return the first non-empty paragraph as a single line. */

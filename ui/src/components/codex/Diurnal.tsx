@@ -6,13 +6,13 @@ import {
   useJournalToday,
   useQuickCapture,
 } from "#/api/journal";
-import { ASCII_QUILL } from "#/components/codex/ascii";
 import { CLink } from "#/components/codex/CLink";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
+import { cn } from "#/lib/cn";
 
 function fmtDate(d: Date): string {
   const y = d.getFullYear();
@@ -32,24 +32,9 @@ function shiftDate(s: string, delta: number): string {
   return fmtDate(d);
 }
 
-const ROMAN_MONTH = [
-  "I",
-  "II",
-  "III",
-  "IV",
-  "V",
-  "VI",
-  "VII",
-  "VIII",
-  "IX",
-  "X",
-  "XI",
-  "XII",
-];
-
-function romanDate(s: string): string {
+function shortDate(s: string): string {
   const d = parseDate(s);
-  return `${d.getDate()} ${ROMAN_MONTH[d.getMonth()]}`;
+  return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
 export function Diurnal() {
@@ -126,15 +111,19 @@ export function Diurnal() {
                 key={dateStr || i}
                 type="button"
                 onClick={() => dateStr && setSelectedDate(dateStr)}
-                className={`mb-[2px] grid w-full cursor-pointer grid-cols-[auto_1fr_auto] items-baseline gap-[6px] border-none bg-transparent p-0 text-left text-[10px] ${
-                  active ? "text-ink" : "text-ink-mute"
-                }`}
+                className={cn(
+                  "mb-[2px] grid w-full cursor-pointer grid-cols-[auto_1fr_auto] items-baseline gap-[6px] border-none bg-transparent p-0 text-left text-[10px]",
+                  active ? "text-ink" : "text-ink-mute",
+                )}
               >
                 <span className="cl-mono text-accent">{marker}</span>
                 <span
-                  className={`cl-serif ${active ? "font-semibold not-italic" : "italic"}`}
+                  className={cn(
+                    "cl-serif",
+                    active ? "font-semibold not-italic" : "italic",
+                  )}
                 >
-                  {dateStr ? romanDate(dateStr) : "—"}
+                  {dateStr ? shortDate(dateStr) : "—"}
                 </span>
                 <span className="cl-mono text-[9px]">
                   {dateStr ? relativeDays(dateStr, today) : ""}
@@ -154,12 +143,12 @@ export function Diurnal() {
             {journalPath ? `D · ${shortFolio(journalPath)}` : "D · —"}
           </div>
         </div>
-        <div className="mb-3 flex items-baseline justify-between border-b border-rule border-t-2 border-t-rule py-[5px]">
+        <div className="mb-3 flex items-baseline justify-between border-b border-rule py-[5px]">
           <div className="cl-serif text-[28px] font-semibold leading-none">
             {dayLabel}
           </div>
           <div className="cl-mono text-[11px]">
-            {yearRoman(parseDate(selectedDate).getFullYear())} · day{" "}
+            {parseDate(selectedDate).getFullYear()} · day{" "}
             {dayOfYear(parseDate(selectedDate))}
           </div>
         </div>
@@ -272,11 +261,6 @@ export function Diurnal() {
             </span>
           </div>
         </div>
-
-        <pre className="cl-ascii cl-ascii-faint mt-4 text-center text-[6px]">
-          {ASCII_QUILL}
-        </pre>
-        <p className="cl-marg mt-1 text-center text-[10px]">fig. iv · stylus</p>
       </div>
     </div>
   );
@@ -316,13 +300,4 @@ function dayOfYear(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0);
   const diff = d.getTime() - start.getTime();
   return Math.floor(diff / (1000 * 60 * 60 * 24));
-}
-
-const ROMAN_ONES = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"];
-
-function yearRoman(year: number): string {
-  // Years 2000+: MM followed by tens and ones. Renders 2000-2099 cleanly.
-  const tens = Math.floor((year - 2000) / 10);
-  const ones = (year - 2000) % 10;
-  return `MM${"X".repeat(tens)}${ones === 0 ? "" : ROMAN_ONES[ones - 1]}`;
 }

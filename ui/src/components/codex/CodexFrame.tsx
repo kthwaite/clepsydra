@@ -8,12 +8,13 @@ import { Sheaf } from "#/components/codex/Sheaf";
 import { Ticker } from "#/components/codex/Ticker";
 import { useTheme } from "#/components/ThemeProvider";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
+import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
 type View = "atrium" | "folio" | "gazetteer" | "constellation" | "diurnal";
 
-/** Nav order + diegetic index numbers, per the redesign plan. */
+/** Nav order + diegetic index numbers. */
 const NAV: ReadonlyArray<readonly [View, string]> = [
   ["atrium", "ATRIUM"],
   ["folio", "FOLIO"],
@@ -104,7 +105,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-3 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink"
           aria-label="CLEPSYDRA — return to Atrium"
         >
-          CLEPSYDRA<span className="text-accent">/</span>VII
+          <span className="text-accent">C</span>LEPSYDRA
         </button>
 
         <nav className="flex items-stretch">
@@ -115,11 +116,12 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
                 key={key}
                 type="button"
                 onClick={() => onNav(key)}
-                className={`cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em] ${
+                className={cn(
+                  "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
                   active
                     ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-                    : "text-ink-mute hover:text-ink"
-                }`}
+                    : "text-ink-mute hover:text-ink",
+                )}
               >
                 <span className="text-[9px] text-ink-mute">
                   {String(i).padStart(2, "0")}
@@ -157,11 +159,12 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           <button
             type="button"
             onClick={() => openSettings("appearance")}
-            className={`cl-mono flex cursor-pointer items-center gap-1.5 border-l border-rule-soft px-3 uppercase tracking-[0.18em] ${
+            className={cn(
+              "cl-mono flex cursor-pointer items-center gap-1.5 border-l border-rule-soft px-3 uppercase tracking-[0.18em]",
               settingsOpen
                 ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-                : "text-ink-mute hover:text-ink"
-            }`}
+                : "text-ink-mute hover:text-ink",
+            )}
           >
             <span className="text-[9px] text-ink-mute">05</span>
             <span className="text-[10px]">STATUS</span>
