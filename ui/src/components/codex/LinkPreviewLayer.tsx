@@ -3,14 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBacklinks } from "#/api/index";
 import { usePage } from "#/api/pages";
-import {
-  countWords,
-  firstParagraph,
-  shortFolio,
-} from "#/components/codex/folio-utils";
+import { shortFolio } from "#/components/codex/folio-utils";
+import { PreviewBody } from "#/components/codex/PreviewBody";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
-import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { kindColorVar, resolveKind } from "#/lib/kind";
 import {
   cancelHoverClose,
   PREVIEW_WIDTH,
@@ -79,9 +76,6 @@ function PreviewWindow({ win }: { win: PW }) {
 
   const title = page?.meta.title || win.path;
   const kind = resolveKind({ path: win.path, body: page?.body });
-  const excerpt = page ? firstParagraph(page.body) : "";
-  const words = page ? countWords(page.body) : 0;
-  const tags = page?.meta.tags ?? [];
 
   return (
     <div
@@ -124,30 +118,7 @@ function PreviewWindow({ win }: { win: PW }) {
       </div>
 
       {/* body */}
-      <div className="px-[10px] py-2">
-        <div className="mb-1 flex items-baseline justify-between border-b border-rule-soft pb-[3px]">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            {kindLabel(kind)}
-          </span>
-          <span className="cl-mono text-[9px] text-ink-mute">
-            {words} wd · ↘{backlinks?.length ?? 0}
-          </span>
-        </div>
-        <div className="mb-[3px] font-sans text-[14px] font-bold leading-[1.2]">
-          {title}
-        </div>
-        {excerpt && (
-          <p className="m-0 font-sans text-[11.5px] leading-[1.45] text-ink-mute">
-            {excerpt.slice(0, 200)}
-            {excerpt.length > 200 ? "…" : ""}
-          </p>
-        )}
-        {tags.length > 0 && (
-          <div className="cl-mono mt-[5px] border-t border-dotted border-rule-soft pt-1 text-[9px] text-accent">
-            {tags.map((t) => `#${t}`).join(" ")}
-          </div>
-        )}
-      </div>
+      <PreviewBody path={win.path} page={page} backlinks={backlinks} showTags />
     </div>
   );
 }

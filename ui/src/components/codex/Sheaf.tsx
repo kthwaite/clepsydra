@@ -1,7 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Pin, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStats } from "#/api/index";
+import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
+import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
@@ -15,6 +18,9 @@ function ordered(tabs: TabDescriptor[]): TabDescriptor[] {
   return [...tabs].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
 }
 
+// Cold-open delay; once a card is showing, scrubbing to another tab is instant.
+const HOVER_DELAY = 220;
+
 export function Sheaf({ activeTabId }: SheafProps) {
   const navigate = useNavigate();
   const tabs = useWorkspaceStore((s) => s.tabs);
@@ -25,10 +31,51 @@ export function Sheaf({ activeTabId }: SheafProps) {
 
   const pageTabs = ordered(tabs.filter((t) => t.type === "page"));
 
+  const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(
+    null,
+  );
+  const openTimer = useRef<number | null>(null);
+
+  const clearOpenTimer = () => {
+    if (openTimer.current !== null) {
+      window.clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+  };
+
+  useEffect(() => clearOpenTimer, []);
+
+  const onTabEnter = (
+    id: string,
+    path: string | undefined,
+    el: HTMLElement,
+  ) => {
+    if (!shouldPreviewTab(path, id, activeTabId)) return;
+    clearOpenTimer();
+    const show = () => setHovered({ id, rect: el.getBoundingClientRect() });
+    // Instant-scrub: if a card is already open, switch with no re-delay.
+    if (hovered) {
+      show();
+    } else {
+      openTimer.current = window.setTimeout(show, HOVER_DELAY);
+    }
+  };
+
+  const onTabLeave = () => {
+    clearOpenTimer();
+    setHovered(null);
+  };
+
   const onActivate = (id: string) => {
+    clearOpenTimer();
+    setHovered(null);
     activateTab(id);
     navigate({ to: "/workspace" });
   };
+
+  const hoveredPath = hovered
+    ? (pageTabs.find((t) => t.id === hovered.id)?.path ?? null)
+    : null;
 
   return (
     <div className="cl-mono cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2">
@@ -53,7 +100,10 @@ export function Sheaf({ activeTabId }: SheafProps) {
             key={t.id}
             type="button"
             onClick={() => onActivate(t.id)}
-            title={t.path ?? t.label}
+            onMouseEnter={(e) => onTabEnter(t.id, t.path, e.currentTarget)}
+            onMouseLeave={onTabLeave}
+            title={t.path ? undefined : t.label}
+            aria-label={t.label || t.path || "untitled folio"}
             className={cn(
               "group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2",
               active
@@ -104,6 +154,10 @@ export function Sheaf({ activeTabId }: SheafProps) {
           </button>
         );
       })}
+
+      {hoveredPath && hovered && (
+        <TabPreviewCard path={hoveredPath} rect={hovered.rect} />
+      )}
 
       <span className="flex-1" />
       <span className="flex flex-shrink-0 items-center gap-2 border-l border-rule-soft px-3 py-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute">

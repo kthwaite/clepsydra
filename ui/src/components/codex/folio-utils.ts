@@ -24,12 +24,26 @@ export function shortFolio(path: string): string {
   return hashFolio(path);
 }
 
-/** Strip YAML frontmatter and return the first non-empty paragraph as a single line. */
-export function firstParagraph(body: string): string {
-  if (!body) return "";
-  const stripped = body.replace(/^---\n[\s\S]*?\n---\n/, "");
-  const para = stripped.split(/\n{2,}/).find((p) => p.trim().length > 0) ?? "";
-  return para.replace(/\s+/g, " ").trim();
+/** Strip a leading YAML frontmatter block, if present. */
+export function stripFrontmatter(body: string): string {
+  return body.replace(/^---\n[\s\S]*?\n---\n?/, "");
+}
+
+/**
+ * Prepare a markdown body for rendering inside a preview card: drop frontmatter
+ * and cap the source so we never parse a whole large note for a hover. The cap
+ * is taken at a line boundary, and a dangling (odd) code fence is closed so a
+ * truncated ``` block doesn't swallow the rest of the render.
+ */
+export function previewMarkdownSource(body: string, maxChars = 1400): string {
+  const stripped = stripFrontmatter(body).replace(/^\s+/, "");
+  if (stripped.length <= maxChars) return stripped.trimEnd();
+  let cut = stripped.slice(0, maxChars);
+  const lastNl = cut.lastIndexOf("\n");
+  if (lastNl > maxChars / 2) cut = cut.slice(0, lastNl);
+  const fences = (cut.match(/```/g) ?? []).length;
+  if (fences % 2 === 1) cut += "\n```";
+  return cut.trimEnd();
 }
 
 /** Count words in a markdown body, ignoring frontmatter. */
