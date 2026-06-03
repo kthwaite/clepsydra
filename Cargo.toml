@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2024"
 
 [[bin]]
-name = "clepsydra"
+name = "clep"
 path = "src/bin/cli.rs"
 
 [dependencies]
