@@ -45,7 +45,8 @@ export function useCreateFolder() {
 export function useUpdatePage() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/vault/pages/{path}", {
-    onSuccess: () => invalidatePageContent(qc),
+    onSuccess: (_data, variables) =>
+      invalidatePageContent(qc, variables.params.path.path),
   });
 }
 

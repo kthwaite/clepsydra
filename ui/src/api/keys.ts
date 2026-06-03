@@ -50,13 +50,40 @@ export function invalidateByPath(qc: QueryClient, prefix: string) {
   });
 }
 
+/** Pull the actual `path` param out of a `usePage` openapi-react-query key. */
+function pageDetailKeyPath(queryKey: readonly unknown[]): string | undefined {
+  const params = queryKey[2] as
+    | { params?: { path?: { path?: string } } }
+    | undefined;
+  return params?.params?.path?.path;
+}
+
 /**
  * Invalidate every cache derived from a page body — both openapi-react-query
  * paths (pages, index) and the hand-rolled key trees (blocks, tasks, agenda,
  * journal). Use after any mutation that edits page content.
+ *
+ * Pass `path` (the edited page) to scope the page-body invalidation to just
+ * that folio plus the page list, instead of marking *every* cached page body
+ * stale. The index tree and the aggregate views (blocks/tasks/agenda/journal)
+ * always stay broad: links are bidirectional, so editing one page can change
+ * another's backlinks, and those views span the whole vault.
  */
-export function invalidatePageContent(qc: QueryClient) {
-  invalidateByPath(qc, queryKeys.pages.pathPrefix);
+export function invalidatePageContent(qc: QueryClient, path?: string) {
+  if (path) {
+    const detailTemplate = `${queryKeys.pages.pathPrefix}/{path}`;
+    qc.invalidateQueries({
+      predicate: (query) => {
+        const template = query.queryKey[1];
+        if (template === queryKeys.pages.pathPrefix) return true; // the list
+        if (template === detailTemplate)
+          return pageDetailKeyPath(query.queryKey) === path;
+        return false;
+      },
+    });
+  } else {
+    invalidateByPath(qc, queryKeys.pages.pathPrefix);
+  }
   invalidateByPath(qc, queryKeys.index.pathPrefix);
   qc.invalidateQueries({ queryKey: queryKeys.blocks.all });
   qc.invalidateQueries({ queryKey: queryKeys.tasks.all });

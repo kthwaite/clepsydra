@@ -71,6 +71,8 @@ export function useQuickCapture() {
       if (!res.ok) throw new Error("Capture failed");
       return res.json();
     },
-    onSuccess: () => invalidatePageContent(qc),
+    // The capture response carries the journal page's own vault path, so we can
+    // scope the body invalidation to it (journal.all below covers the digests).
+    onSuccess: (data) => invalidatePageContent(qc, data.path),
   });
 }

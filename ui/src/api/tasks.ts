@@ -96,6 +96,7 @@ export function useToggleTaskStatus() {
       if (!res.ok) throw new Error("Failed to update task");
       return res.json();
     },
-    onSuccess: () => invalidatePageContent(qc),
+    onSuccess: (_data, variables) =>
+      invalidatePageContent(qc, variables.pagePath),
   });
 }

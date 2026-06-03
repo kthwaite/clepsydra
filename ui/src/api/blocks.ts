@@ -52,6 +52,7 @@ export function useAssignBlockId() {
       if (!res.ok) throw new Error("Failed to assign block ID");
       return res.json() as Promise<{ block_id: string }>;
     },
-    onSuccess: () => invalidatePageContent(qc),
+    onSuccess: (_data, variables) =>
+      invalidatePageContent(qc, variables.page_path),
   });
 }
