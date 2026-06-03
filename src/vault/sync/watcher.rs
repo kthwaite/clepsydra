@@ -49,7 +49,8 @@ fn map_debounced_event(
 
 /// Watches a vault directory for filesystem changes and emits [`ChangeEvent`]s.
 pub struct VaultWatcher {
-    _debouncer: Debouncer<RecommendedWatcher>,
+    #[allow(dead_code)]
+    debouncer: Debouncer<RecommendedWatcher>,
 }
 
 impl VaultWatcher {
@@ -89,9 +90,7 @@ impl VaultWatcher {
             .watcher()
             .watch(root.as_ref(), RecursiveMode::Recursive)?;
 
-        Ok(Self {
-            _debouncer: debouncer,
-        })
+        Ok(Self { debouncer })
     }
 }
 
