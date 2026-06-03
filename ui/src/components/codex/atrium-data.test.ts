@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHeatmap,
-  deriveInventory,
   dayOfYear,
+  deriveInventory,
   julianDay,
-  sortRecents,
   type RecentItem,
+  sortRecents,
 } from "./atrium-data";
 
 describe("dayOfYear / julianDay", () => {
@@ -85,9 +85,21 @@ describe("deriveInventory", () => {
     { tag: "hapax-two", count: 1 },
   ];
   const items = [
-    { created_at: "2026-05-02T01:00:00Z", updated_at: "2026-05-02T02:00:00Z", tags: ["x"] },
-    { created_at: "2026-04-29T01:00:00Z", updated_at: "2026-05-02T05:00:00Z", tags: [] },
-    { created_at: "2026-03-01T01:00:00Z", updated_at: "2026-03-01T01:00:00Z", tags: ["y"] },
+    {
+      created_at: "2026-05-02T01:00:00Z",
+      updated_at: "2026-05-02T02:00:00Z",
+      tags: ["x"],
+    },
+    {
+      created_at: "2026-04-29T01:00:00Z",
+      updated_at: "2026-05-02T05:00:00Z",
+      tags: [],
+    },
+    {
+      created_at: "2026-03-01T01:00:00Z",
+      updated_at: "2026-03-01T01:00:00Z",
+      tags: ["y"],
+    },
   ];
 
   it("derives corpus cells with real subs", () => {
@@ -126,13 +138,31 @@ describe("deriveInventory", () => {
 
 describe("sortRecents", () => {
   const items: RecentItem[] = [
-    { path: "a.md", title: "A", created_at: "2026-05-01T00:00:00Z", updated_at: "2026-05-03T00:00:00Z", tags: [] },
-    { path: "b.md", title: "B", created_at: "2026-05-02T00:00:00Z", updated_at: "2026-05-01T00:00:00Z", tags: [] },
+    {
+      path: "a.md",
+      title: "A",
+      created_at: "2026-05-01T00:00:00Z",
+      updated_at: "2026-05-03T00:00:00Z",
+      tags: [],
+    },
+    {
+      path: "b.md",
+      title: "B",
+      created_at: "2026-05-02T00:00:00Z",
+      updated_at: "2026-05-01T00:00:00Z",
+      tags: [],
+    },
   ];
   it("sorts by updated_at desc for 'edited'", () => {
-    expect(sortRecents(items, "edited").map((i) => i.path)).toEqual(["a.md", "b.md"]);
+    expect(sortRecents(items, "edited").map((i) => i.path)).toEqual([
+      "a.md",
+      "b.md",
+    ]);
   });
   it("sorts by created_at desc for 'created'", () => {
-    expect(sortRecents(items, "created").map((i) => i.path)).toEqual(["b.md", "a.md"]);
+    expect(sortRecents(items, "created").map((i) => i.path)).toEqual([
+      "b.md",
+      "a.md",
+    ]);
   });
 });

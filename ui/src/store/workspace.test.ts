@@ -34,35 +34,47 @@ describe("pushOpenHistory", () => {
 
 describe("useWorkspaceStore openTab wiring", () => {
   it("records page opens but not graph opens in openHistory", () => {
-    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+    });
 
     useWorkspaceStore.getState().openTab("page", "note-a.md", "Note A");
-    expect(
-      useWorkspaceStore.getState().openHistory.map((e) => e.path),
-    ).toEqual(["note-a.md"]);
+    expect(useWorkspaceStore.getState().openHistory.map((e) => e.path)).toEqual(
+      ["note-a.md"],
+    );
 
     useWorkspaceStore.getState().openTab("graph");
-    expect(
-      useWorkspaceStore.getState().openHistory.map((e) => e.path),
-    ).toEqual(["note-a.md"]);
+    expect(useWorkspaceStore.getState().openHistory.map((e) => e.path)).toEqual(
+      ["note-a.md"],
+    );
   });
 
   it("activateTab records page-tab activations in openHistory", () => {
-    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+    });
     const store = useWorkspaceStore.getState();
     store.addTab({ id: "t1", type: "page", path: "x.md", label: "X" });
     store.addTab({ id: "t2", type: "graph", label: "Graph" });
     useWorkspaceStore.getState().activateTab("t1");
     useWorkspaceStore.getState().activateTab("t2");
-    expect(
-      useWorkspaceStore.getState().openHistory.map((e) => e.path),
-    ).toEqual(["x.md"]);
+    expect(useWorkspaceStore.getState().openHistory.map((e) => e.path)).toEqual(
+      ["x.md"],
+    );
   });
 });
 
 describe("useWorkspaceStore updateTabPath", () => {
   it("updates the target tab's path and leaves other tabs untouched", () => {
-    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+    });
     const store = useWorkspaceStore.getState();
     store.addTab({ id: "t1", type: "page", path: "notes/x.md", label: "X" });
     store.addTab({ id: "t2", type: "page", path: "notes/y.md", label: "Y" });
@@ -80,7 +92,11 @@ describe("useWorkspaceStore updateTabPath", () => {
   });
 
   it("updates the label too when one is supplied", () => {
-    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+    });
     useWorkspaceStore
       .getState()
       .addTab({ id: "t1", type: "page", path: "notes/x.md", label: "X" });
@@ -93,20 +109,22 @@ describe("useWorkspaceStore updateTabPath", () => {
   });
 
   it("removes the old path from openHistory and adds the new one", () => {
-    useWorkspaceStore.setState({ tabs: [], activeTabId: null, openHistory: [] });
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+    });
     const store = useWorkspaceStore.getState();
     // openTab seeds openHistory for page tabs.
     store.openTab("page", "notes/x.md", "X");
-    expect(
-      useWorkspaceStore.getState().openHistory.map((e) => e.path),
-    ).toEqual(["notes/x.md"]);
+    expect(useWorkspaceStore.getState().openHistory.map((e) => e.path)).toEqual(
+      ["notes/x.md"],
+    );
 
     const tabId = useWorkspaceStore.getState().tabs[0].id;
     useWorkspaceStore.getState().updateTabPath(tabId, "projects/x.md");
 
-    const paths = useWorkspaceStore
-      .getState()
-      .openHistory.map((e) => e.path);
+    const paths = useWorkspaceStore.getState().openHistory.map((e) => e.path);
     expect(paths).toContain("projects/x.md");
     expect(paths).not.toContain("notes/x.md");
   });

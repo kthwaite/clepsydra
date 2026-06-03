@@ -57,8 +57,18 @@ interface InventoryItem {
 const MS_PER_DAY = 86_400_000;
 const HEATMAP_DAYS = 26 * 7;
 const MONTHS = [
-  "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+  "JAN",
+  "FEB",
+  "MAR",
+  "APR",
+  "MAY",
+  "JUN",
+  "JUL",
+  "AUG",
+  "SEP",
+  "OCT",
+  "NOV",
+  "DEC",
 ];
 
 /** UTC day key (YYYY-MM-DD) for an ISO string. */
@@ -100,7 +110,10 @@ function level(n: number): number {
   return 5;
 }
 
-export function buildHeatmap(items: HeatItem[], now: Date = new Date()): Heatmap {
+export function buildHeatmap(
+  items: HeatItem[],
+  now: Date = new Date(),
+): Heatmap {
   const counts = new Map<string, number>();
   let total = 0;
   for (const it of items) {
@@ -112,7 +125,9 @@ export function buildHeatmap(items: HeatItem[], now: Date = new Date()): Heatmap
   }
 
   // Today at UTC midnight; walk back to the Monday on/before (today - 181d).
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
   const start = new Date(today);
   start.setUTCDate(start.getUTCDate() - (HEATMAP_DAYS - 1));
   // Monday-first columns: 0=Sun..6=Sat → days back to Monday = (dow + 6) % 7.
@@ -224,7 +239,8 @@ export function deriveInventory(
   let new7d = 0;
   let unfiled = 0;
   for (const it of items) {
-    if (it.created_at && dayKeyOf(it.created_at) === todayKey) capturesToday += 1;
+    if (it.created_at && dayKeyOf(it.created_at) === todayKey)
+      capturesToday += 1;
     if (it.updated_at && dayKeyOf(it.updated_at) === todayKey) editedToday += 1;
     if (it.created_at && dayKeyOf(it.created_at) >= sevenAgoKey) new7d += 1;
     if (!it.tags || it.tags.length === 0) unfiled += 1;

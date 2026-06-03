@@ -1,8 +1,14 @@
 import SunCalc from "suncalc";
 
 const MOON_NAMES = [
-  "New", "Waxing crescent", "First quarter", "Waxing gibbous",
-  "Full", "Waning gibbous", "Last quarter", "Waning crescent",
+  "New",
+  "Waxing crescent",
+  "First quarter",
+  "Waxing gibbous",
+  "Full",
+  "Waning gibbous",
+  "Last quarter",
+  "Waning crescent",
 ];
 const MOON_GLYPHS = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 
@@ -17,7 +23,10 @@ export interface MoonInfo {
 }
 
 /** Pure mapping from raw illumination to display info. */
-export function describeMoon(illum: { fraction: number; phase: number }): MoonInfo {
+export function describeMoon(illum: {
+  fraction: number;
+  phase: number;
+}): MoonInfo {
   const idx = Math.round(illum.phase * 8) % 8;
   return {
     phaseName: MOON_NAMES[idx],

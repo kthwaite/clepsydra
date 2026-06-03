@@ -18,7 +18,9 @@ describe("stripFrontmatter", () => {
 describe("previewMarkdownSource", () => {
   it("preserves markdown structure (frontmatter aside)", () => {
     expect(
-      previewMarkdownSource("---\ntype: note\n---\n## common expansions\n\nbody"),
+      previewMarkdownSource(
+        "---\ntype: note\n---\n## common expansions\n\nbody",
+      ),
     ).toBe("## common expansions\n\nbody");
   });
 

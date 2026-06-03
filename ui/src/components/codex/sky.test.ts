@@ -31,8 +31,12 @@ describe("sunArcPosition", () => {
   const sunrise = new Date("2026-05-02T05:54:00Z");
   const sunset = new Date("2026-05-02T20:31:00Z");
   it("clamps to the horizon before sunrise and after sunset", () => {
-    expect(sunArcPosition(new Date("2026-05-02T04:00:00Z"), sunrise, sunset).t).toBe(0);
-    expect(sunArcPosition(new Date("2026-05-02T22:00:00Z"), sunrise, sunset).t).toBe(1);
+    expect(
+      sunArcPosition(new Date("2026-05-02T04:00:00Z"), sunrise, sunset).t,
+    ).toBe(0);
+    expect(
+      sunArcPosition(new Date("2026-05-02T22:00:00Z"), sunrise, sunset).t,
+    ).toBe(1);
   });
   it("is ~0.5 at solar midpoint", () => {
     const mid = new Date("2026-05-02T13:12:00Z");

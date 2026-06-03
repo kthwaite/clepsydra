@@ -28,7 +28,9 @@ export function Card({
     <section className={clsx("border border-rule bg-paper-2", className)}>
       <div className="flex items-center justify-between gap-3 border-b border-rule bg-paper px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className={clsx("h-[7px] w-[7px] flex-shrink-0", PIP_CLASS[pip])} />
+          <span
+            className={clsx("h-[7px] w-[7px] flex-shrink-0", PIP_CLASS[pip])}
+          />
           <span className="cl-mono truncate text-[9px] font-medium uppercase tracking-[0.22em] text-ink">
             {label}
           </span>

@@ -6,7 +6,15 @@ import { MoonDisc } from "./MoonDisc";
 describe("sky components", () => {
   it("renders MoonDisc with a phase label", () => {
     const { getByLabelText } = render(
-      <MoonDisc info={{ phaseName: "Full", glyph: "🌕", illumPct: 100, waxing: false, terminatorScaleX: 1 }} />,
+      <MoonDisc
+        info={{
+          phaseName: "Full",
+          glyph: "🌕",
+          illumPct: 100,
+          waxing: false,
+          terminatorScaleX: 1,
+        }}
+      />,
     );
     expect(getByLabelText(/Full · 100%/)).toBeInTheDocument();
   });

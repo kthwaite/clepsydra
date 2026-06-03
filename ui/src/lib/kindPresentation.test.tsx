@@ -7,7 +7,17 @@ describe("presentationFor", () => {
     expect(p.metaExtras).toBeNull();
   });
   it("never throws for any known kind", () => {
-    for (const k of ["NOTE","PROJECT","JOURNAL","TODO","QUOTE","BOOK","CAPTURE","CODE","PERSON"] as const) {
+    for (const k of [
+      "NOTE",
+      "PROJECT",
+      "JOURNAL",
+      "TODO",
+      "QUOTE",
+      "BOOK",
+      "CAPTURE",
+      "CODE",
+      "PERSON",
+    ] as const) {
       expect(() => presentationFor(k)).not.toThrow();
     }
   });

@@ -84,7 +84,9 @@ const components: Components = {
   ),
   hr: () => <hr className="my-1.5 border-0 border-t border-rule-soft" />,
   img: ({ alt }) => (
-    <span className="cl-mono text-[9px] text-ink-faint">🖼 {alt || "image"}</span>
+    <span className="cl-mono text-[9px] text-ink-faint">
+      🖼 {alt || "image"}
+    </span>
   ),
 };
 

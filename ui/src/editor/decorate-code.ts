@@ -1,5 +1,5 @@
-import { refractor } from "#/editor/refractor-languages";
 import { type NodeEntry, type Range, Element as SlateElement } from "slate";
+import { refractor } from "#/editor/refractor-languages";
 
 /** Prism token type → Vessel colour CSS var, applied by renderLeaf. */
 export const TOKEN_COLOR: Record<string, string> = {

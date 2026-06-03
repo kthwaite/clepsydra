@@ -14,7 +14,10 @@ describe("decorateCode", () => {
   });
 
   it("returns [] for a code-block with no language", () => {
-    const node = { type: "code-block" as const, children: [{ text: "const x = 1;" }] };
+    const node = {
+      type: "code-block" as const,
+      children: [{ text: "const x = 1;" }],
+    };
     expect(decorateCode([node as any, [0]])).toEqual([]);
   });
 
