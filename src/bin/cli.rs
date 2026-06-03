@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use clepsydra::diagnostics::{self, DoctorOpts};
+use clepsydra::doctor::{self, DoctorOpts};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::new_note::create_new_note;
 use clepsydra::{open_vault_and_index, run_server};
@@ -145,7 +145,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             Ok(0)
         }
         Commands::Doctor { json, strict, full } => {
-            let report = diagnostics::run(DoctorOpts { full }).await;
+            let report = doctor::run(DoctorOpts { full }).await;
             if json {
                 // Machine-readable output stays raw — never styled.
                 report.render_json(&mut std::io::stdout().lock())?;

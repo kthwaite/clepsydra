@@ -598,7 +598,7 @@ async fn serve(app: Router, settings: &Settings) -> Result<(), Box<dyn std::erro
 ///
 /// Serve-only by construction — this is called solely from [`run_server`]. The
 /// read-only index build (`open_vault_and_index`) and `doctor`
-/// (`diagnostics::run`) never reach it, preserving the read-only boundary
+/// (`doctor::run`) never reach it, preserving the read-only boundary
 /// (ADR 0001). Best-effort: failures are logged via tracing and never abort
 /// startup. Real `state.hooks` are forwarded so startup moves of academic work
 /// pages fire `AcademicMoveHook`, mirroring `move_page` and LSP `did_save`.
