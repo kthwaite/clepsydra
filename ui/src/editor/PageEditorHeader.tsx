@@ -28,7 +28,7 @@ export function PageEditorHeader({
   onSaveNow,
 }: PageEditorHeaderProps) {
   return (
-    <div className="border-b border-border pb-4">
+    <div className="pb-4">
       <input
         type="text"
         value={title}
