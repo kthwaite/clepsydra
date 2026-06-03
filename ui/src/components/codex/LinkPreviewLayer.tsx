@@ -9,6 +9,7 @@ import {
   shortFolio,
 } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import {
   cancelHoverClose,
@@ -46,10 +47,19 @@ function PreviewWindow({ win }: { win: PW }) {
 
   useEffect(() => {
     if (!dragging) return;
+    // pointermove fires far faster than we can paint; coalesce to one store
+    // write per frame so the drag doesn't thrash React renders.
+    let raf = 0;
+    let pending: { x: number; y: number } | null = null;
+    const flush = () => {
+      raf = 0;
+      if (pending) move(win.id, pending.x, pending.y);
+    };
     const onMove = (e: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      move(win.id, e.clientX - d.ox, e.clientY - d.oy);
+      pending = { x: e.clientX - d.ox, y: e.clientY - d.oy };
+      if (!raf) raf = requestAnimationFrame(flush);
     };
     const onUp = () => setDragging(false);
     window.addEventListener("pointermove", onMove);
@@ -57,6 +67,7 @@ function PreviewWindow({ win }: { win: PW }) {
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      if (raf) cancelAnimationFrame(raf);
     };
   }, [dragging, win.id, move]);
 
@@ -189,9 +200,10 @@ function IconBtn({
       title={label}
       onClick={onClick}
       onPointerDown={(e) => e.stopPropagation()}
-      className={`flex cursor-pointer items-center p-[1px] ${
-        active ? "text-accent" : "text-ink-mute hover:text-ink"
-      }`}
+      className={cn(
+        "flex cursor-pointer items-center p-[1px]",
+        active ? "text-accent" : "text-ink-mute hover:text-ink",
+      )}
     >
       {children}
     </button>
