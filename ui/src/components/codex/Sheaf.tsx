@@ -2,7 +2,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { Pin, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useStats } from "#/api/index";
-import { shortFolio } from "#/components/codex/folio-utils";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
@@ -67,14 +66,6 @@ export function Sheaf({ activeTabId }: SheafProps) {
               style={{ background: kindColorVar(kind) }}
               aria-hidden
             />
-            <span
-              className={cn(
-                "text-[9px] font-medium tracking-[0.04em]",
-                active ? "text-accent" : "text-ink-mute",
-              )}
-            >
-              {t.path ? shortFolio(t.path) : "—"}
-            </span>
             <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px]">
               {t.label || t.path || "(untitled)"}
             </span>
