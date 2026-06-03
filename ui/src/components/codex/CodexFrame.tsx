@@ -189,15 +189,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
         <Sheaf activeTabId={activeTabId} />
       )}
 
-      {/* READING PROGRESS — folio only; sits directly under the tab bar */}
-      {view === "folio" && (
-        <div className="relative h-[2px] flex-shrink-0 bg-rule-soft">
-          <div
-            className="absolute inset-0 bg-accent transition-[width] duration-100 ease-linear"
-            style={{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }}
-          />
-        </div>
-      )}
+      {/* Reading progress now renders as a per-heading tick rail inside the
+          FOLIO prose gutter (see Folio.tsx). The footer keeps the % readout. */}
 
       {/* ── WORKSPACE ───────────────────────────────────────────────── */}
       <main className="cl-noscroll relative flex-1 overflow-auto">

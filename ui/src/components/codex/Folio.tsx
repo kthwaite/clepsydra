@@ -264,65 +264,68 @@ export function Folio({ tabId, path }: FolioProps) {
       )}
 
       {/* ── CENTER · DOSSIER ─────────────────────────────────────────── */}
-      <div
-        ref={bodyRef}
-        onScroll={onScroll}
-        className="cl-noscroll relative overflow-auto"
-      >
-        <div className="mx-auto max-w-[900px] px-7 py-[18px] pb-10">
-          {/* dossier header */}
-          <div className="flex items-baseline justify-between">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-              FILE / {folioCode}
-            </span>
-            <div className="flex items-center gap-3">
-              <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                <Pip kind={kind} />
-                {kindLabel(kind)}
+      <div className="relative min-h-0">
+        <div
+          ref={bodyRef}
+          onScroll={onScroll}
+          className="cl-noscroll h-full overflow-auto"
+        >
+          <div className="mx-auto max-w-[900px] px-7 py-[18px] pb-10">
+            {/* dossier header */}
+            <div className="flex items-baseline justify-between">
+              <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+                FILE / {folioCode}
               </span>
-              <SaveIndicator
-                status={editor.saveStatus}
-                error={editor.saveError}
+              <div className="flex items-center gap-3">
+                <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+                  <Pip kind={kind} />
+                  {kindLabel(kind)}
+                </span>
+                <SaveIndicator
+                  status={editor.saveStatus}
+                  error={editor.saveError}
+                />
+              </div>
+            </div>
+            <hr className="cl-rule-dash mt-2" />
+
+            {/* title + tags + aliases */}
+            <div className="mt-4">
+              <PageEditorHeader
+                path={path}
+                title={editor.title}
+                onTitleChange={editor.setTitle}
+                tags={editor.tags}
+                onTagsChange={editor.setTags}
+                aliases={editor.aliases}
+                onAliasesChange={editor.setAliases}
+                onSaveNow={editor.saveNow}
               />
             </div>
-          </div>
-          <hr className="cl-rule-dash mt-2" />
 
-          {/* title + tags + aliases */}
-          <div className="mt-4">
-            <PageEditorHeader
-              path={path}
-              title={editor.title}
-              onTitleChange={editor.setTitle}
-              tags={editor.tags}
-              onTagsChange={editor.setTags}
-              aliases={editor.aliases}
-              onAliasesChange={editor.setAliases}
-              onSaveNow={editor.saveNow}
-            />
-          </div>
+            <hr className="cl-rule-dash mt-3" />
 
-          <hr className="cl-rule-dash mt-3" />
+            {/* body — Slate editor styled as dossier prose */}
+            <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
+              <SlateEditor
+                key={`${path}:${editor.editorRevision}`}
+                initialValue={editor.initialValue}
+                onChange={editor.onSlateChange}
+                onSaveNow={editor.saveNow}
+              />
+            </article>
 
-          {/* body — Slate editor styled as dossier prose */}
-          <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
-            <SlateEditor
-              key={`${path}:${editor.editorRevision}`}
-              initialValue={editor.initialValue}
-              onChange={editor.onSlateChange}
-              onSaveNow={editor.saveNow}
-            />
-          </article>
-
-          {/* end of file */}
-          <hr className="cl-rule-dash mt-8" />
-          <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-            <span>END OF FILE</span>
-            <span>
-              {folioCode} · {wordCount > 0 ? `${wordCount} WD` : "—"}
-            </span>
+            {/* end of file */}
+            <hr className="cl-rule-dash mt-8" />
+            <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+              <span>END OF FILE</span>
+              <span>
+                {folioCode} · {wordCount > 0 ? `${wordCount} WD` : "—"}
+              </span>
+            </div>
           </div>
         </div>
+        <ReadingTicks toc={toc} activeIndex={activeIndex} onJump={scrollTo} />
       </div>
 
       {/* ── RIGHT · APPARATUS ────────────────────────────────────────── */}
@@ -423,6 +426,55 @@ export function Folio({ tabId, path }: FolioProps) {
 }
 
 /* ── small presentational helpers ─────────────────────────────────────── */
+
+/**
+ * Reading-position rail: one horizontal tick per heading, stacked vertically in
+ * the prose gutter, with the active section's tick widened + accented. Replaces
+ * the old horizontal scroll-fraction bar. Ticks step in from the right edge by
+ * heading depth, echoing the left-rail TOC's indentation.
+ */
+function ReadingTicks({
+  toc,
+  activeIndex,
+  onJump,
+}: {
+  toc: TocEntry[];
+  activeIndex: number;
+  onJump: (index: number) => void;
+}) {
+  if (toc.length === 0) return null;
+  return (
+    <nav
+      aria-label="Reading position"
+      className="pointer-events-none absolute top-1/2 right-3 z-10 flex max-h-[88%] -translate-y-1/2 flex-col items-end gap-1 overflow-hidden"
+    >
+      {toc.map((h, i) => {
+        const active = i === activeIndex;
+        return (
+          <button
+            key={`${h.text}-${i}`}
+            type="button"
+            onClick={() => onJump(i)}
+            aria-label={`${h.number} ${h.text}`}
+            aria-current={active ? "location" : undefined}
+            title={h.text}
+            style={{ marginRight: (h.depth - 1) * 4 }}
+            className="group pointer-events-auto flex flex-shrink-0 cursor-pointer items-center justify-end py-[5px] pl-5"
+          >
+            <span
+              className={cn(
+                "h-[3px] transition-all",
+                active
+                  ? "w-7 bg-accent"
+                  : "w-3.5 bg-ink-mute/40 group-hover:w-5 group-hover:bg-ink",
+              )}
+            />
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 function Pip({ kind }: { kind: Parameters<typeof kindColorVar>[0] }) {
   return (
