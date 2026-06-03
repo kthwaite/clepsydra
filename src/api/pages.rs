@@ -1287,7 +1287,10 @@ Some quoted text.\n";
         .unwrap();
 
         assert_eq!(resp.0.path, "notes/x.md");
-        assert_eq!(resp.0.meta.project, None, "project should be cleared in meta");
+        assert_eq!(
+            resp.0.meta.project, None,
+            "project should be cleared in meta"
+        );
         assert!(
             !state
                 .vault

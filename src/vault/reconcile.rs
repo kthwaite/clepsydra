@@ -167,9 +167,16 @@ mod tests {
             None
         );
         // Source untouched; destination not overwritten.
-        assert!(vault.resolve(&VaultPath::new("notes/q.md").unwrap()).exists());
+        assert!(
+            vault
+                .resolve(&VaultPath::new("notes/q.md").unwrap())
+                .exists()
+        );
         let dest_body =
             fs::read_to_string(vault.resolve(&VaultPath::new("quotes/q.md").unwrap())).unwrap();
-        assert!(dest_body.contains("occupied"), "destination overwritten: {dest_body}");
+        assert!(
+            dest_body.contains("occupied"),
+            "destination overwritten: {dest_body}"
+        );
     }
 }
