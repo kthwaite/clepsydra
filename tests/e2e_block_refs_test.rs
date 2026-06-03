@@ -38,6 +38,7 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
 
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
+        started_at: std::time::Instant::now(),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),

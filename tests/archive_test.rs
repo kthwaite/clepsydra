@@ -46,6 +46,7 @@ fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
 
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
+        started_at: std::time::Instant::now(),
         vault,
         index: index_handle,
         cas: cas_arc,
