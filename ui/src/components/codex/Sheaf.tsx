@@ -107,8 +107,8 @@ export function Sheaf({ activeTabId }: SheafProps) {
             className={cn(
               "group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2",
               active
-                ? "border-t-2 border-t-accent bg-paper text-ink"
-                : "border-t-2 border-t-transparent text-ink-mute hover:text-ink",
+                ? "bg-paper text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
+                : "text-ink-mute hover:text-ink",
             )}
           >
             <span
