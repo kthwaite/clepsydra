@@ -15,6 +15,7 @@ pub mod openapi;
 pub mod pages;
 pub mod pagination;
 pub mod tasks;
+pub mod uptime;
 
 use std::sync::Arc;
 
@@ -28,6 +29,10 @@ use crate::vault::index_handle::IndexHandle;
 
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
+    /// Monotonic instant captured when this state is built at startup. The
+    /// `/uptime` endpoint reports `started_at.elapsed()`, giving true server
+    /// uptime independent of any client's tab lifetime.
+    pub started_at: std::time::Instant,
     pub vault: Vault,
     pub index: IndexHandle,
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
@@ -81,4 +86,5 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))
         .route("/location", axum::routing::get(location::get_location))
+        .route("/uptime", axum::routing::get(uptime::get_uptime))
 }

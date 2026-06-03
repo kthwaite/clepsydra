@@ -401,6 +401,7 @@ pub(crate) async fn build_app_state(
     let location = vault::location::load_or_seed(vault.root());
 
     Ok(Arc::new(AppState {
+        started_at: std::time::Instant::now(),
         vault,
         index: index_handle,
         cas: cas_arc,

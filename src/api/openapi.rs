@@ -18,7 +18,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Academic", description = "Academic works, annotations and importers"),
         (name = "Events", description = "Server-sent events stream"),
         (name = "BCL", description = "Brimley-Cocoon Line countdown"),
-        (name = "Location", description = "Vault geographic location")
+        (name = "Location", description = "Vault geographic location"),
+        (name = "Uptime", description = "Server uptime")
     ),
     paths(
         // Pages
@@ -74,7 +75,9 @@ use utoipa_swagger_ui::SwaggerUi;
         // BCL
         crate::api::bcl::get_bcl,
         // Location
-        crate::api::location::get_location
+        crate::api::location::get_location,
+        // Uptime
+        crate::api::uptime::get_uptime
     ),
     components(
         schemas(
@@ -141,7 +144,9 @@ use utoipa_swagger_ui::SwaggerUi;
             // BCL
             crate::api::bcl::BclResponse,
             // Location
-            crate::api::location::LocationResponse
+            crate::api::location::LocationResponse,
+            // Uptime
+            crate::api::uptime::UptimeResponse
         )
     )
 )]

@@ -74,6 +74,7 @@ pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
     let (change_tx, _rx) = broadcast::channel(64);
 
     let state = Arc::new(AppState {
+        started_at: std::time::Instant::now(),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
