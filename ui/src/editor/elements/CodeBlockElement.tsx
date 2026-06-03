@@ -51,7 +51,10 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
           {label}
         </button>
       </div>
-      <pre className="cl-noscroll overflow-x-auto px-4 py-3 font-mono text-[12.5px] leading-[1.5] text-ink">
+      <pre
+        className="cl-noscroll overflow-x-auto px-4 py-3 font-mono text-[12.5px] leading-[1.5] text-ink"
+        spellCheck="false"
+      >
         <code>{children}</code>
       </pre>
       {open && (
