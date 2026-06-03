@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { useAssignPage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
-import { KindSelect } from "#/components/codex/KindSelect";
-import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import {
   formatAbsoluteDate,
   formatRelativeTime,
@@ -12,6 +10,8 @@ import {
   countWordsFromSlate,
   shortFolio,
 } from "#/components/codex/folio-utils";
+import { KindSelect } from "#/components/codex/KindSelect";
+import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
@@ -19,6 +19,7 @@ import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
+import { cn } from "#/lib/cn";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { useProjects } from "#/lib/useProjects";
@@ -215,11 +216,12 @@ export function Folio({ tabId, path }: FolioProps) {
                       key={`${h.text}-${i}`}
                       type="button"
                       onClick={() => scrollTo(i)}
-                      className={`flex w-full cursor-pointer items-baseline gap-1.5 py-[2px] pr-1 text-left text-[11px] ${
+                      className={cn(
+                        "flex w-full cursor-pointer items-baseline gap-1.5 py-[2px] pr-1 text-left text-[11px]",
                         active
                           ? "border-l-2 border-accent bg-highlight pl-2 text-ink"
-                          : "border-l-2 border-transparent pl-2 text-ink-mute hover:text-ink"
-                      }`}
+                          : "border-l-2 border-transparent pl-2 text-ink-mute hover:text-ink",
+                      )}
                       style={{ paddingLeft: (h.depth - 1) * 8 + 8 }}
                     >
                       <span className="text-[9px] text-ink-mute">
@@ -469,9 +471,10 @@ function RailStub({
 }) {
   return (
     <aside
-      className={`flex justify-center pt-3 ${
-        side === "left" ? "border-r" : "border-l"
-      } border-rule`}
+      className={cn(
+        "flex justify-center border-rule pt-3",
+        side === "left" ? "border-r" : "border-l",
+      )}
     >
       <button
         type="button"
@@ -495,9 +498,10 @@ function Resizer({
   return (
     <div
       onPointerDown={onPointerDown}
-      className={`absolute top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-accent ${
-        side === "left" ? "left-0" : "right-0"
-      }`}
+      className={cn(
+        "absolute top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-accent",
+        side === "left" ? "left-0" : "right-0",
+      )}
       aria-hidden
     />
   );
@@ -546,11 +550,12 @@ function RTabBtn({
     <button
       type="button"
       onClick={onClick}
-      className={`cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-2.5 py-1.5 text-[9px] uppercase tracking-[0.14em] ${
+      className={cn(
+        "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-2.5 py-1.5 text-[9px] uppercase tracking-[0.14em]",
         active
           ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-          : "text-ink-mute hover:text-ink"
-      }`}
+          : "text-ink-mute hover:text-ink",
+      )}
     >
       {label}
       <span className={active ? "text-accent" : "text-ink-mute"}>{n}</span>
@@ -688,9 +693,10 @@ function OpenRow({
   const kind = resolveKind({ path: t.path ?? "" });
   return (
     <div
-      className={`group flex w-full items-center gap-1.5 py-[2px] text-[11px] ${
-        active ? "text-ink" : "text-ink-mute"
-      }`}
+      className={cn(
+        "group flex w-full items-center gap-1.5 py-[2px] text-[11px]",
+        active ? "text-ink" : "text-ink-mute",
+      )}
     >
       <button
         type="button"
@@ -708,11 +714,12 @@ function OpenRow({
         onClick={onTogglePin}
         aria-label={t.pinned ? "Unpin tab" : "Pin tab"}
         title={t.pinned ? "Unpin" : "Pin"}
-        className={`cl-mono flex-shrink-0 cursor-pointer px-1 text-[10px] ${
+        className={cn(
+          "cl-mono flex-shrink-0 cursor-pointer px-1 text-[10px]",
           t.pinned
             ? "text-accent"
-            : "text-ink-mute opacity-0 hover:text-ink group-hover:opacity-100"
-        }`}
+            : "text-ink-mute opacity-0 hover:text-ink group-hover:opacity-100",
+        )}
       >
         ✶
       </button>

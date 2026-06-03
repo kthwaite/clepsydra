@@ -3,6 +3,7 @@ import { Pin, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useStats } from "#/api/index";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
@@ -54,11 +55,12 @@ export function Sheaf({ activeTabId }: SheafProps) {
             type="button"
             onClick={() => onActivate(t.id)}
             title={t.path ?? t.label}
-            className={`group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2 ${
+            className={cn(
+              "group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2",
               active
                 ? "border-t-2 border-t-accent bg-paper text-ink"
-                : "border-t-2 border-t-transparent text-ink-mute hover:text-ink"
-            }`}
+                : "border-t-2 border-t-transparent text-ink-mute hover:text-ink",
+            )}
           >
             <span
               className="inline-block h-[6px] w-[6px] flex-shrink-0"
@@ -66,9 +68,10 @@ export function Sheaf({ activeTabId }: SheafProps) {
               aria-hidden
             />
             <span
-              className={`text-[9px] font-medium tracking-[0.04em] ${
-                active ? "text-accent" : "text-ink-mute"
-              }`}
+              className={cn(
+                "text-[9px] font-medium tracking-[0.04em]",
+                active ? "text-accent" : "text-ink-mute",
+              )}
             >
               {t.path ? shortFolio(t.path) : "—"}
             </span>
@@ -83,11 +86,12 @@ export function Sheaf({ activeTabId }: SheafProps) {
               role="button"
               tabIndex={0}
               aria-label={t.pinned ? "unpin folio" : "pin folio"}
-              className={`flex-shrink-0 cursor-pointer px-[2px] leading-none transition-opacity ${
+              className={cn(
+                "flex-shrink-0 cursor-pointer px-[2px] leading-none transition-opacity",
                 t.pinned
                   ? "text-warn opacity-100"
-                  : "text-ink-mute opacity-0 group-hover:opacity-60 hover:!opacity-100"
-              }`}
+                  : "text-ink-mute opacity-0 group-hover:opacity-60 hover:!opacity-100",
+              )}
             >
               <Pin size={11} fill={t.pinned ? "currentColor" : "none"} />
             </span>

@@ -11,6 +11,7 @@ import { shortFolio } from "#/components/codex/folio-utils";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
 
 type Command = {
@@ -251,46 +252,52 @@ export function CommandPalette() {
                   c.action();
                   close();
                 }}
-                className={`grid w-full cursor-pointer grid-cols-[50px_112px_1fr_20px] items-center gap-[10px] px-[14px] py-[4px] text-left leading-[1.4] ${
-                  active ? "bg-ink" : ""
-                }`}
+                className={cn(
+                  "grid w-full cursor-pointer grid-cols-[50px_112px_1fr_20px] items-center gap-[10px] px-[14px] py-[4px] text-left leading-[1.4]",
+                  active && "bg-ink",
+                )}
               >
                 <span
-                  className={`cl-mono text-[9px] tracking-[0.16em] ${
-                    active ? "text-paper" : "text-accent"
-                  }`}
+                  className={cn(
+                    "cl-mono text-[9px] tracking-[0.16em]",
+                    active ? "text-paper" : "text-accent",
+                  )}
                 >
                   {KIND_LABEL[c.kind]}
                 </span>
                 <span
-                  className={`cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] tracking-[0.04em] ${
-                    active ? "text-paper" : "text-ink-2"
-                  }`}
+                  className={cn(
+                    "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] tracking-[0.04em]",
+                    active ? "text-paper" : "text-ink-2",
+                  )}
                 >
                   {c.id}
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span
-                    className={`cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] uppercase tracking-[0.02em] ${
-                      active ? "text-paper" : "text-ink"
-                    }`}
+                    className={cn(
+                      "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] uppercase tracking-[0.02em]",
+                      active ? "text-paper" : "text-ink",
+                    )}
                   >
                     {c.title}
                   </span>
                   {c.sub && (
                     <span
-                      className={`cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] normal-case ${
-                        active ? "text-paper/75" : "text-ink-mute"
-                      }`}
+                      className={cn(
+                        "cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] normal-case",
+                        active ? "text-paper/75" : "text-ink-mute",
+                      )}
                     >
                       {c.sub}
                     </span>
                   )}
                 </span>
                 <span
-                  className={`text-[10px] ${
-                    active ? "text-paper" : "text-ink-faint"
-                  }`}
+                  className={cn(
+                    "text-[10px]",
+                    active ? "text-paper" : "text-ink-faint",
+                  )}
                 >
                   ⏎
                 </span>

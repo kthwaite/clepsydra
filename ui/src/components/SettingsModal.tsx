@@ -7,6 +7,7 @@ import { NavigationModeSelector } from "#/components/NavigationModeSelector";
 import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
+import { cn } from "#/lib/cn";
 import { ACCENTS, DENSITIES } from "#/lib/theme";
 import { type SettingsSection, useUiStore } from "#/store/ui";
 
@@ -50,11 +51,12 @@ export function SettingsModal() {
                   key={section.id}
                   type="button"
                   onClick={() => setActiveSection(section.id)}
-                  className={`mb-1 block w-full border border-transparent px-3 py-2 text-left text-xs uppercase tracking-wider hover:bg-accent ${
+                  className={cn(
+                    "mb-1 block w-full border border-transparent px-3 py-2 text-left text-xs uppercase tracking-wider hover:bg-accent",
                     activeSection === section.id
                       ? "border-border bg-accent font-bold"
-                      : "text-muted-foreground"
-                  }`}
+                      : "text-muted-foreground",
+                  )}
                 >
                   {section.label}
                 </button>
@@ -178,11 +180,12 @@ function OperatorPreferences() {
               onClick={() => setAccent(a.id)}
               title={a.label}
               aria-label={a.label}
-              className={`flex items-center gap-1.5 border px-2 py-1 ${
+              className={cn(
+                "flex items-center gap-1.5 border px-2 py-1",
                 accent === a.id
                   ? "border-accent text-foreground"
-                  : "border-border text-muted-foreground"
-              }`}
+                  : "border-border text-muted-foreground",
+              )}
             >
               <span
                 className="inline-block h-[10px] w-[10px]"
@@ -208,11 +211,12 @@ function OperatorPreferences() {
         <button
           type="button"
           onClick={() => setDiegetic(!diegetic)}
-          className={`cl-mono border px-3 py-1 text-[10px] uppercase tracking-[0.14em] ${
+          className={cn(
+            "cl-mono border px-3 py-1 text-[10px] uppercase tracking-[0.14em]",
             diegetic
               ? "border-accent bg-accent text-black"
-              : "border-border text-muted-foreground"
-          }`}
+              : "border-border text-muted-foreground",
+          )}
         >
           {diegetic ? "on" : "off"}
         </button>
@@ -280,11 +284,12 @@ function Segmented({
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
-          className={`cl-mono border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] last:border-r-0 ${
+          className={cn(
+            "cl-mono border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] last:border-r-0",
             value === o.id
               ? "bg-accent text-black"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+              : "text-muted-foreground hover:text-foreground",
+          )}
         >
           {o.label}
         </button>

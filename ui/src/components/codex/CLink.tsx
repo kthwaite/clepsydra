@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
 import {
   cancelHoverClose,
   scheduleHoverClose,
@@ -100,7 +101,7 @@ export function CLink({
       }}
       role="link"
       tabIndex={0}
-      className={`cl-link relative cursor-pointer ${className ?? ""}`}
+      className={cn("cl-link relative cursor-pointer", className)}
       style={style}
     >
       {children}

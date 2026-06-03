@@ -6,6 +6,7 @@ import {
   TaskStatusButton,
 } from "#/components/ui/task-status-button";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
 
 function priorityLabel(p: string): string {
   switch (p) {
@@ -61,7 +62,12 @@ export function TaskList({ tasks, emptyMessage = "No tasks." }: TaskListProps) {
 
             <div className="min-w-0 flex-1">
               <span
-                className={`text-sm ${isDone ? "text-muted-foreground line-through" : "text-foreground"}`}
+                className={cn(
+                  "text-sm",
+                  isDone
+                    ? "text-muted-foreground line-through"
+                    : "text-foreground",
+                )}
               >
                 {task.content}
               </span>

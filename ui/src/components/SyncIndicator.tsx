@@ -1,4 +1,5 @@
 import { type ConnectionStatus, useVaultEvents } from "#/hooks/useVaultEvents";
+import { cn } from "#/lib/cn";
 
 const STATUS_LABELS: Record<ConnectionStatus, string> = {
   connecting: "Connecting\u2026",
@@ -20,7 +21,7 @@ export function SyncIndicator() {
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
       title={STATUS_LABELS[status]}
     >
-      <div className={`h-1.5 w-1.5 ${STATUS_COLORS[status]}`} />
+      <div className={cn("h-1.5 w-1.5", STATUS_COLORS[status])} />
       <span className="sr-only">{STATUS_LABELS[status]}</span>
     </div>
   );

@@ -7,6 +7,7 @@ import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
@@ -189,20 +190,20 @@ export function Atrium() {
           {inventory.map((cell, i) => (
             <div
               key={cell.label}
-              className={
-                "flex flex-col gap-1 border-rule px-3.5 py-3 " +
-                (i % 8 !== 7 ? "border-r " : "") +
-                (i >= 4 ? "border-t lg:border-t-0 " : "")
-              }
+              className={cn(
+                "flex flex-col gap-1 border-rule px-3.5 py-3",
+                i % 8 !== 7 && "border-r",
+                i >= 4 && "border-t lg:border-t-0",
+              )}
             >
               <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
                 {cell.label}
               </span>
               <span
-                className={
-                  "font-sans text-[28px] font-bold leading-none tabular-nums " +
-                  (cell.tone === "warn" ? "text-warn" : "text-ink")
-                }
+                className={cn(
+                  "font-sans text-[28px] font-bold leading-none tabular-nums",
+                  cell.tone === "warn" ? "text-warn" : "text-ink",
+                )}
               >
                 {cell.value}
               </span>
@@ -333,12 +334,12 @@ export function Atrium() {
                 type="button"
                 key={t}
                 onClick={() => setRecentTab(t)}
-                className={
-                  "cl-mono border-r border-rule px-3.5 py-2 text-[9px] uppercase tracking-[0.22em] " +
-                  (recentTab === t
+                className={cn(
+                  "cl-mono border-r border-rule px-3.5 py-2 text-[9px] uppercase tracking-[0.22em]",
+                  recentTab === t
                     ? "text-ink shadow-[inset_0_2px_0_var(--accent)]"
-                    : "text-ink-mute hover:text-ink")
-                }
+                    : "text-ink-mute hover:text-ink",
+                )}
               >
                 {t === "edited"
                   ? "Recently edited"
@@ -467,7 +468,7 @@ function Heatmap({
               {week.map((lvl, di) => (
                 <span
                   key={`d${di}`}
-                  className={`h-[12px] w-[12px] ${HEAT_LEVEL[lvl]}`}
+                  className={cn("h-[12px] w-[12px]", HEAT_LEVEL[lvl])}
                 />
               ))}
             </div>
@@ -500,7 +501,7 @@ function HeatmapFooter({
         {HEAT_LEVEL.map((c, i) => (
           <i
             key={`leg${i}`}
-            className={`inline-block h-3 w-3 border border-rule ${c}`}
+            className={cn("inline-block h-3 w-3 border border-rule", c)}
           />
         ))}
         MORE
