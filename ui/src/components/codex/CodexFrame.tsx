@@ -1,3 +1,4 @@
+import { useIsMutating } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useStats } from "#/api/index";
@@ -5,8 +6,8 @@ import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { Sheaf } from "#/components/codex/Sheaf";
-import { Ticker } from "#/components/codex/Ticker";
 import { useTheme } from "#/components/ThemeProvider";
+import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
@@ -72,6 +73,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 
   const folioCode = useFolioCode(view);
   const clock = useUtcClock();
+  const uptime = useUptime();
+  const writing = useIsMutating() > 0;
 
   // ⌘N → INTAKE (browsers reserve ⌘N for new-window in some cases; the command
   // palette offers a reliable fallback).
@@ -98,7 +101,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   return (
     <div className="cl-root cl-paper flex h-screen w-screen flex-col overflow-hidden">
       {/* ── HEADER RAIL ─────────────────────────────────────────────── */}
-      <header className="flex flex-shrink-0 items-stretch border-b border-rule text-[11px]">
+      <header className="flex flex-shrink-0 items-stretch border-b border-rule text-[11px] h-8">
         <button
           type="button"
           onClick={() => navigate({ to: "/" })}
@@ -181,22 +184,12 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
         </div>
       </header>
 
-      {/* ── TICKER (diegetic chrome) ────────────────────────────────── */}
-      {diegetic && <Ticker />}
-
       {/* ── SHEAF (open files) — hidden on ATRIUM + CONSTELLATION ───── */}
       {view !== "atrium" && view !== "constellation" && (
         <Sheaf activeTabId={activeTabId} />
       )}
 
-      {/* ── WORKSPACE ───────────────────────────────────────────────── */}
-      <main className="cl-noscroll relative flex-1 overflow-auto">
-        <div key={location.pathname} className="view-anim h-full">
-          {children}
-        </div>
-      </main>
-
-      {/* READING PROGRESS — folio only */}
+      {/* READING PROGRESS — folio only; sits directly under the tab bar */}
       {view === "folio" && (
         <div className="relative h-[2px] flex-shrink-0 bg-rule-soft">
           <div
@@ -205,6 +198,13 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           />
         </div>
       )}
+
+      {/* ── WORKSPACE ───────────────────────────────────────────────── */}
+      <main className="cl-noscroll relative flex-1 overflow-auto">
+        <div key={location.pathname} className="view-anim h-full">
+          {children}
+        </div>
+      </main>
 
       {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
       <footer className="cl-mono flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
@@ -216,6 +216,14 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
               aria-hidden
             />
             <span className="font-medium tracking-[0.16em]">VESSEL</span>
+            <span
+              className={cn(
+                "inline-block h-[6px] w-[6px]",
+                writing ? "animate-pulse bg-accent" : "bg-ink-mute/30",
+              )}
+              aria-label={writing ? "Sending data to server" : undefined}
+              title={writing ? "Sending…" : undefined}
+            />
           </span>
         )}
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">
@@ -232,6 +240,9 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
             {formatRelativeTime(stats?.last_indexed_at)}
           </span>
         )}
+        <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums opacity-70">
+          up {uptime}
+        </span>
         <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
           {clock} UTC
         </span>

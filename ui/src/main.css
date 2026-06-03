@@ -132,9 +132,9 @@
     --rule-soft: #6a675c;
     --grid: rgba(21, 20, 15, 0.06);
     --highlight: rgba(238, 119, 51, 0.16);
-    --bar-bg: #15140f;
-    --bar-fg: #efece2;
-    --bar-rule: rgba(239, 236, 226, 0.3);
+    --bar-bg: #ddd8c9;
+    --bar-fg: #15140f;
+    --bar-rule: rgba(21, 20, 15, 0.18);
 
     /* Re-bind Tailwind semantic aliases for paper mode (accents unchanged) */
     --color-paper: #efece2;
@@ -147,9 +147,9 @@
     --color-rule: #15140f;
     --color-rule-soft: #6a675c;
     --color-highlight: rgba(238, 119, 51, 0.16);
-    --color-bar-bg: #15140f;
-    --color-bar-fg: #efece2;
-    --color-bar-rule: rgba(239, 236, 226, 0.3);
+    --color-bar-bg: #ddd8c9;
+    --color-bar-fg: #15140f;
+    --color-bar-rule: rgba(21, 20, 15, 0.18);
 
     --color-background: #efece2;
     --color-foreground: #15140f;

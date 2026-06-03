@@ -40,6 +40,7 @@ interface StatsLike {
   tags: number;
   orphan_pages: number;
   isolated_pages: number;
+  attachments: number;
 }
 
 interface TagLike {
@@ -208,6 +209,11 @@ export function deriveInventory(
       label: "Isolated",
       value: n(stats.isolated_pages),
       sub: "no links in or out",
+    });
+    cells.push({
+      label: "Attach",
+      value: n(stats.attachments),
+      sub: "files",
     });
   }
 
