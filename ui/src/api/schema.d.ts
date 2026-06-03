@@ -505,6 +505,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/uptime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_uptime"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/pages": {
         parameters: {
             query?: never;
@@ -990,6 +1006,13 @@ export interface components {
             venue?: string | null;
             /** Format: int32 */
             year?: number | null;
+        };
+        UptimeResponse: {
+            /**
+             * Format: int64
+             * @description Whole seconds the server has been running since startup.
+             */
+            uptime_seconds: number;
         };
         VaultStats: {
             /** Format: int64 */
@@ -2577,6 +2600,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LocationResponse"];
+                };
+            };
+        };
+    };
+    get_uptime: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server uptime in seconds */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UptimeResponse"];
                 };
             };
         };
