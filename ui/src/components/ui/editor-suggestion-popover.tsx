@@ -7,7 +7,7 @@ import {
   type VirtualElement,
 } from "@floating-ui/react";
 import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface EditorSuggestionPopoverProps<T> {
   items: T[];

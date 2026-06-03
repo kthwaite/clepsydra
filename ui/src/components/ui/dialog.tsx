@@ -7,7 +7,7 @@ import {
   Dialog as RACDialog,
 } from "react-aria-components";
 import { IconButton } from "#/components/ui/icon-button";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 type DialogSize = "sm" | "md" | "lg" | "xl" | "full";
 

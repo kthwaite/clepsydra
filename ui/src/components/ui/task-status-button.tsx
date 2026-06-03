@@ -1,5 +1,5 @@
 import { Check, Circle, Loader2, X } from "lucide-react";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 const STATUS_ICONS: Record<string, typeof Circle> = {
   todo: Circle,

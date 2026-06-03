@@ -5,7 +5,7 @@ import {
   Popover,
   Select,
 } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 import { KINDS, type Kind, kindLabel } from "#/lib/kind";
 
 export interface KindSelectProps {

@@ -13,8 +13,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { cn } from "#/components/ui/utils";
 import { displayLabel, filterLanguages } from "#/editor/code-languages";
+import { cn } from "#/lib/cn";
 
 /** Sentinel row id for the "Plain text" reset entry (never a real lang id). */
 const PLAIN = " plain";

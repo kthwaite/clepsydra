@@ -9,7 +9,7 @@ import {
   Tabs as RACTabs,
   type TabsProps as RACTabsProps,
 } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export function Tabs({ className, ...props }: RACTabsProps) {
   return <RACTabs {...props} className={cn("flex flex-col", className)} />;

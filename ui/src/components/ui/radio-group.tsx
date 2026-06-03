@@ -6,7 +6,7 @@ import {
   type RadioGroupProps as RACRadioGroupProps,
   type RadioProps as RACRadioProps,
 } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface RadioGroupProps extends RACRadioGroupProps {
   label?: string;

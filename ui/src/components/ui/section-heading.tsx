@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface SectionHeadingProps {
   children: ReactNode;

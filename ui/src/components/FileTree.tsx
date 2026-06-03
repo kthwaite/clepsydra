@@ -2,7 +2,6 @@ import { ChevronRight, File, Folder } from "lucide-react";
 import { useMemo } from "react";
 import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
 import { useFolderTreePaths, usePages } from "#/api/pages";
-import { cn } from "#/components/ui/utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   buildPageTree,
@@ -10,6 +9,7 @@ import {
   type TreeData,
   type TreeNode,
 } from "#/lib/buildPageTree";
+import { cn } from "#/lib/cn";
 
 function FileTreeItems({
   parentId,

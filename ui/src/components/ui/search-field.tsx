@@ -5,7 +5,7 @@ import {
   SearchField as RACSearchField,
   type SearchFieldProps as RACSearchFieldProps,
 } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface SearchFieldProps extends RACSearchFieldProps {
   placeholder?: string;

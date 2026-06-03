@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { Button, Tag, TagGroup, TagList } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface TagInputProps {
   label: string;

@@ -1,5 +1,5 @@
 import { Button, type ButtonProps } from "#/components/ui/button";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 interface IconButtonProps extends Omit<ButtonProps, "size"> {
   "aria-label": string;

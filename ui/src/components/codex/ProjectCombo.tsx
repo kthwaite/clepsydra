@@ -7,7 +7,7 @@ import {
   ListBoxItem,
   Popover,
 } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface ProjectComboProps {
   value: string | null;

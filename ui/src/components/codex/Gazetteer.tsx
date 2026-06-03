@@ -12,14 +12,17 @@ import type { BulkAssignResponse } from "#/api/types";
 import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
-import { cn } from "#/components/ui/utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { KINDS, type Kind, kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
-import { useProjects } from "#/lib/useProjects";
+import { cn } from "#/lib/cn";
 import {
-  filterAndSortRows,
-  type GazetteerSort,
-} from "./gazetteer-filter";
+  KINDS,
+  type Kind,
+  kindColorVar,
+  kindLabel,
+  resolveKind,
+} from "#/lib/kind";
+import { useProjects } from "#/lib/useProjects";
+import { filterAndSortRows, type GazetteerSort } from "./gazetteer-filter";
 
 /** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
 export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
@@ -143,11 +146,12 @@ export function Gazetteer({ initialTag }: Props) {
               key={s}
               type="button"
               onClick={() => setSort(s)}
-              className={`cursor-pointer border-r border-rule-soft px-2 py-1 last:border-r-0 ${
+              className={cn(
+                "cursor-pointer border-r border-rule-soft px-2 py-1 last:border-r-0",
                 sort === s
                   ? "bg-accent text-black"
-                  : "text-ink-mute hover:text-ink"
-              }`}
+                  : "text-ink-mute hover:text-ink",
+              )}
             >
               {s}
             </button>
@@ -330,7 +334,10 @@ export function Gazetteer({ initialTag }: Props) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="cl-marg px-3 py-6 text-center">
-                  ∅ no folios{selectedTags.length > 0 ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}` : ""}
+                  ∅ no folios
+                  {selectedTags.length > 0
+                    ? ` under ${selectedTags.map((t) => `#${t}`).join(" ")}`
+                    : ""}
                   {query ? ` matching “${query}”` : ""}.
                 </td>
               </tr>
@@ -353,7 +360,10 @@ function Th({
 }) {
   return (
     <th
-      className={`px-3 py-2 font-medium ${right ? "text-right" : "text-left"}`}
+      className={cn(
+        "px-3 py-2 font-medium",
+        right ? "text-right" : "text-left",
+      )}
       style={w ? { width: w } : undefined}
     >
       {children}
@@ -374,11 +384,12 @@ function Chip({
     <button
       type="button"
       onClick={onClick}
-      className={`cl-mono cursor-pointer border px-[6px] py-[1px] text-[10px] ${
+      className={cn(
+        "cl-mono cursor-pointer border px-[6px] py-[1px] text-[10px]",
         active
           ? "border-accent text-accent"
-          : "border-rule-soft text-ink-mute hover:text-ink"
-      }`}
+          : "border-rule-soft text-ink-mute hover:text-ink",
+      )}
     >
       {children}
     </button>

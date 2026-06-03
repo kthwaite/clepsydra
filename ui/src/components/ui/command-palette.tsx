@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 // ---------------------------------------------------------------------------
 // CommandPaletteItem

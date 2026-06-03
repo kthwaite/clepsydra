@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { cn } from "#/components/ui/utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { cn } from "#/lib/cn";
 
 export interface PageLinkProps {
   path: string;

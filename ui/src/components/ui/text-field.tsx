@@ -7,7 +7,7 @@ import {
   Text,
   type ValidationResult,
 } from "react-aria-components";
-import { cn } from "#/components/ui/utils";
+import { cn } from "#/lib/cn";
 
 export interface TextFieldProps extends RACTextFieldProps {
   label: string;
