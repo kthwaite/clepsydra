@@ -1,3 +1,4 @@
+//! Agenda-related endpoints: /agenda/today, /agenda/week, /agenda/overdue.
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -1,3 +1,4 @@
+//! Handlers for block-related API endpoints.
 use std::collections::HashMap;
 use std::sync::Arc;
 

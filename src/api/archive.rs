@@ -1,3 +1,5 @@
+//! API endpoints for ingesting web page archives, including associated blobs stored in
+//! the CAS.
 use std::fs;
 use std::io::Write;
 use std::sync::Arc;

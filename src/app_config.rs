@@ -25,6 +25,7 @@ pub fn find_config_path(start_dir: &Path) -> Option<PathBuf> {
     )
 }
 
+/// Internal helper that accepts env vars as parameters for easier testing.
 pub(crate) fn config_candidates_with_env(
     start_dir: &Path,
     xdg_config_home: Option<OsString>,
@@ -47,6 +48,7 @@ pub(crate) fn config_candidates_with_env(
     candidates
 }
 
+/// Internal helper that accepts env vars as parameters for easier testing.
 pub(crate) fn find_config_path_with_env(
     start_dir: &Path,
     xdg_config_home: Option<OsString>,
@@ -57,6 +59,7 @@ pub(crate) fn find_config_path_with_env(
         .find(|p| p.is_file())
 }
 
+/// Helper to construct the XDG config path from env vars, if set.
 fn xdg_config_file(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
     if let Some(xdg) = xdg_config_home {
         return Some(PathBuf::from(xdg).join("clepsydra/config.toml"));

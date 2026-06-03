@@ -1,3 +1,4 @@
+//! API handlers for academic work and annotation management.
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;

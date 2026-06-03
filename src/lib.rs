@@ -44,10 +44,16 @@ pub struct Settings {
 
 #[derive(Debug, Deserialize)]
 pub struct ServerSettings {
+    /// The host to listen on. (Default: "localhost".)
     pub host: String,
+    /// The port to listen on. (Default: 16667, chosen for being memorable and unused
+    /// by common services.)
     pub port: u16,
+    /// When true, the server will include extra debug information in API responses
     #[serde(default)]
     pub dev_mode: bool,
+    /// TLS settings. When `tls.enabled` is true, the server will serve over HTTPS
+    /// using the provided cert/key or auto-generated defaults.
     #[serde(default)]
     pub tls: TlsSettings,
 }
@@ -65,14 +71,23 @@ impl Default for ServerSettings {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct TlsSettings {
+    /// When true, the server will serve over HTTPS using the provided cert/key or auto-generated
+    /// defaults. (Default: false)
     #[serde(default)]
     pub enabled: bool,
+    /// Path to the TLS certificate file. Must be set together with `key_path`. When both are unset,
+    /// the server will auto-generate certs for localhost using mkcert and store them in the app
+    /// data directory.
     pub cert_path: Option<PathBuf>,
+    /// Path to the TLS private key file. Must be set together with `cert_path`. When both are
+    /// unset, the server will auto-generate certs for localhost using mkcert and store them in the
+    /// app data directory.
     pub key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct VaultSettings {
+    /// The vault root directory. Can be absolute or relative to the config file location. (Default: "./vault")
     #[serde(default = "default_vault_root")]
     pub root: String,
 }
@@ -90,6 +105,9 @@ impl Default for VaultSettings {
 }
 
 impl Settings {
+    /// Load settings from the config file discovered at `base_dir` (or its parents), layering
+    /// defaults and environment variables on top. Returns the loaded settings and the path to the
+    /// config file.
     fn load(base_dir: &Path) -> Result<(Self, PathBuf), Box<dyn std::error::Error>> {
         let candidates = config_candidates(base_dir);
         let checked = candidates

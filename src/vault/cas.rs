@@ -1,3 +1,4 @@
+//! Content-addressed storage for blobs, with reference counting and garbage collection.
 use std::fs;
 use std::path::{Path, PathBuf};
 

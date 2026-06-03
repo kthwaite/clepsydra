@@ -1,3 +1,6 @@
+//! Handlers for managing attachments in the vault.
+//! Attachments are files stored in a designated folder within the vault, and can be
+//! uploaded, listed, retrieved, and deleted via the API.
 use std::fs;
 use std::sync::Arc;
 

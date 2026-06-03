@@ -1,3 +1,4 @@
+//! API endpoints related to server-sent events (SSE) for vault synchronization notifications.
 use std::convert::Infallible;
 use std::sync::Arc;
 
