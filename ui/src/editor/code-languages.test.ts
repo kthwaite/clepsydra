@@ -2,6 +2,7 @@ import { refractor } from "refractor";
 import { describe, expect, it } from "vitest";
 import {
   COMMON_LANGUAGES,
+  CURATED_ALIASES,
   displayLabel,
   filterLanguages,
   listLanguageIds,
@@ -63,8 +64,9 @@ describe("code-languages", () => {
     expect(ids).not.toContain("plain");
   });
 
-  it("lists each grammar at most once", () => {
-    const ids = listLanguageIds();
+  it("lists each grammar at most once (curated aliases excepted)", () => {
+    const curated = new Set<string>(CURATED_ALIASES);
+    const ids = listLanguageIds().filter((id) => !curated.has(id));
     const grammars = refractor.languages as Record<string, object>;
     const seen = new Set<object>();
     for (const id of ids) {
@@ -72,5 +74,18 @@ describe("code-languages", () => {
       expect(seen.has(g)).toBe(false);
       seen.add(g);
     }
+  });
+
+  it("surfaces zsh as its own row sharing the bash grammar", () => {
+    const ids = listLanguageIds();
+    const grammars = refractor.languages as Record<string, object>;
+    expect(ids).toContain("zsh");
+    expect(ids).toContain("bash");
+    // zsh has no dedicated Prism grammar — it reuses bash's.
+    expect(grammars.zsh).toBe(grammars.bash);
+  });
+
+  it("filterLanguages finds zsh", () => {
+    expect(filterLanguages("zsh")).toContain("zsh");
   });
 });

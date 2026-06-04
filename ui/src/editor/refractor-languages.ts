@@ -10,4 +10,11 @@ import tsx from "refractor/tsx";
 refractor.register(jsx);
 refractor.register(tsx);
 
+// Prism (and thus refractor) ships no dedicated zsh grammar — zsh is highlighted
+// by the bash grammar, which already carries the `sh`/`shell` aliases. Add `zsh`
+// as a further alias so ```zsh code blocks highlight without importing any new
+// grammar. (Surfaced as its own picker row via CURATED_ALIASES in
+// code-languages.ts.)
+refractor.alias("bash", "zsh");
+
 export { refractor };

@@ -18,6 +18,16 @@ export const COMMON_LANGUAGES = [
   "markdown",
 ] as const;
 
+/**
+ * Alias names that share a grammar with another language but should still
+ * surface as their own picker row. zsh has no dedicated Prism grammar — it
+ * reuses bash (registered as an alias in refractor-languages.ts) — but
+ * operators expect to select "zsh" explicitly. Listed here so the alias-collapse
+ * in `listLanguageIds` keeps them instead of folding them back into the host
+ * grammar; pinned just after the common block.
+ */
+export const CURATED_ALIASES = ["zsh"] as const;
+
 /** Uppercase display label for a language id (matches the code-block header). */
 export function displayLabel(id: string): string {
   return id.toUpperCase();
@@ -27,7 +37,8 @@ export function displayLabel(id: string): string {
  * All refractor-registered grammars, with the registered subset of
  * COMMON_LANGUAGES pinned to the front (in COMMON order) and the rest
  * following alphabetically. Aliases are collapsed to a single canonical
- * name per grammar, so each grammar appears at most once. The plaintext
+ * name per grammar, so each grammar appears at most once — except the curated
+ * aliases in CURATED_ALIASES (e.g. zsh), which get their own row. The plaintext
  * family (plain/plaintext/text/txt — all the same empty grammar) is
  * excluded; the picker's dedicated "Plain text" reset row covers it.
  */
@@ -41,17 +52,23 @@ export function listLanguageIds(): string[] {
     .filter((id) => grammars[id] !== plainGrammar);
   const registeredSet = new Set(registered);
   const common = COMMON_LANGUAGES.filter((id) => registeredSet.has(id));
+  // Curated aliases intentionally share a grammar with a common entry (e.g.
+  // zsh→bash) but get their own row; pin them right after the common block.
+  const curated = CURATED_ALIASES.filter((id) => registeredSet.has(id));
+  const front = [...common, ...curated];
 
   // refractor.listLanguages() returns aliases (e.g. "js", "ts") as flat peers
   // of their canonical grammar ("javascript", "typescript"). Collapse them so
   // the picker lists each grammar once. Aliases share grammar-object identity
-  // with their canonical name.
-  const claimed = new Set<object>(common.map((id) => grammars[id]));
+  // with their canonical name. Grammars already represented by a front entry
+  // are claimed so they don't reappear (this also suppresses the host of a
+  // curated alias, e.g. the remaining bash aliases sh/shell).
+  const claimed = new Set<object>(front.map((id) => grammars[id]));
 
   const chosen = new Map<object, string>();
   for (const id of registered) {
     const grammar = grammars[id];
-    if (claimed.has(grammar)) continue; // already represented by a common entry
+    if (claimed.has(grammar)) continue; // already represented by a front entry
     const current = chosen.get(grammar);
     // Prefer the longest name as the canonical label (e.g. "javascript" > "js").
     if (current === undefined || id.length > current.length) {
@@ -60,7 +77,7 @@ export function listLanguageIds(): string[] {
   }
 
   const rest = [...chosen.values()].sort();
-  return [...common, ...rest];
+  return [...front, ...rest];
 }
 
 /**
