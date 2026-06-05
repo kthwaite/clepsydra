@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Folio } from "#/components/codex/Folio";
+import { FolioBoundary } from "#/components/codex/FolioBoundary";
 import { useWorkspaceStore } from "#/store/workspace";
 
 // The graph tab pulls in d3 (force/drag/zoom/selection); keep it out of the
@@ -44,7 +45,9 @@ export function TabContent() {
 
   if (activeTab.type === "page" && activeTab.path) {
     return (
-      <Folio key={activeTab.path} tabId={activeTab.id} path={activeTab.path} />
+      <FolioBoundary key={activeTab.path} path={activeTab.path}>
+        <Folio tabId={activeTab.id} path={activeTab.path} />
+      </FolioBoundary>
     );
   }
 
