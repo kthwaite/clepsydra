@@ -16,7 +16,10 @@ export function usePage(path: string) {
     "get",
     "/api/vault/pages/{path}",
     { params: { path: { path } } },
-    { enabled: !!path },
+    // Opt out of the global throwOnError so a missing-file 404 surfaces as
+    // query `error` state and the folio can render a recovery panel instead of
+    // unmounting the whole app.
+    { enabled: !!path, throwOnError: false },
   );
 }
 

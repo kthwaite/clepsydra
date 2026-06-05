@@ -6,6 +6,7 @@ import {
   formatAbsoluteDate,
   formatRelativeTime,
 } from "#/components/codex/codex-time";
+import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import {
   countWordsFromSlate,
   shortFolio,
@@ -40,6 +41,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const { data: similar } = useSimilar(path);
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
+  const closeTab = useWorkspaceStore((s) => s.closeTab);
   const assign = useAssignPage();
   const projects = useProjects();
   const { setProgress } = useReadingProgress();
@@ -138,7 +140,7 @@ export function Folio({ tabId, path }: FolioProps) {
     return <div className="cl-marg p-6">… fetching folio {path} …</div>;
   }
   if (editor.error) {
-    return <div className="cl-marg p-6">⁂ folio not found · {path}</div>;
+    return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
   }
 
   const lw = left.collapsed ? 34 : left.width;
