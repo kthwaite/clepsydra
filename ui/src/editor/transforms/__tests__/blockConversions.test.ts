@@ -125,4 +125,37 @@ describe("applyBlockConversion", () => {
     expect(list.type).toBe("bulleted-list");
     expect(list.children).toHaveLength(2);
   });
+
+  it("BC-09: slash-style delete + convert merges with the adjacent list above", () => {
+    // Mirrors the slash-menu flow: a `/bullet` query paragraph sits below an
+    // existing list; the deleteRange removes the query, then the new list
+    // merges into the one above. The existing item stays first; the new
+    // (now-empty) item is appended after it.
+    const editor = withOutliner(withHistory(createEditor()));
+    editor.children = [
+      {
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [{ type: "paragraph", children: [{ text: "a" }] }],
+          },
+        ],
+      },
+      { type: "paragraph", children: [{ text: "/bullet" }] },
+    ];
+    applyBlockConversion(editor, {
+      at: [1],
+      deleteRange: {
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: "/bullet".length },
+      },
+      conversion: { type: "bulleted-list" },
+    });
+    expect(editor.children).toHaveLength(1);
+    const list = editor.children[0] as any;
+    expect(list.children).toHaveLength(2);
+    expect(list.children[0].children[0].children[0].text).toBe("a");
+    expect(list.children[1].children[0].children[0].text).toBe("");
+  });
 });

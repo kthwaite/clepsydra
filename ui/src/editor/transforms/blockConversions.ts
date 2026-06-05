@@ -127,9 +127,12 @@ function mergeWithAdjacentList(
         const ourNode = Node.get(editor, listPath);
         if (!SlateElement.isElement(ourNode)) return;
         const count = ourNode.children.length;
-        for (let i = count - 1; i >= 0; i--) {
+        // Always move the current first child: each move shrinks our list from
+        // the front, so source index 0 is the next item every iteration. This
+        // preserves original order (moving from the tail would reverse it).
+        for (let i = 0; i < count; i++) {
           Transforms.moveNodes(editor, {
-            at: [...listPath, i],
+            at: [...listPath, 0],
             to: [...prevPath, (prevNode as any).children.length],
           });
         }
