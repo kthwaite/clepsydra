@@ -22,6 +22,7 @@ import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
+import { withMarkdownPaste } from "./plugins/withMarkdownPaste";
 import {
   indentListItem,
   moveBlockDown,
@@ -60,8 +61,10 @@ export function SlateEditor({
 }: SlateEditorProps) {
   const editor = useMemo(
     () =>
-      withReact(
-        withHistory(withAutoformat(withOutliner(withSchema(createEditor())))),
+      withMarkdownPaste(
+        withReact(
+          withHistory(withAutoformat(withOutliner(withSchema(createEditor())))),
+        ),
       ),
     [],
   );
