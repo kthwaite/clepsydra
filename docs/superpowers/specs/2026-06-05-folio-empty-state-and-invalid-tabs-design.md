@@ -58,9 +58,13 @@ Hybrid, two layers of defense:
    and is upgraded from a one-liner into the recovery panel. Declarative, no
    class component on the happy path.
 
-   The other folio queries (`useBacklinks` / `useOutlinks` / `useSimilar`)
-   query the links table by path and return `[]` for unknown paths rather than
-   404, so they degrade quietly and are left on the global default.
+   `useOutlinks` **also** 404s on a missing path (the backend `outlinks`
+   handler maps a no-rows lookup to 404), so it inherits the same opt-out
+   (`throwOnError: false`) — otherwise it would throw during render before the
+   `editor.error` guard and re-crash the app. `useBacklinks` / `useSimilar`
+   are pure index queries that return `[]` for unknown paths, so they degrade
+   quietly and are left on the global default. (The `FolioBoundary` backstop
+   below would catch any residual throw regardless.)
 
 2. **Error boundary (backstop).** A thin, dependency-free class error boundary
    wraps the folio render in `TabContent`. It catches **any** unexpected error
