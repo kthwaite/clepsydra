@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Folio } from "#/components/codex/Folio";
 import { FolioBoundary } from "#/components/codex/FolioBoundary";
+import { FolioLauncher } from "#/components/codex/FolioLauncher";
 import { useWorkspaceStore } from "#/store/workspace";
 
 // The graph tab pulls in d3 (force/drag/zoom/selection); keep it out of the
@@ -18,17 +19,7 @@ export function TabContent() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   if (!activeTab) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="cl-marg">
-          No folios open. Use{" "}
-          <kbd className="cl-mono border border-[var(--rule-soft)] px-1 py-[1px] text-[10px]">
-            ⌘K
-          </kbd>{" "}
-          to invoke the console.
-        </p>
-      </div>
-    );
+    return <FolioLauncher />;
   }
 
   if (activeTab.type === "graph") {
