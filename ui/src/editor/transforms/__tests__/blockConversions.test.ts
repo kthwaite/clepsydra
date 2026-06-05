@@ -60,6 +60,16 @@ describe("applyBlockConversion", () => {
     expect(list.children[0].checked).toBe(false);
   });
 
+  it("BC-04b: task with checked: true produces a checked item", () => {
+    const editor = editorWithParagraph("");
+    applyBlockConversion(editor, {
+      at: [0],
+      conversion: { type: "task", checked: true },
+    });
+    const list = editor.children[0] as any;
+    expect(list.children[0].checked).toBe(true);
+  });
+
   it("BC-05: blockquote wraps the paragraph", () => {
     const editor = editorWithParagraph("");
     applyBlockConversion(editor, {

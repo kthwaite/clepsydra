@@ -7,7 +7,7 @@ import {
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
-import type { ListType } from "#/editor/plugins/listUtils";
+import { applyBlockConversion } from "#/editor/transforms/blockConversions";
 
 // ---------------------------------------------------------------------------
 // Pattern definitions
@@ -74,44 +74,12 @@ function getBlockTriggerText(
   return firstChild.text;
 }
 
-// ---------------------------------------------------------------------------
-// List merge: merge with adjacent same-type list
-// ---------------------------------------------------------------------------
-
-function mergeWithAdjacentList(
-  editor: Editor,
-  listPath: Path,
-  listType: ListType,
-): void {
-  const index = listPath[listPath.length - 1];
-
-  // Check previous sibling
-  if (index > 0) {
-    const prevPath = Path.previous(listPath);
-    try {
-      const prevNode = Node.get(editor, prevPath);
-      if (
-        SlateElement.isElement(prevNode) &&
-        (prevNode as any).type === listType
-      ) {
-        // Move all children of our new list into the previous list
-        const ourNode = Node.get(editor, listPath);
-        if (!SlateElement.isElement(ourNode)) return;
-        const count = ourNode.children.length;
-        for (let i = count - 1; i >= 0; i--) {
-          Transforms.moveNodes(editor, {
-            at: [...listPath, i],
-            to: [...prevPath, (prevNode as any).children.length],
-          });
-        }
-        // Remove the now-empty list wrapper
-        Transforms.removeNodes(editor, { at: listPath });
-        return;
-      }
-    } catch {
-      // no previous sibling
-    }
-  }
+/** Range spanning the leading trigger text in a block's first text node. */
+function triggerRange(blockPath: Path, len: number) {
+  return {
+    anchor: { path: [...blockPath, 0], offset: 0 },
+    focus: { path: [...blockPath, 0], offset: len },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -155,144 +123,57 @@ export function tryBlockTransform(editor: Editor): boolean {
   const headingMatch = text.match(HEADING_RE);
   if (headingMatch) {
     const level = headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6;
-    applyWithBatch(editor, () => {
-      // Delete the trigger text
-      Transforms.delete(editor, {
-        at: {
-          anchor: { path: [...blockPath, 0], offset: 0 },
-          focus: { path: [...blockPath, 0], offset: text.length },
-        },
-      });
-      // Convert paragraph to heading
-      Transforms.setNodes(editor, { type: "heading", level } as any, {
-        at: blockPath,
-      });
+    applyBlockConversion(editor, {
+      at: blockPath,
+      deleteRange: triggerRange(blockPath, text.length),
+      conversion: { type: "heading", level },
     });
     return true;
   }
 
   // Numbered list: 1.
   if (NUMBERED_LIST_RE.test(text)) {
-    return applyListTransform(editor, blockEntry, "numbered-list");
+    applyBlockConversion(editor, {
+      at: blockPath,
+      deleteRange: triggerRange(blockPath, text.length),
+      conversion: { type: "numbered-list" },
+    });
+    return true;
   }
 
   // Bulleted list: - or *
   if (BULLETED_LIST_RE.test(text)) {
-    return applyListTransform(editor, blockEntry, "bulleted-list");
+    applyBlockConversion(editor, {
+      at: blockPath,
+      deleteRange: triggerRange(blockPath, text.length),
+      conversion: { type: "bulleted-list" },
+    });
+    return true;
   }
 
-  // Task list: [], [ ], [x], [X] — wraps the paragraph in a new task list-item.
+  // Task list: [], [ ], [x], [X]
   const taskMatch = text.match(TASK_RE);
   if (taskMatch) {
-    const inner = taskMatch[1];
-    const checked = inner === "x" || inner === "X";
-    return applyTaskListTransform(editor, blockEntry, checked);
+    const checked = taskMatch[1] === "x" || taskMatch[1] === "X";
+    applyBlockConversion(editor, {
+      at: blockPath,
+      deleteRange: triggerRange(blockPath, text.length),
+      conversion: { type: "task", checked },
+    });
+    return true;
   }
 
   // Blockquote: >
   if (BLOCKQUOTE_RE.test(text)) {
-    applyWithBatch(editor, () => {
-      // Delete the trigger text
-      Transforms.delete(editor, {
-        at: {
-          anchor: { path: [...blockPath, 0], offset: 0 },
-          focus: { path: [...blockPath, 0], offset: text.length },
-        },
-      });
-      // Wrap the paragraph in a blockquote
-      Transforms.wrapNodes(
-        editor,
-        { type: "blockquote", children: [] } as any,
-        { at: blockPath },
-      );
+    applyBlockConversion(editor, {
+      at: blockPath,
+      deleteRange: triggerRange(blockPath, text.length),
+      conversion: { type: "blockquote" },
     });
     return true;
   }
 
   return false;
-}
-
-// ---------------------------------------------------------------------------
-// List transform helper
-// ---------------------------------------------------------------------------
-
-function applyListTransform(
-  editor: Editor,
-  blockEntry: [SlateElement, Path],
-  listType: ListType,
-): boolean {
-  const [, blockPath] = blockEntry;
-  const text = getBlockTriggerText(editor, blockEntry);
-  if (text === undefined) return false;
-
-  applyWithBatch(editor, () => {
-    // The outer list wrapper is inserted at the original paragraph path.
-    const listPath = [...blockPath];
-
-    // Delete the trigger text
-    Transforms.delete(editor, {
-      at: {
-        anchor: { path: [...blockPath, 0], offset: 0 },
-        focus: { path: [...blockPath, 0], offset: text.length },
-      },
-    });
-    // Wrap paragraph in list-item, then in list
-    // Step 1: wrap paragraph in list-item
-    Transforms.wrapNodes(editor, { type: "list-item", children: [] } as any, {
-      at: blockPath,
-    });
-    // Step 2: wrap list-item in list
-    Transforms.wrapNodes(editor, { type: listType, children: [] } as any, {
-      at: blockPath,
-    });
-
-    // Merge with adjacent same-type list at the transformed wrapper path.
-    mergeWithAdjacentList(editor, listPath, listType);
-  });
-
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Task list transform — fresh paragraph -> bulleted-list with checked item
-// ---------------------------------------------------------------------------
-
-function applyTaskListTransform(
-  editor: Editor,
-  blockEntry: [SlateElement, Path],
-  checked: boolean,
-): boolean {
-  const [, blockPath] = blockEntry;
-  const text = getBlockTriggerText(editor, blockEntry);
-  if (text === undefined) return false;
-
-  applyWithBatch(editor, () => {
-    // The outer list wrapper is inserted at the original paragraph path.
-    const listPath = [...blockPath];
-
-    // Delete the trigger text
-    Transforms.delete(editor, {
-      at: {
-        anchor: { path: [...blockPath, 0], offset: 0 },
-        focus: { path: [...blockPath, 0], offset: text.length },
-      },
-    });
-    // Wrap paragraph in list-item with checked state, then in bulleted-list
-    Transforms.wrapNodes(
-      editor,
-      { type: "list-item", checked, children: [] } as any,
-      { at: blockPath },
-    );
-    Transforms.wrapNodes(
-      editor,
-      { type: "bulleted-list", children: [] } as any,
-      { at: blockPath },
-    );
-
-    mergeWithAdjacentList(editor, listPath, "bulleted-list");
-  });
-
-  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,16 +195,18 @@ function tryTaskPromotion(
   const checked = inner === "x" || inner === "X";
   const [, blockPath] = blockEntry;
 
-  applyWithBatch(editor, () => {
-    // Delete the trigger text
-    Transforms.delete(editor, {
-      at: {
-        anchor: { path: [...blockPath, 0], offset: 0 },
-        focus: { path: [...blockPath, 0], offset: text.length },
-      },
+  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+    Editor.withoutNormalizing(editor, () => {
+      // Delete the trigger text
+      Transforms.delete(editor, {
+        at: {
+          anchor: { path: [...blockPath, 0], offset: 0 },
+          focus: { path: [...blockPath, 0], offset: text.length },
+        },
+      });
+      // Set checked on the list-item
+      Transforms.setNodes(editor, { checked } as any, { at: listItemPath });
     });
-    // Set checked on the list-item
-    Transforms.setNodes(editor, { checked } as any, { at: listItemPath });
   });
 
   return true;
@@ -347,29 +230,10 @@ export function tryThematicBreak(editor: Editor): boolean {
   const text = getBlockTriggerText(editor, blockEntry);
   if (text !== "--") return false;
 
-  applyWithBatch(editor, () => {
-    // Delete all text in the paragraph
-    Transforms.delete(editor, {
-      at: {
-        anchor: { path: [...blockPath, 0], offset: 0 },
-        focus: { path: [...blockPath, 0], offset: 2 },
-      },
-    });
-    // Convert to thematic-break
-    Transforms.setNodes(editor, { type: "thematic-break" } as any, {
-      at: blockPath,
-    });
-    // Insert a trailing paragraph after
-    Transforms.insertNodes(
-      editor,
-      { type: "paragraph", children: [{ text: "" }] } as any,
-      { at: Path.next(blockPath) },
-    );
-    // Move selection to the new paragraph
-    Transforms.select(editor, {
-      anchor: { path: [...Path.next(blockPath), 0], offset: 0 },
-      focus: { path: [...Path.next(blockPath), 0], offset: 0 },
-    });
+  applyBlockConversion(editor, {
+    at: blockPath,
+    deleteRange: triggerRange(blockPath, 2),
+    conversion: { type: "thematic-break" },
   });
 
   return true;
@@ -399,34 +263,11 @@ export function tryCodeFence(editor: Editor): boolean {
 
   const language = match[1] || undefined;
 
-  applyWithBatch(editor, () => {
-    // Delete all text
-    Transforms.delete(editor, {
-      at: {
-        anchor: { path: [...blockPath, 0], offset: 0 },
-        focus: { path: [...blockPath, 0], offset: text.length },
-      },
-    });
-    // Convert to code-block
-    Transforms.setNodes(editor, { type: "code-block", language } as any, {
-      at: blockPath,
-    });
+  applyBlockConversion(editor, {
+    at: blockPath,
+    deleteRange: triggerRange(blockPath, text.length),
+    conversion: { type: "code-block", language },
   });
 
   return true;
-}
-
-// ---------------------------------------------------------------------------
-// Undo batching helper
-// ---------------------------------------------------------------------------
-
-function applyWithBatch(editor: Editor, fn: () => void): void {
-  const histEditor = editor as unknown as HistoryEditor;
-  if (typeof HistoryEditor.withNewBatch === "function") {
-    HistoryEditor.withNewBatch(histEditor, () => {
-      Editor.withoutNormalizing(editor, fn);
-    });
-  } else {
-    Editor.withoutNormalizing(editor, fn);
-  }
 }

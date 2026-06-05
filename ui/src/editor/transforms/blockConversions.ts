@@ -20,7 +20,7 @@ export type BlockConversion =
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6 }
   | { type: "bulleted-list" }
   | { type: "numbered-list" }
-  | { type: "task" }
+  | { type: "task"; checked?: boolean }
   | { type: "blockquote" }
   | { type: "code-block"; language?: string }
   | { type: "thematic-break" };
@@ -62,7 +62,7 @@ export function applyBlockConversion(
         wrapInList(editor, at, "numbered-list");
         break;
       case "task":
-        wrapInList(editor, at, "bulleted-list", false);
+        wrapInList(editor, at, "bulleted-list", conversion.checked ?? false);
         break;
       case "blockquote":
         Transforms.wrapNodes(editor, makeBlockquote({}), { at });
