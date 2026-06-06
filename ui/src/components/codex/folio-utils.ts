@@ -55,6 +55,26 @@ export function countWords(body: string): number {
 
 type SlateLike = { text?: string; children?: SlateLike[] };
 
+/**
+ * Human-readable label for a vault path. Page filenames follow
+ * `<yyyymmdd>.<title-slug>.<shortid>.md` (ADR 0002); when that shape is present
+ * the title-slug is turned into spaced words. Other paths fall back to the
+ * basename (sans `.md`). Used where no stored title is available — e.g. the
+ * launcher's recent-files list, which references closed files.
+ */
+export function folioDisplayName(path: string): string {
+  const base = (path.split("/").pop() ?? path).replace(/\.md$/i, "");
+  const parts = base.split(".");
+  if (parts.length >= 3) {
+    const id = parts[parts.length - 1];
+    if (/^[0-9A-Za-z]{8}$/.test(id)) {
+      const slug = parts.slice(1, -1).join(".");
+      if (slug) return slug.replace(/-/g, " ");
+    }
+  }
+  return base;
+}
+
 /** Count words in a Slate value by walking all text leaves recursively. */
 export function countWordsFromSlate(value: unknown): number {
   if (!Array.isArray(value)) return 0;

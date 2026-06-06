@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countWordsFromSlate,
+  folioDisplayName,
   previewMarkdownSource,
   stripFrontmatter,
 } from "./folio-utils";
@@ -86,5 +87,25 @@ describe("countWordsFromSlate", () => {
       },
     ];
     expect(countWordsFromSlate(value)).toBe(4);
+  });
+});
+
+describe("folioDisplayName", () => {
+  it("derives spaced words from a slug with an 8-char short id", () => {
+    expect(folioDisplayName("notes/20260101.my-great-note.ab12CD34.md")).toBe(
+      "my great note",
+    );
+  });
+
+  it("falls back to the basename when there is no short id", () => {
+    expect(folioDisplayName("journal/2026-06-05.md")).toBe("2026-06-05");
+  });
+
+  it("falls back to the basename for a bare filename", () => {
+    expect(folioDisplayName("inbox.md")).toBe("inbox");
+  });
+
+  it("falls back when the trailing segment is not an 8-char id", () => {
+    expect(folioDisplayName("a.b.c.md")).toBe("a.b.c");
   });
 });
