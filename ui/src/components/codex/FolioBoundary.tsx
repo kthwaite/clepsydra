@@ -32,7 +32,9 @@ export class FolioBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      return <FolioNotFound path={this.props.path} onClose={this.handleClose} />;
+      return (
+        <FolioNotFound path={this.props.path} onClose={this.handleClose} />
+      );
     }
     return this.props.children;
   }

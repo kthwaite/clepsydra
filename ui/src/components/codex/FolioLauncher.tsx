@@ -1,8 +1,5 @@
 import { formatRelativeTime } from "#/components/codex/codex-time";
-import {
-  folioDisplayName,
-  shortFolio,
-} from "#/components/codex/folio-utils";
+import { folioDisplayName, shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { kindColorVar, resolveKind } from "#/lib/kind";
 import { useUiStore } from "#/store/ui";
@@ -40,7 +37,11 @@ export function FolioLauncher() {
             Actions
           </div>
           <div className="flex flex-col">
-            <LauncherAction label="Open console" hint="⌘K" onClick={openSearch} />
+            <LauncherAction
+              label="Open console"
+              hint="⌘K"
+              onClick={openSearch}
+            />
             <LauncherAction
               label="Inscribe new folio"
               hint="⌘N"
@@ -75,7 +76,9 @@ export function FolioLauncher() {
                     <span
                       className="inline-block h-[6px] w-[6px] flex-shrink-0"
                       style={{
-                        background: kindColorVar(resolveKind({ path: entry.path })),
+                        background: kindColorVar(
+                          resolveKind({ path: entry.path }),
+                        ),
                       }}
                       aria-hidden
                     />
@@ -86,7 +89,9 @@ export function FolioLauncher() {
                       {shortFolio(entry.path)}
                     </span>
                     <span className="cl-mono flex-shrink-0 text-[9px] text-ink-mute">
-                      {formatRelativeTime(new Date(entry.openedAt).toISOString())}
+                      {formatRelativeTime(
+                        new Date(entry.openedAt).toISOString(),
+                      )}
                     </span>
                   </button>
                 );

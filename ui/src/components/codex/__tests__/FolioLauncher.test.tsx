@@ -35,14 +35,18 @@ describe("FolioLauncher", () => {
   it("opens the inscribe modal via the quick action", async () => {
     const user = userEvent.setup();
     render(<FolioLauncher />);
-    await user.click(screen.getByRole("button", { name: /inscribe new folio/i }));
+    await user.click(
+      screen.getByRole("button", { name: /inscribe new folio/i }),
+    );
     expect(useUiStore.getState().isInscribeOpen).toBe(true);
   });
 
   it("opens the graph via the quick action", async () => {
     const user = userEvent.setup();
     render(<FolioLauncher />);
-    await user.click(screen.getByRole("button", { name: /open constellation/i }));
+    await user.click(
+      screen.getByRole("button", { name: /open constellation/i }),
+    );
     expect(openTabMock).toHaveBeenCalledWith("graph");
   });
 
