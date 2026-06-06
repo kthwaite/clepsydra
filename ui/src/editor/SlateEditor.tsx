@@ -5,7 +5,6 @@ import {
   type Descendant,
   Editor,
   Node,
-  Path,
   Range,
   Element as SlateElement,
   Text,
@@ -16,6 +15,10 @@ import { Editable, Slate, withReact } from "slate-react";
 import type { BlockResponse } from "#/api/blocks";
 import { useAssignBlockId } from "#/api/blocks";
 import { usePages } from "#/api/pages";
+import {
+  applyBlockConversion,
+  type BlockConversion,
+} from "#/editor/transforms/blockConversions";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import { decorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
@@ -31,16 +34,39 @@ import {
   withOutliner,
 } from "./plugins/withOutliner";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
-import { makeBlockquote } from "./schema/elements/blockquote";
 import { makeBlockRef } from "./schema/elements/blockRef";
-import { makeCodeBlock } from "./schema/elements/codeBlock";
-import { makeBulletedList, makeNumberedList } from "./schema/elements/list";
-import { makeParagraph } from "./schema/elements/paragraph";
-import { makeThematicBreak } from "./schema/elements/thematicBreak";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
-import type { HeadingElement, ListItemElement } from "./types";
 import { WikilinkCombobox } from "./WikilinkCombobox";
+
+export function slashCommandToConversion(id: string): BlockConversion | null {
+  switch (id) {
+    case "h1":
+    case "h2":
+    case "h3":
+    case "h4":
+    case "h5":
+    case "h6":
+      return {
+        type: "heading",
+        level: Number.parseInt(id.slice(1), 10) as 1 | 2 | 3 | 4 | 5 | 6,
+      };
+    case "bullet":
+      return { type: "bulleted-list" };
+    case "number":
+      return { type: "numbered-list" };
+    case "task":
+      return { type: "task" };
+    case "quote":
+      return { type: "blockquote" };
+    case "code":
+      return { type: "code-block" };
+    case "divider":
+      return { type: "thematic-break" };
+    default:
+      return null;
+  }
+}
 
 interface SlateEditorProps {
   initialValue: Descendant[];
@@ -242,136 +268,25 @@ export function SlateEditor({
       const { selection } = editor;
       if (!selection) return;
 
-      // Delete /query text
-      Transforms.delete(editor, {
-        at: { anchor: slashTrigger.anchor, focus: selection.focus },
-      });
-
-      // Apply transform based on command
-      switch (cmd.id) {
-        case "h1":
-        case "h2":
-        case "h3":
-        case "h4":
-        case "h5":
-        case "h6": {
-          const level = Number.parseInt(cmd.id.slice(1)) as
-            | 1
-            | 2
-            | 3
-            | 4
-            | 5
-            | 6;
-          const entry = Editor.above(editor, {
-            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-          });
-          if (entry) {
-            Transforms.setNodes(
-              editor,
-              { type: "heading", level } satisfies Partial<HeadingElement>,
-              {
-                at: entry[1],
-              },
-            );
-          }
-          break;
-        }
-        case "bullet":
-        case "number": {
-          const entry = Editor.above(editor, {
-            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-          });
-          if (entry) {
-            const [, blockPath] = entry;
-            Transforms.setNodes(
-              editor,
-              { type: "list-item" } satisfies Partial<ListItemElement>,
-              {
-                at: blockPath,
-              },
-            );
-            Transforms.wrapNodes(editor, makeParagraph({}), {
-              at: blockPath,
-              match: (n) => Text.isText(n),
-            });
-            Transforms.wrapNodes(
-              editor,
-              cmd.id === "bullet" ? makeBulletedList({}) : makeNumberedList({}),
-              { at: blockPath },
-            );
-          }
-          break;
-        }
-        case "task": {
-          const entry = Editor.above(editor, {
-            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-          });
-          if (entry) {
-            const [, blockPath] = entry;
-            Transforms.setNodes(
-              editor,
-              {
-                type: "list-item",
-                checked: false,
-              } satisfies Partial<ListItemElement>,
-              { at: blockPath },
-            );
-            Transforms.wrapNodes(editor, makeParagraph({}), {
-              at: blockPath,
-              match: (n) => Text.isText(n),
-            });
-            Transforms.wrapNodes(editor, makeBulletedList({}), {
-              at: blockPath,
-            });
-          }
-          break;
-        }
-        case "quote": {
-          const entry = Editor.above(editor, {
-            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-          });
-          if (entry) {
-            Transforms.wrapNodes(editor, makeBlockquote({}), { at: entry[1] });
-          }
-          break;
-        }
-        case "code": {
-          const entry = Editor.above(editor, {
-            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-          });
-          if (entry) {
-            const [, blockPath] = entry;
-            Transforms.removeNodes(editor, { at: blockPath });
-            Transforms.insertNodes(editor, makeCodeBlock({}), {
-              at: blockPath,
-            });
-            Transforms.select(editor, {
-              anchor: { path: [...blockPath, 0], offset: 0 },
-              focus: { path: [...blockPath, 0], offset: 0 },
-            });
-          }
-          break;
-        }
-        case "divider": {
-          const entry = Editor.above(editor, {
-            match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-          });
-          if (entry) {
-            const [, blockPath] = entry;
-            Transforms.removeNodes(editor, { at: blockPath });
-            Transforms.insertNodes(editor, makeThematicBreak({}), {
-              at: blockPath,
-            });
-            const nextPath = Path.next(blockPath);
-            Transforms.insertNodes(editor, makeParagraph({}), { at: nextPath });
-            Transforms.select(editor, {
-              anchor: { path: [...nextPath, 0], offset: 0 },
-              focus: { path: [...nextPath, 0], offset: 0 },
-            });
-          }
-          break;
-        }
+      const conversion = slashCommandToConversion(cmd.id);
+      if (!conversion) {
+        setSlashTrigger(null);
+        return;
       }
+
+      const entry = Editor.above(editor, {
+        match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
+      });
+      if (!entry) {
+        setSlashTrigger(null);
+        return;
+      }
+
+      applyBlockConversion(editor, {
+        at: entry[1],
+        deleteRange: { anchor: slashTrigger.anchor, focus: selection.focus },
+        conversion,
+      });
       setSlashTrigger(null);
     },
     [slashTrigger, editor],
