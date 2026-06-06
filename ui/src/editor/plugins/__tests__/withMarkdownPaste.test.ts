@@ -88,9 +88,14 @@ describe("withMarkdownPaste", () => {
       anchor: { path: [0, 0], offset: 0 },
       focus: { path: [0, 0], offset: 0 },
     };
-    editor.insertData(fakeData({ "text/plain": "## Title" }));
+    const data = fakeData({ "text/plain": "## Title" });
+    editor.insertData(data);
+    // The guard took the code-block branch: base received the original
+    // DataTransfer and the markdown path never ran (code-block untouched).
     expect(base).toHaveBeenCalledTimes(1);
+    expect(base).toHaveBeenCalledWith(data);
     expect((editor.children[0] as any).type).toBe("code-block");
+    expect((editor.children[0] as any).children[0].text).toBe("");
   });
 
   it("MP-06: a paste with no text/plain defers to base", () => {
