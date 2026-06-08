@@ -11,6 +11,7 @@ import {
   type RenderElementProps,
   useSlateStatic,
 } from "slate-react";
+import { cn } from "#/lib/cn";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
   BulletedListElement,
@@ -43,11 +44,14 @@ function ListItem({
   return (
     <li
       {...attributes}
-      className={checked === true ? "line-through text-muted-foreground" : ""}
+      className={cn(
+        "flex items-baseline",
+        checked === true && "line-through text-muted-foreground",
+      )}
     >
       <span
         contentEditable={false}
-        className="mr-2 inline-flex cursor-pointer select-none align-text-top"
+        className="mr-2 inline-flex cursor-pointer select-none"
       >
         <input
           type="checkbox"
@@ -103,7 +107,7 @@ export const bulletedListDescriptor: ElementDescriptor<BulletedListElement> = {
     children,
   }),
   render: ({ attributes, children }) => (
-    <ul {...attributes} className="list-['▸'] pl-5 marker:text-accent">
+    <ul {...attributes} className="list-disc marker:text-accent">
       {children}
     </ul>
   ),

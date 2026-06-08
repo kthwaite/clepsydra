@@ -28,7 +28,7 @@ export function FootnoteRefElement({ attributes, children, element }: Props) {
     <span {...attributes}>
       <span
         contentEditable={false}
-        className="relative inline cursor-default align-super text-[0.75em] text-accent"
+        className="relative inline cursor-default align-super text-[0.8em] text-accent pl-1"
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >

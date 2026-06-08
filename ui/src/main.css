@@ -264,6 +264,14 @@ body {
     text-rendering: geometricPrecision;
 }
 
+ul {
+    /** use padding to indent each list item the equivalent distance of a line height. 
+     * This will allow the bullet to sit neatly in a square of white-space. */
+    padding-inline-start: 1lh;
+}
+
+
+
 ::selection {
     background: var(--accent);
     color: #000;
@@ -383,9 +391,11 @@ body {
     position: relative;
     overflow: hidden;
 }
-.cl-grid-texture > * {
+
+.cl-grid-texture>* {
     position: relative;
 }
+
 .cl-grid-texture::before {
     content: "";
     position: absolute;
