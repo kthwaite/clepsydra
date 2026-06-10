@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "#/lib/cn";
 import { QUIRE_COLORS, quireColorVar } from "#/store/quires";
@@ -17,12 +17,14 @@ const MENU_WIDTH = 220;
 
 /** Hand-rolled context menu for SHEAF tabs and quire labels. RAC menus were
  * deferred for the tab strip (docs/design-notes/defer-tabbar-rac-migration.md);
- * this follows the CommandPalette's overlay + panel idiom instead. */
+ * this portals a panel styled after the CommandPalette dialog and dismisses on
+ * outside mousedown (no overlay, so retargeting is a single gesture). */
 export function SheafContextMenu({ target, onClose }: SheafContextMenuProps) {
   const tabs = useWorkspaceStore((s) => s.tabs);
   const quires = useWorkspaceStore((s) => s.quires);
   // null = root menu; a string = a name being drafted (new quire / rename).
   const [draft, setDraft] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -30,6 +32,16 @@ export function SheafContextMenu({ target, onClose }: SheafContextMenuProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Close on any mousedown outside the panel — including the right-click that
+  // opens a *different* target's menu, so retargeting is a single gesture.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!panelRef.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
   }, [onClose]);
 
   const store = () => useWorkspaceStore.getState();
@@ -112,11 +124,16 @@ export function SheafContextMenu({ target, onClose }: SheafContextMenuProps) {
             onCancel={onClose}
           />
         )}
-        <div className="flex items-center gap-2 px-3 py-[5px]">
+        <div
+          role="group"
+          aria-label="quire color"
+          className="flex items-center gap-2 px-3 py-[5px]"
+        >
           {QUIRE_COLORS.map((c) => (
             <button
               key={c}
               type="button"
+              role="menuitem"
               aria-label={`recolor ${c}`}
               onClick={act(() => store().recolorQuire(quire.id, c))}
               className={cn(
@@ -146,22 +163,13 @@ export function SheafContextMenu({ target, onClose }: SheafContextMenuProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60]"
-      onMouseDown={onClose}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
+      ref={panelRef}
+      role="menu"
+      aria-label="sheaf context menu"
+      className="cl-mono fixed z-[60] flex w-[220px] flex-col border-[1.5px] border-ink bg-paper py-1 text-[10px] uppercase tracking-[0.08em] text-ink"
+      style={{ left, top }}
     >
-      <div
-        role="menu"
-        aria-label="sheaf context menu"
-        onMouseDown={(e) => e.stopPropagation()}
-        className="cl-mono fixed flex w-[220px] flex-col border-[1.5px] border-ink bg-paper py-1 text-[10px] uppercase tracking-[0.08em] text-ink"
-        style={{ left, top }}
-      >
-        {content}
-      </div>
+      {content}
     </div>,
     document.body,
   );
@@ -219,9 +227,12 @@ function NameInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === "Enter") onCommit(value);
-          else if (e.key === "Escape") onCancel();
+          if (e.key === "Enter" || e.key === "Escape") {
+            e.stopPropagation();
+            e.preventDefault();
+            if (e.key === "Enter") onCommit(value);
+            else onCancel();
+          }
         }}
         placeholder="QUIRE NAME"
         className="w-full border border-ink/40 bg-transparent px-2 py-[3px] text-[10px] uppercase tracking-[0.08em] text-ink outline-none placeholder:text-ink-faint"

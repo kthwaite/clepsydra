@@ -190,7 +190,7 @@ export function CommandPalette() {
       if (q.id === active.quireId) continue;
       cmds.push({
         kind: "cmd",
-        id: `quire.add.${q.name}`,
+        id: `quire.add.${q.id}`,
         title: `Quire: add active folio to ${q.name}`,
         action: () => store().addTabToQuire(active.id, q.id),
       });

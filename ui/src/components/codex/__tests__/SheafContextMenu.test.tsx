@@ -104,6 +104,19 @@ describe("SheafContextMenu — quire target", () => {
     expect(state.tabs.find((t) => t.id === "t2")?.quireId).toBeUndefined();
   });
 
+  it("recolors the quire via a swatch", async () => {
+    seed();
+    const user = userEvent.setup();
+    render(
+      <SheafContextMenu
+        target={{ kind: "quire", quireId: "q1", x: 10, y: 10 }}
+        onClose={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("menuitem", { name: "recolor madder" }));
+    expect(useWorkspaceStore.getState().quires.q1.color).toBe("madder");
+  });
+
   it("closes the quire's unpinned members", async () => {
     seed();
     const user = userEvent.setup();
