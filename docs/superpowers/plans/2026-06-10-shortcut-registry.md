@@ -701,8 +701,8 @@ import { useWorkspaceStore } from "#/store/workspace";
 
 type Binding = {
   run: () => void;
-  /** Gate for route-scoped bindings; a matched-but-gated chord is left to
-   *  the browser (no preventDefault), preserving pre-registry behaviour. */
+  /** Gate for route-scoped bindings; a matched-but-gated chord falls through
+   *  to later bindings, or to the browser (no preventDefault). */
   when?: () => boolean;
 };
 
@@ -770,7 +770,7 @@ export function useGlobalShortcuts() {
       for (const id of GLOBAL_SHORTCUT_IDS) {
         if (!matchesChord(e, SHORTCUTS[id].chord)) continue;
         const binding = bindings[id];
-        if (binding.when && !binding.when()) return;
+        if (binding.when && !binding.when()) continue;
         e.preventDefault();
         binding.run();
         return;
