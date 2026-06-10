@@ -51,6 +51,15 @@ describe("Sheaf quire rendering", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 
+  it("an active quire member renders both the quire and active rules", () => {
+    seed(false);
+    useWorkspaceStore.setState({ activeTabId: "t1" });
+    render(<Sheaf activeTabId="t1" />);
+    const tabButton = screen.getByRole("button", { name: "Alpha" });
+    expect(tabButton.style.boxShadow).toContain("var(--quire-sepia)");
+    expect(tabButton.style.boxShadow).toContain("var(--accent)");
+  });
+
   it("clicking the label toggles collapse in the store", async () => {
     seed(false);
     const user = userEvent.setup();

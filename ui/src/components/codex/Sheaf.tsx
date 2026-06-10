@@ -104,8 +104,9 @@ export function Sheaf({ activeTabId }: SheafProps) {
             <button
               type="button"
               onClick={() => toggleQuireCollapse(seg.quire.id)}
-              aria-expanded={!seg.quire.collapsed}
-              aria-label={`quire ${seg.quire.name}, ${seg.members.length} folios`}
+              aria-label={`quire ${seg.quire.name}, ${seg.members.length} folios${
+                seg.quire.collapsed ? ", collapsed" : ""
+              }`}
               className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
               style={{
                 color: quireColorVar(seg.quire.color),
