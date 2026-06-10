@@ -73,7 +73,7 @@ fn default_excluded_patterns() -> Vec<String> {
 }
 
 fn default_linkable_properties() -> Vec<String> {
-    vec!["tags".to_string(), "aliases".to_string()]
+    vec!["tags".to_string(), "aliases".to_string(), "link".to_string()]
 }
 
 /// Configuration for the academic library subsystem.
@@ -233,6 +233,15 @@ max_blob_size_mb = 200
         assert_eq!(config.archive.max_blob_size_mb, 200);
         // Unset fields keep defaults
         assert_eq!(config.archive.default_path_prefix, "archive");
+    }
+
+    #[test]
+    fn vault_section_defaults() {
+        let config = VaultConfig::default();
+        assert_eq!(
+            config.vault.linkable_properties,
+            vec!["tags", "aliases", "link"]
+        );
     }
 
     #[test]

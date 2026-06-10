@@ -19,6 +19,8 @@ pub enum Kind {
     Capture,
     Code,
     Person,
+    Task,
+    Cycle,
 }
 
 impl Kind {
@@ -35,6 +37,8 @@ impl Kind {
             Kind::Capture => "captures",
             Kind::Code => "code",
             Kind::Person => "people",
+            Kind::Task => "tasks",
+            Kind::Cycle => "cycles",
         }
     }
 
@@ -50,6 +54,8 @@ impl Kind {
             Kind::Capture => "CAPTURE",
             Kind::Code => "CODE",
             Kind::Person => "PERSON",
+            Kind::Task => "TASK",
+            Kind::Cycle => "CYCLE",
         }
     }
 
@@ -65,6 +71,8 @@ impl Kind {
             "CAPTURE" => Some(Kind::Capture),
             "CODE" => Some(Kind::Code),
             "PERSON" => Some(Kind::Person),
+            "TASK" => Some(Kind::Task),
+            "CYCLE" => Some(Kind::Cycle),
             _ => None,
         }
     }
@@ -76,12 +84,14 @@ impl Kind {
             "notes" | "note" => Some(Kind::Note),
             "projects" | "project" => Some(Kind::Project),
             "journals" | "journal" | "daily" | "dailies" | "diary" => Some(Kind::Journal),
-            "todos" | "todo" | "tasks" | "task" => Some(Kind::Todo),
+            "todos" | "todo" => Some(Kind::Todo),
             "quotes" | "quote" => Some(Kind::Quote),
             "books" | "book" | "reading" | "library" => Some(Kind::Book),
             "captures" | "capture" | "inbox" | "clippings" => Some(Kind::Capture),
             "code" | "snippets" => Some(Kind::Code),
             "people" | "persons" | "person" | "contacts" => Some(Kind::Person),
+            "tasks" | "task" => Some(Kind::Task),
+            "cycles" | "cycle" | "sprints" | "sprint" => Some(Kind::Cycle),
             _ => None,
         }
     }
@@ -151,7 +161,7 @@ mod tests {
             (Kind::Journal, true)
         );
         assert_eq!(resolve("diary/x.md", None), (Kind::Journal, true));
-        assert_eq!(resolve("tasks/x.md", None), (Kind::Todo, true));
+        assert_eq!(resolve("tasks/x.md", None), (Kind::Task, true));
     }
 
     #[test]
@@ -172,6 +182,8 @@ mod tests {
             Kind::Capture,
             Kind::Code,
             Kind::Person,
+            Kind::Task,
+            Kind::Cycle,
         ];
         for k in all {
             assert_eq!(
@@ -180,6 +192,11 @@ mod tests {
                 "from_token(as_str()) round-trip failed for {k:?}"
             );
         }
+        assert_eq!(Kind::Task.canonical_folder(), "tasks");
+        assert_eq!(Kind::Cycle.canonical_folder(), "cycles");
+        assert_eq!(Kind::from_folder("tasks"), Some(Kind::Task));
+        assert_eq!(Kind::from_folder("todos"), Some(Kind::Todo));
+        assert_eq!(Kind::from_folder("sprints"), Some(Kind::Cycle));
     }
 
     #[test]
