@@ -35,7 +35,6 @@ const KIND_LABEL: Record<Command["kind"], string> = {
 export function CommandPalette() {
   const open = useUiStore((s) => s.isSearchOpen);
   const close = useUiStore((s) => s.closeSearch);
-  const toggle = useUiStore((s) => s.toggleSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openSettings = useUiStore((s) => s.openSettings);
   const runBoot = useUiStore((s) => s.runBoot);
@@ -53,18 +52,6 @@ export function CommandPalette() {
     12,
   );
   const { data: tags } = useTags();
-
-  // ⌘K / Ctrl+K
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        toggle();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggle]);
 
   useEffect(() => {
     if (open) {

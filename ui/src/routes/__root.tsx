@@ -7,6 +7,7 @@ import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
 import { RouteError } from "#/components/RouteError";
 import { SettingsModal } from "#/components/SettingsModal";
+import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 
 export const Route = createRootRoute({
   notFoundComponent: () => (
@@ -23,6 +24,7 @@ export const Route = createRootRoute({
         <CodexFrame>
           <Outlet />
         </CodexFrame>
+        <GlobalShortcuts />
         <CommandPalette />
         <SettingsModal />
         <InscribeModal />

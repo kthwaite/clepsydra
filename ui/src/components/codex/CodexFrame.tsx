@@ -36,7 +36,6 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const navigate = useNavigate();
   const openSearch = useUiStore((s) => s.openSearch);
   const openSettings = useUiStore((s) => s.openSettings);
-  const openInscribe = useUiStore((s) => s.openInscribe);
   const settingsOpen = useUiStore((s) => s.isSettingsOpen);
   const { toggle, resolvedTheme, diegetic } = useTheme();
   const dark = resolvedTheme === "dark";
@@ -75,19 +74,6 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const clock = useUtcClock();
   const uptime = useUptime();
   const writing = useIsMutating() > 0;
-
-  // ⌘N → INTAKE (browsers reserve ⌘N for new-window in some cases; the command
-  // palette offers a reliable fallback).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "n" || e.key === "N")) {
-        e.preventDefault();
-        openInscribe();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [openInscribe]);
 
   const pages = stats?.pages ?? 0;
   const links = stats?.links_total ?? 0;
