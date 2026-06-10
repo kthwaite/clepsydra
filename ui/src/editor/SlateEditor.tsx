@@ -19,6 +19,7 @@ import {
   applyBlockConversion,
   type BlockConversion,
 } from "#/editor/transforms/blockConversions";
+import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import { decorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
@@ -317,115 +318,111 @@ export function SlateEditor({
     }
 
     // --- Outliner keybindings ---
-    if (event.key === "Tab" && !event.shiftKey) {
+    if (matchesChord(event, SHORTCUTS["editor.indent"].chord)) {
       event.preventDefault();
       indentListItem(editor);
       return;
     }
-    if (event.key === "Tab" && event.shiftKey) {
+    if (matchesChord(event, SHORTCUTS["editor.outdent"].chord)) {
       event.preventDefault();
       outdentListItem(editor);
       return;
     }
-    if (event.key === "ArrowUp" && event.altKey) {
+    if (matchesChord(event, SHORTCUTS["editor.moveUp"].chord)) {
       event.preventDefault();
       moveBlockUp(editor);
       return;
     }
-    if (event.key === "ArrowDown" && event.altKey) {
+    if (matchesChord(event, SHORTCUTS["editor.moveDown"].chord)) {
       event.preventDefault();
       moveBlockDown(editor);
       return;
     }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (matchesChord(event, SHORTCUTS["editor.checkbox"].chord)) {
       event.preventDefault();
       toggleCheckbox(editor);
       return;
     }
 
     // --- Save ---
-    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+    if (matchesChord(event, SHORTCUTS["folio.save"].chord)) {
       event.preventDefault();
       onSaveNow();
       return;
     }
 
     // --- Formatting marks ---
-    if (event.metaKey || event.ctrlKey) {
-      switch (event.key) {
-        case "b": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.bold) {
-            Editor.removeMark(editor, "bold");
-          } else {
-            Editor.addMark(editor, "bold", true);
-          }
-          return;
-        }
-        case "i": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.italic) {
-            Editor.removeMark(editor, "italic");
-          } else {
-            Editor.addMark(editor, "italic", true);
-          }
-          return;
-        }
-        case "u": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.underline) {
-            Editor.removeMark(editor, "underline");
-          } else {
-            Editor.addMark(editor, "underline", true);
-          }
-          return;
-        }
-        case "e": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.code) {
-            Editor.removeMark(editor, "code");
-          } else {
-            Editor.addMark(editor, "code", true);
-          }
-          return;
-        }
-        case "d": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.strikethrough) {
-            Editor.removeMark(editor, "strikethrough");
-          } else {
-            Editor.addMark(editor, "strikethrough", true);
-          }
-          return;
-        }
-        case ".": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.superscript) {
-            Editor.removeMark(editor, "superscript");
-          } else {
-            Editor.removeMark(editor, "subscript");
-            Editor.addMark(editor, "superscript", true);
-          }
-          return;
-        }
-        case ",": {
-          event.preventDefault();
-          const marks = Editor.marks(editor);
-          if (marks?.subscript) {
-            Editor.removeMark(editor, "subscript");
-          } else {
-            Editor.removeMark(editor, "superscript");
-            Editor.addMark(editor, "subscript", true);
-          }
-          return;
-        }
+    if (matchesChord(event, SHORTCUTS["editor.mark.bold"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.bold) {
+        Editor.removeMark(editor, "bold");
+      } else {
+        Editor.addMark(editor, "bold", true);
       }
+      return;
+    }
+    if (matchesChord(event, SHORTCUTS["editor.mark.italic"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.italic) {
+        Editor.removeMark(editor, "italic");
+      } else {
+        Editor.addMark(editor, "italic", true);
+      }
+      return;
+    }
+    if (matchesChord(event, SHORTCUTS["editor.mark.underline"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.underline) {
+        Editor.removeMark(editor, "underline");
+      } else {
+        Editor.addMark(editor, "underline", true);
+      }
+      return;
+    }
+    if (matchesChord(event, SHORTCUTS["editor.mark.code"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.code) {
+        Editor.removeMark(editor, "code");
+      } else {
+        Editor.addMark(editor, "code", true);
+      }
+      return;
+    }
+    if (matchesChord(event, SHORTCUTS["editor.mark.strikethrough"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.strikethrough) {
+        Editor.removeMark(editor, "strikethrough");
+      } else {
+        Editor.addMark(editor, "strikethrough", true);
+      }
+      return;
+    }
+    if (matchesChord(event, SHORTCUTS["editor.mark.superscript"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.superscript) {
+        Editor.removeMark(editor, "superscript");
+      } else {
+        Editor.removeMark(editor, "subscript");
+        Editor.addMark(editor, "superscript", true);
+      }
+      return;
+    }
+    if (matchesChord(event, SHORTCUTS["editor.mark.subscript"].chord)) {
+      event.preventDefault();
+      const marks = Editor.marks(editor);
+      if (marks?.subscript) {
+        Editor.removeMark(editor, "subscript");
+      } else {
+        Editor.removeMark(editor, "superscript");
+        Editor.addMark(editor, "subscript", true);
+      }
+      return;
     }
   };
 

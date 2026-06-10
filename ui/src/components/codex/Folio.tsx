@@ -23,6 +23,7 @@ import { usePageEditor } from "#/editor/usePageEditor";
 import { cn } from "#/lib/cn";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
+import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { useProjects } from "#/lib/useProjects";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
@@ -100,7 +101,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const saveNow = editor.saveNow;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      if (matchesChord(e, SHORTCUTS["folio.save"].chord)) {
         e.preventDefault();
         saveNow();
       }
