@@ -6,6 +6,7 @@ import {
   isTabHidden,
   nearestVisibleTabId,
   nextQuireColor,
+  normalizeQuires,
   type Quire,
   QUIRE_COLORS,
   quireColorVar,
@@ -97,5 +98,42 @@ describe("cycleTargetId", () => {
 
   it("returns null when fewer than two tabs are visible", () => {
     expect(cycleTargetId([tab("a"), tab("b", "q1")], quires, "a", false)).toBeNull();
+  });
+});
+
+describe("normalizeQuires", () => {
+  it("gathers a quire's members behind its first member", () => {
+    const quires = { q1: quire("q1") };
+    const tabs = [tab("a", "q1"), tab("x"), tab("b", "q1"), tab("y")];
+    const out = normalizeQuires(tabs, quires);
+    expect(out.tabs.map((t) => t.id)).toEqual(["a", "b", "x", "y"]);
+  });
+
+  it("leaves already-contiguous arrays untouched in order", () => {
+    const quires = { q1: quire("q1") };
+    const tabs = [tab("x"), tab("a", "q1"), tab("b", "q1"), tab("y")];
+    const out = normalizeQuires(tabs, quires);
+    expect(out.tabs.map((t) => t.id)).toEqual(["x", "a", "b", "y"]);
+  });
+
+  it("drops quires that have no members", () => {
+    const quires = { q1: quire("q1"), ghost: quire("ghost") };
+    const out = normalizeQuires([tab("a", "q1")], quires);
+    expect(out.quires.q1).toBeDefined();
+    expect(out.quires.ghost).toBeUndefined();
+  });
+
+  it("strips quireIds that reference nonexistent quires", () => {
+    const out = normalizeQuires([tab("a", "deleted")], {});
+    expect(out.tabs[0].quireId).toBeUndefined();
+    expect(out.quires).toEqual({});
+  });
+
+  it("keeps interleaved graph tabs in place outside quire runs", () => {
+    const quires = { q1: quire("q1") };
+    const graph: TabDescriptor = { id: "g", type: "graph", label: "Graph" };
+    const tabs = [tab("a", "q1"), graph, tab("b", "q1")];
+    const out = normalizeQuires(tabs, quires);
+    expect(out.tabs.map((t) => t.id)).toEqual(["a", "b", "g"]);
   });
 });

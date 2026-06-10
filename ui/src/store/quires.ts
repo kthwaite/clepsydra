@@ -71,6 +71,33 @@ export function nearestVisibleTabId(
   return null;
 }
 
+/** Re-establish quire invariants: strip dangling quireIds, make members
+ * contiguous (gathered behind each quire's first member), drop empty quires.
+ * Pure; returns fresh arrays/maps and never mutates inputs. */
+export function normalizeQuires(
+  tabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+): { tabs: TabDescriptor[]; quires: Record<string, Quire> } {
+  const cleaned = tabs.map((t) =>
+    t.quireId && !quires[t.quireId] ? { ...t, quireId: undefined } : t,
+  );
+
+  const out: TabDescriptor[] = [];
+  const seen = new Set<string>();
+  for (const t of cleaned) {
+    if (!t.quireId) {
+      out.push(t);
+    } else if (!seen.has(t.quireId)) {
+      seen.add(t.quireId);
+      out.push(...cleaned.filter((m) => m.quireId === t.quireId));
+    }
+  }
+
+  const live: Record<string, Quire> = {};
+  for (const id of seen) live[id] = quires[id];
+  return { tabs: out, quires: live };
+}
+
 /** Ctrl-Tab target: next/previous *visible* tab in array order, wrapping. */
 export function cycleTargetId(
   tabs: TabDescriptor[],
