@@ -5,6 +5,7 @@ import { CommandPalette } from "#/components/codex/CommandPalette";
 import { InscribeModal } from "#/components/codex/InscribeModal";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
+import { ShortcutHelpModal } from "#/components/codex/ShortcutHelpModal";
 import { RouteError } from "#/components/RouteError";
 import { SettingsModal } from "#/components/SettingsModal";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
@@ -28,6 +29,7 @@ export const Route = createRootRoute({
         <CommandPalette />
         <SettingsModal />
         <InscribeModal />
+        <ShortcutHelpModal />
         <LinkPreviewLayer />
         <BootSequence />
       </ReadingProgressProvider>
