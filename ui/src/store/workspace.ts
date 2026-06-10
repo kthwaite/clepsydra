@@ -138,19 +138,20 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           return;
         }
 
-        // New page tabs inherit the active page tab's quire (self-assembling
-        // research context); graph tabs never join quires.
         const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+        // New page tabs inherit the active page tab's quire (self-assembling
+        // research context); graph tabs never join quires. Only the append
+        // branch uses this — replace mode keeps the slot's own quire.
+        const inheritedQuireId =
+          type === "page" && activeTab?.type === "page"
+            ? activeTab.quireId
+            : undefined;
         const newTab: TabDescriptor = {
           id: crypto.randomUUID(),
           type,
           path: type === "page" ? path : undefined,
           label: label ?? path ?? "Graph",
           lastActiveAt: Date.now(),
-          quireId:
-            type === "page" && activeTab?.type === "page"
-              ? activeTab.quireId
-              : undefined,
         };
 
         const nextHistory =
@@ -174,15 +175,19 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         } else {
           // "new" or "smart" — append; normalize gathers it to its quire run.
           set(
-            normalized([...state.tabs, newTab], state.quires, {
-              activeTabId: newTab.id,
-              openHistory: nextHistory,
-            }),
+            normalized(
+              [...state.tabs, { ...newTab, quireId: inheritedQuireId }],
+              state.quires,
+              { activeTabId: newTab.id, openHistory: nextHistory },
+            ),
           );
         }
       },
 
       addTab(tab) {
+        // Caller contract: do not pass a quireId belonging to a collapsed
+        // quire — addTab activates the tab and would break the
+        // active-tab-is-never-hidden invariant.
         set((state) =>
           normalized([...state.tabs, tab], state.quires, {
             activeTabId: tab.id,
