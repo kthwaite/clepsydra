@@ -199,25 +199,27 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         let nextActive = state.activeTabId;
 
         if (state.activeTabId === tabId) {
-          if (nextTabs.length === 0) {
-            nextActive = null;
-          } else if (idx < nextTabs.length) {
-            // activate right neighbor
-            nextActive = nextTabs[idx].id;
-          } else {
-            // was rightmost, activate new rightmost
-            nextActive = nextTabs[nextTabs.length - 1].id;
-          }
+          nextActive =
+            nextTabs.length === 0
+              ? null
+              : nearestVisibleTabId(
+                  nextTabs,
+                  state.quires,
+                  Math.min(idx, nextTabs.length - 1),
+                );
         }
 
-        set({ tabs: nextTabs, activeTabId: nextActive });
+        set(normalized(nextTabs, state.quires, { activeTabId: nextActive }));
       },
 
       closeOtherTabs(tabId) {
-        set((state) => ({
-          tabs: state.tabs.filter((t) => t.id === tabId),
-          activeTabId: tabId,
-        }));
+        set((state) =>
+          normalized(
+            state.tabs.filter((t) => t.id === tabId || t.pinned),
+            state.quires,
+            { activeTabId: tabId },
+          ),
+        );
       },
 
       activateTab(tabId) {

@@ -402,3 +402,45 @@ describe("openTab quire integration", () => {
     ).toBeUndefined();
   });
 });
+
+describe("visibility-aware closing", () => {
+  it("closeTab skips hidden neighbors when re-homing activation", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("t1"),
+        pageTab("t2", "q1"),
+        pageTab("t3", "q1"),
+        pageTab("t4"),
+      ],
+      activeTabId: "t1",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+    useWorkspaceStore.getState().closeTab("t1");
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t4");
+  });
+
+  it("closeTab dissolves a quire when its last member closes", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1"), pageTab("t2")],
+      activeTabId: "t2",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+    useWorkspaceStore.getState().closeTab("t1");
+    expect(useWorkspaceStore.getState().quires.q1).toBeUndefined();
+  });
+
+  it("closeOtherTabs spares pinned tabs and dead quires dissolve", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1"), pageTab("t2", "q1", true), pageTab("t3")],
+      activeTabId: "t3",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+    useWorkspaceStore.getState().closeOtherTabs("t3");
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((t) => t.id)).toEqual(["t2", "t3"]);
+    expect(state.quires.q1).toBeDefined(); // pinned member keeps it alive
+  });
+});
