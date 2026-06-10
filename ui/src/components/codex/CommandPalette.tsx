@@ -12,6 +12,7 @@ import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 import { useUiStore } from "#/store/ui";
 
 type Command = {
@@ -37,6 +38,7 @@ export function CommandPalette() {
   const close = useUiStore((s) => s.closeSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openSettings = useUiStore((s) => s.openSettings);
+  const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const runBoot = useUiStore((s) => s.runBoot);
   const navigate = useNavigate();
   const openTab = useOpenTab();
@@ -69,19 +71,19 @@ export function CommandPalette() {
     () => [
       {
         kind: "cmd",
-        id: "⌘H",
+        id: formatChord(SHORTCUTS["nav.atrium"].chord),
         title: "Open Atrium",
         action: () => navigate({ to: "/" }),
       },
       {
         kind: "cmd",
-        id: "⌘D",
+        id: formatChord(SHORTCUTS["nav.diurnal"].chord),
         title: "Open Diurnal",
         action: () => navigate({ to: "/journal" }),
       },
       {
         kind: "cmd",
-        id: "⌘G",
+        id: formatChord(SHORTCUTS["nav.constellation"].chord),
         title: "Open Constellation (graph)",
         action: () => {
           openTab("graph");
@@ -89,27 +91,33 @@ export function CommandPalette() {
       },
       {
         kind: "cmd",
-        id: "⌘I",
+        id: formatChord(SHORTCUTS["nav.gazetteer"].chord),
         title: "Open Gazetteer (index)",
         action: () => navigate({ to: "/gazetteer" }),
       },
       {
         kind: "cmd",
-        id: "⌘N",
+        id: formatChord(SHORTCUTS["app.inscribe"].chord),
         title: "Inscribe new folio",
         action: () => openInscribe(),
       },
       {
         kind: "cmd",
-        id: "⌘,",
+        id: formatChord(SHORTCUTS["app.settings"].chord),
         title: "Open Status / preferences",
         action: () => openSettings("appearance"),
       },
       {
         kind: "cmd",
-        id: "⌘\\",
+        id: formatChord(SHORTCUTS["app.themeToggle"].chord),
         title: "Toggle dark mode",
         action: () => toggleTheme(),
+      },
+      {
+        kind: "cmd",
+        id: formatChord(SHORTCUTS["app.shortcutHelp"].chord),
+        title: "Keyboard shortcuts",
+        action: () => openShortcutHelp(),
       },
       {
         kind: "cmd",
@@ -130,6 +138,7 @@ export function CommandPalette() {
       toggleTheme,
       openInscribe,
       openSettings,
+      openShortcutHelp,
       runBoot,
       diegetic,
       setDiegetic,
