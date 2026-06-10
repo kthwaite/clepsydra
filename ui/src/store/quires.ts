@@ -113,3 +113,64 @@ export function cycleTargetId(
     : (idx + 1) % visible.length;
   return visible[next].id;
 }
+
+/** Display order for the SHEAF strip: pinned-ungrouped tabs first, then the
+ * remaining segments in array order; within each quire run, pinned members
+ * first. Assumes quire runs are already contiguous (post-normalize). */
+export function orderSheafTabs(
+  tabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+): TabDescriptor[] {
+  void quires;
+  const pinnedUngrouped = tabs.filter((t) => t.pinned && !t.quireId);
+  const rest: TabDescriptor[] = [];
+  let i = 0;
+  while (i < tabs.length) {
+    const t = tabs[i];
+    if (t.pinned && !t.quireId) {
+      i++;
+    } else if (t.quireId) {
+      const qid = t.quireId;
+      const run: TabDescriptor[] = [];
+      while (i < tabs.length && tabs[i].quireId === qid) {
+        run.push(tabs[i]);
+        i++;
+      }
+      rest.push(
+        ...run.filter((m) => m.pinned),
+        ...run.filter((m) => !m.pinned),
+      );
+    } else {
+      rest.push(t);
+      i++;
+    }
+  }
+  return [...pinnedUngrouped, ...rest];
+}
+
+export type SheafSegment =
+  | { kind: "tab"; tab: TabDescriptor }
+  | { kind: "quire"; quire: Quire; members: TabDescriptor[] };
+
+/** Fold display-ordered tabs into render segments for the SHEAF. Tabs whose
+ * quireId has no live quire render as plain tabs. */
+export function sheafSegments(
+  orderedTabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+): SheafSegment[] {
+  const out: SheafSegment[] = [];
+  for (const tab of orderedTabs) {
+    const quire = tab.quireId ? quires[tab.quireId] : undefined;
+    if (!quire) {
+      out.push({ kind: "tab", tab });
+      continue;
+    }
+    const last = out.at(-1);
+    if (last?.kind === "quire" && last.quire.id === quire.id) {
+      last.members.push(tab);
+    } else {
+      out.push({ kind: "quire", quire, members: [tab] });
+    }
+  }
+  return out;
+}

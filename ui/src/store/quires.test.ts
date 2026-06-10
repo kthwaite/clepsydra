@@ -7,9 +7,11 @@ import {
   nearestVisibleTabId,
   nextQuireColor,
   normalizeQuires,
-  type Quire,
+  orderSheafTabs,
   QUIRE_COLORS,
+  type Quire,
   quireColorVar,
+  sheafSegments,
 } from "./quires";
 
 function tab(id: string, quireId?: string, pinned?: boolean): TabDescriptor {
@@ -97,7 +99,9 @@ describe("cycleTargetId", () => {
   });
 
   it("returns null when fewer than two tabs are visible", () => {
-    expect(cycleTargetId([tab("a"), tab("b", "q1")], quires, "a", false)).toBeNull();
+    expect(
+      cycleTargetId([tab("a"), tab("b", "q1")], quires, "a", false),
+    ).toBeNull();
   });
 });
 
@@ -135,5 +139,59 @@ describe("normalizeQuires", () => {
     const tabs = [tab("a", "q1"), graph, tab("b", "q1")];
     const out = normalizeQuires(tabs, quires);
     expect(out.tabs.map((t) => t.id)).toEqual(["a", "b", "g"]);
+  });
+});
+
+describe("orderSheafTabs", () => {
+  it("floats pinned-ungrouped tabs to the front, keeps segments in order", () => {
+    const quires = { q1: quire("q1") };
+    const tabs = [
+      tab("a", "q1"),
+      tab("b", "q1"),
+      tab("x"),
+      tab("p", undefined, true),
+    ];
+    expect(orderSheafTabs(tabs, quires).map((t) => t.id)).toEqual([
+      "p",
+      "a",
+      "b",
+      "x",
+    ]);
+  });
+
+  it("sorts pinned members first within their quire, not globally", () => {
+    const quires = { q1: quire("q1") };
+    const tabs = [
+      tab("x"),
+      tab("a", "q1"),
+      tab("b", "q1", true),
+      tab("c", "q1"),
+    ];
+    expect(orderSheafTabs(tabs, quires).map((t) => t.id)).toEqual([
+      "x",
+      "b",
+      "a",
+      "c",
+    ]);
+  });
+});
+
+describe("sheafSegments", () => {
+  it("groups ordered tabs into tab and quire segments", () => {
+    const quires = { q1: quire("q1") };
+    const ordered = [tab("x"), tab("a", "q1"), tab("b", "q1"), tab("y")];
+    const segs = sheafSegments(ordered, quires);
+    expect(segs).toHaveLength(3);
+    expect(segs[0]).toMatchObject({ kind: "tab", tab: { id: "x" } });
+    expect(segs[1]).toMatchObject({ kind: "quire", quire: { id: "q1" } });
+    expect(
+      segs[1].kind === "quire" && segs[1].members.map((m) => m.id),
+    ).toEqual(["a", "b"]);
+    expect(segs[2]).toMatchObject({ kind: "tab", tab: { id: "y" } });
+  });
+
+  it("treats tabs with unknown quireIds as ungrouped", () => {
+    const segs = sheafSegments([tab("a", "ghost")], {});
+    expect(segs[0].kind).toBe("tab");
   });
 });
