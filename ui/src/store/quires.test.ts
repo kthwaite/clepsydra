@@ -133,7 +133,7 @@ describe("normalizeQuires", () => {
     expect(out.quires).toEqual({});
   });
 
-  it("keeps interleaved graph tabs in place outside quire runs", () => {
+  it("displaces non-member tabs to after the gathered run", () => {
     const quires = { q1: quire("q1") };
     const graph: TabDescriptor = { id: "g", type: "graph", label: "Graph" };
     const tabs = [tab("a", "q1"), graph, tab("b", "q1")];

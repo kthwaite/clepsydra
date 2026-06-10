@@ -38,6 +38,8 @@ export function nextQuireColor(quires: Record<string, Quire>): QuireColor {
   const used = new Set(Object.values(quires).map((q) => q.color));
   return (
     QUIRE_COLORS.find((c) => !used.has(c)) ??
+    // Fallback: all six colors are in use — pick by position modulo 6 for
+    // deterministic rotation rather than always returning the same hue.
     QUIRE_COLORS[Object.keys(quires).length % QUIRE_COLORS.length]
   );
 }
@@ -56,7 +58,9 @@ export function isTabHidden(
   return !!(tab.quireId && quires[tab.quireId]?.collapsed);
 }
 
-/** Nearest visible tab scanning right from `index`, then left; null if none. */
+/** Nearest visible tab at or right of `index`, then left; null if none.
+ * For close-neighbor activation pass the index in the already-reduced array.
+ * For collapse activation pass the hidden tab's own index (it will be skipped). */
 export function nearestVisibleTabId(
   tabs: TabDescriptor[],
   quires: Record<string, Quire>,
