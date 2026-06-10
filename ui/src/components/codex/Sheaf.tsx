@@ -3,6 +3,10 @@ import { Pin, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useStats } from "#/api/index";
+import {
+  type MenuTarget,
+  SheafContextMenu,
+} from "#/components/codex/SheafContextMenu";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { cn } from "#/lib/cn";
@@ -39,6 +43,7 @@ export function Sheaf({ activeTabId }: SheafProps) {
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(
     null,
   );
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
   const openTimer = useRef<number | null>(null);
 
   const clearOpenTimer = () => {
@@ -46,6 +51,12 @@ export function Sheaf({ activeTabId }: SheafProps) {
       window.clearTimeout(openTimer.current);
       openTimer.current = null;
     }
+  };
+
+  const openMenu = (next: MenuTarget) => {
+    clearOpenTimer();
+    setHovered(null);
+    setMenu(next);
   };
 
   useEffect(() => clearOpenTimer, []);
@@ -98,12 +109,25 @@ export function Sheaf({ activeTabId }: SheafProps) {
             onActivate={onActivate}
             onEnter={onTabEnter}
             onLeave={onTabLeave}
+            onContextMenu={(e, tabId) => {
+              e.preventDefault();
+              openMenu({ kind: "tab", tabId, x: e.clientX, y: e.clientY });
+            }}
           />
         ) : (
           <Fragment key={seg.quire.id}>
             <button
               type="button"
               onClick={() => toggleQuireCollapse(seg.quire.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openMenu({
+                  kind: "quire",
+                  quireId: seg.quire.id,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
+              }}
               aria-label={`quire ${seg.quire.name}, ${seg.members.length} folios${
                 seg.quire.collapsed ? ", collapsed" : ""
               }`}
@@ -128,6 +152,15 @@ export function Sheaf({ activeTabId }: SheafProps) {
                   onActivate={onActivate}
                   onEnter={onTabEnter}
                   onLeave={onTabLeave}
+                  onContextMenu={(e, tabId) => {
+                    e.preventDefault();
+                    openMenu({
+                      kind: "tab",
+                      tabId,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }}
                 />
               ))}
           </Fragment>
@@ -143,6 +176,7 @@ export function Sheaf({ activeTabId }: SheafProps) {
         <span className="text-ink-2">{stats?.pages ?? 0}</span> indexed
         <span className="border-l border-rule-soft pl-2">⌘N intake</span>
       </span>
+      {menu && <SheafContextMenu target={menu} onClose={() => setMenu(null)} />}
     </div>
   );
 }
@@ -154,6 +188,7 @@ type FolioTabProps = {
   onActivate: (id: string) => void;
   onEnter: (id: string, path: string | undefined, el: HTMLElement) => void;
   onLeave: () => void;
+  onContextMenu: (e: ReactMouseEvent, tabId: string) => void;
 };
 
 function FolioTab({
@@ -163,6 +198,7 @@ function FolioTab({
   onActivate,
   onEnter,
   onLeave,
+  onContextMenu,
 }: FolioTabProps) {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const togglePin = useWorkspaceStore((s) => s.togglePin);
@@ -189,6 +225,7 @@ function FolioTab({
       onClick={() => onActivate(t.id)}
       onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
       onMouseLeave={onLeave}
+      onContextMenu={(e) => onContextMenu(e, t.id)}
       title={t.path ? undefined : t.label}
       aria-label={t.label || t.path || "untitled folio"}
       className={cn(
