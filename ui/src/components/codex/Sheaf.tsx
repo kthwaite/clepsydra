@@ -1,22 +1,23 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Pin, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useStats } from "#/api/index";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
+import {
+  orderSheafTabs,
+  type Quire,
+  quireColorVar,
+  sheafSegments,
+} from "#/store/quires";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type SheafProps = {
   activeTabId: string | null;
 };
-
-/** Pinned tabs first, each group preserving insertion order. */
-function ordered(tabs: TabDescriptor[]): TabDescriptor[] {
-  return [...tabs].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
-}
 
 // Cold-open delay; once a card is showing, scrubbing to another tab is instant.
 const HOVER_DELAY = 220;
@@ -24,12 +25,16 @@ const HOVER_DELAY = 220;
 export function Sheaf({ activeTabId }: SheafProps) {
   const navigate = useNavigate();
   const tabs = useWorkspaceStore((s) => s.tabs);
+  const quires = useWorkspaceStore((s) => s.quires);
   const activateTab = useWorkspaceStore((s) => s.activateTab);
-  const closeTab = useWorkspaceStore((s) => s.closeTab);
-  const togglePin = useWorkspaceStore((s) => s.togglePin);
+  const toggleQuireCollapse = useWorkspaceStore((s) => s.toggleQuireCollapse);
   const { data: stats } = useStats();
 
-  const pageTabs = ordered(tabs.filter((t) => t.type === "page"));
+  const pageTabs = orderSheafTabs(
+    tabs.filter((t) => t.type === "page"),
+    quires,
+  );
+  const segments = sheafSegments(pageTabs, quires);
 
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(
     null,
@@ -84,76 +89,49 @@ export function Sheaf({ activeTabId }: SheafProps) {
         <span className="text-ink-2">{pageTabs.length}</span>
       </span>
 
-      {pageTabs.map((t) => {
-        const active = t.id === activeTabId;
-        const kind = resolveKindFromPath(t.path ?? "");
-        const onClose = (e: ReactMouseEvent) => {
-          e.stopPropagation();
-          closeTab(t.id);
-        };
-        const onPin = (e: ReactMouseEvent) => {
-          e.stopPropagation();
-          togglePin(t.id);
-        };
-        return (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => onActivate(t.id)}
-            onMouseEnter={(e) => onTabEnter(t.id, t.path, e.currentTarget)}
-            onMouseLeave={onTabLeave}
-            title={t.path ? undefined : t.label}
-            aria-label={t.label || t.path || "untitled folio"}
-            className={cn(
-              "group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2",
-              active
-                ? "bg-paper text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-                : "text-ink-mute hover:text-ink",
-            )}
-          >
-            <span
-              className="inline-block h-[6px] w-[6px] flex-shrink-0"
-              style={{ background: kindColorVar(kind) }}
-              aria-hidden
-            />
-            <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px]">
-              {t.label || t.path || "(untitled)"}
-            </span>
-            <span
-              onClick={onPin}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onPin(e as unknown as ReactMouseEvent);
+      {segments.map((seg) =>
+        seg.kind === "tab" ? (
+          <FolioTab
+            key={seg.tab.id}
+            tab={seg.tab}
+            active={seg.tab.id === activeTabId}
+            onActivate={onActivate}
+            onEnter={onTabEnter}
+            onLeave={onTabLeave}
+          />
+        ) : (
+          <Fragment key={seg.quire.id}>
+            <button
+              type="button"
+              onClick={() => toggleQuireCollapse(seg.quire.id)}
+              aria-expanded={!seg.quire.collapsed}
+              aria-label={`quire ${seg.quire.name}, ${seg.members.length} folios`}
+              className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
+              style={{
+                color: quireColorVar(seg.quire.color),
+                boxShadow: `inset 0 2px 0 0 ${quireColorVar(seg.quire.color)}`,
               }}
-              role="button"
-              tabIndex={0}
-              aria-label={t.pinned ? "unpin folio" : "pin folio"}
-              className={cn(
-                "flex-shrink-0 cursor-pointer px-[2px] leading-none transition-opacity",
-                t.pinned
-                  ? "text-warn opacity-100"
-                  : "text-ink-mute opacity-0 group-hover:opacity-60 hover:!opacity-100",
-              )}
             >
-              <Pin size={11} fill={t.pinned ? "currentColor" : "none"} />
-            </span>
-            {!t.pinned && (
-              <span
-                onClick={onClose}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter")
-                    onClose(e as unknown as ReactMouseEvent);
-                }}
-                role="button"
-                tabIndex={0}
-                aria-label="close folio"
-                className="flex-shrink-0 cursor-pointer px-[2px] leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
-              >
-                <X size={11} />
-              </span>
-            )}
-          </button>
-        );
-      })}
+              {seg.quire.name}
+              {seg.quire.collapsed && (
+                <span className="text-ink-mute">·{seg.members.length}</span>
+              )}
+            </button>
+            {!seg.quire.collapsed &&
+              seg.members.map((t) => (
+                <FolioTab
+                  key={t.id}
+                  tab={t}
+                  quire={seg.quire}
+                  active={t.id === activeTabId}
+                  onActivate={onActivate}
+                  onEnter={onTabEnter}
+                  onLeave={onTabLeave}
+                />
+              ))}
+          </Fragment>
+        ),
+      )}
 
       {hoveredPath && hovered && (
         <TabPreviewCard path={hoveredPath} rect={hovered.rect} />
@@ -165,5 +143,98 @@ export function Sheaf({ activeTabId }: SheafProps) {
         <span className="border-l border-rule-soft pl-2">⌘N intake</span>
       </span>
     </div>
+  );
+}
+
+type FolioTabProps = {
+  tab: TabDescriptor;
+  quire?: Quire;
+  active: boolean;
+  onActivate: (id: string) => void;
+  onEnter: (id: string, path: string | undefined, el: HTMLElement) => void;
+  onLeave: () => void;
+};
+
+function FolioTab({
+  tab: t,
+  quire,
+  active,
+  onActivate,
+  onEnter,
+  onLeave,
+}: FolioTabProps) {
+  const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const togglePin = useWorkspaceStore((s) => s.togglePin);
+
+  const kind = resolveKindFromPath(t.path ?? "");
+  const onClose = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    closeTab(t.id);
+  };
+  const onPin = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    togglePin(t.id);
+  };
+
+  // Quire membership rules the top edge; the active accent keeps the bottom.
+  const rules = [
+    quire ? `inset 0 2px 0 0 ${quireColorVar(quire.color)}` : null,
+    active ? "inset 0 -2px 0 0 var(--accent)" : null,
+  ].filter(Boolean);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onActivate(t.id)}
+      onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
+      onMouseLeave={onLeave}
+      title={t.path ? undefined : t.label}
+      aria-label={t.label || t.path || "untitled folio"}
+      className={cn(
+        "group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2",
+        active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
+      )}
+      style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
+    >
+      <span
+        className="inline-block h-[6px] w-[6px] flex-shrink-0"
+        style={{ background: kindColorVar(kind) }}
+        aria-hidden
+      />
+      <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px]">
+        {t.label || t.path || "(untitled)"}
+      </span>
+      <span
+        onClick={onPin}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onPin(e as unknown as ReactMouseEvent);
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label={t.pinned ? "unpin folio" : "pin folio"}
+        className={cn(
+          "flex-shrink-0 cursor-pointer px-[2px] leading-none transition-opacity",
+          t.pinned
+            ? "text-warn opacity-100"
+            : "text-ink-mute opacity-0 group-hover:opacity-60 hover:!opacity-100",
+        )}
+      >
+        <Pin size={11} fill={t.pinned ? "currentColor" : "none"} />
+      </span>
+      {!t.pinned && (
+        <span
+          onClick={onClose}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onClose(e as unknown as ReactMouseEvent);
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="close folio"
+          className="flex-shrink-0 cursor-pointer px-[2px] leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+        >
+          <X size={11} />
+        </span>
+      )}
+    </button>
   );
 }
