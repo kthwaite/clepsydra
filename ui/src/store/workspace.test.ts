@@ -322,6 +322,19 @@ describe("quire actions", () => {
     expect(q.name).toBe("renamed");
     expect(q.color).toBe("madder");
   });
+
+  it("activateTab auto-expands a collapsed quire containing the target tab", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1"), pageTab("t2")],
+      activeTabId: "t2",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+    useWorkspaceStore.getState().activateTab("t1");
+    const state = useWorkspaceStore.getState();
+    expect(state.activeTabId).toBe("t1");
+    expect(state.quires.q1.collapsed).toBe(false);
+  });
 });
 
 describe("openTab quire integration", () => {

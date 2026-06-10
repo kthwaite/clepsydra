@@ -40,7 +40,9 @@ export function migrateWorkspace(
   if (version < 3 || typeof s.quires !== "object" || s.quires === null) {
     s = { ...s, quires: {} };
   }
-  return s;
+  // Invariant pass over rehydrated state (dangling quireIds, gaps in runs,
+  // quires persisted by older/buggy builds).
+  return { ...s, ...normalizeQuires(s.tabs ?? [], s.quires ?? {}) };
 }
 
 export interface TabDescriptor {
@@ -141,9 +143,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
         // New page tabs inherit the active page tab's quire (self-assembling
         // research context); graph tabs never join quires. Only the append
-        // branch uses this — replace mode keeps the slot's own quire.
+        // branch uses this — replace mode keeps the slot's own quire. Never
+        // inherit a collapsed quire: the new tab becomes active and must
+        // stay visible.
+        const inheritedQuire = activeTab?.quireId
+          ? state.quires[activeTab.quireId]
+          : undefined;
         const inheritedQuireId =
-          type === "page" && activeTab?.type === "page"
+          type === "page" &&
+          activeTab?.type === "page" &&
+          !inheritedQuire?.collapsed
             ? activeTab.quireId
             : undefined;
         const newTab: TabDescriptor = {
@@ -230,11 +239,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       activateTab(tabId) {
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
+          // Activation must never land on a hidden tab — expand its quire.
+          const quire = tab?.quireId ? state.quires[tab.quireId] : undefined;
           return {
             activeTabId: tabId,
             tabs: state.tabs.map((t) =>
               t.id === tabId ? { ...t, lastActiveAt: Date.now() } : t,
             ),
+            quires: quire?.collapsed
+              ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
+              : state.quires,
             openHistory:
               tab?.type === "page" && tab.path
                 ? pushOpenHistory(state.openHistory, tab.path, Date.now())
