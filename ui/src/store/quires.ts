@@ -1,0 +1,88 @@
+// Quires — Chrome-style tab groups in the SHEAF. In codicology a quire is a
+// gathering of folios bound into a codex; here it is a named, coloured,
+// collapsible cluster of contiguous page tabs.
+//
+// Invariants (re-established by normalizeQuires after every store mutation
+// that can change membership or order — see workspace.ts):
+//   1. Tabs sharing a quireId are contiguous in the tabs array.
+//   2. A quire with no member tabs does not exist.
+//   3. The active tab is never hidden (enforced by the store actions that
+//      collapse quires or change activation).
+
+import type { TabDescriptor } from "#/store/workspace";
+
+export const QUIRE_COLORS = [
+  "sepia",
+  "verdigris",
+  "slate",
+  "madder",
+  "ochre",
+  "indigo",
+] as const;
+
+export type QuireColor = (typeof QUIRE_COLORS)[number];
+
+export interface Quire {
+  id: string;
+  name: string;
+  color: QuireColor;
+  collapsed: boolean;
+}
+
+export function quireColorVar(color: QuireColor): string {
+  return `var(--quire-${color})`;
+}
+
+/** First unused ledger hue; cycles once all six are taken. */
+export function nextQuireColor(quires: Record<string, Quire>): QuireColor {
+  const used = new Set(Object.values(quires).map((q) => q.color));
+  return (
+    QUIRE_COLORS.find((c) => !used.has(c)) ??
+    QUIRE_COLORS[Object.keys(quires).length % QUIRE_COLORS.length]
+  );
+}
+
+/** Default quire name derived from a tab label (palette flow). */
+export function deriveQuireName(label: string): string {
+  const word = label.trim().split(/\s+/)[0] ?? "";
+  return (word || "QUIRE").toUpperCase().slice(0, 12);
+}
+
+/** A tab is hidden when it belongs to a collapsed quire. */
+export function isTabHidden(
+  tab: TabDescriptor,
+  quires: Record<string, Quire>,
+): boolean {
+  return !!(tab.quireId && quires[tab.quireId]?.collapsed);
+}
+
+/** Nearest visible tab scanning right from `index`, then left; null if none. */
+export function nearestVisibleTabId(
+  tabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+  index: number,
+): string | null {
+  for (let i = Math.max(index, 0); i < tabs.length; i++) {
+    if (!isTabHidden(tabs[i], quires)) return tabs[i].id;
+  }
+  for (let i = Math.min(index, tabs.length) - 1; i >= 0; i--) {
+    if (!isTabHidden(tabs[i], quires)) return tabs[i].id;
+  }
+  return null;
+}
+
+/** Ctrl-Tab target: next/previous *visible* tab in array order, wrapping. */
+export function cycleTargetId(
+  tabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+  activeTabId: string | null,
+  backwards: boolean,
+): string | null {
+  const visible = tabs.filter((t) => !isTabHidden(t, quires));
+  if (visible.length < 2) return null;
+  const idx = visible.findIndex((t) => t.id === activeTabId);
+  const next = backwards
+    ? (idx - 1 + visible.length) % visible.length
+    : (idx + 1) % visible.length;
+  return visible[next].id;
+}
