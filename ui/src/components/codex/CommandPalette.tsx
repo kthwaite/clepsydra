@@ -13,7 +13,9 @@ import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
+import { deriveQuireName } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
+import { useWorkspaceStore } from "#/store/workspace";
 
 type Command = {
   /** Drives the KIND column tag: cmd → CMD, note → FILE, tag → TAG. */
@@ -167,10 +169,47 @@ export function CommandPalette() {
     }));
   }, [tags, navigate]);
 
+  const workspaceTabs = useWorkspaceStore((s) => s.tabs);
+  const quireMap = useWorkspaceStore((s) => s.quires);
+  const activeTabId = useWorkspaceStore((s) => s.activeTabId);
+
+  const quireCommands = useMemo<Command[]>(() => {
+    const active = workspaceTabs.find((t) => t.id === activeTabId);
+    if (!active || active.type !== "page") return [];
+    const store = () => useWorkspaceStore.getState();
+    const cmds: Command[] = [
+      {
+        kind: "cmd",
+        id: "quire.new",
+        title: "Quire: new from active folio",
+        action: () =>
+          store().createQuire(active.id, deriveQuireName(active.label)),
+      },
+    ];
+    for (const q of Object.values(quireMap)) {
+      if (q.id === active.quireId) continue;
+      cmds.push({
+        kind: "cmd",
+        id: `quire.add.${q.id}`,
+        title: `Quire: add active folio to ${q.name}`,
+        action: () => store().addTabToQuire(active.id, q.id),
+      });
+    }
+    if (active.quireId) {
+      cmds.push({
+        kind: "cmd",
+        id: "quire.remove",
+        title: "Quire: remove active folio from quire",
+        action: () => store().removeTabFromQuire(active.id),
+      });
+    }
+    return cmds;
+  }, [workspaceTabs, quireMap, activeTabId]);
+
   const filtered = useMemo<Command[]>(() => {
     if (!q) return [...verbCommands, ...tagCommands].slice(0, 10);
     const ql = q.toLowerCase();
-    const verbsMatch = verbCommands.filter(
+    const verbsMatch = [...verbCommands, ...quireCommands].filter(
       (c) =>
         c.title.toLowerCase().includes(ql) || c.id.toLowerCase().includes(ql),
     );
@@ -178,7 +217,7 @@ export function CommandPalette() {
       c.title.toLowerCase().includes(ql),
     );
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
-  }, [q, verbCommands, noteCommands, tagCommands]);
+  }, [q, verbCommands, noteCommands, tagCommands, quireCommands]);
 
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {

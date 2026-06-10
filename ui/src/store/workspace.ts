@@ -1,5 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  nearestVisibleTabId,
+  nextQuireColor,
+  normalizeQuires,
+  type Quire,
+  type QuireColor,
+} from "#/store/quires";
 
 export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
@@ -21,6 +28,23 @@ export function pushOpenHistory(
   return [{ path, openedAt: now }, ...without].slice(0, OPEN_HISTORY_CAP);
 }
 
+/** Persist migrations: v1→v2 adds openHistory, v2→v3 adds quires. */
+export function migrateWorkspace(
+  persisted: unknown,
+  version: number,
+): Partial<WorkspaceState> {
+  let s = (persisted ?? {}) as Partial<WorkspaceState>;
+  if (version < 2 || !Array.isArray(s.openHistory)) {
+    s = { ...s, openHistory: [] };
+  }
+  if (version < 3 || typeof s.quires !== "object" || s.quires === null) {
+    s = { ...s, quires: {} };
+  }
+  // Invariant pass over rehydrated state (dangling quireIds, gaps in runs,
+  // quires persisted by older/buggy builds).
+  return { ...s, ...normalizeQuires(s.tabs ?? [], s.quires ?? {}) };
+}
+
 export interface TabDescriptor {
   id: string;
   type: TabType;
@@ -30,6 +54,8 @@ export interface TabDescriptor {
   pinned?: boolean;
   /** Epoch ms of last activation — orders the RECENT accordion section. */
   lastActiveAt?: number;
+  /** Membership in a quire (tab group). Members are kept contiguous. */
+  quireId?: string;
 }
 
 interface WorkspaceState {
@@ -37,6 +63,7 @@ interface WorkspaceState {
   activeTabId: string | null;
   navigationMode: NavigationMode;
   openHistory: OpenHistoryEntry[];
+  quires: Record<string, Quire>;
 }
 
 interface WorkspaceActions {
@@ -50,10 +77,29 @@ interface WorkspaceActions {
   updateTabLabel: (tabId: string, label: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
   setNavigationMode: (mode: NavigationMode) => void;
+  createQuire: (tabId: string, name: string) => void;
+  addTabToQuire: (tabId: string, quireId: string) => void;
+  removeTabFromQuire: (tabId: string) => void;
+  renameQuire: (quireId: string, name: string) => void;
+  recolorQuire: (quireId: string, color: QuireColor) => void;
+  toggleQuireCollapse: (quireId: string) => void;
+  closeQuireTabs: (quireId: string) => void;
+  ungroupQuire: (quireId: string) => void;
 }
 
 function tabKey(type: TabType, path?: string): string {
   return type === "graph" ? "graph" : `page:${path}`;
+}
+
+/** Re-establish quire invariants after a mutation; merge any extra changes. */
+function normalized(
+  tabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+  extra: Partial<WorkspaceState> = {},
+): Partial<WorkspaceState> {
+  // extra first: normalizeQuires' tabs/quires always win, so callers cannot
+  // accidentally override the invariant-enforced structure via `extra`.
+  return { ...extra, ...normalizeQuires(tabs, quires) };
 }
 
 export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
@@ -63,6 +109,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       activeTabId: null,
       navigationMode: "smart",
       openHistory: [],
+      quires: {},
 
       openTab(type, path, label) {
         const state = get();
@@ -72,12 +119,19 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const existing = state.tabs.find((t) => tabKey(t.type, t.path) === key);
 
         if (existing) {
-          // Always focus existing tab regardless of mode
+          // Always focus existing tab regardless of mode; an explicit open of
+          // a hidden tab auto-expands its quire (active is never hidden).
+          const quire = existing.quireId
+            ? state.quires[existing.quireId]
+            : undefined;
           set({
             activeTabId: existing.id,
             tabs: state.tabs.map((t) =>
               t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
             ),
+            quires: quire?.collapsed
+              ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
+              : state.quires,
             openHistory:
               existing.type === "page" && existing.path
                 ? pushOpenHistory(state.openHistory, existing.path, Date.now())
@@ -86,6 +140,21 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           return;
         }
 
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+        // New page tabs inherit the active page tab's quire (self-assembling
+        // research context); graph tabs never join quires. Only the append
+        // branch uses this — replace mode keeps the slot's own quire. Never
+        // inherit a collapsed quire: the new tab becomes active and must
+        // stay visible.
+        const inheritedQuire = activeTab?.quireId
+          ? state.quires[activeTab.quireId]
+          : undefined;
+        const inheritedQuireId =
+          type === "page" &&
+          activeTab?.type === "page" &&
+          !inheritedQuire?.collapsed
+            ? activeTab.quireId
+            : undefined;
         const newTab: TabDescriptor = {
           id: crypto.randomUUID(),
           type,
@@ -94,35 +163,45 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           lastActiveAt: Date.now(),
         };
 
+        const nextHistory =
+          type === "page" && path
+            ? pushOpenHistory(state.openHistory, path, Date.now())
+            : state.openHistory;
+
         if (state.navigationMode === "replace" && state.activeTabId) {
-          // Replace the active tab's content
-          set({
-            tabs: state.tabs.map((t) =>
-              t.id === state.activeTabId ? { ...newTab, id: t.id } : t,
+          // Replace the active tab's content; the slot keeps its quire.
+          set(
+            normalized(
+              state.tabs.map((t) =>
+                t.id === state.activeTabId
+                  ? { ...newTab, id: t.id, quireId: t.quireId }
+                  : t,
+              ),
+              state.quires,
+              { openHistory: nextHistory },
             ),
-            openHistory:
-              type === "page" && path
-                ? pushOpenHistory(state.openHistory, path, Date.now())
-                : state.openHistory,
-          });
+          );
         } else {
-          // "new" or "smart" — add new tab
-          set({
-            tabs: [...state.tabs, newTab],
-            activeTabId: newTab.id,
-            openHistory:
-              type === "page" && path
-                ? pushOpenHistory(state.openHistory, path, Date.now())
-                : state.openHistory,
-          });
+          // "new" or "smart" — append; normalize gathers it to its quire run.
+          set(
+            normalized(
+              [...state.tabs, { ...newTab, quireId: inheritedQuireId }],
+              state.quires,
+              { activeTabId: newTab.id, openHistory: nextHistory },
+            ),
+          );
         }
       },
 
       addTab(tab) {
-        set((state) => ({
-          tabs: [...state.tabs, tab],
-          activeTabId: tab.id,
-        }));
+        // Caller contract: do not pass a quireId belonging to a collapsed
+        // quire — addTab activates the tab and would break the
+        // active-tab-is-never-hidden invariant.
+        set((state) =>
+          normalized([...state.tabs, tab], state.quires, {
+            activeTabId: tab.id,
+          }),
+        );
       },
 
       closeTab(tabId) {
@@ -134,35 +213,42 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         let nextActive = state.activeTabId;
 
         if (state.activeTabId === tabId) {
-          if (nextTabs.length === 0) {
-            nextActive = null;
-          } else if (idx < nextTabs.length) {
-            // activate right neighbor
-            nextActive = nextTabs[idx].id;
-          } else {
-            // was rightmost, activate new rightmost
-            nextActive = nextTabs[nextTabs.length - 1].id;
-          }
+          nextActive =
+            nextTabs.length === 0
+              ? null
+              : nearestVisibleTabId(
+                  nextTabs,
+                  state.quires,
+                  Math.min(idx, nextTabs.length - 1),
+                );
         }
 
-        set({ tabs: nextTabs, activeTabId: nextActive });
+        set(normalized(nextTabs, state.quires, { activeTabId: nextActive }));
       },
 
       closeOtherTabs(tabId) {
-        set((state) => ({
-          tabs: state.tabs.filter((t) => t.id === tabId),
-          activeTabId: tabId,
-        }));
+        set((state) =>
+          normalized(
+            state.tabs.filter((t) => t.id === tabId || t.pinned),
+            state.quires,
+            { activeTabId: tabId },
+          ),
+        );
       },
 
       activateTab(tabId) {
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
+          // Activation must never land on a hidden tab — expand its quire.
+          const quire = tab?.quireId ? state.quires[tab.quireId] : undefined;
           return {
             activeTabId: tabId,
             tabs: state.tabs.map((t) =>
               t.id === tabId ? { ...t, lastActiveAt: Date.now() } : t,
             ),
+            quires: quire?.collapsed
+              ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
+              : state.quires,
             openHistory:
               tab?.type === "page" && tab.path
                 ? pushOpenHistory(state.openHistory, tab.path, Date.now())
@@ -184,7 +270,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           const tabs = [...state.tabs];
           const [moved] = tabs.splice(fromIndex, 1);
           tabs.splice(toIndex, 0, moved);
-          return { tabs };
+          return normalized(tabs, state.quires);
         });
       },
 
@@ -220,17 +306,150 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       setNavigationMode(mode) {
         set({ navigationMode: mode });
       },
+
+      createQuire(tabId, name) {
+        set((state) => {
+          const tab = state.tabs.find((t) => t.id === tabId);
+          if (!tab || tab.type !== "page") return state;
+          const quire: Quire = {
+            id: crypto.randomUUID(),
+            name: name.trim() || "QUIRE",
+            color: nextQuireColor(state.quires),
+            collapsed: false,
+          };
+          return normalized(
+            state.tabs.map((t) =>
+              t.id === tabId ? { ...t, quireId: quire.id } : t,
+            ),
+            { ...state.quires, [quire.id]: quire },
+          );
+        });
+      },
+
+      addTabToQuire(tabId, quireId) {
+        set((state) => {
+          const quire = state.quires[quireId];
+          const tab = state.tabs.find((t) => t.id === tabId);
+          if (!quire || !tab || tab.type !== "page") return state;
+          if (tab.quireId === quireId) return state; // already a member; no-op
+          // Invariant: the active tab is never hidden — expand on demand.
+          const expand = quire.collapsed && tabId === state.activeTabId;
+          // Move the tab to after the last existing member of the quire so
+          // normalizeQuires places it at the end of the run, not the middle.
+          const withoutTab = state.tabs.filter((t) => t.id !== tabId);
+          const lastMemberIdx = withoutTab.reduce(
+            (acc, t, i) => (t.quireId === quireId ? i : acc),
+            -1,
+          );
+          const insertAt =
+            lastMemberIdx === -1 ? withoutTab.length : lastMemberIdx + 1;
+          const reordered = [
+            ...withoutTab.slice(0, insertAt),
+            { ...tab, quireId },
+            ...withoutTab.slice(insertAt),
+          ];
+          return normalized(
+            reordered,
+            expand
+              ? { ...state.quires, [quireId]: { ...quire, collapsed: false } }
+              : state.quires,
+          );
+        });
+      },
+
+      removeTabFromQuire(tabId) {
+        set((state) =>
+          normalized(
+            state.tabs.map((t) =>
+              t.id === tabId ? { ...t, quireId: undefined } : t,
+            ),
+            state.quires,
+          ),
+        );
+      },
+
+      renameQuire(quireId, name) {
+        set((state) => {
+          const quire = state.quires[quireId];
+          if (!quire) return state;
+          return {
+            quires: {
+              ...state.quires,
+              [quireId]: { ...quire, name: name.trim() || quire.name },
+            },
+          };
+        });
+      },
+
+      recolorQuire(quireId, color) {
+        set((state) => {
+          const quire = state.quires[quireId];
+          if (!quire) return state;
+          return {
+            quires: { ...state.quires, [quireId]: { ...quire, color } },
+          };
+        });
+      },
+
+      toggleQuireCollapse(quireId) {
+        set((state) => {
+          const quire = state.quires[quireId];
+          if (!quire) return state;
+          const quires = {
+            ...state.quires,
+            [quireId]: { ...quire, collapsed: !quire.collapsed },
+          };
+          let activeTabId = state.activeTabId;
+          if (!quire.collapsed) {
+            // Collapsing: if the active tab just went hidden, re-home activation.
+            const active = state.tabs.find((t) => t.id === state.activeTabId);
+            if (active?.quireId === quireId) {
+              const idx = state.tabs.findIndex((t) => t.id === active.id);
+              activeTabId = nearestVisibleTabId(state.tabs, quires, idx);
+            }
+          }
+          return { quires, activeTabId };
+        });
+      },
+
+      closeQuireTabs(quireId) {
+        set((state) => {
+          const firstIdx = state.tabs.findIndex((t) => t.quireId === quireId);
+          const nextTabs = state.tabs.filter(
+            (t) => t.quireId !== quireId || t.pinned,
+          );
+          let activeTabId = state.activeTabId;
+          if (activeTabId && !nextTabs.some((t) => t.id === activeTabId)) {
+            const at = Math.min(
+              Math.max(firstIdx, 0),
+              Math.max(nextTabs.length - 1, 0),
+            );
+            // Old quires map on purpose: if the quire was collapsed and a pinned
+            // member survives, it stays collapsed (and hidden) — the label chip
+            // still renders, so the survivor remains discoverable.
+            activeTabId = nearestVisibleTabId(nextTabs, state.quires, at);
+          }
+          return normalized(nextTabs, state.quires, { activeTabId });
+        });
+      },
+
+      ungroupQuire(quireId) {
+        set((state) => {
+          const { [quireId]: _, ...rest } = state.quires;
+          return normalized(
+            state.tabs.map((t) =>
+              t.quireId === quireId ? { ...t, quireId: undefined } : t,
+            ),
+            rest,
+          );
+        });
+      },
     }),
     {
       name: "clepsydra.workspace",
-      version: 2,
-      migrate: (persisted, version): Partial<WorkspaceState> => {
-        const s = (persisted ?? {}) as Partial<WorkspaceState>;
-        if (version < 2 || !Array.isArray(s.openHistory)) {
-          return { ...s, openHistory: [] };
-        }
-        return s;
-      },
+      version: 3,
+      migrate: (persisted, version): Partial<WorkspaceState> =>
+        migrateWorkspace(persisted, version),
     },
   ),
 );

@@ -8,6 +8,7 @@ import {
   matchesChord,
   SHORTCUTS,
 } from "#/lib/shortcuts";
+import { cycleTargetId } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -22,10 +23,10 @@ type Binding = {
 const inWorkspace = () => window.location.pathname.startsWith("/workspace");
 
 function cycleTab(dir: 1 | -1) {
-  const { tabs, activeTabId, activateTab } = useWorkspaceStore.getState();
-  if (tabs.length < 2) return;
-  const idx = tabs.findIndex((t) => t.id === activeTabId);
-  activateTab(tabs[(idx + dir + tabs.length) % tabs.length].id);
+  const { tabs, quires, activeTabId, activateTab } =
+    useWorkspaceStore.getState();
+  const target = cycleTargetId(tabs, quires, activeTabId, dir === -1);
+  if (target) activateTab(target);
 }
 
 /**

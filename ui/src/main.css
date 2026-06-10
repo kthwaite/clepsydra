@@ -100,6 +100,13 @@
     --cool: #4cd9ff;
     --warn: #ffb84a;
     --hot: #ff3b1f;
+    /* Quire (tab-group) ledger hues — desaturated ink-stamp palette */
+    --quire-sepia: #a98e63;
+    --quire-verdigris: #5fa68c;
+    --quire-slate: #7d93a8;
+    --quire-madder: #b06a66;
+    --quire-ochre: #c2a14a;
+    --quire-indigo: #8a82b8;
     --rule: #2a2825;
     --rule-soft: #1c1b18;
     --grid: rgba(232, 230, 223, 0.05);
@@ -128,6 +135,12 @@
     --ink-2: #3a3833;
     --ink-mute: #6a675c;
     --ink-faint: #9a978a;
+    --quire-sepia: #7a6033;
+    --quire-verdigris: #2f6f56;
+    --quire-slate: #44607a;
+    --quire-madder: #8c3f3a;
+    --quire-ochre: #8a6a14;
+    --quire-indigo: #4f4787;
     --rule: #15140f;
     --rule-soft: #6a675c;
     --grid: rgba(21, 20, 15, 0.06);
