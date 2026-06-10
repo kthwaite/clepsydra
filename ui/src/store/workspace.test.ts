@@ -323,3 +323,82 @@ describe("quire actions", () => {
     expect(q.color).toBe("madder");
   });
 });
+
+describe("openTab quire integration", () => {
+  it("a new tab inherits the active tab's quire and lands at the end of the run", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1"), pageTab("t2", "q1"), pageTab("t3")],
+      activeTabId: "t1",
+      navigationMode: "smart",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+    useWorkspaceStore.getState().openTab("page", "new.md", "New");
+    const { tabs } = useWorkspaceStore.getState();
+    const created = tabs.find((t) => t.path === "new.md");
+    expect(created?.quireId).toBe("q1");
+    expect(tabs.map((t) => t.path)).toEqual([
+      "t1.md",
+      "t2.md",
+      "new.md",
+      "t3.md",
+    ]);
+  });
+
+  it("does not inherit when the active tab is ungrouped", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1")],
+      activeTabId: "t1",
+      navigationMode: "smart",
+    });
+    useWorkspaceStore.getState().openTab("page", "new.md", "New");
+    expect(
+      useWorkspaceStore.getState().tabs.find((t) => t.path === "new.md")
+        ?.quireId,
+    ).toBeUndefined();
+  });
+
+  it("replace mode keeps the slot's quire membership", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1")],
+      activeTabId: "t1",
+      navigationMode: "replace",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+    useWorkspaceStore.getState().openTab("page", "other.md", "Other");
+    const t1 = useWorkspaceStore.getState().tabs.find((t) => t.id === "t1");
+    expect(t1?.path).toBe("other.md");
+    expect(t1?.quireId).toBe("q1");
+  });
+
+  it("focusing an existing tab hidden in a collapsed quire auto-expands it", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1"), pageTab("t2")],
+      activeTabId: "t2",
+      navigationMode: "smart",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: true } },
+    });
+    useWorkspaceStore.getState().openTab("page", "t1.md");
+    const state = useWorkspaceStore.getState();
+    expect(state.activeTabId).toBe("t1");
+    expect(state.quires.q1.collapsed).toBe(false);
+  });
+
+  it("graph tabs never inherit a quire", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1")],
+      activeTabId: "t1",
+      navigationMode: "smart",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+    useWorkspaceStore.getState().openTab("graph");
+    expect(
+      useWorkspaceStore.getState().tabs.find((t) => t.type === "graph")
+        ?.quireId,
+    ).toBeUndefined();
+  });
+});

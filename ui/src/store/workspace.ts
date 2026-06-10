@@ -117,12 +117,19 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const existing = state.tabs.find((t) => tabKey(t.type, t.path) === key);
 
         if (existing) {
-          // Always focus existing tab regardless of mode
+          // Always focus existing tab regardless of mode; an explicit open of
+          // a hidden tab auto-expands its quire (active is never hidden).
+          const quire = existing.quireId
+            ? state.quires[existing.quireId]
+            : undefined;
           set({
             activeTabId: existing.id,
             tabs: state.tabs.map((t) =>
               t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
             ),
+            quires: quire?.collapsed
+              ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
+              : state.quires,
             openHistory:
               existing.type === "page" && existing.path
                 ? pushOpenHistory(state.openHistory, existing.path, Date.now())
@@ -131,43 +138,56 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           return;
         }
 
+        // New page tabs inherit the active page tab's quire (self-assembling
+        // research context); graph tabs never join quires.
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
         const newTab: TabDescriptor = {
           id: crypto.randomUUID(),
           type,
           path: type === "page" ? path : undefined,
           label: label ?? path ?? "Graph",
           lastActiveAt: Date.now(),
+          quireId:
+            type === "page" && activeTab?.type === "page"
+              ? activeTab.quireId
+              : undefined,
         };
 
+        const nextHistory =
+          type === "page" && path
+            ? pushOpenHistory(state.openHistory, path, Date.now())
+            : state.openHistory;
+
         if (state.navigationMode === "replace" && state.activeTabId) {
-          // Replace the active tab's content
-          set({
-            tabs: state.tabs.map((t) =>
-              t.id === state.activeTabId ? { ...newTab, id: t.id } : t,
+          // Replace the active tab's content; the slot keeps its quire.
+          set(
+            normalized(
+              state.tabs.map((t) =>
+                t.id === state.activeTabId
+                  ? { ...newTab, id: t.id, quireId: t.quireId }
+                  : t,
+              ),
+              state.quires,
+              { openHistory: nextHistory },
             ),
-            openHistory:
-              type === "page" && path
-                ? pushOpenHistory(state.openHistory, path, Date.now())
-                : state.openHistory,
-          });
+          );
         } else {
-          // "new" or "smart" — add new tab
-          set({
-            tabs: [...state.tabs, newTab],
-            activeTabId: newTab.id,
-            openHistory:
-              type === "page" && path
-                ? pushOpenHistory(state.openHistory, path, Date.now())
-                : state.openHistory,
-          });
+          // "new" or "smart" — append; normalize gathers it to its quire run.
+          set(
+            normalized([...state.tabs, newTab], state.quires, {
+              activeTabId: newTab.id,
+              openHistory: nextHistory,
+            }),
+          );
         }
       },
 
       addTab(tab) {
-        set((state) => ({
-          tabs: [...state.tabs, tab],
-          activeTabId: tab.id,
-        }));
+        set((state) =>
+          normalized([...state.tabs, tab], state.quires, {
+            activeTabId: tab.id,
+          }),
+        );
       },
 
       closeTab(tabId) {
@@ -229,7 +249,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           const tabs = [...state.tabs];
           const [moved] = tabs.splice(fromIndex, 1);
           tabs.splice(toIndex, 0, moved);
-          return { tabs };
+          return normalized(tabs, state.quires);
         });
       },
 
