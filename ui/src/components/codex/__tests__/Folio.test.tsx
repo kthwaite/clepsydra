@@ -6,9 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
 // early-return branch renders FolioNotFound. Mock the editor + data hooks so
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
-const { usePageEditorMock } = vi.hoisted(() => ({
-  usePageEditorMock: vi.fn(),
-}));
+const { usePageEditorMock } = vi.hoisted(() => ({ usePageEditorMock: vi.fn() }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
 }));
