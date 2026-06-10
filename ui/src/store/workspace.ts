@@ -95,7 +95,9 @@ function normalized(
   quires: Record<string, Quire>,
   extra: Partial<WorkspaceState> = {},
 ): Partial<WorkspaceState> {
-  return { ...normalizeQuires(tabs, quires), ...extra };
+  // extra first: normalizeQuires' tabs/quires always win, so callers cannot
+  // accidentally override the invariant-enforced structure via `extra`.
+  return { ...extra, ...normalizeQuires(tabs, quires) };
 }
 
 export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
@@ -288,6 +290,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           const quire = state.quires[quireId];
           const tab = state.tabs.find((t) => t.id === tabId);
           if (!quire || !tab || tab.type !== "page") return state;
+          if (tab.quireId === quireId) return state; // already a member; no-op
           // Invariant: the active tab is never hidden — expand on demand.
           const expand = quire.collapsed && tabId === state.activeTabId;
           // Move the tab to after the last existing member of the quire so
@@ -380,6 +383,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
               Math.max(firstIdx, 0),
               Math.max(nextTabs.length - 1, 0),
             );
+            // Old quires map on purpose: if the quire was collapsed and a pinned
+            // member survives, it stays collapsed (and hidden) — the label chip
+            // still renders, so the survivor remains discoverable.
             activeTabId = nearestVisibleTabId(nextTabs, state.quires, at);
           }
           return normalized(nextTabs, state.quires, { activeTabId });

@@ -206,6 +206,21 @@ describe("quire actions", () => {
     ]);
   });
 
+  it("addTabToQuire is a no-op when the tab is already a member", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1", "q1"), pageTab("t2", "q1"), pageTab("t3")],
+      activeTabId: "t1",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+    useWorkspaceStore.getState().addTabToQuire("t1", "q1");
+    expect(useWorkspaceStore.getState().tabs.map((t) => t.id)).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+  });
+
   it("addTabToQuire expands a collapsed quire when adding the active tab", () => {
     resetStore();
     useWorkspaceStore.setState({
