@@ -101,6 +101,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const saveNow = editor.saveNow;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (matchesChord(e, SHORTCUTS["folio.save"].chord)) {
         e.preventDefault();
         saveNow();
