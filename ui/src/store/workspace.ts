@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { normalizeQuires, type Quire } from "#/store/quires";
 
 export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
@@ -21,6 +22,21 @@ export function pushOpenHistory(
   return [{ path, openedAt: now }, ...without].slice(0, OPEN_HISTORY_CAP);
 }
 
+/** Persist migrations: v1→v2 adds openHistory, v2→v3 adds quires. */
+export function migrateWorkspace(
+  persisted: unknown,
+  version: number,
+): Partial<WorkspaceState> {
+  let s = (persisted ?? {}) as Partial<WorkspaceState>;
+  if (version < 2 || !Array.isArray(s.openHistory)) {
+    s = { ...s, openHistory: [] };
+  }
+  if (version < 3 || typeof s.quires !== "object" || s.quires === null) {
+    s = { ...s, quires: {} };
+  }
+  return s;
+}
+
 export interface TabDescriptor {
   id: string;
   type: TabType;
@@ -30,6 +46,8 @@ export interface TabDescriptor {
   pinned?: boolean;
   /** Epoch ms of last activation — orders the RECENT accordion section. */
   lastActiveAt?: number;
+  /** Membership in a quire (tab group). Members are kept contiguous. */
+  quireId?: string;
 }
 
 interface WorkspaceState {
@@ -37,6 +55,7 @@ interface WorkspaceState {
   activeTabId: string | null;
   navigationMode: NavigationMode;
   openHistory: OpenHistoryEntry[];
+  quires: Record<string, Quire>;
 }
 
 interface WorkspaceActions {
@@ -56,6 +75,15 @@ function tabKey(type: TabType, path?: string): string {
   return type === "graph" ? "graph" : `page:${path}`;
 }
 
+/** Re-establish quire invariants after a mutation; merge any extra changes. */
+function normalized(
+  tabs: TabDescriptor[],
+  quires: Record<string, Quire>,
+  extra: Partial<WorkspaceState> = {},
+): Partial<WorkspaceState> {
+  return { ...normalizeQuires(tabs, quires), ...extra };
+}
+
 export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
   persist(
     (set, get) => ({
@@ -63,6 +91,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       activeTabId: null,
       navigationMode: "smart",
       openHistory: [],
+      quires: {},
 
       openTab(type, path, label) {
         const state = get();
@@ -223,14 +252,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
     }),
     {
       name: "clepsydra.workspace",
-      version: 2,
-      migrate: (persisted, version): Partial<WorkspaceState> => {
-        const s = (persisted ?? {}) as Partial<WorkspaceState>;
-        if (version < 2 || !Array.isArray(s.openHistory)) {
-          return { ...s, openHistory: [] };
-        }
-        return s;
-      },
+      version: 3,
+      migrate: (persisted, version): Partial<WorkspaceState> =>
+        migrateWorkspace(persisted, version),
     },
   ),
 );

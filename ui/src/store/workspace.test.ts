@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type OpenHistoryEntry,
+  migrateWorkspace,
   pushOpenHistory,
   useWorkspaceStore,
 } from "./workspace";
@@ -127,5 +128,25 @@ describe("useWorkspaceStore updateTabPath", () => {
     const paths = useWorkspaceStore.getState().openHistory.map((e) => e.path);
     expect(paths).toContain("projects/x.md");
     expect(paths).not.toContain("notes/x.md");
+  });
+});
+
+describe("migrateWorkspace", () => {
+  it("adds an empty quires map to v2 state", () => {
+    const v2 = { tabs: [], activeTabId: null, openHistory: [] };
+    const out = migrateWorkspace(v2, 2);
+    expect(out.quires).toEqual({});
+    expect(out.openHistory).toEqual([]);
+  });
+
+  it("adds both openHistory and quires to v1 state", () => {
+    const out = migrateWorkspace({ tabs: [] }, 1);
+    expect(out.openHistory).toEqual([]);
+    expect(out.quires).toEqual({});
+  });
+
+  it("passes v3 state through untouched", () => {
+    const v3 = { tabs: [], activeTabId: null, openHistory: [], quires: {} };
+    expect(migrateWorkspace(v3, 3)).toEqual(v3);
   });
 });
