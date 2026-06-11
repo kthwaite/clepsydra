@@ -91,6 +91,24 @@ describe("applyTaskPatch", () => {
     expect(result.tasks[0].tags).toEqual(["feat"]);
   });
 
+  it("clears project when project is the empty-string wire sentinel", () => {
+    const board = makeBoard([makeTask({ project: "op-a" })]);
+    const result = applyTaskPatch(board, "task-1", { project: "" });
+    expect(result.tasks[0].project).toBeNull();
+  });
+
+  it("leaves project unchanged when project is null (backend no-op)", () => {
+    const board = makeBoard([makeTask({ project: "op-a" })]);
+    const result = applyTaskPatch(board, "task-1", { project: null });
+    expect(result.tasks[0].project).toBe("op-a");
+  });
+
+  it("sets project when project is a non-empty string", () => {
+    const board = makeBoard([makeTask({ project: "op-a" })]);
+    const result = applyTaskPatch(board, "task-1", { project: "op-b" });
+    expect(result.tasks[0].project).toBe("op-b");
+  });
+
   it("returns board unchanged when id is not found", () => {
     const board = makeBoard([makeTask()]);
     const result = applyTaskPatch(board, "no-such-id", { status: "DONE" });

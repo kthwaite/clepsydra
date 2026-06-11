@@ -24,7 +24,8 @@ const API_BASE = "/api/vault/board";
  *   - key absent in patch → leave current value unchanged
  *   - key present as null → clear to null
  *   - key present as string → set to that value
- * Plain fields (status/priority/title/project) follow absent-means-keep too.
+ * Plain fields (status/priority/title) follow absent-means-keep too.
+ * Project: null/absent = keep; "" = clear (the wire sentinel); value = set.
  * Tags: absent = keep, present (array or null) = replace entirely.
  * Returns the original board unchanged when the task id is not found.
  */
@@ -59,7 +60,12 @@ export function applyTaskPatch(
       ? { priority: patch.priority }
       : {}),
     ...("title" in patch && patch.title != null ? { title: patch.title } : {}),
-    ...("project" in patch ? { project: patch.project ?? null } : {}),
+    // Project is NOT tri-state on the wire: the backend deserializes JSON
+    // null to None (no-op); "" is the wire sentinel for clear (matches
+    // backend assign semantics, also triggers the refile).
+    ...(typeof patch.project === "string"
+      ? { project: patch.project === "" ? null : patch.project }
+      : {}),
     // Tri-state fields
     cycle: triState(task.cycle, "cycle"),
     assignee: triState(task.assignee, "assignee"),
