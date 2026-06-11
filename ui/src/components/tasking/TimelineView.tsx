@@ -120,7 +120,7 @@ export function TimelineView({
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
-  const hasScheduledTasks = groups.some((g) => g.items.length > 0);
+  const hasScheduledTasks = groups.length > 0;
 
   if (!win || !hasScheduledTasks) {
     return (

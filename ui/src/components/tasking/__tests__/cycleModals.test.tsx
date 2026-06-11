@@ -746,18 +746,18 @@ describe("SealCycleModal — render", () => {
     ).toBeInTheDocument();
   });
 
-  it("does NOT show next PLANNED cycle option when none exists", () => {
+  it("shows next PLANNED cycle option when one exists (different id)", () => {
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
     });
     wrapQC(
       <SealCycleModal
         cycle={CYCLE_ACTIVE}
-        cycles={[CYCLE_PLANNED_2]} // only PLANNED_2, but seal modal checks id !== cycle.id... actually PLANNED_2 is a different id, so it would show
+        cycles={[CYCLE_PLANNED_2]} // PLANNED_2 is PLANNED and a different id from CYCLE_ACTIVE
         tasks={TASKS}
       />,
     );
-    // PLANNED_2 is PLANNED and different id — should appear
+    // PLANNED_2 is PLANNED and different id — should appear as a carry-to option
     expect(
       screen.getByTestId(`seal-cycle-carry-${CYCLE_PLANNED_2.code}`),
     ).toBeInTheDocument();

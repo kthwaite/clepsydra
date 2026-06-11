@@ -330,3 +330,67 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
     expect(screen.getByTestId("edit-panel-code")).toHaveTextContent("TSK-0003");
   });
 });
+
+// ── onOpenPage / onOpenDossier prop threading ─────────────────────────────────
+
+describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
+  function renderScreenWithProps(
+    onOpenPage: (path: string) => void,
+    onOpenDossier: (link: string) => void,
+  ) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <TaskingScreen onOpenPage={onOpenPage} onOpenDossier={onOpenDossier} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("OPEN PAGE → in TaskEditPanel calls onOpenPage with the task path", async () => {
+    const onOpenPage = vi.fn();
+    const onOpenDossier = vi.fn();
+    stubBoardFetch();
+    renderScreenWithProps(onOpenPage, onOpenDossier);
+    await screen.findByText("TASKING BOARD");
+
+    // Open the edit panel for t1
+    useBoardStore.setState({ editTaskId: "t1" });
+    await screen.findByTestId("edit-panel");
+
+    await userEvent.click(screen.getByTestId("edit-panel-open-page"));
+    // t1's path is "tasks/t1.md"
+    expect(onOpenPage).toHaveBeenCalledWith("tasks/t1.md");
+    expect(onOpenDossier).not.toHaveBeenCalled();
+  });
+
+  it("OPEN → dossier button in TaskEditPanel calls onOpenDossier with task.link", async () => {
+    // Override fetch to return a fixture where t1 has a link field
+    const boardWithLink = {
+      ...BOARD_FIXTURE,
+      tasks: BOARD_FIXTURE.tasks.map((t) =>
+        t.id === "t1" ? { ...t, link: "ops-1" } : t,
+      ),
+    };
+    const fetchStub = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(boardWithLink),
+      } as Response),
+    );
+    vi.stubGlobal("fetch", fetchStub);
+
+    const onOpenPage = vi.fn();
+    const onOpenDossier = vi.fn();
+    renderScreenWithProps(onOpenPage, onOpenDossier);
+    await screen.findByText("TASKING BOARD");
+
+    useBoardStore.setState({ editTaskId: "t1" });
+    await screen.findByTestId("edit-panel");
+
+    await userEvent.click(screen.getByTestId("edit-panel-open-dossier"));
+    expect(onOpenDossier).toHaveBeenCalledWith("ops-1");
+    expect(onOpenPage).not.toHaveBeenCalled();
+  });
+});

@@ -236,7 +236,10 @@ afterEach(() => {
 });
 
 // helper
-function renderCycleView(cycle = ACTIVE_CYCLE, items: BoardTask[] = C01_TASKS) {
+function renderCycleView(
+  cycle: BoardCycle | typeof BACKLOG_PSEUDO = ACTIVE_CYCLE,
+  items: BoardTask[] = C01_TASKS,
+) {
   return render(<CycleView cycle={cycle} tasks={items} />);
 }
 
@@ -273,7 +276,7 @@ describe("CycleView — action buttons per state", () => {
   });
 
   it("BACKLOG pseudo-cycle shows no action buttons", () => {
-    renderCycleView({ ...BACKLOG_PSEUDO, id: "pseudo" } as BoardCycle, []);
+    renderCycleView(BACKLOG_PSEUDO, []);
     expect(
       screen.queryByRole("button", { name: /OPEN CYCLE|SEAL CYCLE/i }),
     ).not.toBeInTheDocument();
@@ -315,7 +318,7 @@ describe("CycleView — header", () => {
   });
 
   it("renders UNSCHEDULED window for BACKLOG pseudo-cycle", () => {
-    renderCycleView({ ...BACKLOG_PSEUDO, id: "pseudo" } as BoardCycle, []);
+    renderCycleView(BACKLOG_PSEUDO, []);
     expect(screen.getByText(/UNSCHEDULED/)).toBeInTheDocument();
   });
 
@@ -362,14 +365,15 @@ describe("CycleView — metrics and burndown", () => {
       (el) => el.closest("div")?.querySelector("b") !== null,
     );
     const metricValue = metricLabel?.closest("div")?.querySelector("b");
-    expect(metricValue?.className).toContain("hot");
+    // data-hot attribute is used (not a CSS class) to avoid Tailwind purging
+    expect(metricValue?.getAttribute("data-hot")).toBe("true");
   });
 
   it("renders HOLD metric without hot color when hold = 0", () => {
     renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
     const holdLabel = screen.getByText("HOLD"); // only one "HOLD" — no HoldTag
     const metricValue = holdLabel.closest("div")?.querySelector("b");
-    expect(metricValue?.className).not.toContain("hot");
+    expect(metricValue?.getAttribute("data-hot")).toBeNull();
   });
 });
 
@@ -506,7 +510,7 @@ describe("CycleView — empty state", () => {
   });
 
   it("COMMIT TASK button on BACKLOG opens taskModal without cycle", async () => {
-    renderCycleView({ ...BACKLOG_PSEUDO, id: "pseudo" } as BoardCycle, []);
+    renderCycleView(BACKLOG_PSEUDO, []);
     await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
     const modal = useBoardStore.getState().taskModal;
     expect(modal).not.toHaveProperty("cycle");
@@ -544,7 +548,7 @@ describe("CycleView — task filtering", () => {
   });
 
   it("BACKLOG pseudo-cycle shows only tasks with no cycle", () => {
-    renderCycleView({ ...BACKLOG_PSEUDO, id: "pseudo" } as BoardCycle, tasks);
+    renderCycleView(BACKLOG_PSEUDO, tasks);
     // t2 and t4 have no cycle
     expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
     expect(screen.getByText("Task Unfiled")).toBeInTheDocument();

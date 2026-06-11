@@ -183,6 +183,14 @@ export function CycleView({
     [items],
   );
 
+  // Whether this is a real BoardCycle with an id (can open modals).
+  // The BACKLOG pseudo-cycle has no `id` field; everything else is a real cycle.
+  function isRealCycle(
+    c: BoardCycle | typeof BACKLOG_PSEUDO_CYCLE,
+  ): c is BoardCycle {
+    return "id" in c && c.id !== undefined;
+  }
+
   // Whether this is the BACKLOG pseudo-cycle (no id → can't open modals)
   const isBacklog = cycle.code === "BACKLOG";
 
@@ -190,6 +198,7 @@ export function CycleView({
   const windowLabel = fmtCycleWindow(cycle.start, cycle.end);
 
   // State label color — mirrors .sp-state.* in styles-board.css
+  // Note: "OPEN" is the BACKLOG pseudo-cycle state (uncommitted tasking).
   const stateColor =
     cycle.state === "ACTIVE"
       ? "var(--cool)"
@@ -198,7 +207,7 @@ export function CycleView({
         : cycle.state === "CLOSED"
           ? "var(--ink-3)"
           : cycle.state === "OPEN"
-            ? "var(--warn)"
+            ? "var(--warn)" // BACKLOG pseudo-cycle
             : "var(--ink-mute)";
 
   function handleCommitTask() {
@@ -238,28 +247,28 @@ export function CycleView({
           {/* Actions */}
           {!isBacklog && (
             <div className="mt-[12px] flex items-center gap-[10px]">
-              {cycle.state === "PLANNED" && (
+              {cycle.state === "PLANNED" && isRealCycle(cycle) && (
                 <button
                   type="button"
                   className="cursor-pointer border border-[var(--hot)] px-[12px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
                   onClick={() =>
                     openCycleModal({
                       kind: "open",
-                      cycleId: (cycle as BoardCycle).id,
+                      cycleId: cycle.id,
                     })
                   }
                 >
                   ▶ OPEN CYCLE
                 </button>
               )}
-              {cycle.state === "ACTIVE" && (
+              {cycle.state === "ACTIVE" && isRealCycle(cycle) && (
                 <button
                   type="button"
                   className="cursor-pointer border border-[var(--hot)] px-[12px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
                   onClick={() =>
                     openCycleModal({
                       kind: "seal",
-                      cycleId: (cycle as BoardCycle).id,
+                      cycleId: cycle.id,
                     })
                   }
                 >
@@ -310,7 +319,8 @@ export function CycleView({
                 HOLD
               </span>
               <b
-                className={`cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]${stats.hold > 0 ? " hot" : ""}`}
+                className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]"
+                data-hot={stats.hold > 0 ? "true" : undefined}
                 style={stats.hold > 0 ? { color: "var(--hot)" } : undefined}
               >
                 {String(stats.hold).padStart(2, "0")}
@@ -359,10 +369,7 @@ export function CycleView({
         </div>
       ) : (
         /* Disposition lanes */
-        <div
-          className="grid gap-[18px]"
-          style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
-        >
+        <div className="grid grid-cols-2 gap-[18px]">
           {byCol.map((g) => (
             <div
               key={g.cid}

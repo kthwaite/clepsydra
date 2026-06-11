@@ -610,6 +610,107 @@ describe("TimelineView — unscheduled footer", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// UNFILED — non-null unmatched project
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TimelineView — UNFILED non-null project", () => {
+  it("task with non-null project not matching any operation lands in UNFILED", () => {
+    const orphanTask: BoardTask = {
+      ...TL_TASK_ALPHA,
+      id: "t-orphan",
+      code: "TSK-0099",
+      project: "orphan-unknown-project",
+      due: "2026-06-10",
+    };
+    wrap(
+      <TimelineView
+        tasks={[TL_TASK_ALPHA, orphanTask]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
+    // alpha group exists (TL_TASK_ALPHA matches OPS-1)
+    expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
+    // orphan-unknown-project doesn't match any op → UNFILED group
+    expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("tl-grp-UNFILED").textContent,
+    ).toContain("UNFILED");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Gridlines per cycle
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TimelineView — gridlines per row", () => {
+  it("renders one gridline per dated cycle in each task row", () => {
+    wrap(
+      <TimelineView
+        tasks={[TL_TASK_ALPHA]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const row = screen.getByTestId("tl-row-t-alpha-1");
+    // TL_CYCLES has 2 cycles with start dates → 2 gridline spans per row
+    const gridlines = row.querySelectorAll(".tl-grid");
+    expect(gridlines.length).toBe(TL_CYCLES.length);
+  });
+
+  it("gridlines have a left% style derived from cycle start", () => {
+    wrap(
+      <TimelineView
+        tasks={[TL_TASK_ALPHA]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const row = screen.getByTestId("tl-row-t-alpha-1");
+    const gridlines = Array.from(row.querySelectorAll(".tl-grid"));
+    // Every gridline must have a left style set
+    for (const gl of gridlines) {
+      const styleAttr = gl.getAttribute("style") ?? "";
+      expect(styleAttr).toMatch(/left:/);
+    }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Row order within group by start date
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TimelineView — row order within group by start", () => {
+  it("tasks within a group are sorted by start ascending", () => {
+    // Later start date first in input — should come second in rendered output
+    const laterTask: BoardTask = {
+      ...TL_TASK_ALPHA,
+      id: "t-alpha-later",
+      code: "TSK-0020",
+      due: "2026-06-22",
+      start: "2026-06-15", // later than TL_TASK_ALPHA's start (2026-06-01)
+    };
+    const earlierTask = TL_TASK_ALPHA; // start: 2026-06-01
+
+    wrap(
+      <TimelineView
+        // Pass laterTask first in the array — the view should still sort it after
+        tasks={[laterTask, earlierTask]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
+
+    const grp = screen.getByTestId("tl-grp-alpha");
+    const rows = grp.querySelectorAll("[data-testid^='tl-row-']");
+    expect(rows.length).toBe(2);
+    // earlier start should appear first
+    expect(rows[0].getAttribute("data-testid")).toBe("tl-row-t-alpha-1");
+    expect(rows[1].getAttribute("data-testid")).toBe("tl-row-t-alpha-later");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // TaskingScreen integration — timeline mode
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -691,5 +792,38 @@ describe("TaskingScreen integration — timeline mode", () => {
     renderScreen();
     await screen.findByText("TASKING BOARD");
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
+  });
+
+  it("UNFILED opFilter: only unfiled tasks are shown (no named-op groups)", async () => {
+    // TL_BOARD has t1 (alpha, due) and t3 (beta, due); t4 is null-project/undated.
+    // Add a dated unfiled task to TL_BOARD so the timeline is non-empty.
+    const unfiledDated: BoardTask = {
+      id: "t-unfiled-dated",
+      code: "TSK-9999",
+      title: "Unfiled Dated",
+      status: "INTAKE",
+      priority: "P3",
+      project: null,
+      cycle: null,
+      due: "2026-06-10",
+      start: "2026-06-08",
+      tags: [],
+      checks: [],
+      path: "tasks/t-unfiled-dated.md",
+      updated_at: "2026-06-05T00:00:00Z",
+    };
+    const boardWithUnfiled: BoardResponse = {
+      ...TL_BOARD,
+      tasks: [...TL_BOARD.tasks, unfiledDated],
+    };
+    useBoardStore.setState({ mode: "timeline", opFilter: "UNFILED" });
+    stubBoardFetch(boardWithUnfiled);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+    // Unfiled group should exist
+    expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
+    // Named operation groups should NOT exist (filtered out by TaskingScreen)
+    expect(screen.queryByTestId("tl-grp-alpha")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tl-grp-beta")).not.toBeInTheDocument();
   });
 });
