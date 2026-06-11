@@ -23,7 +23,7 @@ excluded_patterns = [
 
 default_page_folder = ""
 
-linkable_properties = ["tags", "aliases"]
+linkable_properties = ["tags", "aliases", "link"]
 "#;
 
 /// Initialize a new vault at the given root directory.
@@ -73,7 +73,12 @@ mod tests {
 
         // Config should be valid TOML parseable as VaultConfig
         let contents = fs::read_to_string(root.join(".clepsydra/config.toml")).unwrap();
-        let _config: crate::vault::config::VaultConfig = toml::from_str(&contents).unwrap();
+        let config: crate::vault::config::VaultConfig = toml::from_str(&contents).unwrap();
+        // Written template must match the serde defaults for linkable_properties.
+        assert_eq!(
+            config.vault.linkable_properties,
+            vec!["tags", "aliases", "link"]
+        );
     }
 
     #[test]
