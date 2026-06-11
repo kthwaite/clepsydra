@@ -1,0 +1,323 @@
+/**
+ * NewCycleModal — create a new cadence cycle.
+ *
+ * Design source: docs/pkm-redesign/project/board-panels.jsx lines 274-359
+ * (NewSprintModal) + styles-board.css .board-modal* / .sp-confirm* classes.
+ *
+ * Opened by openCycleModal({ kind: "new" }).
+ * On success: closeCycleModal + setCycleSel(created.code) + setMode("cycle").
+ *
+ * Uses the same RAC ModalOverlay/Modal/RACDialog primitives as NewTaskModal.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import {
+  Modal,
+  ModalOverlay,
+  Dialog as RACDialog,
+} from "react-aria-components";
+import type { BoardCycle } from "#/api/board";
+import { useCreateCycle } from "#/api/board";
+import { useBoardStore } from "#/store/board";
+import { fmtCycleWindow } from "./board-constants";
+import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
+
+// ── newCyclePrefill ───────────────────────────────────────────────────────────
+
+export interface NewCyclePrefill {
+  code: string;
+  label: string;
+  start: string;
+  end: string;
+}
+
+/**
+ * Pure helper — computes default field values for a new cycle.
+ *
+ * - code  = "S-" + (max numeric suffix across cycles + 1, min 1)
+ * - label = "CYCLE " + same number
+ * - start = day after latest cycle end (fallback: now)
+ * - end   = start + 6 days
+ *
+ * @param cycles  Existing board cycles (may be empty).
+ * @param now     ISO date string "YYYY-MM-DD" — injected for testability.
+ *                Pass today's date in production.
+ */
+export function newCyclePrefill(
+  cycles: Pick<BoardCycle, "code" | "end">[],
+  now: string,
+): NewCyclePrefill {
+  // Max numeric suffix (S-3 → 3, C-01 → 1, etc.)
+  const nums = cycles.map((c) => {
+    const m = c.code.match(/(\d+)$/);
+    return m ? parseInt(m[1], 10) : 0;
+  });
+  const n = (nums.length ? Math.max(...nums) : 0) + 1;
+
+  // Latest cycle end date → start is the day after; fallback to now
+  const ends = cycles
+    .map((c) => c.end)
+    .filter((e): e is string => e != null)
+    .sort();
+  const lastEnd = ends.length ? ends[ends.length - 1] : now;
+  const start = isoAddDays(lastEnd, 1);
+  const end = isoAddDays(start, 6);
+
+  return {
+    code: `S-${n}`,
+    label: `CYCLE ${n}`,
+    start,
+    end,
+  };
+}
+
+/** ISO date arithmetic — returns "YYYY-MM-DD" for `iso + days` days. */
+export function isoAddDays(iso: string, days: number): string {
+  // Parse by splitting — avoids timezone-shift issues from `new Date(isoString)`
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** "YYYY-MM-DD" → "MM.DD" display string. */
+function fmtMD(iso: string): string {
+  const parts = iso.split("-");
+  if (parts.length === 3) return `${parts[1]}.${parts[2]}`;
+  return iso;
+}
+
+// ── NewCycleModal ─────────────────────────────────────────────────────────────
+
+interface NewCycleModalProps {
+  cycles: BoardCycle[];
+  /** Injected "today" for testability. Defaults to real today. */
+  now?: string;
+}
+
+export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
+  const cycleModal = useBoardStore((s) => s.cycleModal);
+  const closeCycleModal = useBoardStore((s) => s.closeCycleModal);
+  const setCycleSel = useBoardStore((s) => s.setCycleSel);
+  const setMode = useBoardStore((s) => s.setMode);
+  const create = useCreateCycle();
+
+  const isOpen = cycleModal?.kind === "new";
+
+  // Form state
+  const [code, setCode] = useState("");
+  const [label, setLabel] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [state, setState] = useState("PLANNED");
+  const [goal, setGoal] = useState("");
+
+  const labelRef = useRef<HTMLInputElement>(null);
+
+  const todayISO = now ?? new Date().toISOString().slice(0, 10);
+
+  // Re-initialise on open
+  useEffect(() => {
+    if (!isOpen) return;
+    const pf = newCyclePrefill(cycles, todayISO);
+    setCode(pf.code);
+    setLabel(pf.label);
+    setStart(pf.start);
+    setEnd(pf.end);
+    setState("PLANNED");
+    setGoal("");
+    // Focus label after state flush
+    setTimeout(() => labelRef.current?.focus(), 0);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps — intentional: only on open
+
+  if (!isOpen) return null;
+
+  const windowLabel =
+    start && end
+      ? `${fmtMD(start)} — ${fmtMD(end)}`
+      : fmtCycleWindow(start, end);
+
+  const commit = () => {
+    create.mutate(
+      {
+        code: code.trim() || undefined,
+        label: (label.trim() || "CYCLE").toUpperCase(),
+        start,
+        end,
+        goal: goal.trim() || undefined,
+        state: state || undefined,
+      },
+      {
+        onSuccess: (cycle) => {
+          closeCycleModal();
+          setCycleSel(cycle.code);
+          setMode("cycle");
+        },
+      },
+    );
+  };
+
+  return (
+    <ModalOverlay
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) closeCycleModal();
+      }}
+      isDismissable
+      className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
+      data-testid="new-cycle-modal-backdrop"
+    >
+      <Modal className="w-[600px] max-w-[94vw]">
+        <RACDialog aria-label="New Cycle" className="outline-none">
+          <div
+            className="flex max-h-[82vh] flex-col border border-[var(--ink-3)] bg-[var(--bg)]"
+            style={{
+              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            data-testid="new-cycle-modal"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
+              <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
+                ◴
+              </span>
+              <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
+                NEW CYCLE
+              </span>
+              <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
+                {windowLabel} · OPEN A CADENCE WINDOW
+              </span>
+              <button
+                type="button"
+                className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+                onClick={closeCycleModal}
+                data-testid="new-cycle-close-btn"
+              >
+                ESC
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
+              {/* LABEL + CODE */}
+              <div className="grid grid-cols-2 gap-[12px]">
+                <EdField label="CYCLE / LABEL">
+                  <input
+                    ref={labelRef}
+                    type="text"
+                    className={INPUT_CLS}
+                    autoFocus
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    data-testid="new-cycle-label"
+                  />
+                </EdField>
+                <EdField label="REGISTER ID" hint="S-NN">
+                  <input
+                    type="text"
+                    className={INPUT_CLS}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    data-testid="new-cycle-code"
+                  />
+                </EdField>
+              </div>
+
+              {/* WINDOW */}
+              <div className="grid grid-cols-2 gap-[12px]">
+                <EdField label="WINDOW / OPEN" hint="start">
+                  <input
+                    type="date"
+                    className={INPUT_CLS}
+                    value={start}
+                    onChange={(e) => setStart(e.target.value)}
+                    data-testid="new-cycle-start"
+                  />
+                </EdField>
+                <EdField label="WINDOW / SEAL" hint="end">
+                  <input
+                    type="date"
+                    className={INPUT_CLS}
+                    value={end}
+                    onChange={(e) => setEnd(e.target.value)}
+                    data-testid="new-cycle-end"
+                  />
+                </EdField>
+              </div>
+
+              {/* INITIAL STATE */}
+              <EdField label="INITIAL STATE" hint="cadence">
+                <div className="flex gap-[6px]">
+                  {["PLANNED", "ACTIVE"].map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
+                      onClick={() => setState(st)}
+                      data-testid={`new-cycle-state-${st}`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </EdField>
+
+              {/* GOAL */}
+              <EdField label="CYCLE GOAL" hint="one line">
+                <textarea
+                  className={`${INPUT_CLS} resize-none`}
+                  rows={2}
+                  placeholder="what this cadence window is for…"
+                  value={goal}
+                  onChange={(e) => setGoal(e.target.value)}
+                  data-testid="new-cycle-goal"
+                />
+              </EdField>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
+              <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
+                <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+                  ⌘↵
+                </span>{" "}
+                open ·{" "}
+                <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+                  ESC
+                </span>{" "}
+                cancel
+              </div>
+              <div className="flex gap-[8px]">
+                <button
+                  type="button"
+                  className="cl-btn"
+                  onClick={closeCycleModal}
+                  data-testid="new-cycle-cancel"
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="button"
+                  className="cl-btn cl-btn-hot"
+                  onClick={commit}
+                  disabled={create.isPending}
+                  data-testid="new-cycle-commit"
+                >
+                  {create.isPending ? "OPENING…" : "◴ OPEN CYCLE"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </RACDialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}

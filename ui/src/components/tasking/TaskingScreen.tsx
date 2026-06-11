@@ -7,8 +7,11 @@ import { BoardHeader } from "./BoardHeader";
 import { opKey } from "./board-constants";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
+import { NewCycleModal } from "./NewCycleModal";
 import { NewTaskModal } from "./NewTaskModal";
+import { OpenCycleModal } from "./OpenCycleModal";
 import { ScopeRail } from "./ScopeRail";
+import { SealCycleModal } from "./SealCycleModal";
 import { TaskEditPanel } from "./TaskEditPanel";
 import { TimelineView } from "./TimelineView";
 
@@ -62,6 +65,7 @@ export function TaskingScreen({
   const railOpen = useBoardStore((s) => s.railOpen);
   const editTaskId = useBoardStore((s) => s.editTaskId);
   const taskModal = useBoardStore((s) => s.taskModal);
+  const cycleModal = useBoardStore((s) => s.cycleModal);
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
 
   const { operations, cycles, tasks, activeOp, visibleTasks, editTask } =
@@ -111,11 +115,26 @@ export function TaskingScreen({
     );
   }
 
+  // Resolve cycle for open/seal modals (only when cycleModal has a cycleId)
+  const cycleModalCycle =
+    cycleModal !== null && cycleModal.kind !== "new"
+      ? (cycles.find((c) => c.id === cycleModal.cycleId) ?? null)
+      : null;
+
   return (
     <>
       {/* Creation modal — rendered at root level so it's not clipped */}
       {taskModal !== null && (
         <NewTaskModal operations={operations} cycles={cycles} />
+      )}
+
+      {/* Cycle lifecycle modals */}
+      {cycleModal?.kind === "new" && <NewCycleModal cycles={cycles} />}
+      {cycleModal?.kind === "open" && cycleModalCycle !== null && (
+        <OpenCycleModal cycle={cycleModalCycle} cycles={cycles} tasks={tasks} />
+      )}
+      {cycleModal?.kind === "seal" && cycleModalCycle !== null && (
+        <SealCycleModal cycle={cycleModalCycle} cycles={cycles} tasks={tasks} />
       )}
 
       <div className="relative flex h-full overflow-hidden">
