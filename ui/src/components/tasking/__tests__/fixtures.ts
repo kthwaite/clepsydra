@@ -150,6 +150,46 @@ export const BOARD_FIXTURE_WITH_NO_SLUG_OP: BoardResponse = {
   operations: [...BOARD_FIXTURE.operations, NO_SLUG_OP],
 };
 
+/**
+ * A CLOSED cycle — used to test the sealed-in-closed-cycle exclusion
+ * (Decision 8 / visibleInKanban).
+ */
+export const CLOSED_CYCLE: BoardResponse["cycles"][number] = {
+  id: "cyc-closed-000",
+  code: "C-00",
+  label: "Cycle 00",
+  state: "CLOSED",
+  path: "tasks/c-00.md",
+  start: "2026-05-12",
+  end: "2026-05-25",
+  goal: "Completed sprint.",
+};
+
+/**
+ * A task that is SEALED and whose cycle is CLOSED — should be excluded
+ * from the kanban SEALED column (but stay in backlog/other views).
+ */
+export const SEALED_IN_CLOSED_CYCLE_TASK: BoardResponse["tasks"][number] = {
+  id: "t-hist",
+  code: "TSK-0099",
+  title: "Historical Sealed Task",
+  status: "SEALED",
+  priority: "P3",
+  project: "alpha",
+  cycle: "C-00",
+  tags: [],
+  checks: [],
+  path: "tasks/t-hist.md",
+  updated_at: "2026-05-25T00:00:00Z",
+};
+
+/** BOARD_FIXTURE augmented with a CLOSED cycle + a sealed-in-closed-cycle task */
+export const BOARD_FIXTURE_WITH_CLOSED_CYCLE: BoardResponse = {
+  ...BOARD_FIXTURE,
+  cycles: [...BOARD_FIXTURE.cycles, CLOSED_CYCLE],
+  tasks: [...BOARD_FIXTURE.tasks, SEALED_IN_CLOSED_CYCLE_TASK],
+};
+
 /** Stub fetch to resolve with the given board (defaults to BOARD_FIXTURE) */
 export function stubBoardFetch(board: BoardResponse = BOARD_FIXTURE) {
   const stub = vi.fn(() =>

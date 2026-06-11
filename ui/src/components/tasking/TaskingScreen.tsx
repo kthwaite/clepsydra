@@ -3,6 +3,7 @@ import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { BoardHeader } from "./BoardHeader";
+import { KanbanView } from "./KanbanView";
 import { opKey } from "./board-constants";
 import { ScopeRail } from "./ScopeRail";
 
@@ -51,7 +52,11 @@ function BodyPlaceholder({ label }: { label: string }) {
 
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
 
-export function TaskingScreen() {
+export function TaskingScreen({
+  onOpenDossier,
+}: {
+  onOpenDossier?: (link: string) => void;
+} = {}) {
   const { data, isLoading, isError } = useBoard();
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
@@ -122,7 +127,15 @@ export function TaskingScreen() {
 
         {/* Body router — Tasks 9-12 replace each placeholder */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          {mode === "card" && <BodyPlaceholder label="CARD" />}
+          {mode === "card" && (
+            <KanbanView
+              columns={data.columns}
+              tasks={visibleTasks}
+              cycles={cycles}
+              showOp={opFilter === "ALL"}
+              onOpenDossier={onOpenDossier}
+            />
+          )}
           {mode === "backlog" && <BodyPlaceholder label="BACKLOG" />}
           {mode === "cycle" && <BodyPlaceholder label="CYCLE" />}
           {mode === "timeline" && <BodyPlaceholder label="TIMELINE" />}

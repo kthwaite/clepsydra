@@ -132,11 +132,14 @@ describe("TaskingScreen smoke", () => {
     expect(screen.getByText("ALL OPS")).toBeInTheDocument();
   });
 
-  it("shows CARD VIEW body placeholder in default mode", async () => {
+  it("shows kanban columns in card mode (default)", async () => {
     stubBoardFetch();
     renderScreen();
     await screen.findByText("TASKING BOARD");
-    expect(screen.getByText(/CARD VIEW/i)).toBeInTheDocument();
+    // KanbanView renders column labels from board.columns
+    expect(screen.getByTestId("kb-col-INTAKE")).toBeInTheDocument();
+    expect(screen.getByTestId("kb-col-FIELD")).toBeInTheDocument();
+    expect(screen.getByTestId("kb-col-SEALED")).toBeInTheDocument();
   });
 
   it("op with null project: clicking its row highlights it, shows op-meta, zero tasks", async () => {
