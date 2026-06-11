@@ -68,6 +68,12 @@ export const SHORTCUTS = {
     scope: "global",
     note: "outside the editor",
   },
+  "nav.tasking": {
+    chord: { key: "j", mod: true },
+    label: "Open Tasking",
+    group: "Navigate",
+    scope: "global",
+  },
   "app.inscribe": {
     chord: { key: "n", mod: true },
     label: "Inscribe new folio",

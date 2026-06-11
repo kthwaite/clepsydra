@@ -53,6 +53,7 @@ export function useGlobalShortcuts() {
       "nav.diurnal": { run: () => navigate({ to: "/journal" }) },
       "nav.constellation": { run: () => openTab("graph") },
       "nav.gazetteer": { run: () => navigate({ to: "/gazetteer" }) },
+      "nav.tasking": { run: () => navigate({ to: "/tasking" }) },
       "app.inscribe": { run: openInscribe },
       "app.settings": { run: () => openSettings("appearance") },
       "app.themeToggle": { run: toggleTheme },

@@ -13,7 +13,13 @@ import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
-type View = "atrium" | "folio" | "gazetteer" | "constellation" | "diurnal";
+type View =
+  | "atrium"
+  | "folio"
+  | "gazetteer"
+  | "constellation"
+  | "diurnal"
+  | "tasking";
 
 /** Nav order + diegetic index numbers. */
 const NAV: ReadonlyArray<readonly [View, string]> = [
@@ -22,6 +28,7 @@ const NAV: ReadonlyArray<readonly [View, string]> = [
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
   ["diurnal", "DIURNAL"],
+  ["tasking", "TASKING"],
 ];
 
 type CodexFrameProps = {
@@ -49,6 +56,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     if (p === "/" || p === "") return "atrium";
     if (p.startsWith("/journal")) return "diurnal";
     if (p.startsWith("/gazetteer")) return "gazetteer";
+    if (p.startsWith("/tasking")) return "tasking";
     if (p.startsWith("/workspace")) {
       const active = workspaceTabs.find((t) => t.id === activeTabId);
       return active?.type === "graph" ? "constellation" : "folio";
@@ -63,7 +71,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     else if (target === "constellation") {
       openTab("graph");
       navigate({ to: "/workspace" });
-    } else if (target === "folio") {
+    } else if (target === "tasking") navigate({ to: "/tasking" });
+    else if (target === "folio") {
       const firstPage = workspaceTabs.find((t) => t.type === "page");
       if (firstPage) useWorkspaceStore.getState().activateTab(firstPage.id);
       navigate({ to: "/workspace" });
@@ -238,6 +247,7 @@ function useFolioCode(view: View): string {
   if (view === "diurnal") return "DIURNAL";
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
+  if (view === "tasking") return "TASKING";
   const active = tabs.find((t) => t.id === activeTabId);
   if (!active?.path) return "—";
   return shortFolio(active.path);
