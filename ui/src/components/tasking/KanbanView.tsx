@@ -52,6 +52,12 @@ export interface KanbanViewProps {
   cycles: BoardCycle[];
   /** Whether ALL ops are showing (drives showOp on cards) */
   showOp: boolean;
+  /**
+   * Project slug of the currently selected operation, when a real op with a
+   * slug is active (mirrors ScopeRail's preset logic — never an op code).
+   * Threaded into the column + button's taskModal preset.
+   */
+  activeProject?: string;
   onOpenDossier?: (link: string) => void;
 }
 
@@ -60,6 +66,7 @@ export function KanbanView({
   tasks,
   cycles,
   showOp,
+  activeProject,
   onOpenDossier,
 }: KanbanViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -130,7 +137,13 @@ export function KanbanView({
               <button
                 className="inline-flex h-[16px] w-[16px] items-center justify-content-center border border-[var(--rule)] text-[13px] leading-[1] text-[var(--ink-3)] transition-[color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:text-[var(--hot)]"
                 title={`New task in ${col.label}`}
-                onClick={() => openTaskModal({ status: col.id })}
+                onClick={() =>
+                  openTaskModal(
+                    activeProject
+                      ? { status: col.id, project: activeProject }
+                      : { status: col.id },
+                  )
+                }
                 data-testid={`kb-add-${col.id}`}
               >
                 +

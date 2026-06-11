@@ -133,6 +133,7 @@ export function TaskingScreen({
               tasks={visibleTasks}
               cycles={cycles}
               showOp={opFilter === "ALL"}
+              activeProject={activeOp?.project ?? undefined}
               onOpenDossier={onOpenDossier}
             />
           )}

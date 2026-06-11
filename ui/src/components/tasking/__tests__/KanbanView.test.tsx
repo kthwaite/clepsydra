@@ -445,6 +445,38 @@ describe("KanbanView — column + button", () => {
     await userEvent.click(screen.getByTestId("kb-add-INTAKE"));
     expect(useBoardStore.getState().taskModal).toEqual({ status: "INTAKE" });
   });
+
+  it("includes project preset when activeProject is set", async () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+        activeProject="alpha"
+      />,
+    );
+    await userEvent.click(screen.getByTestId("kb-add-FIELD"));
+    expect(useBoardStore.getState().taskModal).toEqual({
+      status: "FIELD",
+      project: "alpha",
+    });
+  });
+
+  it("omits the project key entirely when activeProject is undefined", async () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    await userEvent.click(screen.getByTestId("kb-add-FIELD"));
+    const modal = useBoardStore.getState().taskModal;
+    expect(modal).toEqual({ status: "FIELD" });
+    expect(modal).not.toHaveProperty("project");
+  });
 });
 
 // ── drag-and-drop ─────────────────────────────────────────────────────────────

@@ -164,3 +164,43 @@ describe("TaskingScreen smoke", () => {
     expect(openStat?.textContent).toBe("00");
   });
 });
+
+// ── kanban + button project preset (mirrors ScopeRail) ───────────────────────
+
+describe("TaskingScreen — kanban column + project preset", () => {
+  it("op with slug selected: + presets both status and project", async () => {
+    useBoardStore.setState({ opFilter: "alpha" });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("kb-add-FIELD"));
+    expect(useBoardStore.getState().taskModal).toEqual({
+      status: "FIELD",
+      project: "alpha",
+    });
+  });
+
+  it("ALL ops: + presets status only, no project key", async () => {
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("kb-add-FIELD"));
+    const modal = useBoardStore.getState().taskModal;
+    expect(modal).toEqual({ status: "FIELD" });
+    expect(modal).not.toHaveProperty("project");
+  });
+
+  it("slug-less op selected: + omits the project preset (a code is not a project)", async () => {
+    useBoardStore.setState({ opFilter: "OPS-3" });
+    stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("kb-add-FIELD"));
+    const modal = useBoardStore.getState().taskModal;
+    expect(modal).toEqual({ status: "FIELD" });
+    expect(modal).not.toHaveProperty("project");
+  });
+});
