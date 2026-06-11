@@ -401,41 +401,7 @@ async fn create_task(
 
     // 2. Validate cycle exists (if specified)
     if let Some(ref cycle_code) = cycle_opt {
-        let cycle_clone = cycle_code.clone();
-        let cycle_exists = state
-            .index
-            .with_index(move |index, _vault| {
-                let conn = index.connection();
-                // Cycle codes are case-sensitive stems from filenames
-                let count: u32 = conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM pages WHERE kind = 'CYCLE'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or(0);
-                if count == 0 {
-                    return false;
-                }
-                // Check any CYCLE page whose path stem matches the code
-                let mut stmt = conn
-                    .prepare("SELECT path FROM pages WHERE kind = 'CYCLE'")
-                    .unwrap();
-                let paths: Vec<String> = stmt
-                    .query_map([], |row| row.get(0))
-                    .unwrap()
-                    .filter_map(|r| r.ok())
-                    .collect();
-                paths.iter().any(|p| path_stem(p) == cycle_clone.as_str())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-        if !cycle_exists {
-            return Err(ApiError::bad_request(format!(
-                "unknown cycle: '{cycle_code}'; must match the stem of an existing CYCLE page (e.g. 'S-13')"
-            )));
-        }
+        ensure_cycle_exists(&state, cycle_code).await?;
     }
 
     // 3. Allocate code: scan TASK paths for TSK-NNNN stems, take max+1
@@ -621,6 +587,20 @@ async fn patch_task(
     Path(id): Path<String>,
     Json(body): Json<PatchTaskRequest>,
 ) -> Result<Json<BoardTask>, ApiError> {
+    // 0. Normalize + validate the tri-state cycle field up front, while the
+    // index is reachable via `state` (the later tri-state application runs on
+    // an already-loaded PageMeta). "BACKLOG" is the no-cycle sentinel: setting
+    // it behaves exactly like null (clear the key). Any other set value must
+    // match an existing CYCLE page stem, same rule as POST.
+    let cycle_field: Option<Option<String>> = match body.cycle {
+        Some(Some(ref c)) if c == "BACKLOG" => Some(None),
+        Some(Some(ref c)) => {
+            ensure_cycle_exists(&state, c).await?;
+            Some(Some(c.clone()))
+        }
+        ref other => other.clone(),
+    };
+
     // 1. Resolve path by UUID
     let id_clone = id.clone();
     let page_path = state
@@ -675,13 +655,13 @@ async fn patch_task(
             .insert("priority".to_string(), serde_yaml::Value::String(priority.clone()));
     }
 
-    // tri-state fields
-    apply_tri_state(&mut meta, "cycle", &body.cycle, |v| validate_cycle_value(v))?;
-    apply_tri_state(&mut meta, "assignee", &body.assignee, |_| Ok(()))?;
-    apply_tri_state(&mut meta, "estimate", &body.estimate, |_| Ok(()))?;
-    apply_tri_state(&mut meta, "due", &body.due, |_| Ok(()))?;
-    apply_tri_state(&mut meta, "hold", &body.hold, |_| Ok(()))?;
-    apply_tri_state(&mut meta, "link", &body.link, |_| Ok(()))?;
+    // tri-state fields (cycle already validated/normalized above)
+    apply_tri_state(&mut meta, "cycle", &cycle_field);
+    apply_tri_state(&mut meta, "assignee", &body.assignee);
+    apply_tri_state(&mut meta, "estimate", &body.estimate);
+    apply_tri_state(&mut meta, "due", &body.due);
+    apply_tri_state(&mut meta, "hold", &body.hold);
+    apply_tri_state(&mut meta, "link", &body.link);
 
     // project change: update meta.project; reconcile will handle refile
     let project_changed = body.project.is_some();
@@ -752,6 +732,29 @@ async fn patch_task(
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+/// Row tuple for a single-task DTO query:
+/// `(id, title, meta_json, project, updated_at, tags_raw)`.
+type TaskDtoRow = (
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+);
+
+/// Row tuple for the task-list query:
+/// `(id, path, title, meta_json, project, updated_at, tags_raw)`.
+type TaskListRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+);
+
 /// Build a `BoardTask` DTO from the index for a given vault path + code.
 /// Reads from the index to ensure consistency with the GET /board response.
 async fn build_board_task_dto(
@@ -765,7 +768,7 @@ async fn build_board_task_dto(
         .index
         .with_index(move |index, _vault| {
             let conn = index.connection();
-            let row: Option<(String, Option<String>, String, Option<String>, Option<String>, String)> = conn
+            let row: Option<TaskDtoRow> = conn
                 .query_row(
                     "SELECT p.id, p.title, p.meta_json, p.project, p.updated_at, \
                              COALESCE((SELECT group_concat(t.tag, char(31)) \
@@ -856,15 +859,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
           ORDER BY p.path",
     )?;
 
-    let task_rows: Vec<(
-        String,
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-    )> = task_stmt
+    let task_rows: Vec<TaskListRow> = task_stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -963,24 +958,45 @@ fn validate_priority(priority: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Placeholder validator for cycle values in tri-state context.
-/// Full validation against the index would require async; we validate
-/// non-null cycle values in the POST path already. For PATCH, callers
-/// pass a no-op validator and note the cycle is stored as-is.
-fn validate_cycle_value(_v: &str) -> Result<(), ApiError> {
+/// Check that `cycle_code` matches the filename stem of an existing CYCLE
+/// page (case-sensitive). Returns 400 with a hint otherwise. Shared by the
+/// POST and PATCH handlers.
+async fn ensure_cycle_exists(state: &AppState, cycle_code: &str) -> Result<(), ApiError> {
+    let cycle_clone = cycle_code.to_string();
+    let exists = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
+            // Cycle codes are case-sensitive stems from filenames
+            let mut stmt = conn.prepare("SELECT path FROM pages WHERE kind = 'CYCLE'")?;
+            let paths: Vec<String> = stmt
+                .query_map([], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok::<_, rusqlite::Error>(
+                paths.iter().any(|p| path_stem(p) == cycle_clone.as_str()),
+            )
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    if !exists {
+        return Err(ApiError::bad_request(format!(
+            "unknown cycle: '{cycle_code}'; must match the stem of an existing CYCLE page (e.g. 'S-13')"
+        )));
+    }
     Ok(())
 }
 
 /// Apply a tri-state field to PageMeta.extra:
 ///   - `None` (key absent): no-op
 ///   - `Some(None)` (key present, null): remove the key
-///   - `Some(Some(v))` (key present, value): call validator, then set
-fn apply_tri_state(
-    meta: &mut PageMeta,
-    key: &str,
-    field: &Option<Option<String>>,
-    validator: impl Fn(&str) -> Result<(), ApiError>,
-) -> Result<(), ApiError> {
+///   - `Some(Some(v))` (key present, value): set the key
+///
+/// Values requiring validation (status/priority/cycle) are validated by the
+/// caller before this is applied.
+fn apply_tri_state(meta: &mut PageMeta, key: &str, field: &Option<Option<String>>) {
     match field {
         None => {
             // absent — no change
@@ -990,12 +1006,10 @@ fn apply_tri_state(
             meta.extra.remove(key);
         }
         Some(Some(v)) => {
-            validator(v)?;
             meta.extra
                 .insert(key.to_string(), serde_yaml::Value::String(v.clone()));
         }
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

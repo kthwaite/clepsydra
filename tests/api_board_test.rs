@@ -407,6 +407,92 @@ async fn create_task_rejects_unknown_cycle() {
 }
 
 // ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — validation failures + BACKLOG sentinel
+// ---------------------------------------------------------------------------
+
+/// Seed a single task (with a cycle S-13 page) and return server + tmp.
+/// Task UUID: 01951234-0000-7000-8000-000000000060.
+fn setup_patch_target() -> (TestServer, TempDir) {
+    setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000060\n\
+             title: FREEZE LEGACY SYNC WRITES\ntype: TASK\n\
+             status: FIELD\npriority: P0\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+    })
+}
+
+#[tokio::test]
+async fn patch_task_rejects_unknown_cycle() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "cycle": "S-99" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_task_backlog_cycle_clears_like_null() {
+    let (server, tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "cycle": "BACKLOG" }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["cycle"].is_null(),
+        "cycle should be cleared by BACKLOG: {body}"
+    );
+
+    // File frontmatter must no longer carry the cycle key
+    let content =
+        std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        !content.contains("cycle:"),
+        "file should not have cycle field, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn patch_task_rejects_bogus_status() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "status": "BOGUS" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_task_rejects_bogus_priority() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "priority": "P9" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
 // PATCH /board/tasks/{id} — moves column, clears hold
 // ---------------------------------------------------------------------------
 
