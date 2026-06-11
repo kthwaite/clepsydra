@@ -121,11 +121,11 @@ export function HealthDot({ health }: { health: string }) {
   );
 }
 
-/** Rotated HOT-bordered "HOLD" stamp for task cards. */
+/** Inline HOT-bordered "HOLD" chip (matches .hold-tag in styles-board.css). */
 export function HoldTag() {
   return (
     <span
-      className="inline-block border border-[var(--hot)] px-[4px] text-[9px] leading-[14px] tracking-[0.12em]"
+      className="inline-block border border-[var(--hot)] px-[4px] text-[var(--fs-xs)] leading-[14px] tracking-[0.12em]"
       style={{ color: "var(--hot)" }}
     >
       HOLD

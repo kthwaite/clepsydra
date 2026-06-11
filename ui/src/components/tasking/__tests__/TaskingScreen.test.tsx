@@ -142,6 +142,16 @@ describe("TaskingScreen smoke", () => {
     expect(screen.getByTestId("kb-col-SEALED")).toBeInTheDocument();
   });
 
+  it("shows the backlog register in backlog mode (not the placeholder)", async () => {
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+    // BacklogView's header row is mounted
+    expect(screen.getByText("FILE-ID")).toBeInTheDocument();
+    expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
+  });
+
   it("op with null project: clicking its row highlights it, shows op-meta, zero tasks", async () => {
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();

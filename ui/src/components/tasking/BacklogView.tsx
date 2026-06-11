@@ -19,6 +19,7 @@ import { useBoardStore } from "#/store/board";
 import {
   COL_LABEL,
   COL_ORDER,
+  HoldTag,
   PRI_LABEL,
   PRI_ORDER,
   StatePip,
@@ -114,12 +115,21 @@ export function BacklogView({ tasks }: BacklogViewProps) {
       </div>
 
       {/* ── Priority groups ──────────────────────────────────────────────── */}
-      {groups.map((g) => (
+      {groups.map((g, idx) => (
         <div key={g.pri}>
-          {/* Group header */}
+          {/* Group header — top border on every group except the first
+              (matches the stylesheet's `.bk-grp-hd:first-child` intent;
+              `first:` can't express this since each header is the first
+              child of its own group wrapper). */}
           <div
-            className="sticky z-[4] flex items-center gap-[12px] border-b border-[var(--ink-3)] border-t border-t-[var(--rule)] bg-[var(--bg)] px-[var(--pad,12px)] py-[7px] first:border-t-0"
-            style={{ top: "var(--row-h, 32px)" }}
+            data-testid={`bk-grp-hd-${g.pri}`}
+            className="sticky z-[4] flex items-center gap-[12px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad,12px)] py-[7px]"
+            style={{
+              top: "var(--row-h, 32px)",
+              borderTopStyle: idx === 0 ? "none" : "solid",
+              borderTopWidth: idx === 0 ? 0 : "1px",
+              borderTopColor: "var(--rule)",
+            }}
           >
             <span
               className="cl-display text-[14px] font-black tracking-[0.06em]"
@@ -175,9 +185,9 @@ export function BacklogView({ tasks }: BacklogViewProps) {
                   {t.hold && (
                     <span
                       data-testid={`bk-hold-tag-${t.id}`}
-                      className="inline-block flex-shrink-0 border border-[var(--hot)] px-[4px] text-[var(--fs-xs)] leading-[14px] tracking-[0.12em] text-[var(--hot)]"
+                      className="flex-shrink-0"
                     >
-                      HOLD
+                      <HoldTag />
                     </span>
                   )}
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap">

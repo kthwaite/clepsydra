@@ -289,6 +289,22 @@ describe("BacklogView — grouping", () => {
     render(<BacklogView tasks={ten} />);
     expect(screen.getByText("10 ITEMS")).toBeInTheDocument();
   });
+
+  it("first group header has no top border; subsequent group headers do", () => {
+    render(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS]} />);
+    // jsdom expands the border-top shorthand — assert on borderTopStyle
+    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveStyle({
+      borderTopStyle: "none",
+    });
+    expect(screen.getByTestId("bk-grp-hd-P1")).toHaveStyle({
+      borderTopStyle: "solid",
+      borderTopWidth: "1px",
+    });
+    expect(screen.getByTestId("bk-grp-hd-P2")).toHaveStyle({
+      borderTopStyle: "solid",
+      borderTopWidth: "1px",
+    });
+  });
 });
 
 describe("BacklogView — row rendering", () => {
