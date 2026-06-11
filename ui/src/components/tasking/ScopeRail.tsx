@@ -1,7 +1,7 @@
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
-import { CycleStatePip, HealthDot } from "./board-constants";
+import { CycleStatePip, HealthDot, opKey } from "./board-constants";
 
 // ── date formatting ──────────────────────────────────────────────────────────
 
@@ -68,9 +68,15 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
   const showUnfiled = hasUnfiledTasks(tasks, operations);
 
   function handleNewTasking() {
-    const project =
-      opFilter !== "ALL" && opFilter !== "UNFILED" ? opFilter : undefined;
-    openTaskModal({ project });
+    if (opFilter === "ALL" || opFilter === "UNFILED") {
+      openTaskModal({});
+      return;
+    }
+    // Only preset a real project slug — an op code is not a valid project
+    // label for task creation, so an op without a slug presets nothing.
+    const activeOp = operations.find((op) => opKey(op) === opFilter);
+    const project = activeOp ? (activeOp.project ?? undefined) : opFilter;
+    openTaskModal(project ? { project } : {});
   }
 
   // Collapsed popout — absolute so it floats over the board area
@@ -155,7 +161,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
         {/* Per-operation rows */}
         {operations.map((op) => {
           const count = tasks.filter((t) => t.project === op.project).length;
-          const active = opFilter === op.project;
+          const active = opFilter === opKey(op);
           return (
             <button
               key={op.id}
@@ -166,7 +172,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
                   ? "border-l-[var(--hot)] bg-[var(--paper)]"
                   : "border-l-transparent",
               )}
-              onClick={() => setOpFilter(op.project ?? op.code)}
+              onClick={() => setOpFilter(opKey(op))}
             >
               <HealthDot health={op.health} />
               <span className="text-[10px] tracking-[0.08em] text-[var(--ink)]">

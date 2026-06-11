@@ -3,6 +3,7 @@ import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { BoardHeader } from "./BoardHeader";
+import { opKey } from "./board-constants";
 import { ScopeRail } from "./ScopeRail";
 
 // ── filterTasks ──────────────────────────────────────────────────────────────
@@ -12,11 +13,12 @@ import { ScopeRail } from "./ScopeRail";
  *  - "ALL"     → return all tasks
  *  - "UNFILED" → tasks whose project is null/empty OR doesn't match any
  *                operation's `project` field
- *  - <code>    → tasks whose project === the operation's `project` field
- *                matching operations.find(op => op.project === opFilter)
+ *  - <key>     → tasks whose project === opFilter
  *
- * Note: opFilter is stored as op.project (not op.code), except for the
- * sentinels "ALL" and "UNFILED".
+ * Note: opFilter stores the canonical op key (`opKey(op)` — project slug,
+ * falling back to op.code when the op has no slug), except for the sentinels
+ * "ALL" and "UNFILED". An op without a project slug correctly yields zero
+ * tasks here, since no task carries its code as a project.
  */
 export function filterTasks(
   tasks: BoardTask[],
@@ -67,7 +69,7 @@ export function TaskingScreen() {
     const filtered = filterTasks(data.tasks, data.operations, opFilter);
     const active =
       opFilter !== "ALL" && opFilter !== "UNFILED"
-        ? (data.operations.find((op) => op.project === opFilter) ?? null)
+        ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
         : null;
 
     return {

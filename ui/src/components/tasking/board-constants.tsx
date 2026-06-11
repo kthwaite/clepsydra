@@ -1,5 +1,17 @@
 /** Shared constants and micro-chips for the Tasking board. */
 
+import type { BoardOperation } from "#/api/board";
+
+// ── canonical op key ─────────────────────────────────────────────────────────
+
+/**
+ * Canonical opFilter key for an operation: its project slug when one exists,
+ * else its code (covers board:true PROJECT pages with no project: frontmatter).
+ * Used consistently by ScopeRail row clicks/active checks and the
+ * TaskingScreen activeOp lookup so selection state never diverges.
+ */
+export const opKey = (op: BoardOperation): string => op.project ?? op.code;
+
 // ── column / priority ordering ───────────────────────────────────────────────
 
 export const COL_ORDER = [

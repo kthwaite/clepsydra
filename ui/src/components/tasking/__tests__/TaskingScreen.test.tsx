@@ -1,9 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { filterTasks, TaskingScreen } from "../TaskingScreen";
-import { BOARD_FIXTURE, stubBoardFetch } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  BOARD_FIXTURE_WITH_NO_SLUG_OP,
+  stubBoardFetch,
+} from "./fixtures";
 
 const { operations, tasks } = BOARD_FIXTURE;
 
@@ -132,5 +137,27 @@ describe("TaskingScreen smoke", () => {
     renderScreen();
     await screen.findByText("TASKING BOARD");
     expect(screen.getByText(/CARD VIEW/i)).toBeInTheDocument();
+  });
+
+  it("op with null project: clicking its row highlights it, shows op-meta, zero tasks", async () => {
+    stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    const row = screen.getByText("OPS-3").closest("button")!;
+    await userEvent.click(row);
+
+    // opFilter falls back to the op code; the row highlights consistently
+    expect(useBoardStore.getState().opFilter).toBe("OPS-3");
+    expect(row.className).toContain("border-l-[var(--hot)]");
+
+    // op-meta line resolves the same op (LEAD label only renders there)
+    expect(screen.getByText("LEAD")).toBeInTheDocument();
+    expect(screen.getByText("Riva")).toBeInTheDocument();
+
+    // no task carries the op code as a project → zero visible tasks
+    const openLabel = screen.getByText("OPEN");
+    const openStat = openLabel.parentElement!.querySelector("span:last-child");
+    expect(openStat?.textContent).toBe("00");
   });
 });

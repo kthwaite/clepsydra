@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { hasUnfiledTasks, ScopeRail } from "../ScopeRail";
-import { BOARD_FIXTURE } from "./fixtures";
+import { BOARD_FIXTURE, NO_SLUG_OP } from "./fixtures";
 
 const { operations, cycles, tasks } = BOARD_FIXTURE;
 
@@ -191,5 +191,39 @@ describe("ScopeRail", () => {
     const addBtn = screen.getByTitle("New cycle");
     await userEvent.click(addBtn);
     expect(useBoardStore.getState().cycleModal).toEqual({ kind: "new" });
+  });
+});
+
+// ── op without a project slug (canonical key = op.code) ──────────────────────
+
+describe("ScopeRail — op with null project", () => {
+  const opsWithNoSlug = [...operations, NO_SLUG_OP];
+
+  it("clicking its row sets opFilter to the op code", async () => {
+    wrap(
+      <ScopeRail operations={opsWithNoSlug} cycles={cycles} tasks={tasks} />,
+    );
+    const row = screen.getByText("OPS-3").closest("button")!;
+    await userEvent.click(row);
+    expect(useBoardStore.getState().opFilter).toBe("OPS-3");
+  });
+
+  it("highlights the row when opFilter equals the op code", () => {
+    useBoardStore.setState({ opFilter: "OPS-3" });
+    wrap(
+      <ScopeRail operations={opsWithNoSlug} cycles={cycles} tasks={tasks} />,
+    );
+    const row = screen.getByText("OPS-3").closest("button")!;
+    expect(row.className).toContain("border-l-[var(--hot)]");
+  });
+
+  it("+ NEW TASKING omits the project preset (a code is not a project)", async () => {
+    useBoardStore.setState({ opFilter: "OPS-3" });
+    wrap(
+      <ScopeRail operations={opsWithNoSlug} cycles={cycles} tasks={tasks} />,
+    );
+    const btn = screen.getByText(/NEW TASKING/);
+    await userEvent.click(btn);
+    expect(useBoardStore.getState().taskModal).toEqual({});
   });
 });

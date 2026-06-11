@@ -128,12 +128,34 @@ export const BOARD_FIXTURE: BoardResponse = {
   ],
 };
 
-/** Stub fetch to resolve with BOARD_FIXTURE */
-export function stubBoardFetch() {
+/**
+ * A board:true PROJECT page with no project: frontmatter — its canonical
+ * opFilter key falls back to the op code (see opKey in board-constants).
+ */
+export const NO_SLUG_OP: BoardResponse["operations"][number] = {
+  id: "op-ccc-333",
+  code: "OPS-3",
+  name: "Operation Gamma",
+  health: "GREEN",
+  path: "tasks/ops-3.md",
+  project: null,
+  lead: "Riva",
+  target: "2026-Q4",
+  dossier: null,
+  note: null,
+};
+
+export const BOARD_FIXTURE_WITH_NO_SLUG_OP: BoardResponse = {
+  ...BOARD_FIXTURE,
+  operations: [...BOARD_FIXTURE.operations, NO_SLUG_OP],
+};
+
+/** Stub fetch to resolve with the given board (defaults to BOARD_FIXTURE) */
+export function stubBoardFetch(board: BoardResponse = BOARD_FIXTURE) {
   const stub = vi.fn(() =>
     Promise.resolve({
       ok: true,
-      json: () => Promise.resolve(BOARD_FIXTURE),
+      json: () => Promise.resolve(board),
     } as Response),
   );
   vi.stubGlobal("fetch", stub);
