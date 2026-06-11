@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useBoardStore } from "#/store/board";
+import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import { opKey } from "./board-constants";
 import { KanbanView } from "./KanbanView";
@@ -137,7 +138,7 @@ export function TaskingScreen({
               onOpenDossier={onOpenDossier}
             />
           )}
-          {mode === "backlog" && <BodyPlaceholder label="BACKLOG" />}
+          {mode === "backlog" && <BacklogView tasks={visibleTasks} />}
           {mode === "cycle" && <BodyPlaceholder label="CYCLE" />}
           {mode === "timeline" && <BodyPlaceholder label="TIMELINE" />}
         </div>
