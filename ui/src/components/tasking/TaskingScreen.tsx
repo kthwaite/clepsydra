@@ -171,9 +171,12 @@ export function TaskingScreen({
               />
             )}
 
-            {/* Right-dock edit panel */}
+            {/* Right-dock edit panel — keyed by task id so switching tasks
+                is a real remount: the unmount flush delivers any pending
+                debounced edit for the old task before the new panel mounts. */}
             {editTask && (
               <TaskEditPanel
+                key={editTask.id}
                 task={editTask}
                 operations={operations}
                 cycles={cycles}

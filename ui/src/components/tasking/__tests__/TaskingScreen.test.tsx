@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
@@ -269,5 +275,58 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
 
     // Panel should NOT appear
     expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
+  });
+
+  it("switching editTaskId flushes the old panel's pending edit (key remount)", async () => {
+    // Stub that also answers PATCH (the GET path returns the fixture)
+    const stub = vi.fn((_url: string, opts?: RequestInit) => {
+      if (opts?.method === "PATCH") {
+        const patch = JSON.parse(opts.body as string) as Record<
+          string,
+          unknown
+        >;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ id: "patched", ...patch }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(BOARD_FIXTURE),
+      } as Response);
+    });
+    vi.stubGlobal("fetch", stub);
+
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    act(() => useBoardStore.setState({ editTaskId: "t1" }));
+    await screen.findByTestId("edit-panel");
+
+    // Type into the title — debounce (300ms) pending
+    fireEvent.change(screen.getByTestId("edit-panel-title"), {
+      target: { value: "SWITCH FLUSH" },
+    });
+
+    // Switch to another task — key={task.id} remounts the panel, and the
+    // old panel's unmount flush must deliver the pending edit for t1
+    act(() => useBoardStore.setState({ editTaskId: "t3" }));
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter(
+        (args) =>
+          typeof args[0] === "string" &&
+          (args[0] as string).includes("/tasks/t1") &&
+          (args[1] as RequestInit | undefined)?.method === "PATCH",
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(
+        (patchCalls[0][1] as RequestInit).body as string,
+      ) as Record<string, unknown>;
+      expect(body.title).toBe("SWITCH FLUSH");
+    });
+
+    // The remounted panel shows the new task
+    expect(screen.getByTestId("edit-panel-code")).toHaveTextContent("TSK-0003");
   });
 });

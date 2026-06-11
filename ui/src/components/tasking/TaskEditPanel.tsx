@@ -6,17 +6,29 @@
  * A scrim behind it closes the panel on click; the panel itself stops
  * propagation.
  *
+ * A11y deviation from the house react-aria Dialog: the right-dock layout is
+ * absolutely positioned inside the board body (not a centered portal overlay),
+ * so the RAC ModalOverlay/Modal primitives don't fit. We hand-roll the basics
+ * instead: role=dialog + aria-modal, Escape-to-close, focus moved onto the
+ * panel container (tabIndex={-1}) on open, and focus restored to the
+ * previously-focused element on close.
+ *
  * All edits are sent as optimistic PATCHes:
  *   - Immediate: disposition (status), priority, operation select, cycle select,
- *     tags, hold toggle.
- *   - Debounced 300ms: title, assignee, estimate, due, hold reason, link.
+ *     hold toggle.
+ *   - Debounced 300ms: title, assignee, estimate, due, hold reason, link, tags.
+ *     Pending debounces are flushed on unmount (close/task-switch) so edits
+ *     aren't dropped — unless a DESTROY is in flight (suppressed to avoid a
+ *     trailing PATCH at the just-deleted task).
  *
  * Checklist deviation (plan decision 7):
  *   The checklist is read-only. We show a progress bar + "d / total done"
  *   and an "OPEN PAGE →" affordance (calls onOpenPage(task.path)). The
  *   markdown body is the source of truth for checklist items.
  *
- * Destroy: two-step confirm — first click arms the button, second fires DELETE.
+ * Destroy: two-step confirm — first click arms the button ("CONFIRM
+ * DESTROY?"), second fires DELETE. The armed state auto-disarms after 3s
+ * and on pointer-leave of the footer.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,7 +36,14 @@ import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useDeleteTask, usePatchTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { opKey } from "./board-constants";
-import { EdField, INPUT_CLS, SELECT_CLS } from "./NewTaskModal";
+import {
+  DispositionRow,
+  EdField,
+  INPUT_CLS,
+  PriorityRow,
+  RADIO_CLS_BASE,
+  SELECT_CLS,
+} from "./fields";
 
 // ── priority colour helpers (mirrors TaskCard) ────────────────────────────────
 
@@ -42,38 +61,8 @@ const PRI_TEXT_COLOR: Record<string, string> = {
   P3: "var(--ink-mute)",
 };
 
-const RADIO_CLS_BASE =
-  "cl-mono border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] cursor-pointer flex-1 text-center transition-[background,color,border-color] duration-[120ms]";
-
-const RADIO_CLS_ON = "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)]";
-
-const PRI_ON_STYLE: Record<string, React.CSSProperties> = {
-  P0: { background: "var(--hot)", borderColor: "var(--hot)", color: "#000" },
-  P1: { background: "var(--warn)", borderColor: "var(--warn)", color: "#000" },
-  P2: { background: "var(--cool)", borderColor: "var(--cool)", color: "#000" },
-  P3: {
-    background: "var(--ink-3)",
-    borderColor: "var(--ink-3)",
-    color: "#000",
-  },
-};
-
-const PRI_OFF_STYLE: Record<string, React.CSSProperties> = {
-  P0: { color: "var(--hot)", borderColor: "var(--hot)" },
-  P1: { color: "var(--warn)", borderColor: "var(--warn)" },
-  P2: { color: "var(--cool)", borderColor: "var(--cool)" },
-  P3: { color: "var(--ink-mute)", borderColor: "var(--rule)" },
-};
-
-const COL_ORDER = [
-  { id: "INTAKE", label: "INTAKE" },
-  { id: "TRIAGE", label: "TRIAGE" },
-  { id: "FIELD", label: "IN-FIELD" },
-  { id: "REVIEW", label: "REVIEW" },
-  { id: "SEALED", label: "SEALED" },
-] as const;
-
-const PRI_OPTS = ["P0", "P1", "P2", "P3"] as const;
+/** How long the armed "CONFIRM DESTROY?" state persists before auto-disarm. */
+const DESTROY_DISARM_MS = 3000;
 
 // ── useDebounce ───────────────────────────────────────────────────────────────
 
@@ -81,6 +70,12 @@ function useDebounced(
   value: string,
   delay: number,
   onChange: (v: string) => void,
+  /**
+   * When suppress.current is true, neither the timer nor the unmount flush
+   * delivers the pending value — set before DELETE so no trailing PATCH is
+   * fired at a just-destroyed task.
+   */
+  suppress?: React.RefObject<boolean>,
 ) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onChange);
@@ -94,25 +89,28 @@ function useDebounced(
     pending.current = value;
     timer.current = setTimeout(() => {
       pending.current = null;
+      if (suppress?.current) return;
       onChangeRef.current(value);
     }, delay);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [value, delay]);
+  }, [value, delay, suppress]);
 
-  // Flush on unmount: closing the panel (✕ / Escape / scrim) within the
-  // debounce window must not silently lose the edit. The per-field onChange
-  // guards (value !== task.field) make a no-edit flush a no-op.
+  // Flush on unmount: closing the panel (✕ / Escape / scrim) or switching
+  // tasks within the debounce window must not silently lose the edit. The
+  // per-field onChange guards (value !== task.field) make a no-edit flush a
+  // no-op; a pending DESTROY suppresses the flush entirely.
   useEffect(
     () => () => {
       if (pending.current !== null) {
         const v = pending.current;
         pending.current = null;
+        if (suppress?.current) return;
         onChangeRef.current(v);
       }
     },
-    [],
+    [suppress],
   );
 }
 
@@ -139,6 +137,9 @@ export function TaskEditPanel({
   const patch = usePatchTask();
   const del = useDeleteTask();
 
+  // Shared kill-switch for all pending debounced edits (see useDebounced).
+  const suppressFlush = useRef(false);
+
   // Local mirror of text fields that debounce before patching
   const [titleVal, setTitleVal] = useState(task.title);
   const [assigneeVal, setAssigneeVal] = useState(task.assignee ?? "");
@@ -148,8 +149,31 @@ export function TaskEditPanel({
   const [linkVal, setLinkVal] = useState(task.link ?? "");
   const [tagsVal, setTagsVal] = useState(task.tags.join(", "));
 
-  // Destroy confirmation state
+  // Destroy confirmation state (two-step; auto-disarms)
   const [destroying, setDestroying] = useState(false);
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const disarmDestroy = useCallback(() => {
+    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    disarmTimer.current = null;
+    setDestroying(false);
+  }, []);
+
+  const armDestroy = useCallback(() => {
+    setDestroying(true);
+    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    disarmTimer.current = setTimeout(
+      () => setDestroying(false),
+      DESTROY_DISARM_MS,
+    );
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    },
+    [],
+  );
 
   // Sync local mirrors when the task identity changes (different editTaskId)
   const taskId = task.id;
@@ -173,6 +197,18 @@ export function TaskEditPanel({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  // Hand-rolled focus handling (see header comment): move focus onto the
+  // panel on open, restore it to the previously-focused element on close.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    panelRef.current?.focus();
+    return () => previouslyFocused?.focus();
+  }, []);
+
   // Immediate patch helper
   const patchNow = useCallback(
     (p: Parameters<typeof patch.mutate>[0]["patch"]) => {
@@ -182,38 +218,78 @@ export function TaskEditPanel({
   );
 
   // Debounced patches (300ms)
-  useDebounced(titleVal, 300, (v) => {
-    if (v.trim() && v !== task.title) patchNow({ title: v.trim() });
-  });
-  useDebounced(assigneeVal, 300, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.assignee ?? null)) patchNow({ assignee: trimmed });
-  });
-  useDebounced(estimateVal, 300, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.estimate ?? null)) patchNow({ estimate: trimmed });
-  });
-  useDebounced(dueVal, 300, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.due ?? null)) patchNow({ due: trimmed });
-  });
-  useDebounced(holdReason, 300, (v) => {
-    if (task.hold && v !== task.hold) patchNow({ hold: v.trim() || task.hold });
-  });
-  useDebounced(linkVal, 300, (v) => {
-    const trimmed = v.trim() || null;
-    if (trimmed !== (task.link ?? null)) patchNow({ link: trimmed });
-  });
+  useDebounced(
+    titleVal,
+    300,
+    (v) => {
+      if (v.trim() && v !== task.title) patchNow({ title: v.trim() });
+    },
+    suppressFlush,
+  );
+  useDebounced(
+    assigneeVal,
+    300,
+    (v) => {
+      const trimmed = v.trim() || null;
+      if (trimmed !== (task.assignee ?? null)) patchNow({ assignee: trimmed });
+    },
+    suppressFlush,
+  );
+  useDebounced(
+    estimateVal,
+    300,
+    (v) => {
+      const trimmed = v.trim() || null;
+      if (trimmed !== (task.estimate ?? null)) patchNow({ estimate: trimmed });
+    },
+    suppressFlush,
+  );
+  useDebounced(
+    dueVal,
+    300,
+    (v) => {
+      const trimmed = v.trim() || null;
+      if (trimmed !== (task.due ?? null)) patchNow({ due: trimmed });
+    },
+    suppressFlush,
+  );
+  // Asymmetric guard, deliberately: the reason input only exists while the
+  // task is held (task.hold truthy), and an emptied reason falls back to the
+  // previous reason rather than clearing the hold — clearing the hold is the
+  // toggle's job (hold: null), never a side effect of editing the reason.
+  useDebounced(
+    holdReason,
+    300,
+    (v) => {
+      if (task.hold && v !== task.hold)
+        patchNow({ hold: v.trim() || task.hold });
+    },
+    suppressFlush,
+  );
+  useDebounced(
+    linkVal,
+    300,
+    (v) => {
+      const trimmed = v.trim() || null;
+      if (trimmed !== (task.link ?? null)) patchNow({ link: trimmed });
+    },
+    suppressFlush,
+  );
 
   // Tags: comma-sep input → debounced 300ms like the other text fields
-  useDebounced(tagsVal, 300, (v) => {
-    const arr = v
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-    const current = task.tags.join(",");
-    if (arr.join(",") !== current) patchNow({ tags: arr });
-  });
+  useDebounced(
+    tagsVal,
+    300,
+    (v) => {
+      const arr = v
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const current = task.tags.join(",");
+      if (arr.join(",") !== current) patchNow({ tags: arr });
+    },
+    suppressFlush,
+  );
 
   // Checklist progress (read-only: decision 7)
   const [done, total] =
@@ -229,6 +305,26 @@ export function TaskEditPanel({
       task.project)
     : "UNFILED";
 
+  const confirmDestroy = () => {
+    // Kill any pending debounced edits BEFORE the DELETE — a trailing PATCH
+    // at the just-deleted task would 404.
+    suppressFlush.current = true;
+    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    del.mutate(
+      { path: task.path },
+      {
+        onSuccess: () => {
+          setEditTaskId(null);
+        },
+        onError: () => {
+          // Page still exists — re-enable edit flushing.
+          suppressFlush.current = false;
+        },
+      },
+    );
+    setDestroying(false);
+  };
+
   return (
     <>
       {/* Scrim */}
@@ -240,7 +336,9 @@ export function TaskEditPanel({
 
       {/* Panel */}
       <div
-        className="absolute bottom-0 right-0 top-0 z-50 flex w-[340px] max-w-[92%] flex-col bg-[var(--bg-2)] border-l border-[var(--ink-3)]"
+        ref={panelRef}
+        tabIndex={-1}
+        className="absolute bottom-0 right-0 top-0 z-50 flex w-[340px] max-w-[92%] flex-col bg-[var(--bg-2)] border-l border-[var(--ink-3)] outline-none"
         style={{ boxShadow: "-16px 0 40px rgba(0,0,0,0.45)" }}
         onClick={(e) => e.stopPropagation()}
         data-testid="edit-panel"
@@ -301,39 +399,20 @@ export function TaskEditPanel({
 
           {/* DISPOSITION */}
           <EdField label="DISPOSITION">
-            <div className="flex gap-[6px]">
-              {COL_ORDER.map((col) => (
-                <button
-                  key={col.id}
-                  type="button"
-                  className={`${RADIO_CLS_BASE} ${task.status === col.id ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
-                  onClick={() => patchNow({ status: col.id })}
-                  data-testid={`edit-panel-status-${col.id}`}
-                >
-                  {col.label}
-                </button>
-              ))}
-            </div>
+            <DispositionRow
+              value={task.status}
+              onChange={(colId) => patchNow({ status: colId })}
+              testIdPrefix="edit-panel"
+            />
           </EdField>
 
           {/* PRIORITY */}
           <EdField label="PRIORITY">
-            <div className="flex gap-[6px]">
-              {PRI_OPTS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  className={RADIO_CLS_BASE}
-                  style={
-                    task.priority === p ? PRI_ON_STYLE[p] : PRI_OFF_STYLE[p]
-                  }
-                  onClick={() => patchNow({ priority: p })}
-                  data-testid={`edit-panel-priority-${p}`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            <PriorityRow
+              value={task.priority}
+              onChange={(p) => patchNow({ priority: p })}
+              testIdPrefix="edit-panel"
+            />
           </EdField>
 
           {/* OPERATION + CYCLE */}
@@ -514,24 +593,20 @@ export function TaskEditPanel({
           </EdField>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg)] px-[12px] py-[10px]">
+        {/* Footer — leaving it disarms a pending destroy */}
+        <div
+          className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg)] px-[12px] py-[10px]"
+          onPointerLeave={() => {
+            if (destroying) disarmDestroy();
+          }}
+          data-testid="edit-panel-foot"
+        >
           {/* Two-step destroy */}
           {destroying ? (
             <button
               type="button"
               className="cl-mono cursor-pointer border border-[var(--hot)] bg-[var(--hot)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[#000]"
-              onClick={() => {
-                del.mutate(
-                  { path: task.path },
-                  {
-                    onSuccess: () => {
-                      setEditTaskId(null);
-                    },
-                  },
-                );
-                setDestroying(false);
-              }}
+              onClick={confirmDestroy}
               data-testid="edit-panel-destroy-confirm"
             >
               CONFIRM DESTROY?
@@ -540,7 +615,7 @@ export function TaskEditPanel({
             <button
               type="button"
               className="cl-mono cursor-pointer border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-[background,color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:bg-[var(--hot)] hover:text-[#000]"
-              onClick={() => setDestroying(true)}
+              onClick={armDestroy}
               data-testid="edit-panel-destroy"
             >
               ✕ DESTROY

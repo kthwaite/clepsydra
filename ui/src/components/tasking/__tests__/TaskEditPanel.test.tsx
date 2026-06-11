@@ -521,6 +521,79 @@ describe("TaskEditPanel — destroy two-step", () => {
     );
     expect(deleteCalls).toHaveLength(0);
   });
+
+  it("destroy with a pending title edit fires DELETE and suppresses the trailing PATCH", async () => {
+    vi.useFakeTimers();
+    const stub = makeStub();
+    const { unmount } = wrap({ fetchStub: stub, seedBoard: true });
+
+    // Pending debounced edit — the 300ms debounce never advances
+    act(() => {
+      fireEvent.change(screen.getByTestId("edit-panel-title"), {
+        target: { value: "DOOMED EDIT" },
+      });
+    });
+
+    // Two-step destroy
+    act(() => {
+      fireEvent.click(screen.getByTestId("edit-panel-destroy"));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("edit-panel-destroy-confirm"));
+    });
+
+    // Panel unmounts (in the app: setEditTaskId(null) on DELETE success)
+    await act(async () => {
+      unmount();
+    });
+
+    const deleteCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "DELETE",
+    );
+    expect(deleteCalls).toHaveLength(1);
+    // The pending edit must NOT be flushed at the just-deleted task
+    const patchCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "PATCH",
+    );
+    expect(patchCalls).toHaveLength(0);
+  });
+
+  it("armed CONFIRM DESTROY? auto-disarms after 3s", async () => {
+    vi.useFakeTimers();
+    wrap();
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("edit-panel-destroy"));
+    });
+    expect(
+      screen.getByTestId("edit-panel-destroy-confirm"),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+    });
+
+    expect(
+      screen.queryByTestId("edit-panel-destroy-confirm"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-panel-destroy")).toBeInTheDocument();
+  });
+
+  it("pointer-leave of the footer disarms a pending destroy", async () => {
+    wrap();
+
+    await userEvent.click(screen.getByTestId("edit-panel-destroy"));
+    expect(
+      screen.getByTestId("edit-panel-destroy-confirm"),
+    ).toBeInTheDocument();
+
+    fireEvent.pointerLeave(screen.getByTestId("edit-panel-foot"));
+
+    expect(
+      screen.queryByTestId("edit-panel-destroy-confirm"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-panel-destroy")).toBeInTheDocument();
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
