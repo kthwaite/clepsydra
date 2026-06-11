@@ -27,6 +27,10 @@ export const queryKeys = {
     recent: (days: number) => ["journal", "recent", days] as const,
   },
 
+  board: {
+    all: ["board"] as const,
+  },
+
   bcl: {
     current: ["bcl"] as const,
   },
