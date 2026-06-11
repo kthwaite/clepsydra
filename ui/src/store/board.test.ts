@@ -111,9 +111,9 @@ describe("useBoardStore persist partialize", () => {
     // Access the persist options via the store's internal config
     const options = (
       useBoardStore as unknown as {
-        persist: { getOptions: () => { partialize?: (s: unknown) => unknown };
-      };
-    }).persist.getOptions();
+        persist: { getOptions: () => { partialize?: (s: unknown) => unknown } };
+      }
+    ).persist.getOptions();
 
     const fullState = {
       mode: "timeline" as const,
