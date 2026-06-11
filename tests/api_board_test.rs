@@ -266,3 +266,211 @@ async fn task_without_status_priority_defaults() {
         tasks[0]["priority"]
     );
 }
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — create task with full fields under a project
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_allocates_code_and_files_under_operation() {
+    let (server, tmp) = setup_server_with(|root| {
+        // projects/op-sig3.md: PROJECT with board: true
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::write(
+            root.join("projects/op-sig3.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000001\n\
+             title: SIGNAL-3 MIGRATION\ntype: PROJECT\nproject: op-sig3\n\
+             board: true\n---\n",
+        )
+        .unwrap();
+
+        // cycles/S-13.md: CYCLE
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "dual-write shim",
+            "project": "op-sig3",
+            "status": "TRIAGE",
+            "priority": "P1",
+            "cycle": "S-13",
+            "checklist": ["shim", "overlap", "verify"]
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["code"], "TSK-0001", "code: {body}");
+    assert_eq!(body["path"], "tasks/op-sig3/TSK-0001.md", "path: {body}");
+    assert_eq!(body["status"], "TRIAGE", "status: {body}");
+    assert_eq!(body["priority"], "P1", "priority: {body}");
+    assert_eq!(body["cycle"], "S-13", "cycle: {body}");
+    assert_eq!(body["title"], "dual-write shim", "title: {body}");
+    let checks = body["checks"].as_array().unwrap();
+    assert_eq!(checks[0], 0, "done should be 0");
+    assert_eq!(checks[1], 3, "total should be 3");
+
+    // Verify file exists on disk with the expected frontmatter
+    let vault_root = tmp.path().join("vault");
+    let file_path = vault_root.join("tasks/op-sig3/TSK-0001.md");
+    assert!(file_path.exists(), "task file should exist on disk");
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(content.contains("type: TASK"), "should have type: TASK");
+    assert!(content.contains("status: TRIAGE"), "should have status: TRIAGE");
+    assert!(
+        content.contains("- [ ] shim"),
+        "should have checklist item 'shim'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — create task without project goes to tasks root
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_without_project_files_at_tasks_root() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "stray" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["code"], "TSK-0001", "code: {body}");
+    assert_eq!(body["path"], "tasks/TSK-0001.md", "path: {body}");
+    assert!(body["project"].is_null(), "project should be null: {body}");
+    assert_eq!(body["status"], "INTAKE", "status should default to INTAKE");
+    assert_eq!(body["priority"], "P2", "priority should default to P2");
+
+    let vault_root = tmp.path().join("vault");
+    assert!(
+        vault_root.join("tasks/TSK-0001.md").exists(),
+        "task file should be at tasks root"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — second create increments code
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn second_create_increments_code() {
+    let (server, _tmp) = setup_server_with(|root| {
+        // Pre-seed an existing task at TSK-0481
+        std::fs::create_dir_all(root.join("tasks/op-sig3")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-sig3/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000003\n\
+             title: EXISTING TASK\ntype: TASK\nproject: op-sig3\n\
+             status: FIELD\npriority: P0\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "next task" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["code"], "TSK-0482",
+        "should allocate TSK-0482 after TSK-0481, got: {body}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — unknown cycle rejected with 400
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_rejects_unknown_cycle() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "x", "cycle": "S-99" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — moves column, clears hold
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_moves_column_and_clears_hold() {
+    let (server, tmp) = setup_server_with(|root| {
+        // cycles/S-13.md
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+
+        // tasks/TSK-0481.md: TASK in FIELD with hold
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0481.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000050\n\
+             title: FREEZE LEGACY SYNC WRITES\ntype: TASK\n\
+             status: FIELD\npriority: P0\ncycle: S-13\n\
+             hold: \"AWAITING X\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    // PATCH the task
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000050")
+        .json(&serde_json::json!({
+            "status": "REVIEW",
+            "hold": null
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["status"], "REVIEW", "status: {body}");
+    assert!(body["hold"].is_null(), "hold should be null: {body}");
+
+    // Verify the board reflects the updated state
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "board should still have 1 task");
+    assert_eq!(tasks[0]["status"], "REVIEW", "board task status: {tasks:?}");
+    assert!(
+        tasks[0]["hold"].is_null(),
+        "board task hold should be null: {tasks:?}"
+    );
+
+    // Verify the file on disk has updated frontmatter
+    let vault_root = tmp.path().join("vault");
+    let file_path = vault_root.join("tasks/TSK-0481.md");
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(
+        content.contains("status: REVIEW"),
+        "file should have status: REVIEW, got:\n{content}"
+    );
+    assert!(
+        !content.contains("hold:"),
+        "file should not have hold field, got:\n{content}"
+    );
+}
