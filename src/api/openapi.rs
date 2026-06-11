@@ -19,7 +19,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Events", description = "Server-sent events stream"),
         (name = "BCL", description = "Brimley-Cocoon Line countdown"),
         (name = "Location", description = "Vault geographic location"),
-        (name = "Uptime", description = "Server uptime")
+        (name = "Uptime", description = "Server uptime"),
+        (name = "Board", description = "TASKING board: read model and task/cycle mutations")
     ),
     paths(
         // Pages
@@ -77,7 +78,13 @@ use utoipa_swagger_ui::SwaggerUi;
         // Location
         crate::api::location::get_location,
         // Uptime
-        crate::api::uptime::get_uptime
+        crate::api::uptime::get_uptime,
+        // Board
+        crate::api::board::read::get_board,
+        crate::api::board::tasks::create_task,
+        crate::api::board::tasks::patch_task,
+        crate::api::board::cycles::create_cycle,
+        crate::api::board::cycles::patch_cycle
     ),
     components(
         schemas(
@@ -146,7 +153,17 @@ use utoipa_swagger_ui::SwaggerUi;
             // Location
             crate::api::location::LocationResponse,
             // Uptime
-            crate::api::uptime::UptimeResponse
+            crate::api::uptime::UptimeResponse,
+            // Board
+            crate::api::board::BoardResponse,
+            crate::api::board::BoardColumn,
+            crate::api::board::BoardOperation,
+            crate::api::board::BoardCycle,
+            crate::api::board::BoardTask,
+            crate::api::board::CreateTaskRequest,
+            crate::api::board::PatchTaskRequest,
+            crate::api::board::CreateCycleRequest,
+            crate::api::board::PatchCycleRequest
         )
     )
 )]
@@ -175,6 +192,72 @@ mod tests {
             spec.paths
                 .paths
                 .contains_key("/api/vault/attachments/{path}")
+        );
+    }
+
+    #[test]
+    fn openapi_includes_board_paths_and_schemas() {
+        let spec = ApiDoc::openapi();
+        // Board paths
+        assert!(
+            spec.paths.paths.contains_key("/api/vault/board"),
+            "expected /api/vault/board in paths"
+        );
+        assert!(
+            spec.paths.paths.contains_key("/api/vault/board/tasks"),
+            "expected /api/vault/board/tasks in paths"
+        );
+        assert!(
+            spec.paths.paths.contains_key("/api/vault/board/tasks/{id}"),
+            "expected /api/vault/board/tasks/{{id}} in paths"
+        );
+        assert!(
+            spec.paths.paths.contains_key("/api/vault/board/cycles"),
+            "expected /api/vault/board/cycles in paths"
+        );
+        assert!(
+            spec.paths
+                .paths
+                .contains_key("/api/vault/board/cycles/{id}"),
+            "expected /api/vault/board/cycles/{{id}} in paths"
+        );
+        // Board schemas
+        let schemas = spec.components.unwrap();
+        assert!(
+            schemas.schemas.contains_key("BoardTask"),
+            "expected BoardTask in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("BoardResponse"),
+            "expected BoardResponse in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("BoardColumn"),
+            "expected BoardColumn in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("BoardCycle"),
+            "expected BoardCycle in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("BoardOperation"),
+            "expected BoardOperation in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("CreateTaskRequest"),
+            "expected CreateTaskRequest in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("PatchTaskRequest"),
+            "expected PatchTaskRequest in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("CreateCycleRequest"),
+            "expected CreateCycleRequest in components"
+        );
+        assert!(
+            schemas.schemas.contains_key("PatchCycleRequest"),
+            "expected PatchCycleRequest in components"
         );
     }
 }

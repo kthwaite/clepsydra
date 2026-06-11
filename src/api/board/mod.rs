@@ -8,9 +8,9 @@
 //! This file owns the router, the (de)serialization DTOs, and the helpers
 //! shared across submodules (validation, code allocation, cycle-code scans).
 
-mod cycles;
-mod read;
-mod tasks;
+pub(crate) mod cycles;
+pub(crate) mod read;
+pub(crate) mod tasks;
 
 use std::sync::Arc;
 

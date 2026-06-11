@@ -33,7 +33,7 @@ use super::{
     )
 )]
 #[allow(clippy::type_complexity)]
-pub(super) async fn get_board(
+pub(crate) async fn get_board(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<BoardResponse>, ApiError> {
     let result = state

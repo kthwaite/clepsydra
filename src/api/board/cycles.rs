@@ -29,7 +29,20 @@ use super::{
 // POST /board/cycles
 // ---------------------------------------------------------------------------
 
-pub(super) async fn create_cycle(
+#[utoipa::path(
+    post,
+    path = "/board/cycles",
+    context_path = "/api/vault",
+    tag = "Board",
+    request_body = CreateCycleRequest,
+    responses(
+        (status = 201, description = "Cycle created", body = BoardCycle),
+        (status = 400, description = "Invalid input", body = crate::api::error::ApiError),
+        (status = 409, description = "Cycle already exists", body = crate::api::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::api::error::ApiError)
+    )
+)]
+pub(crate) async fn create_cycle(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateCycleRequest>,
 ) -> Result<Response, ApiError> {
@@ -151,8 +164,22 @@ pub(super) async fn create_cycle(
 // PATCH /board/cycles/{id}
 // ---------------------------------------------------------------------------
 
+#[utoipa::path(
+    patch,
+    path = "/board/cycles/{id}",
+    context_path = "/api/vault",
+    tag = "Board",
+    params(("id" = String, Path, description = "Cycle UUID")),
+    request_body = PatchCycleRequest,
+    responses(
+        (status = 200, description = "Cycle updated", body = BoardCycle),
+        (status = 400, description = "Invalid input", body = crate::api::error::ApiError),
+        (status = 404, description = "Cycle not found", body = crate::api::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::api::error::ApiError)
+    )
+)]
 #[allow(clippy::too_many_lines)]
-pub(super) async fn patch_cycle(
+pub(crate) async fn patch_cycle(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<PatchCycleRequest>,

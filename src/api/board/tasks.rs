@@ -28,8 +28,20 @@ use super::{
 // POST /board/tasks
 // ---------------------------------------------------------------------------
 
+#[utoipa::path(
+    post,
+    path = "/board/tasks",
+    context_path = "/api/vault",
+    tag = "Board",
+    request_body = CreateTaskRequest,
+    responses(
+        (status = 201, description = "Task created", body = BoardTask),
+        (status = 400, description = "Invalid input", body = crate::api::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::api::error::ApiError)
+    )
+)]
 #[allow(clippy::too_many_lines)]
-pub(super) async fn create_task(
+pub(crate) async fn create_task(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateTaskRequest>,
 ) -> Result<Response, ApiError> {
@@ -206,7 +218,21 @@ pub(super) async fn create_task(
 // PATCH /board/tasks/{id}
 // ---------------------------------------------------------------------------
 
-pub(super) async fn patch_task(
+#[utoipa::path(
+    patch,
+    path = "/board/tasks/{id}",
+    context_path = "/api/vault",
+    tag = "Board",
+    params(("id" = String, Path, description = "Task UUID")),
+    request_body = PatchTaskRequest,
+    responses(
+        (status = 200, description = "Task updated", body = BoardTask),
+        (status = 400, description = "Invalid input", body = crate::api::error::ApiError),
+        (status = 404, description = "Task not found", body = crate::api::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::api::error::ApiError)
+    )
+)]
+pub(crate) async fn patch_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<PatchTaskRequest>,
