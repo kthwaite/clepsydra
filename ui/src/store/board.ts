@@ -33,9 +33,7 @@ interface BoardActions {
   }) => void;
   closeTaskModal: () => void;
   openCycleModal: (
-    modal:
-      | { kind: "new" }
-      | { kind: "open" | "seal"; cycleId: string },
+    modal: { kind: "new" } | { kind: "open" | "seal"; cycleId: string },
   ) => void;
   closeCycleModal: () => void;
 }
@@ -65,6 +63,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
     }),
     {
       name: "clepsydra.board",
+      version: 1,
       partialize: (state) => ({
         mode: state.mode,
         opFilter: state.opFilter,

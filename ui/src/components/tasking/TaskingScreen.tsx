@@ -1,12 +1,87 @@
+import { useMemo } from "react";
+import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
+import { useBoardStore } from "#/store/board";
+import { BoardHeader } from "./BoardHeader";
+import { ScopeRail } from "./ScopeRail";
 
-/** Placeholder for the Tasking board screen — Task 8 builds this out fully. */
+// ── filterTasks ──────────────────────────────────────────────────────────────
+
+/**
+ * Filter tasks by the active opFilter value:
+ *  - "ALL"     → return all tasks
+ *  - "UNFILED" → tasks whose project is null/empty OR doesn't match any
+ *                operation's `project` field
+ *  - <code>    → tasks whose project === the operation's `project` field
+ *                matching operations.find(op => op.project === opFilter)
+ *
+ * Note: opFilter is stored as op.project (not op.code), except for the
+ * sentinels "ALL" and "UNFILED".
+ */
+export function filterTasks(
+  tasks: BoardTask[],
+  operations: BoardOperation[],
+  opFilter: string,
+): BoardTask[] {
+  if (opFilter === "ALL") return tasks;
+
+  const knownProjects = new Set(
+    operations.map((op) => op.project).filter(Boolean),
+  );
+
+  if (opFilter === "UNFILED") {
+    return tasks.filter((t) => !t.project || !knownProjects.has(t.project));
+  }
+
+  // Specific operation — filter by project slug
+  return tasks.filter((t) => t.project === opFilter);
+}
+
+// ── body placeholders ─────────────────────────────────────────────────────────
+
+function BodyPlaceholder({ label }: { label: string }) {
+  return (
+    <div className="cl-mono flex h-full items-center justify-center text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+      {label} VIEW — COMING SOON
+    </div>
+  );
+}
+
+// ── TaskingScreen ─────────────────────────────────────────────────────────────
+
 export function TaskingScreen() {
   const { data, isLoading, isError } = useBoard();
+  const { mode, opFilter, railOpen } = useBoardStore();
+
+  const { operations, cycles, tasks, activeOp, visibleTasks } = useMemo(() => {
+    if (!data) {
+      return {
+        operations: [],
+        cycles: [],
+        tasks: [],
+        activeOp: null,
+        visibleTasks: [],
+      };
+    }
+
+    const filtered = filterTasks(data.tasks, data.operations, opFilter);
+    const active =
+      opFilter !== "ALL" && opFilter !== "UNFILED"
+        ? (data.operations.find((op) => op.project === opFilter) ?? null)
+        : null;
+
+    return {
+      operations: data.operations,
+      cycles: data.cycles,
+      tasks: data.tasks,
+      activeOp: active,
+      visibleTasks: filtered,
+    };
+  }, [data, opFilter]);
 
   if (isLoading) {
     return (
-      <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-ink-mute">
+      <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-[var(--ink-mute)]">
         LOADING
       </div>
     );
@@ -21,13 +96,33 @@ export function TaskingScreen() {
   }
 
   return (
-    <div className="cl-mono flex h-full flex-col items-center justify-center gap-2 text-ink-mute">
-      <span className="text-[13px] uppercase tracking-[0.22em] text-ink">
-        TASKING
-      </span>
-      <span className="text-[10px] tracking-[0.14em] opacity-60">
-        {data.tasks.length} tasks · {data.cycles.length} cycles
-      </span>
+    <div className="relative flex h-full overflow-hidden">
+      {/* Left scope rail — renders popout button when collapsed */}
+      {railOpen ? (
+        <div className="w-[232px] flex-none">
+          <ScopeRail operations={operations} cycles={cycles} tasks={tasks} />
+        </div>
+      ) : (
+        <ScopeRail operations={operations} cycles={cycles} tasks={tasks} />
+      )}
+
+      {/* Main — always flex-1, always full width when rail is collapsed */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <BoardHeader
+          operations={operations}
+          cycles={cycles}
+          tasks={visibleTasks}
+          activeOp={activeOp}
+        />
+
+        {/* Body router — Tasks 9-12 replace each placeholder */}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          {mode === "card" && <BodyPlaceholder label="CARD" />}
+          {mode === "backlog" && <BodyPlaceholder label="BACKLOG" />}
+          {mode === "cycle" && <BodyPlaceholder label="CYCLE" />}
+          {mode === "timeline" && <BodyPlaceholder label="TIMELINE" />}
+        </div>
+      </div>
     </div>
   );
 }
