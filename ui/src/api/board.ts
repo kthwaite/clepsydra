@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "#/api/schema";
-import { queryKeys } from "./keys";
+import { invalidatePageStructure, queryKeys } from "./keys";
 
 export type BoardTask = components["schemas"]["BoardTask"];
 export type BoardCycle = components["schemas"]["BoardCycle"];
@@ -151,6 +151,33 @@ export function usePatchTask() {
       }
     },
     onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.board.all }),
+  });
+}
+
+/**
+ * Delete a task by its vault page path.
+ * Uses DELETE /api/vault/pages/{path} (force=true to skip backlink check).
+ * Invalidates the board query + page structure on success.
+ */
+export function useDeleteTask() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, { path: string }>({
+    mutationFn: async ({ path }) => {
+      const encoded = path
+        .split("/")
+        .map((seg) => encodeURIComponent(seg))
+        .join("/");
+      const res = await fetch(`/api/vault/pages/${encoded}?force=true`, {
+        method: "DELETE",
+      });
+      if (!res.ok && res.status !== 204) {
+        throw new Error("Failed to delete task");
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.board.all });
+      invalidatePageStructure(qc);
+    },
   });
 }
 

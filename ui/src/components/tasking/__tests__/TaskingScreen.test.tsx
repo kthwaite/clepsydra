@@ -214,3 +214,60 @@ describe("TaskingScreen — kanban column + project preset", () => {
     expect(modal).not.toHaveProperty("project");
   });
 });
+
+// ── integration: modal and panel mounting ────────────────────────────────────
+
+describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
+  it("mounts NewTaskModal when taskModal is non-null", async () => {
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    useBoardStore.setState({ taskModal: { status: "INTAKE" } });
+
+    // The modal should appear and contain the title text
+    const modal = await screen.findByTestId("new-task-modal");
+    expect(modal).toBeInTheDocument();
+    expect(modal).toHaveTextContent("NEW TASKING");
+  });
+
+  it("does not mount NewTaskModal when taskModal is null", async () => {
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
+  });
+
+  it("mounts TaskEditPanel when editTaskId matches a task in board data", async () => {
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    // t1 exists in BOARD_FIXTURE
+    useBoardStore.setState({ editTaskId: "t1" });
+
+    // Panel should appear with the task code
+    expect(await screen.findByTestId("edit-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("edit-panel-code")).toHaveTextContent("TSK-0001");
+  });
+
+  it("does not mount TaskEditPanel when editTaskId is null", async () => {
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
+  });
+
+  it("does not mount TaskEditPanel when editTaskId does not match any task", async () => {
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    useBoardStore.setState({ editTaskId: "ghost-task" });
+
+    // Panel should NOT appear
+    expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
+  });
+});
