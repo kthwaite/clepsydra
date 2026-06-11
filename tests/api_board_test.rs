@@ -325,7 +325,10 @@ async fn create_task_allocates_code_and_files_under_operation() {
     assert!(file_path.exists(), "task file should exist on disk");
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert!(content.contains("type: TASK"), "should have type: TASK");
-    assert!(content.contains("status: TRIAGE"), "should have status: TRIAGE");
+    assert!(
+        content.contains("status: TRIAGE"),
+        "should have status: TRIAGE"
+    );
     assert!(
         content.contains("- [ ] shim"),
         "should have checklist item 'shim'"
@@ -462,8 +465,7 @@ async fn patch_task_backlog_cycle_clears_like_null() {
     );
 
     // File frontmatter must no longer carry the cycle key
-    let content =
-        std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
     assert!(
         !content.contains("cycle:"),
         "file should not have cycle field, got:\n{content}"
@@ -522,11 +524,13 @@ async fn create_task_persists_all_optional_fields() {
     let tags = body["tags"].as_array().unwrap();
     let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
     assert!(tag_strs.contains(&"ops"), "tags should contain ops: {body}");
-    assert!(tag_strs.contains(&"sync"), "tags should contain sync: {body}");
+    assert!(
+        tag_strs.contains(&"sync"),
+        "tags should contain sync: {body}"
+    );
 
     // Disk frontmatter carries all fields
-    let content =
-        std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
     assert!(content.contains("assignee: kit"), "frontmatter:\n{content}");
     assert!(content.contains("estimate: 3d"), "frontmatter:\n{content}");
     assert!(
@@ -623,8 +627,7 @@ async fn patch_task_project_clear_moves_to_tasks_root() {
         !vault_root.join("tasks/op-a/TSK-0001.md").exists(),
         "file should no longer exist under tasks/op-a/"
     );
-    let content =
-        std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
     assert!(
         !content.contains("project:"),
         "frontmatter should not carry project, got:\n{content}"
@@ -655,11 +658,13 @@ async fn patch_task_updates_title_tags_and_link() {
     let tags = body["tags"].as_array().unwrap();
     let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
     assert!(tag_strs.contains(&"ops"), "tags should contain ops: {body}");
-    assert!(tag_strs.contains(&"sync"), "tags should contain sync: {body}");
+    assert!(
+        tag_strs.contains(&"sync"),
+        "tags should contain sync: {body}"
+    );
 
     // Disk frontmatter reflects all three
-    let content =
-        std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
     assert!(
         content.contains("title: thaw legacy sync writes"),
         "frontmatter:\n{content}"
@@ -773,7 +778,10 @@ async fn create_cycle_defaults_code_and_state() {
 
     let body: serde_json::Value = res.json();
     assert_eq!(body["code"], "S-14", "code: {body}");
-    assert_eq!(body["state"], "PLANNED", "state should default to PLANNED: {body}");
+    assert_eq!(
+        body["state"], "PLANNED",
+        "state should default to PLANNED: {body}"
+    );
     assert_eq!(body["path"], "cycles/S-14.md", "path: {body}");
     assert_eq!(body["label"], "CYCLE 14", "label: {body}");
     assert_eq!(body["start"], "2026-04-20", "start: {body}");
@@ -784,9 +792,18 @@ async fn create_cycle_defaults_code_and_state() {
     let file_path = vault_root.join("cycles/S-14.md");
     assert!(file_path.exists(), "cycle file should exist on disk");
     let content = std::fs::read_to_string(&file_path).unwrap();
-    assert!(content.contains("type: CYCLE"), "should have type: CYCLE, got:\n{content}");
-    assert!(content.contains("state: PLANNED"), "should have state: PLANNED, got:\n{content}");
-    assert!(content.contains("title: CYCLE 14"), "should have title, got:\n{content}");
+    assert!(
+        content.contains("type: CYCLE"),
+        "should have type: CYCLE, got:\n{content}"
+    );
+    assert!(
+        content.contains("state: PLANNED"),
+        "should have state: PLANNED, got:\n{content}"
+    );
+    assert!(
+        content.contains("title: CYCLE 14"),
+        "should have title, got:\n{content}"
+    );
     assert!(
         content.contains("2026-04-20"),
         "should have start date, got:\n{content}"

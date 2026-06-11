@@ -1,0 +1,370 @@
+//! Cycle mutations: `POST /board/cycles` and `PATCH /board/cycles/{id}`,
+//! including the seal-with-carryover flow.
+
+use std::fs;
+use std::io::Write;
+use std::sync::Arc;
+
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use chrono::Utc;
+use rusqlite::params;
+
+use crate::api::AppState;
+use crate::api::error::ApiError;
+use crate::api::events::SyncNotification;
+use crate::vault::kind::Kind;
+use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::path::VaultPath;
+
+use super::read::build_board_cycle_dto;
+use super::{
+    BoardCycle, CreateCycleRequest, PatchCycleRequest, ensure_cycle_exists, extra_str,
+    fetch_cycle_codes, next_code_number, path_stem,
+};
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles
+// ---------------------------------------------------------------------------
+
+pub(super) async fn create_cycle(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateCycleRequest>,
+) -> Result<Response, ApiError> {
+    // 1. Validate state (only PLANNED or ACTIVE allowed at creation)
+    let state_str = body.state.as_deref().unwrap_or("PLANNED");
+    match state_str {
+        "PLANNED" | "ACTIVE" => {}
+        "CLOSED" => {
+            return Err(ApiError::bad_request(
+                "state 'CLOSED' is not valid at cycle creation time",
+            ));
+        }
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "unknown state: '{other}'; valid values at creation: PLANNED, ACTIVE"
+            )));
+        }
+    }
+
+    // 2. Determine code: explicit (must not collide) or auto-generated
+    let code: String = match body.code {
+        Some(explicit) => {
+            let codes = fetch_cycle_codes(&state).await?;
+            if codes.iter().any(|c| c == &explicit) {
+                return Err(ApiError::conflict(format!(
+                    "cycle already exists with code: '{explicit}'"
+                )));
+            }
+            explicit
+        }
+        None => {
+            // Auto-generate: max S-(\d+) among existing CYCLE stems, +1 (min 1)
+            let next_num = next_code_number(&state, "CYCLE", "S-").await?;
+            format!("S-{next_num}")
+        }
+    };
+
+    // 3. Build vault path: cycles/<CODE>.md
+    let vault_path_str = format!("cycles/{code}.md");
+    let vault_path = VaultPath::new(&vault_path_str)
+        .map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let abs_path = state.vault.resolve(&vault_path);
+
+    // Create parent directory
+    if let Some(parent) = abs_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+    }
+
+    // 4. Build PageMeta
+    let mut meta = PageMeta::new();
+    meta.title = Some(body.label.clone());
+    meta.kind = Some(Kind::Cycle);
+
+    meta.extra.insert(
+        "state".to_string(),
+        serde_yaml::Value::String(state_str.to_string()),
+    );
+    meta.extra.insert(
+        "start".to_string(),
+        serde_yaml::Value::String(body.start.clone()),
+    );
+    meta.extra.insert(
+        "end".to_string(),
+        serde_yaml::Value::String(body.end.clone()),
+    );
+    if let Some(ref g) = body.goal {
+        meta.extra
+            .insert("goal".to_string(), serde_yaml::Value::String(g.clone()));
+    }
+
+    // 5. Atomic create_new write
+    let content = write_page_content(&meta, "");
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&abs_path)
+    {
+        Ok(mut file) => {
+            file.write_all(content.as_bytes())
+                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(ApiError::conflict(format!(
+                "cycle file already exists: {vault_path_str}"
+            )));
+        }
+        Err(e) => {
+            return Err(ApiError::internal(format!("failed to create file: {e}")));
+        }
+    }
+
+    // 6. Re-index + resolve links + broadcast
+    {
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    }
+
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: vec![vault_path_str.clone()],
+        removed: vec![],
+    });
+
+    // 7. Build and return BoardCycle DTO
+    let cycle_dto = build_board_cycle_dto(&state, &vault_path).await?;
+    Ok((StatusCode::CREATED, Json(cycle_dto)).into_response())
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id}
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_lines)]
+pub(super) async fn patch_cycle(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<PatchCycleRequest>,
+) -> Result<Json<BoardCycle>, ApiError> {
+    // 1. Validate state if present
+    let new_state = if let Some(ref s) = body.state {
+        match s.as_str() {
+            "PLANNED" | "ACTIVE" | "CLOSED" => {}
+            other => {
+                return Err(ApiError::bad_request(format!(
+                    "unknown state: '{other}'; valid values: PLANNED, ACTIVE, CLOSED"
+                )));
+            }
+        }
+        Some(s.as_str())
+    } else {
+        None
+    };
+
+    let is_closing = new_state == Some("CLOSED");
+
+    // 2. Validate carry_to: only meaningful when closing; must be "BACKLOG"
+    // or an existing CYCLE stem (self-reference is rejected below once this
+    // cycle's own code is known).
+    if let Some(ref carry) = body.carry_to {
+        if !is_closing {
+            return Err(ApiError::bad_request(
+                "carry_to is only valid when state is CLOSED",
+            ));
+        }
+        if carry != "BACKLOG" {
+            ensure_cycle_exists(&state, carry).await?;
+        }
+    }
+
+    // 3. Resolve cycle by UUID — must be CYCLE kind
+    let id_clone = id.clone();
+    let page_path = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
+            conn.query_row(
+                "SELECT path FROM pages WHERE id = ?1 AND kind = 'CYCLE'",
+                params![id_clone],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("cycle not found with id: {id}")))?;
+
+    let vault_path = VaultPath::new(&page_path)
+        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let abs_path = state.vault.resolve(&vault_path);
+    if !abs_path.exists() {
+        return Err(ApiError::not_found(format!(
+            "cycle file missing: {page_path}"
+        )));
+    }
+
+    // 4. Load the cycle file
+    let page = Page::from_file(&abs_path, vault_path.clone())
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+    let mut meta = page.meta;
+    let page_body = page.body;
+
+    // Derive this cycle's code from its path stem (same canonical derivation
+    // as build_board_cycle_dto and the GET /board aggregation).
+    let cycle_code = path_stem(&page_path).to_string();
+
+    // Extra guard: carry_to must not be the same cycle (self-reference)
+    if matches!(&body.carry_to, Some(carry) if carry != "BACKLOG" && carry == &cycle_code) {
+        return Err(ApiError::bad_request(
+            "carry_to cannot reference the cycle being closed",
+        ));
+    }
+
+    // 5. Apply cycle field mutations
+    if let Some(s) = new_state {
+        meta.extra.insert(
+            "state".to_string(),
+            serde_yaml::Value::String(s.to_string()),
+        );
+    }
+    if let Some(ref g) = body.goal {
+        meta.extra
+            .insert("goal".to_string(), serde_yaml::Value::String(g.clone()));
+    }
+    if let Some(ref s) = body.start {
+        meta.extra
+            .insert("start".to_string(), serde_yaml::Value::String(s.clone()));
+    }
+    if let Some(ref e) = body.end {
+        meta.extra
+            .insert("end".to_string(), serde_yaml::Value::String(e.clone()));
+    }
+
+    // 6. Bump updated_at and write cycle file
+    meta.updated_at = Some(Utc::now());
+    let content = write_page_content(&meta, &page_body);
+    fs::write(&abs_path, &content)
+        .map_err(|e| ApiError::internal(format!("failed to write cycle file: {e}")))?;
+
+    // Re-index the cycle page itself
+    {
+        let vp = vault_path.clone();
+        state
+            .index
+            .with_index(move |index, vault| {
+                index.index_page(vault, &vp)?;
+                index.resolve_links_for_page(&vp)?;
+                Ok::<_, crate::vault::index::IndexError>(())
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    }
+
+    // 7. Carryover: only when closing AND carry_to is set
+    //
+    // Find all TASK pages with extra.cycle == this cycle's code AND status != "SEALED".
+    // For each, rewrite frontmatter (cycle removed for BACKLOG, or set to target code),
+    // bump updated_at, write, and reindex.
+    //
+    // No cross-file transaction — acceptable by design per ADR 0001 reconcile posture.
+    // Failure of an individual rewrite is surfaced as 500 (first error wins) but the
+    // cycle page itself has already been updated.
+    let mut upserted_paths: Vec<String> = vec![page_path.clone()];
+
+    if is_closing && let Some(ref carry) = body.carry_to {
+        // Collect task paths to rewrite. One statement fetches path +
+        // meta_json for all TASK pages; the cycle/status filter runs in Rust.
+        let cycle_code_for_query = cycle_code.clone();
+        let task_paths: Vec<String> = state
+            .index
+            .with_index(move |index, _vault| {
+                let conn = index.connection();
+                let mut stmt =
+                    conn.prepare("SELECT path, meta_json FROM pages WHERE kind = 'TASK'")?;
+                let rows: Vec<(String, String)> = stmt
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect::<Result<_, _>>()?;
+
+                let matched = rows
+                    .into_iter()
+                    .filter(|(_, meta_json)| {
+                        let v: serde_json::Value =
+                            serde_json::from_str(meta_json).unwrap_or(serde_json::Value::Null);
+                        extra_str(&v, "cycle").as_deref() == Some(cycle_code_for_query.as_str())
+                            && extra_str(&v, "status").unwrap_or_default() != "SEALED"
+                    })
+                    .map(|(path, _)| path)
+                    .collect();
+                Ok::<_, rusqlite::Error>(matched)
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+        // Rewrite each matched task
+        for task_path in task_paths {
+            let tvp = VaultPath::new(&task_path)
+                .map_err(|e| ApiError::internal(format!("invalid task path: {e}")))?;
+            let tabs_path = state.vault.resolve(&tvp);
+            if !tabs_path.exists() {
+                continue; // stale index entry — skip
+            }
+            let task_page = Page::from_file(&tabs_path, tvp.clone())
+                .map_err(|e| ApiError::internal(format!("failed to read task: {e}")))?;
+            let mut task_meta = task_page.meta;
+            let task_body = task_page.body;
+
+            if carry == "BACKLOG" {
+                task_meta.extra.remove("cycle");
+            } else {
+                task_meta.extra.insert(
+                    "cycle".to_string(),
+                    serde_yaml::Value::String(carry.clone()),
+                );
+            }
+            task_meta.updated_at = Some(Utc::now());
+
+            let task_content = write_page_content(&task_meta, &task_body);
+            fs::write(&tabs_path, &task_content).map_err(|e| {
+                ApiError::internal(format!("failed to write task {task_path}: {e}"))
+            })?;
+
+            // Re-index this task
+            let tvp2 = tvp.clone();
+            state
+                .index
+                .with_index(move |index, vault| {
+                    index.index_page(vault, &tvp2)?;
+                    index.resolve_links_for_page(&tvp2)?;
+                    Ok::<_, crate::vault::index::IndexError>(())
+                })
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+
+            upserted_paths.push(task_path);
+        }
+    }
+
+    // 8. Broadcast once with all modified paths
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: upserted_paths,
+        removed: vec![],
+    });
+
+    // 9. Return updated BoardCycle DTO
+    let cycle_dto = build_board_cycle_dto(&state, &vault_path).await?;
+    Ok(Json(cycle_dto))
+}
