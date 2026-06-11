@@ -742,3 +742,294 @@ async fn patch_task_moves_column_and_clears_hold() {
         "file should not have hold field, got:\n{content}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — create cycle with auto-generated code + default state
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_cycle_defaults_code_and_state() {
+    let (server, tmp) = setup_server_with(|root| {
+        // seed an existing cycle S-13
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "CYCLE 14",
+            "start": "2026-04-20",
+            "end": "2026-04-26"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["code"], "S-14", "code: {body}");
+    assert_eq!(body["state"], "PLANNED", "state should default to PLANNED: {body}");
+    assert_eq!(body["path"], "cycles/S-14.md", "path: {body}");
+    assert_eq!(body["label"], "CYCLE 14", "label: {body}");
+    assert_eq!(body["start"], "2026-04-20", "start: {body}");
+    assert_eq!(body["end"], "2026-04-26", "end: {body}");
+
+    // File on disk must have correct frontmatter
+    let vault_root = tmp.path().join("vault");
+    let file_path = vault_root.join("cycles/S-14.md");
+    assert!(file_path.exists(), "cycle file should exist on disk");
+    let content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(content.contains("type: CYCLE"), "should have type: CYCLE, got:\n{content}");
+    assert!(content.contains("state: PLANNED"), "should have state: PLANNED, got:\n{content}");
+    assert!(content.contains("title: CYCLE 14"), "should have title, got:\n{content}");
+    assert!(
+        content.contains("2026-04-20"),
+        "should have start date, got:\n{content}"
+    );
+    assert!(
+        content.contains("2026-04-26"),
+        "should have end date, got:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — explicit code and state honored
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_cycle_honors_explicit_code_and_state() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-20",
+            "label": "CYCLE 20",
+            "start": "2026-06-01",
+            "end": "2026-06-07",
+            "state": "ACTIVE",
+            "goal": "finish the thing"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["code"], "S-20", "code: {body}");
+    assert_eq!(body["state"], "ACTIVE", "state: {body}");
+    assert_eq!(body["goal"], "finish the thing", "goal: {body}");
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — duplicate code yields 409
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_cycle_rejects_duplicate_code() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000002\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+    });
+
+    // Explicit code that already exists
+    let res = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-13",
+            "label": "CYCLE 13 DUP",
+            "start": "2026-04-13",
+            "end": "2026-04-19"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CONFLICT);
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — seal cycle, carry non-sealed tasks to BACKLOG
+// ---------------------------------------------------------------------------
+
+/// Seed two cycles S-13 (ACTIVE) + S-14 (PLANNED) plus two tasks in S-13.
+/// Returns (server, tmp, cycle_uuid_s13, task_sealed_uuid, task_field_uuid).
+fn setup_cycle_with_tasks() -> (TestServer, TempDir) {
+    setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        // S-13 ACTIVE
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000001\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n\
+             start: \"2026-04-13\"\nend: \"2026-04-19\"\n---\n",
+        )
+        .unwrap();
+        // S-14 PLANNED
+        std::fs::write(
+            root.join("cycles/S-14.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000002\n\
+             title: CYCLE 14\ntype: CYCLE\nstate: PLANNED\n\
+             start: \"2026-04-20\"\nend: \"2026-04-26\"\n---\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        // SEALED task in S-13 — should stay in S-13 after carryover
+        std::fs::write(
+            root.join("tasks/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000001\n\
+             title: Done Task\ntype: TASK\nstatus: SEALED\npriority: P2\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+        // FIELD task in S-13 — should be carried over
+        std::fs::write(
+            root.join("tasks/TSK-0002.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000002\n\
+             title: Open Task\ntype: TASK\nstatus: FIELD\npriority: P1\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+    })
+}
+
+#[tokio::test]
+async fn seal_cycle_routes_carryover_to_backlog() {
+    let (server, tmp) = setup_cycle_with_tasks();
+
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({
+            "state": "CLOSED",
+            "carry_to": "BACKLOG"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["state"], "CLOSED", "cycle state: {body}");
+
+    let vault_root = tmp.path().join("vault");
+
+    // FIELD task (TSK-0002): cycle key should be REMOVED
+    let field_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
+    assert!(
+        !field_content.contains("cycle:"),
+        "FIELD task should have cycle removed, got:\n{field_content}"
+    );
+
+    // SEALED task (TSK-0001): cycle should still be S-13
+    let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        sealed_content.contains("cycle: S-13"),
+        "SEALED task should keep cycle S-13, got:\n{sealed_content}"
+    );
+
+    // GET /board should reflect cycle null for the FIELD task
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    let field_task = tasks
+        .iter()
+        .find(|t| t["code"] == "TSK-0002")
+        .expect("TSK-0002 should exist in board");
+    assert!(
+        field_task["cycle"].is_null(),
+        "board: FIELD task cycle should be null after carryover to BACKLOG, got: {}",
+        field_task["cycle"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — seal with carry_to next cycle
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn seal_cycle_can_carry_to_next_cycle() {
+    let (server, tmp) = setup_cycle_with_tasks();
+
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({
+            "state": "CLOSED",
+            "carry_to": "S-14"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let vault_root = tmp.path().join("vault");
+
+    // FIELD task: cycle should now be S-14
+    let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
+    assert!(
+        content.contains("cycle: S-14"),
+        "FIELD task should now reference S-14, got:\n{content}"
+    );
+
+    // SEALED task: cycle should still be S-13
+    let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        sealed_content.contains("cycle: S-13"),
+        "SEALED task should keep S-13, got:\n{sealed_content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — seal without carry_to leaves tasks alone
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn seal_cycle_without_carry_leaves_tasks() {
+    let (server, tmp) = setup_cycle_with_tasks();
+
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({ "state": "CLOSED" }))
+        .await;
+    res.assert_status_ok();
+
+    let vault_root = tmp.path().join("vault");
+
+    // FIELD task: cycle should still be S-13
+    let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
+    assert!(
+        content.contains("cycle: S-13"),
+        "without carry_to, FIELD task cycle should remain S-13, got:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/cycles/{id} — validation: bogus state + unknown carry target
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_cycle_rejects_bad_state_and_unknown_carry_target() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000001\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+    });
+
+    // Bad state value
+    let res = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({ "state": "BOGUS" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+    // Unknown carry_to cycle
+    let res2 = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({ "state": "CLOSED", "carry_to": "S-99" }))
+        .await;
+    res2.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
