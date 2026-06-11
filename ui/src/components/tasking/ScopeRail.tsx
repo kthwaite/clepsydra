@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
@@ -43,6 +44,8 @@ interface ScopeRailProps {
 }
 
 export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
+  // Field selectors (useShallow) — the rail must not re-render on ephemeral
+  // modal/edit state changes elsewhere in the store.
   const {
     railOpen,
     opFilter,
@@ -54,7 +57,20 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
     setMode,
     openTaskModal,
     openCycleModal,
-  } = useBoardStore();
+  } = useBoardStore(
+    useShallow((s) => ({
+      railOpen: s.railOpen,
+      opFilter: s.opFilter,
+      mode: s.mode,
+      cycleSel: s.cycleSel,
+      setRailOpen: s.setRailOpen,
+      setOpFilter: s.setOpFilter,
+      setCycleSel: s.setCycleSel,
+      setMode: s.setMode,
+      openTaskModal: s.openTaskModal,
+      openCycleModal: s.openCycleModal,
+    })),
+  );
 
   // Derive task counts
   const knownProjects = new Set(

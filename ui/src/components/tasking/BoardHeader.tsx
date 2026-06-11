@@ -1,47 +1,8 @@
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
+import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
 import { HealthDot, MODES } from "./board-constants";
-
-// ── Sparkline ────────────────────────────────────────────────────────────────
-
-/** Minimal inline SVG polyline sparkline. No external dep. */
-function Sparkline({
-  data,
-  width,
-  height,
-  color,
-}: {
-  data: number[];
-  width: number;
-  height: number;
-  color: string;
-}) {
-  if (data.length < 2) return null;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const step = width / (data.length - 1);
-  const pts = data
-    .map((v, i) => {
-      const x = i * step;
-      const y = height - ((v - min) / range) * (height - 2) - 1;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-
-  return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      fill="none"
-      style={{ display: "block" }}
-    >
-      <polyline points={pts} stroke={color} strokeWidth="1.5" fill="none" />
-    </svg>
-  );
-}
 
 // ── mode glyphs ──────────────────────────────────────────────────────────────
 
@@ -163,6 +124,8 @@ function ModeGlyph({ gl }: { gl: string }) {
 
 // ── sparkline data (hardcoded per prototype) ─────────────────────────────────
 
+// Synthetic placeholder data per plan decision 11 — real 14d seal-rate
+// telemetry is a later task; the prototype hardcodes this exact series.
 const SEAL_SPARKLINE = [1, 2, 1, 3, 2, 4, 2, 3, 5, 3, 4, 2, 5, 4];
 
 // ── BoardHeader ──────────────────────────────────────────────────────────────
@@ -184,7 +147,9 @@ export function BoardHeader({
   activeOp,
   onOpenDossier,
 }: BoardHeaderProps) {
-  const { mode, setMode } = useBoardStore();
+  // Field selectors — the shell must not re-render on ephemeral modal state.
+  const mode = useBoardStore((s) => s.mode);
+  const setMode = useBoardStore((s) => s.setMode);
 
   // Stats
   const open = tasks.filter((t) => t.status !== "SEALED").length;
@@ -285,11 +250,11 @@ export function BoardHeader({
             <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               SEAL RATE 14d
             </span>
-            <Sparkline
+            <Spark
               data={SEAL_SPARKLINE}
               width={96}
               height={26}
-              color="var(--cool)"
+              accent="var(--cool)"
             />
           </div>
         </div>

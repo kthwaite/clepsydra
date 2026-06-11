@@ -53,7 +53,10 @@ function BodyPlaceholder({ label }: { label: string }) {
 
 export function TaskingScreen() {
   const { data, isLoading, isError } = useBoard();
-  const { mode, opFilter, railOpen } = useBoardStore();
+  // Field selectors — the shell must not re-render on ephemeral modal state.
+  const mode = useBoardStore((s) => s.mode);
+  const opFilter = useBoardStore((s) => s.opFilter);
+  const railOpen = useBoardStore((s) => s.railOpen);
 
   const { operations, cycles, tasks, activeOp, visibleTasks } = useMemo(() => {
     if (!data) {

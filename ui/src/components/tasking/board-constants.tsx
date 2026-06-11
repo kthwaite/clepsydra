@@ -74,12 +74,12 @@ export function PriChip({ pri }: { pri: string }) {
 
 /**
  * 6×6 square pip coloured by board status column.
- * Colors from .bk-statepip.* in styles-board.css:
+ * Colors from .bk-statepip.* in styles-board.css, in Vessel tokens:
  *   INTAKE  → ink-faint (default/empty)
  *   TRIAGE  → ink-2
  *   FIELD   → cool (cyan)
  *   REVIEW  → warn (amber)
- *   SEALED  → ink-4 (very muted)
+ *   SEALED  → ink-faint (very muted)
  */
 export function StatePip({ col }: { col: string }) {
   const color =
@@ -101,7 +101,7 @@ export function StatePip({ col }: { col: string }) {
 }
 
 /**
- * 7×7 health dot: GREEN=cool, AMBER=warn, RED=hot (blinking), else ink-3.
+ * 7×7 health dot: GREEN=cool, AMBER=warn, RED=hot (blinking), else ink-mute.
  * Matches .op-dot in styles-board.css.
  */
 export function HealthDot({ health }: { health: string }) {
