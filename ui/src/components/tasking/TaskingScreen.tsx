@@ -8,6 +8,7 @@ import { opKey } from "./board-constants";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { ScopeRail } from "./ScopeRail";
+import { TimelineView } from "./TimelineView";
 
 // ── filterTasks ──────────────────────────────────────────────────────────────
 
@@ -40,16 +41,6 @@ export function filterTasks(
 
   // Specific operation — filter by project slug
   return tasks.filter((t) => t.project === opFilter);
-}
-
-// ── body placeholders ─────────────────────────────────────────────────────────
-
-function BodyPlaceholder({ label }: { label: string }) {
-  return (
-    <div className="cl-mono flex h-full items-center justify-center text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-      {label} VIEW — COMING SOON
-    </div>
-  );
 }
 
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
@@ -148,7 +139,19 @@ export function TaskingScreen({
               activeProject={activeOp?.project ?? undefined}
             />
           )}
-          {mode === "timeline" && <BodyPlaceholder label="TIMELINE" />}
+          {mode === "timeline" && (
+            <TimelineView
+              tasks={visibleTasks}
+              operations={
+                opFilter === "ALL" || opFilter === "UNFILED"
+                  ? operations
+                  : activeOp
+                    ? [activeOp]
+                    : []
+              }
+              cycles={cycles}
+            />
+          )}
         </div>
       </div>
     </div>
