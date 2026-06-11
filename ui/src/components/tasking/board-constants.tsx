@@ -70,8 +70,6 @@ export const MODES = [
   { id: "timeline", label: "TIMELINE", gl: "tl" },
 ] as const;
 
-export type ModeId = (typeof MODES)[number]["id"];
-
 // ── micro-chip components ────────────────────────────────────────────────────
 
 /** Small coloured priority badge: P0=hot P1=warn P2=cool P3=ink-mute */

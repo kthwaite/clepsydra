@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useBoardStore } from "#/store/board";
@@ -67,6 +67,17 @@ export function TaskingScreen({
   const taskModal = useBoardStore((s) => s.taskModal);
   const cycleModal = useBoardStore((s) => s.cycleModal);
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
+  const setOpFilter = useBoardStore((s) => s.setOpFilter);
+
+  // Self-heal a stale persisted opFilter: if the filter names an op that no
+  // longer exists (renamed/deleted since last session), the board would render
+  // silently empty — reset to ALL once board data is available.
+  useEffect(() => {
+    if (!data || opFilter === "ALL" || opFilter === "UNFILED") return;
+    if (!data.operations.some((op) => opKey(op) === opFilter)) {
+      setOpFilter("ALL");
+    }
+  }, [data, opFilter, setOpFilter]);
 
   const { operations, cycles, tasks, activeOp, visibleTasks, editTask } =
     useMemo(() => {
@@ -154,6 +165,7 @@ export function TaskingScreen({
             cycles={cycles}
             tasks={visibleTasks}
             activeOp={activeOp}
+            onOpenDossier={onOpenDossier}
           />
 
           {/* Body router — Tasks 9-12 replace each placeholder */}

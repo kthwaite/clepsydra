@@ -393,4 +393,51 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     expect(onOpenDossier).toHaveBeenCalledWith("ops-1");
     expect(onOpenPage).not.toHaveBeenCalled();
   });
+
+  it("op-meta DOSSIER button in BoardHeader calls onOpenDossier with the op dossier", async () => {
+    const onOpenPage = vi.fn();
+    const onOpenDossier = vi.fn();
+    stubBoardFetch();
+    renderScreenWithProps(onOpenPage, onOpenDossier);
+    await screen.findByText("TASKING BOARD");
+
+    // Select OPS-1 via its ScopeRail row → the op-meta line renders
+    await userEvent.click(screen.getByText("OPS-1").closest("button")!);
+    expect(useBoardStore.getState().opFilter).toBe("alpha");
+
+    // The DOSSIER button shows the op's dossier value ("tasks/ops-1")
+    await userEvent.click(screen.getByRole("button", { name: "tasks/ops-1" }));
+    expect(onOpenDossier).toHaveBeenCalledWith("tasks/ops-1");
+    expect(onOpenPage).not.toHaveBeenCalled();
+  });
+});
+
+// ── stale opFilter self-heal ──────────────────────────────────────────────────
+
+describe("TaskingScreen — stale opFilter self-heal", () => {
+  it("resets a persisted opFilter matching no operation to ALL once data loads", async () => {
+    useBoardStore.setState({ opFilter: "ghost-op" });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    // The effect resets the stale filter to ALL…
+    await waitFor(() => expect(useBoardStore.getState().opFilter).toBe("ALL"));
+    // …and the full task set renders (would be empty under "ghost-op")
+    expect(await screen.findByText("Task Alpha 1")).toBeInTheDocument();
+    expect(screen.getByText("Task Unfiled")).toBeInTheDocument();
+  });
+
+  it("does not reset UNFILED or a valid op filter", async () => {
+    useBoardStore.setState({ opFilter: "UNFILED" });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+    expect(useBoardStore.getState().opFilter).toBe("UNFILED");
+
+    act(() => useBoardStore.setState({ opFilter: "alpha" }));
+    await waitFor(() =>
+      expect(useBoardStore.getState().opFilter).toBe("alpha"),
+    );
+  });
 });
