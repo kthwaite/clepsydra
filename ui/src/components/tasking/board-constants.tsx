@@ -5,9 +5,8 @@ import type { BoardOperation } from "#/api/board";
 // ── date formatting ──────────────────────────────────────────────────────────
 
 /**
- * Formats a cycle date window as "MM.DD — MM.DD".
- * Returns "UNSCHEDULED" when both start and end are null/undefined.
- * Returns "—" should never occur (both absent → UNSCHEDULED).
+ * Formats a cycle date window as "MM.DD — MM.DD" (half-open when only one
+ * bound is set). Returns "UNSCHEDULED" when both start and end are absent.
  */
 export function fmtCycleWindow(
   start?: string | null,

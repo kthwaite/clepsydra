@@ -119,21 +119,26 @@ export interface CycleViewProps {
    * matches internally.
    */
   tasks: BoardTask[];
+  /**
+   * Project slug of the currently selected operation, when a real op with a
+   * slug is active (mirrors KanbanView's `activeOp?.project ?? undefined` —
+   * never an op code). Threaded into the COMMIT TASK preset.
+   */
+  activeProject?: string;
   /** Optional: called when a task row is clicked. Defaults to store action. */
   onEditTask?: (id: string) => void;
 }
 
-export function CycleView({ cycle, tasks, onEditTask }: CycleViewProps) {
+export function CycleView({
+  cycle,
+  tasks,
+  activeProject,
+  onEditTask,
+}: CycleViewProps) {
   // Store actions — field-selector pattern (no ephemeral re-renders)
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const openTaskModal = useBoardStore((s) => s.openTaskModal);
   const openCycleModal = useBoardStore((s) => s.openCycleModal);
-  const activeProject = useBoardStore((s) => {
-    // Mirror KanbanView: derive from opFilter so commit preset is consistent
-    return s.opFilter !== "ALL" && s.opFilter !== "UNFILED"
-      ? s.opFilter
-      : undefined;
-  });
 
   const handleEditTask = onEditTask ?? setEditTaskId;
 

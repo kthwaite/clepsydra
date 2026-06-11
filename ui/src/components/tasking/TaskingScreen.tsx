@@ -145,6 +145,7 @@ export function TaskingScreen({
             <CycleView
               cycle={resolveCycle(cycleSel, cycles)}
               tasks={visibleTasks}
+              activeProject={activeOp?.project ?? undefined}
             />
           )}
           {mode === "timeline" && <BodyPlaceholder label="TIMELINE" />}

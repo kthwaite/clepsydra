@@ -15,7 +15,11 @@ import type { BoardCycle, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { CycleView, cycleStats, resolveCycle } from "../CycleView";
 import { TaskingScreen } from "../TaskingScreen";
-import { BOARD_FIXTURE, stubBoardFetch } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  BOARD_FIXTURE_WITH_NO_SLUG_OP,
+  stubBoardFetch,
+} from "./fixtures";
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -507,6 +511,23 @@ describe("CycleView — empty state", () => {
     const modal = useBoardStore.getState().taskModal;
     expect(modal).not.toHaveProperty("cycle");
   });
+
+  it("COMMIT TASK includes project when activeProject prop is set", async () => {
+    render(<CycleView cycle={ACTIVE_CYCLE} tasks={[]} activeProject="alpha" />);
+    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    expect(useBoardStore.getState().taskModal).toEqual({
+      cycle: "C-01",
+      project: "alpha",
+    });
+  });
+
+  it("COMMIT TASK omits project when activeProject prop is absent", async () => {
+    render(<CycleView cycle={ACTIVE_CYCLE} tasks={[]} />);
+    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    const modal = useBoardStore.getState().taskModal;
+    expect(modal).toEqual({ cycle: "C-01" });
+    expect(modal).not.toHaveProperty("project");
+  });
 });
 
 // ── task filtering (backlog vs named cycle) ───────────────────────────────────
@@ -580,6 +601,42 @@ describe("TaskingScreen integration — cycle mode", () => {
       screen.getByRole("heading", { name: /BACKLOG/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(/UNSCHEDULED/)).toBeInTheDocument();
+  });
+
+  it("op with slug active: COMMIT TASK presets {cycle, project}", async () => {
+    // C-02 has no tasks → empty state with COMMIT TASK; "alpha" op has a slug
+    useBoardStore.setState({
+      mode: "cycle",
+      cycleSel: "C-02",
+      opFilter: "alpha",
+    });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    expect(useBoardStore.getState().taskModal).toEqual({
+      cycle: "C-02",
+      project: "alpha",
+    });
+  });
+
+  it("slug-less op active: COMMIT TASK presets {cycle} only — the op CODE is not a project", async () => {
+    // opFilter holds OPS-3 (the op code; NO_SLUG_OP has project: null).
+    // No task carries the code as a project → empty state in any cycle.
+    useBoardStore.setState({
+      mode: "cycle",
+      cycleSel: "C-02",
+      opFilter: "OPS-3",
+    });
+    stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    const modal = useBoardStore.getState().taskModal;
+    expect(modal).toEqual({ cycle: "C-02" });
+    expect(modal).not.toHaveProperty("project");
   });
 });
 
