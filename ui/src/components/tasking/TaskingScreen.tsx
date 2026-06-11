@@ -5,6 +5,7 @@ import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import { opKey } from "./board-constants";
+import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { ScopeRail } from "./ScopeRail";
 
@@ -62,6 +63,7 @@ export function TaskingScreen({
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const opFilter = useBoardStore((s) => s.opFilter);
+  const cycleSel = useBoardStore((s) => s.cycleSel);
   const railOpen = useBoardStore((s) => s.railOpen);
 
   const { operations, cycles, tasks, activeOp, visibleTasks } = useMemo(() => {
@@ -139,7 +141,12 @@ export function TaskingScreen({
             />
           )}
           {mode === "backlog" && <BacklogView tasks={visibleTasks} />}
-          {mode === "cycle" && <BodyPlaceholder label="CYCLE" />}
+          {mode === "cycle" && (
+            <CycleView
+              cycle={resolveCycle(cycleSel, cycles)}
+              tasks={visibleTasks}
+            />
+          )}
           {mode === "timeline" && <BodyPlaceholder label="TIMELINE" />}
         </div>
       </div>

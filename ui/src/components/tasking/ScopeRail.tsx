@@ -2,22 +2,12 @@ import { useShallow } from "zustand/react/shallow";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
-import { CycleStatePip, HealthDot, opKey } from "./board-constants";
-
-// ── date formatting ──────────────────────────────────────────────────────────
-
-function fmtCycleWindow(start?: string | null, end?: string | null): string {
-  if (!start && !end) return "—";
-  const fmt = (s: string) => {
-    // ISO date "YYYY-MM-DD" → "MM.DD"
-    const parts = s.split("-");
-    if (parts.length === 3) return `${parts[1]}.${parts[2]}`;
-    return s;
-  };
-  if (start && end) return `${fmt(start)} — ${fmt(end)}`;
-  if (start) return `${fmt(start)} —`;
-  return `— ${fmt(end!)}`;
-}
+import {
+  CycleStatePip,
+  fmtCycleWindow,
+  HealthDot,
+  opKey,
+} from "./board-constants";
 
 // ── UNFILED detection ────────────────────────────────────────────────────────
 

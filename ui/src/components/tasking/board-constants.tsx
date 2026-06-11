@@ -2,6 +2,29 @@
 
 import type { BoardOperation } from "#/api/board";
 
+// ── date formatting ──────────────────────────────────────────────────────────
+
+/**
+ * Formats a cycle date window as "MM.DD — MM.DD".
+ * Returns "UNSCHEDULED" when both start and end are null/undefined.
+ * Returns "—" should never occur (both absent → UNSCHEDULED).
+ */
+export function fmtCycleWindow(
+  start?: string | null,
+  end?: string | null,
+): string {
+  if (!start && !end) return "UNSCHEDULED";
+  const fmt = (s: string) => {
+    // ISO date "YYYY-MM-DD" → "MM.DD"
+    const parts = s.split("-");
+    if (parts.length === 3) return `${parts[1]}.${parts[2]}`;
+    return s;
+  };
+  if (start && end) return `${fmt(start)} — ${fmt(end)}`;
+  if (start) return `${fmt(start)} —`;
+  return `— ${fmt(end!)}`;
+}
+
 // ── canonical op key ─────────────────────────────────────────────────────────
 
 /**
