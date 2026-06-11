@@ -493,6 +493,188 @@ async fn patch_task_rejects_bogus_priority() {
 }
 
 // ---------------------------------------------------------------------------
+// POST /board/tasks — all optional fields persist to frontmatter + response
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_persists_all_optional_fields() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "full payload",
+            "assignee": "kit",
+            "estimate": "3d",
+            "due": "2026-04-21",
+            "tags": ["ops", "sync"],
+            "link": "CLP-0901-J"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    // Response carries all fields
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["assignee"], "kit", "assignee: {body}");
+    assert_eq!(body["estimate"], "3d", "estimate: {body}");
+    assert_eq!(body["due"], "2026-04-21", "due: {body}");
+    assert_eq!(body["link"], "CLP-0901-J", "link: {body}");
+    let tags = body["tags"].as_array().unwrap();
+    let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+    assert!(tag_strs.contains(&"ops"), "tags should contain ops: {body}");
+    assert!(tag_strs.contains(&"sync"), "tags should contain sync: {body}");
+
+    // Disk frontmatter carries all fields
+    let content =
+        std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    assert!(content.contains("assignee: kit"), "frontmatter:\n{content}");
+    assert!(content.contains("estimate: 3d"), "frontmatter:\n{content}");
+    assert!(
+        content.contains("due:") && content.contains("2026-04-21"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("link:") && content.contains("CLP-0901-J"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("- ops") && content.contains("- sync"),
+        "frontmatter should list both tags:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — project change A→B physically moves the file
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_project_change_moves_file() {
+    let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-a/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000070\n\
+             title: MOVE ME\ntype: TASK\nproject: op-a\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000070")
+        .json(&serde_json::json!({ "project": "op-b" }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["path"], "tasks/op-b/TSK-0001.md",
+        "response path should be under op-b: {body}"
+    );
+    assert_eq!(body["project"], "op-b", "project: {body}");
+
+    let vault_root = tmp.path().join("vault");
+    assert!(
+        vault_root.join("tasks/op-b/TSK-0001.md").exists(),
+        "file should exist under tasks/op-b/"
+    );
+    assert!(
+        !vault_root.join("tasks/op-a/TSK-0001.md").exists(),
+        "file should no longer exist under tasks/op-a/"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — project clear ("") moves the file to tasks root
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_project_clear_moves_to_tasks_root() {
+    let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-a/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000071\n\
+             title: UNFILE ME\ntype: TASK\nproject: op-a\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000071")
+        .json(&serde_json::json!({ "project": "" }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["path"], "tasks/TSK-0001.md",
+        "response path should be at tasks root: {body}"
+    );
+    assert!(body["project"].is_null(), "project should be null: {body}");
+
+    let vault_root = tmp.path().join("vault");
+    assert!(
+        vault_root.join("tasks/TSK-0001.md").exists(),
+        "file should exist at tasks root"
+    );
+    assert!(
+        !vault_root.join("tasks/op-a/TSK-0001.md").exists(),
+        "file should no longer exist under tasks/op-a/"
+    );
+    let content =
+        std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        !content.contains("project:"),
+        "frontmatter should not carry project, got:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — happy path for title + tags + link
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_updates_title_tags_and_link() {
+    let (server, tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({
+            "title": "thaw legacy sync writes",
+            "tags": ["ops", "sync"],
+            "link": "CLP-0901-J"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["title"], "thaw legacy sync writes", "title: {body}");
+    assert_eq!(body["link"], "CLP-0901-J", "link: {body}");
+    let tags = body["tags"].as_array().unwrap();
+    let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+    assert!(tag_strs.contains(&"ops"), "tags should contain ops: {body}");
+    assert!(tag_strs.contains(&"sync"), "tags should contain sync: {body}");
+
+    // Disk frontmatter reflects all three
+    let content =
+        std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        content.contains("title: thaw legacy sync writes"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("link:") && content.contains("CLP-0901-J"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("- ops") && content.contains("- sync"),
+        "frontmatter should list both tags:\n{content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // PATCH /board/tasks/{id} — moves column, clears hold
 // ---------------------------------------------------------------------------
 

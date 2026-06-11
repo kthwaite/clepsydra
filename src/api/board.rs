@@ -524,8 +524,8 @@ async fn create_task(
                 .map_err(|e| ApiError::internal(format!("invalid retry path: {e}")))?;
             let abs_path2 = state.vault.resolve(&vault_path2);
             let code2 = format!("TSK-{:04}", next_num + 1);
-            meta.extra
-                .insert("status".to_string(), serde_yaml::Value::String(status.to_string()));
+            // Plain (non-atomic) write by design: at single-user scale a second
+            // consecutive collision is not worth guarding against.
             let content2 = write_page_content(&meta, &page_body);
             fs::write(&abs_path2, &content2)
                 .map_err(|e| ApiError::internal(format!("failed to write retry file: {e}")))?;
@@ -663,11 +663,18 @@ async fn patch_task(
     apply_tri_state(&mut meta, "hold", &body.hold);
     apply_tri_state(&mut meta, "link", &body.link);
 
-    // project change: update meta.project; reconcile will handle refile
-    let project_changed = body.project.is_some();
-    let new_project = body.project.clone();
-    if let Some(ref p) = new_project {
-        meta.project = if p.is_empty() { None } else { Some(p.clone()) };
+    // project change: update meta.project. An empty string is an explicit
+    // clear (mirrors pages-assign's clear_project). The refile route differs:
+    // a set project goes through the conservative reconcile_page, but a clear
+    // must use project_path_cleared + move_page_to — the conservative
+    // projection never strips a subfolder when project is absent, so
+    // reconcile_page alone would leave the file orphaned in the old folder.
+    let project_cleared = matches!(body.project.as_deref(), Some(""));
+    let project_changed = body.project.is_some() && !project_cleared;
+    if project_cleared {
+        meta.project = None;
+    } else if let Some(ref p) = body.project {
+        meta.project = Some(p.clone());
     }
 
     // 4. Bump updated_at
@@ -678,9 +685,10 @@ async fn patch_task(
     fs::write(&abs_path, &content)
         .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
 
-    // 6. Invalidate + reindex + resolve + reconcile (handles project refile)
+    // 6. Invalidate + reindex + resolve + refile (handles project change/clear)
     let path_for_index = page_path.clone();
     let hooks = Arc::clone(&state.hooks);
+    let declared_kind = meta.kind;
     let final_path = state
         .index
         .with_index(move |index, vault| {
@@ -693,8 +701,23 @@ async fn patch_task(
             for dep_path in &deps {
                 index.resolve_links_for_page(dep_path)?;
             }
-            // If project changed, reconcile to move the file to its new folder
-            let moved = if project_changed {
+            // Refile on project change. An explicit clear strips the subfolder
+            // via project_path_cleared + move_page_to (same as pages-assign's
+            // clear_project branch); a set project uses the conservative
+            // reconcile_page.
+            let moved = if project_cleared {
+                match crate::vault::projection::project_path_cleared(&path_for_index, declared_kind)
+                {
+                    Some(dest) => crate::vault::reconcile::move_page_to(
+                        vault,
+                        index,
+                        &path_for_index,
+                        &dest,
+                        &hooks,
+                    )?,
+                    None => None,
+                }
+            } else if project_changed {
                 crate::vault::reconcile::reconcile_page(
                     vault,
                     index,
