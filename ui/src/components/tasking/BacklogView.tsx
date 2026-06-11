@@ -25,6 +25,9 @@ import {
   StatePip,
 } from "./board-constants";
 
+/** Shared grid tracks for the header row and task rows (.bk-row). */
+const BK_COLS = "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px";
+
 // ── groupBacklog — pure helper (unit-testable) ────────────────────────────────
 
 export interface BacklogGroup {
@@ -50,9 +53,10 @@ export function groupBacklog(tasks: BoardTask[]): BacklogGroup[] {
           COL_ORDER.indexOf(a.status as (typeof COL_ORDER)[number]) -
           COL_ORDER.indexOf(b.status as (typeof COL_ORDER)[number]);
         if (colDiff !== 0) return colDiff;
+        // Plain string compare — locale-insensitive, correct for ISO dates
         const aDue = a.due ?? "9";
         const bDue = b.due ?? "9";
-        return aDue.localeCompare(bDue);
+        return aDue < bDue ? -1 : aDue > bDue ? 1 : 0;
       }),
   })).filter((g) => g.items.length > 0);
 }
@@ -70,16 +74,12 @@ export function BacklogView({ tasks }: BacklogViewProps) {
   const groups = useMemo(() => groupBacklog(tasks), [tasks]);
 
   return (
-    <div
-      className="h-full overflow-auto text-[var(--fs-s)]"
-      style={{ fontSize: "var(--fs-s)" }}
-    >
+    <div className="h-full overflow-auto text-[var(--fs-s)]">
       {/* ── Header row ──────────────────────────────────────────────────── */}
       <div
         className="cl-mono sticky top-0 z-[3] grid w-full border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]"
         style={{
-          gridTemplateColumns:
-            "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px",
+          gridTemplateColumns: BK_COLS,
           gap: "12px",
           minHeight: "var(--row-h, 32px)",
           alignItems: "center",
@@ -157,9 +157,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
           {/* Task rows */}
           {g.items.map((t) => {
             const [done, total] =
-              t.checks && t.checks.length === 2
-                ? (t.checks as [number, number])
-                : [0, 0];
+              t.checks.length >= 2 ? [t.checks[0], t.checks[1]] : [0, 0];
 
             return (
               <button
@@ -167,8 +165,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
                 data-testid={`bk-row-${t.id}`}
                 className="cl-mono grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad,12px)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
                 style={{
-                  gridTemplateColumns:
-                    "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px",
+                  gridTemplateColumns: BK_COLS,
                   gap: "12px",
                   alignItems: "center",
                   minHeight: "var(--row-h, 32px)",
