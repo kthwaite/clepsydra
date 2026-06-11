@@ -85,16 +85,35 @@ function useDebounced(
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // Latest value not yet delivered to onChange. Non-null only while a timer
+  // is pending — lets the unmount cleanup flush instead of dropping the edit.
+  const pending = useRef<string | null>(null);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
+    pending.current = value;
     timer.current = setTimeout(() => {
+      pending.current = null;
       onChangeRef.current(value);
     }, delay);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
   }, [value, delay]);
+
+  // Flush on unmount: closing the panel (✕ / Escape / scrim) within the
+  // debounce window must not silently lose the edit. The per-field onChange
+  // guards (value !== task.field) make a no-edit flush a no-op.
+  useEffect(
+    () => () => {
+      if (pending.current !== null) {
+        const v = pending.current;
+        pending.current = null;
+        onChangeRef.current(v);
+      }
+    },
+    [],
+  );
 }
 
 // ── TaskEditPanel ─────────────────────────────────────────────────────────────
@@ -186,7 +205,7 @@ export function TaskEditPanel({
     if (trimmed !== (task.link ?? null)) patchNow({ link: trimmed });
   });
 
-  // Tags: comma-sep input → immediate patch on change (debounced 300ms)
+  // Tags: comma-sep input → debounced 300ms like the other text fields
   useDebounced(tagsVal, 300, (v) => {
     const arr = v
       .split(",")

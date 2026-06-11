@@ -167,9 +167,12 @@ export function useDeleteTask() {
         .split("/")
         .map((seg) => encodeURIComponent(seg))
         .join("/");
-      const res = await fetch(`/api/vault/pages/${encoded}?force=true`, {
-        method: "DELETE",
-      });
+      // rewrite=plain_text pinned explicitly: DESTROY removes the page;
+      // inbound wikilinks degrade to plain text so notes keep their meaning.
+      const res = await fetch(
+        `/api/vault/pages/${encoded}?force=true&rewrite=plain_text`,
+        { method: "DELETE" },
+      );
       if (!res.ok && res.status !== 204) {
         throw new Error("Failed to delete task");
       }

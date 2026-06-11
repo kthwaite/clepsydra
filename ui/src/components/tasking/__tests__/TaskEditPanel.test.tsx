@@ -383,6 +383,39 @@ describe("TaskEditPanel — debounced patches", () => {
     >;
     expect(body.title).toBe("UPDATED TITLE");
   });
+
+  it("flushes a pending title edit when the panel closes before the debounce fires", async () => {
+    vi.useFakeTimers();
+    const stub = makeStub();
+    const { unmount } = wrap({ fetchStub: stub, seedBoard: true });
+
+    act(() => {
+      fireEvent.change(screen.getByTestId("edit-panel-title"), {
+        target: { value: "FLUSHED TITLE" },
+      });
+    });
+
+    // No PATCH yet — the 300ms debounce has not elapsed
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
+    ).toHaveLength(0);
+
+    // Close the panel (Escape/✕/scrim all unmount it) WITHOUT advancing timers
+    await act(async () => {
+      unmount();
+    });
+
+    // The pending edit must be flushed, not dropped
+    const patchCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "PATCH",
+    );
+    expect(patchCalls.length).toBe(1);
+    const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(body.title).toBe("FLUSHED TITLE");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -466,6 +499,10 @@ describe("TaskEditPanel — destroy two-step", () => {
       // tasks/t-full.md encoded
       expect(url).toContain("tasks");
       expect(url).toContain("t-full.md");
+      // Pinned policy: force past the backlink check, degrade inbound
+      // wikilinks to plain text (not silently inherited backend default)
+      expect(url).toContain("force=true");
+      expect(url).toContain("rewrite=plain_text");
     });
 
     await waitFor(() => {
