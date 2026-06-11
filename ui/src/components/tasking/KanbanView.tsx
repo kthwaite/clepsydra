@@ -117,7 +117,11 @@ export function KanbanView({
             }}
             onDrop={() => {
               if (dragId) {
-                patchTask.mutate({ id: dragId, patch: { status: col.id } });
+                // Same-column drop is a no-op — skip the mutation entirely
+                const dragged = visible.find((t) => t.id === dragId);
+                if (dragged && dragged.status !== col.id) {
+                  patchTask.mutate({ id: dragId, patch: { status: col.id } });
+                }
               }
               setDragId(null);
               setDropCol(null);
@@ -135,7 +139,7 @@ export function KanbanView({
                 </span>
               )}
               <button
-                className="inline-flex h-[16px] w-[16px] items-center justify-content-center border border-[var(--rule)] text-[13px] leading-[1] text-[var(--ink-3)] transition-[color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+                className="inline-flex h-[16px] w-[16px] items-center justify-center border border-[var(--rule)] text-[13px] leading-[1] text-[var(--ink-3)] transition-[color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:text-[var(--hot)]"
                 title={`New task in ${col.label}`}
                 onClick={() =>
                   openTaskModal(

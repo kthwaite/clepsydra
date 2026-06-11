@@ -9,7 +9,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
@@ -154,9 +154,7 @@ describe("KanbanView — column rendering", () => {
     );
     // TRIAGE has only t3, REVIEW has no tasks at all
     expect(screen.getByTestId("kb-empty-REVIEW")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("kb-empty-REVIEW").textContent,
-    ).toContain("NONE");
+    expect(screen.getByTestId("kb-empty-REVIEW").textContent).toContain("NONE");
   });
 
   it("buckets tasks into the correct columns by status", () => {
@@ -487,7 +485,9 @@ describe("KanbanView — drag-and-drop", () => {
     vi.stubGlobal("fetch", stub);
 
     // Need a QueryClient that is already hydrated — wrap the component
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     // Pre-populate the cache so usePatchTask onMutate doesn't error
     const { queryKeys } = await import("#/api/keys");
     qc.setQueryData(queryKeys.board.all, BOARD_FIXTURE);
@@ -527,6 +527,46 @@ describe("KanbanView — drag-and-drop", () => {
       const body = JSON.parse(opts.body as string) as Record<string, unknown>;
       expect(body).toEqual({ status: "REVIEW" });
     });
+  });
+
+  it("same-column drop fires NO PATCH request", async () => {
+    const stub = makeStub();
+    vi.stubGlobal("fetch", stub);
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { queryKeys } = await import("#/api/keys");
+    qc.setQueryData(queryKeys.board.all, BOARD_FIXTURE);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <KanbanView
+          columns={columns}
+          tasks={tasks}
+          cycles={cycles}
+          showOp={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    // Drag t1 (FIELD) and drop it back onto its own FIELD column
+    const card = screen.getByTestId("task-card-t1");
+    const fieldCol = screen.getByTestId("kb-col-FIELD");
+
+    fireEvent.dragStart(card);
+    fireEvent.dragOver(fieldCol);
+    fireEvent.drop(fieldCol);
+
+    // Flush microtasks so any (incorrect) mutation would have fired
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const patchCalls = stub.mock.calls.filter((args) => {
+      const opts = args[1] as RequestInit | undefined;
+      return opts?.method === "PATCH";
+    });
+    expect(patchCalls).toHaveLength(0);
   });
 
   it("dragEnd clears the drag state (card no longer has dragging style)", () => {

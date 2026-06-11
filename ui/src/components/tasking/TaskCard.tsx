@@ -45,7 +45,8 @@ export function TaskCard({
   onClick,
   onOpenDossier,
 }: TaskCardProps) {
-  const [done, total] = t.checks.length >= 2 ? [t.checks[0], t.checks[1]] : [0, 0];
+  const [done, total] =
+    t.checks.length >= 2 ? [t.checks[0], t.checks[1]] : [0, 0];
   const pct = total > 0 ? (done / total) * 100 : 0;
   const checksDone = total > 0 && done === total;
 
@@ -116,7 +117,10 @@ export function TaskCard({
       {/* Checklist progress bar */}
       {total > 0 && (
         <div className="mb-[7px] flex items-center gap-[7px]">
-          <span className="flex-1 border border-[var(--rule)] bg-[var(--bg-3)]" style={{ height: 4 }}>
+          <span
+            className="flex-1 border border-[var(--rule)] bg-[var(--bg-3)]"
+            style={{ height: 4 }}
+          >
             <i
               className="block h-full"
               style={{

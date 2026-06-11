@@ -3,8 +3,8 @@ import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { BoardHeader } from "./BoardHeader";
-import { KanbanView } from "./KanbanView";
 import { opKey } from "./board-constants";
+import { KanbanView } from "./KanbanView";
 import { ScopeRail } from "./ScopeRail";
 
 // ── filterTasks ──────────────────────────────────────────────────────────────
