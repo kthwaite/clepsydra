@@ -206,6 +206,35 @@ async fn task_without_project_has_null_project() {
 }
 
 // ---------------------------------------------------------------------------
+// TASK link with wikilink alias strips brackets AND display text
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_link_wikilink_alias_keeps_target_only() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0003.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000040\n\
+             title: Aliased Link Task\ntype: TASK\n\
+             link: \"[[CLP-0901-J|the dossier]]\"\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let tasks = body["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "expected 1 task, got: {tasks:?}");
+    assert_eq!(
+        tasks[0]["link"], "CLP-0901-J",
+        "expected aliased wikilink to yield target only, got: {}",
+        tasks[0]["link"]
+    );
+}
+
+// ---------------------------------------------------------------------------
 // TASK with no status/priority defaults to INTAKE/P2
 // ---------------------------------------------------------------------------
 

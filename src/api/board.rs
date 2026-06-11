@@ -136,13 +136,13 @@ async fn get_board(
 
             // --- Operations (PROJECT pages with board: true) -------------------
             let mut op_stmt = conn.prepare(
-                "SELECT id, path, title, meta_json, project, updated_at \
+                "SELECT id, path, title, meta_json, project \
                    FROM pages \
                   WHERE kind = 'PROJECT' \
                   ORDER BY path",
             )?;
 
-            let op_rows: Vec<(String, String, Option<String>, String, Option<String>, Option<String>)> = op_stmt
+            let op_rows: Vec<(String, String, Option<String>, String, Option<String>)> = op_stmt
                 .query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -150,13 +150,12 @@ async fn get_board(
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
                     ))
                 })?
                 .collect::<Result<_, _>>()?;
 
             let mut operations: Vec<BoardOperation> = Vec::new();
-            for (id_str, path, title, meta_json, project, _updated_at) in op_rows {
+            for (id_str, path, title, meta_json, project) in op_rows {
                 // Parse meta_json to check board: true
                 let meta: serde_json::Value =
                     serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
@@ -179,6 +178,8 @@ async fn get_board(
                 // name = title or stem
                 let name = title.unwrap_or_else(|| stem.to_ascii_uppercase());
 
+                // Absent `health:` frontmatter normalizes to "GREEN" by design —
+                // the UI treats health as always-present decoration.
                 let health = meta
                     .get("health")
                     .and_then(|v| v.as_str())
@@ -207,26 +208,25 @@ async fn get_board(
 
             // --- Cycles (CYCLE pages) ------------------------------------------
             let mut cy_stmt = conn.prepare(
-                "SELECT id, path, title, meta_json, updated_at \
+                "SELECT id, path, title, meta_json \
                    FROM pages \
                   WHERE kind = 'CYCLE' \
                   ORDER BY path",
             )?;
 
-            let cy_rows: Vec<(String, String, Option<String>, String, Option<String>)> = cy_stmt
+            let cy_rows: Vec<(String, String, Option<String>, String)> = cy_stmt
                 .query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
                     ))
                 })?
                 .collect::<Result<_, _>>()?;
 
             let mut cycles: Vec<BoardCycle> = Vec::new();
-            for (id_str, path, title, meta_json, _updated_at) in cy_rows {
+            for (id_str, path, title, meta_json) in cy_rows {
                 let id = match Uuid::parse_str(&id_str) {
                     Ok(u) => u,
                     Err(_) => continue,
@@ -405,14 +405,21 @@ fn extra_str(meta: &serde_json::Value, key: &str) -> Option<String> {
     }
 }
 
-/// Extract `link` field: if value looks like a wikilink (`[[target]]`),
-/// strip the brackets and return the inner text; otherwise return the
-/// raw string value.
+/// Extract `link` field: if value looks like a wikilink (`[[target]]` or
+/// `[[target|display]]`), strip the brackets and return only the target
+/// (the part before `|`, mirroring `extract_links` in vault/link.rs);
+/// otherwise return the raw string value.
 fn extract_link_or_str(meta: &serde_json::Value, key: &str) -> Option<String> {
     let raw = extra_str(meta, key)?;
     // Strip wikilink brackets if present
     if raw.starts_with("[[") && raw.ends_with("]]") {
-        Some(raw[2..raw.len() - 2].to_string())
+        let inner = &raw[2..raw.len() - 2];
+        // If `[[target|display]]`, keep only the target (before `|`).
+        let target = match inner.split_once('|') {
+            Some((t, _)) => t,
+            None => inner,
+        };
+        Some(target.to_string())
     } else {
         Some(raw)
     }
@@ -426,17 +433,12 @@ fn count_checks(
     conn: &rusqlite::Connection,
     page_id: &str,
 ) -> Result<[u32; 2], rusqlite::Error> {
-    let total: u32 = conn.query_row(
-        "SELECT COUNT(*) FROM block_properties bp \
-          WHERE bp.page_id = ?1 AND bp.key = 'status'",
+    let (total, done): (u32, u32) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(value = 'done'), 0) \
+           FROM block_properties \
+          WHERE page_id = ?1 AND key = 'status'",
         params![page_id],
-        |row| row.get(0),
-    )?;
-    let done: u32 = conn.query_row(
-        "SELECT COUNT(*) FROM block_properties bp \
-          WHERE bp.page_id = ?1 AND bp.key = 'status' AND bp.value = 'done'",
-        params![page_id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     Ok([done, total])
 }
