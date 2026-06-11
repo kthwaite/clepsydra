@@ -4,6 +4,7 @@ pub mod archive;
 pub mod attachments;
 pub mod bcl;
 pub mod blocks;
+pub mod board;
 pub mod error;
 pub mod events;
 pub mod folders;
@@ -82,6 +83,7 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/index", index_routes::router())
         .nest("/journal", journal::router())
         .nest("/tasks", tasks::router())
+        .nest("/board", board::router())
         .nest("/agenda", agenda::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))
