@@ -867,6 +867,7 @@ pub struct ContentEntry {
     description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     word_count: Option<i64>,
+    #[schema(value_type = crate::vault::kind::Kind)]
     kind: String,
     inferred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

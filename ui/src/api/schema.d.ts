@@ -868,7 +868,7 @@ export interface components {
             created_at?: string | null;
             description: string;
             inferred: boolean;
-            kind: string;
+            kind: components["schemas"]["Kind"];
             links: string[];
             path: string;
             project?: string | null;
@@ -1027,6 +1027,15 @@ export interface components {
             dry_run?: boolean;
             since?: string | null;
         };
+        /**
+         * @description The single type discriminator of a page. Closed enum; expand by editing here.
+         *
+         *     Exposed in the OpenAPI document as an UPPERCASE string enum (matching the
+         *     custom `Serialize` impl below) so the UI's generated types carry the full
+         *     vocabulary instead of hardcoding it.
+         * @enum {string}
+         */
+        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE";
         LocationResponse: {
             /** @description Optional human-readable label (e.g. `"London"`). */
             label?: string | null;
@@ -1059,7 +1068,7 @@ export interface components {
             body: string;
             canonical_name: string;
             inferred: boolean;
-            kind: string;
+            kind: components["schemas"]["Kind"];
             meta: components["schemas"]["PageMetaResponse"];
             path: string;
             project?: string | null;
@@ -1077,7 +1086,7 @@ export interface components {
             canonical_name: string;
             id: string;
             inferred: boolean;
-            kind: string;
+            kind: components["schemas"]["Kind"];
             path: string;
             project?: string | null;
             tags: string[];

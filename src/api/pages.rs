@@ -32,6 +32,7 @@ pub struct PageSummary {
     pub path: String,
     pub title: Option<String>,
     pub canonical_name: String,
+    #[schema(value_type = crate::vault::kind::Kind)]
     pub kind: String,
     pub inferred: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,6 +75,7 @@ pub struct PageDetailResponse {
     pub canonical_name: String,
     pub meta: PageMetaResponse,
     pub body: String,
+    #[schema(value_type = crate::vault::kind::Kind)]
     pub kind: String,
     pub inferred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

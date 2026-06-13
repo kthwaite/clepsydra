@@ -90,6 +90,7 @@ use utoipa_swagger_ui::SwaggerUi;
         schemas(
             // Shared
             crate::api::error::ApiError,
+            crate::vault::kind::Kind,
             // Pages
             crate::api::pages::PageSummary,
             crate::api::pages::PageMetaResponse,
@@ -180,6 +181,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kind_schema_is_the_full_uppercase_vocabulary() {
+        // The UI derives its Kind type (and kind dropdowns) from the generated
+        // OpenAPI types; this pins the schema to the wire tokens so drift in
+        // the rename_all/value_type plumbing fails here, not in the frontend.
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let values = json["components"]["schemas"]["Kind"]["enum"]
+            .as_array()
+            .expect("Kind schema should be an enum");
+        let tokens: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(
+            tokens,
+            [
+                "NOTE", "PROJECT", "JOURNAL", "TODO", "QUOTE", "BOOK", "CAPTURE", "CODE",
+                "PERSON", "TASK", "CYCLE"
+            ]
+        );
+    }
 
     #[test]
     fn openapi_includes_core_paths() {

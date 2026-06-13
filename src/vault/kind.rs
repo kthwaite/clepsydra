@@ -8,7 +8,12 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The single type discriminator of a page. Closed enum; expand by editing here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Exposed in the OpenAPI document as an UPPERCASE string enum (matching the
+/// custom `Serialize` impl below) so the UI's generated types carry the full
+/// vocabulary instead of hardcoding it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
+#[schema(rename_all = "UPPERCASE")]
 pub enum Kind {
     Note,
     Project,
