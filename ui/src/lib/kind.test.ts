@@ -16,7 +16,11 @@ describe("resolveKindFromPath", () => {
     expect(resolveKindFromPath("projects/vessel.md")).toBe("PROJECT");
     expect(resolveKindFromPath("People/kit.md")).toBe("PERSON");
     expect(resolveKindFromPath("reading/some-book.md")).toBe("BOOK");
-    expect(resolveKindFromPath("tasks/x.md")).toBe("TODO");
+    // "tasks" moved from TODO to the TASK kind with the tasking board
+    // (mirrors Kind::from_folder in src/vault/kind.rs); "todos" stays TODO.
+    expect(resolveKindFromPath("tasks/x.md")).toBe("TASK");
+    expect(resolveKindFromPath("todos/x.md")).toBe("TODO");
+    expect(resolveKindFromPath("cycles/S-13.md")).toBe("CYCLE");
   });
 
   it("tolerates leading slashes and nested paths", () => {

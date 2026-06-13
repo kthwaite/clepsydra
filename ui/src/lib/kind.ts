@@ -7,6 +7,16 @@
 // folder/frontmatter heuristics remain only as the fallback for callers that
 // lack a backend kind.
 
+import type { components } from "#/api/schema";
+
+/** The kind vocabulary, generated from the backend's OpenAPI `Kind` enum
+ * (src/vault/kind.rs via `bun run openapi`). The backend stays authoritative:
+ * adding/removing a variant there changes this union on regeneration. */
+export type Kind = components["schemas"]["Kind"];
+
+/** Runtime list of kinds, in display order for kind pickers. `satisfies`
+ * rejects tokens the backend doesn't know; the `Exclude` assertion below fails
+ * typecheck if a backend kind is missing here, so the two cannot drift. */
 export const KINDS = [
   "NOTE",
   "PROJECT",
@@ -17,9 +27,15 @@ export const KINDS = [
   "CAPTURE",
   "CODE",
   "PERSON",
-] as const;
+  "TASK",
+  "CYCLE",
+] as const satisfies readonly Kind[];
 
-export type Kind = (typeof KINDS)[number];
+type MissingFromKinds = Exclude<Kind, (typeof KINDS)[number]>;
+const _kindsAreExhaustive: [MissingFromKinds] extends [never]
+  ? true
+  : MissingFromKinds = true;
+void _kindsAreExhaustive;
 
 const KIND_SET = new Set<string>(KINDS);
 
@@ -41,6 +57,8 @@ export const KIND_META: Record<Kind, KindMeta> = {
   PERSON: { label: "PERSON", color: "var(--cool)" },
   CAPTURE: { label: "CAPTURE", color: "var(--cool)" },
   NOTE: { label: "NOTE", color: "var(--ink-mute)" },
+  TASK: { label: "TASK", color: "var(--hot)" },
+  CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
 };
 
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
@@ -56,8 +74,12 @@ const FOLDER_KIND: Record<string, Kind> = {
   diary: "JOURNAL",
   todos: "TODO",
   todo: "TODO",
-  tasks: "TODO",
-  task: "TODO",
+  tasks: "TASK",
+  task: "TASK",
+  cycles: "CYCLE",
+  cycle: "CYCLE",
+  sprints: "CYCLE",
+  sprint: "CYCLE",
   notes: "NOTE",
   note: "NOTE",
   projects: "PROJECT",
