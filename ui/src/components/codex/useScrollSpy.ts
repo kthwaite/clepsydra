@@ -1,23 +1,61 @@
-import { type RefObject, useCallback, useEffect, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  activeIndexAt,
+  computeTriggers,
+  jumpTargetFor,
+} from "#/components/codex/scrollTriggers";
 
 const HEADING_SELECTOR = "h1,h2,h3,h4,h5,h6";
+
+interface TriggerMap {
+  headingTops: number[];
+  triggers: number[];
+  maxScroll: number;
+}
+
+const EMPTY_MAP: TriggerMap = { headingTops: [], triggers: [], maxScroll: 0 };
 
 /**
  * Tracks the active heading within a scroll container for TOC scrollspy.
  * Heading DOM order matches the TOC entry order (both are document order), so
  * the returned index maps directly onto the TOC list. `recount` is a value to
  * re-run discovery on (e.g. the document revision).
+ *
+ * Activation positions come from the shared trigger map in `scrollTriggers`,
+ * which uplifts otherwise-unreachable triggers near the document end onto the
+ * scrollable range and drives `scrollTo` from the same map — so every TOC
+ * entry is reachable and the clicked entry is always the one highlighted.
  */
 export function useScrollSpy(
   containerRef: RefObject<HTMLElement | null>,
   recount: unknown,
 ): { activeIndex: number; scrollTo: (index: number) => void } {
   const [activeIndex, setActiveIndex] = useState(0);
+  const mapRef = useRef<TriggerMap>(EMPTY_MAP);
 
-  const headings = useCallback((): HTMLElement[] => {
+  const remap = useCallback(() => {
     const el = containerRef.current;
-    if (!el) return [];
-    return Array.from(el.querySelectorAll<HTMLElement>(HEADING_SELECTOR));
+    if (!el) {
+      mapRef.current = EMPTY_MAP;
+      return;
+    }
+    const hs = Array.from(el.querySelectorAll<HTMLElement>(HEADING_SELECTOR));
+    const containerTop = el.getBoundingClientRect().top;
+    const headingTops = hs.map(
+      (h) => h.getBoundingClientRect().top - containerTop + el.scrollTop,
+    );
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    mapRef.current = {
+      headingTops,
+      triggers: computeTriggers(headingTops, maxScroll),
+      maxScroll,
+    };
   }, [containerRef]);
 
   useEffect(() => {
@@ -25,45 +63,47 @@ export function useScrollSpy(
     if (!el) return;
 
     const compute = () => {
-      const hs = headings();
-      if (hs.length === 0) {
-        setActiveIndex(0);
-        return;
+      // content can reflow without firing resize (e.g. images loading);
+      // refresh the map whenever the scrollable range has drifted
+      if (el.scrollHeight - el.clientHeight !== mapRef.current.maxScroll) {
+        remap();
       }
-      const top = el.getBoundingClientRect().top;
-      const threshold = 96; // px below the container top counts as "current"
-      let idx = 0;
-      for (let i = 0; i < hs.length; i++) {
-        const rel = hs[i].getBoundingClientRect().top - top;
-        if (rel <= threshold) idx = i;
-        else break;
-      }
-      setActiveIndex(idx);
+      const { triggers, maxScroll } = mapRef.current;
+      setActiveIndex(activeIndexAt(el.scrollTop, triggers, maxScroll));
+    };
+    const refresh = () => {
+      remap();
+      compute();
     };
 
-    compute();
+    refresh();
     el.addEventListener("scroll", compute, { passive: true });
-    window.addEventListener("resize", compute);
+    window.addEventListener("resize", refresh);
+    const observer =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(refresh)
+        : undefined;
+    observer?.observe(el);
     return () => {
       el.removeEventListener("scroll", compute);
-      window.removeEventListener("resize", compute);
+      window.removeEventListener("resize", refresh);
+      observer?.disconnect();
     };
-  }, [containerRef, headings, recount]);
+  }, [containerRef, remap, recount]);
 
   const scrollTo = useCallback(
     (index: number) => {
-      const hs = headings();
-      const target = hs[index];
       const el = containerRef.current;
-      if (!target || !el) return;
-      const top =
-        target.getBoundingClientRect().top -
-        el.getBoundingClientRect().top +
-        el.scrollTop -
-        16;
-      el.scrollTo({ top, behavior: "smooth" });
+      if (!el) return;
+      remap();
+      const { headingTops, triggers, maxScroll } = mapRef.current;
+      if (index < 0 || index >= headingTops.length) return;
+      el.scrollTo({
+        top: jumpTargetFor(index, headingTops, triggers, maxScroll),
+        behavior: "smooth",
+      });
     },
-    [containerRef, headings],
+    [containerRef, remap],
   );
 
   return { activeIndex, scrollTo };
