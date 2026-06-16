@@ -17,16 +17,19 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const VAULT_RELATIVE_PATH: &str = ".clepsydra/location.toml";
 const HOME_RELATIVE_PATH: &str = ".config/clepsydra/location.toml";
 
 /// Geographic coordinates plus an optional human-readable label.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Location {
     pub latitude: f64,
     pub longitude: f64,
+    /// Skipped when serializing so a `None` label produces no `label` key in
+    /// the emitted TOML (rather than an explicit `label = ""` or null).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 
@@ -80,6 +83,26 @@ fn seed_from_home(src: &Path, dst: &Path) -> std::io::Result<()> {
 fn read_location(path: &Path) -> Option<Location> {
     let raw = std::fs::read_to_string(path).ok()?;
     parse_location(&raw)
+}
+
+/// Persist `loc` to `<vault_root>/.clepsydra/location.toml`, creating the
+/// `.clepsydra` directory if it does not yet exist.
+///
+/// The serialized TOML omits the `label` key entirely when `loc.label` is
+/// `None` (see the `skip_serializing_if` on [`Location::label`]). Errors are
+/// returned as human-readable strings for the caller (the `PUT /location`
+/// handler maps them to a 500).
+pub fn write_location(vault_root: &Path, loc: &Location) -> Result<(), String> {
+    let vault_path = vault_root.join(VAULT_RELATIVE_PATH);
+    if let Some(parent) = vault_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create location config directory: {e}"))?;
+    }
+    let toml = toml::to_string_pretty(loc)
+        .map_err(|e| format!("failed to serialize location config: {e}"))?;
+    std::fs::write(&vault_path, toml)
+        .map_err(|e| format!("failed to write location config: {e}"))?;
+    Ok(())
 }
 
 fn parse_location(raw: &str) -> Option<Location> {
@@ -192,5 +215,67 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // Soft assertion as in BCL tests: cannot easily mock $HOME.
         let _ = load_or_seed(tmp.path());
+    }
+
+    #[test]
+    fn write_location_round_trips_through_read() {
+        let tmp = TempDir::new().unwrap();
+        let loc = Location {
+            latitude: 48.8566,
+            longitude: 2.3522,
+            label: Some("Paris".to_string()),
+        };
+        write_location(tmp.path(), &loc).expect("write should succeed");
+
+        let read_back = load_or_seed(tmp.path()).expect("written file should load");
+        assert_eq!(read_back, loc);
+    }
+
+    #[test]
+    fn write_location_creates_clepsydra_dir() {
+        let tmp = TempDir::new().unwrap();
+        // No .clepsydra dir exists yet.
+        assert!(!tmp.path().join(".clepsydra").exists());
+
+        let loc = Location {
+            latitude: 0.0,
+            longitude: 0.0,
+            label: None,
+        };
+        write_location(tmp.path(), &loc).expect("write should succeed");
+
+        assert!(tmp.path().join(".clepsydra").is_dir());
+        assert!(tmp.path().join(VAULT_RELATIVE_PATH).is_file());
+    }
+
+    #[test]
+    fn write_location_omits_label_when_none() {
+        let tmp = TempDir::new().unwrap();
+        let loc = Location {
+            latitude: 12.34,
+            longitude: 56.78,
+            label: None,
+        };
+        write_location(tmp.path(), &loc).expect("write should succeed");
+
+        let contents = std::fs::read_to_string(tmp.path().join(VAULT_RELATIVE_PATH)).unwrap();
+        assert!(
+            !contents.contains("label"),
+            "TOML should not contain a label key when label is None, got:\n{contents}"
+        );
+    }
+
+    #[test]
+    fn write_location_emits_label_when_some() {
+        let tmp = TempDir::new().unwrap();
+        let loc = Location {
+            latitude: 35.6762,
+            longitude: 139.6503,
+            label: Some("Tokyo".to_string()),
+        };
+        write_location(tmp.path(), &loc).expect("write should succeed");
+
+        let contents = std::fs::read_to_string(tmp.path().join(VAULT_RELATIVE_PATH)).unwrap();
+        assert!(contents.contains("label = \"Tokyo\""), "got:\n{contents}");
     }
 }

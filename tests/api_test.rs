@@ -49,7 +49,7 @@ fn setup_server() -> (TestServer, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
 
     let app: Router = Router::new()
@@ -69,6 +69,61 @@ async fn bcl_endpoint_returns_nulls_when_unconfigured() {
     assert!(body["birth_date"].is_null());
     assert!(body["bcl_date"].is_null());
     assert!(body["remaining_seconds"].is_null());
+}
+
+#[tokio::test]
+async fn put_location_persists_and_get_reflects_it() {
+    let (server, tmp) = setup_server();
+
+    let res = server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 51.5074,
+            "longitude": -0.1278,
+            "label": "London"
+        }))
+        .await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["latitude"].as_f64(), Some(51.5074));
+    assert_eq!(body["longitude"].as_f64(), Some(-0.1278));
+    assert_eq!(body["label"].as_str(), Some("London"));
+
+    // A subsequent GET reflects the live in-memory update.
+    let get = server.get("/api/vault/location").await;
+    get.assert_status(StatusCode::OK);
+    let get_body: serde_json::Value = get.json();
+    assert_eq!(get_body["latitude"].as_f64(), Some(51.5074));
+    assert_eq!(get_body["longitude"].as_f64(), Some(-0.1278));
+    assert_eq!(get_body["label"].as_str(), Some("London"));
+
+    // The config file was written to disk.
+    let cfg = tmp.path().join("vault/.clepsydra/location.toml");
+    assert!(cfg.is_file(), "expected location.toml at {}", cfg.display());
+    let contents = fs::read_to_string(&cfg).unwrap();
+    assert!(contents.contains("London"), "got:\n{contents}");
+}
+
+#[tokio::test]
+async fn put_location_rejects_out_of_range_latitude() {
+    let (server, _tmp) = setup_server();
+    let res = server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 200.0,
+            "longitude": 0.0,
+            "label": null
+        }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn geocode_rejects_blank_query() {
+    let (server, _tmp) = setup_server();
+    // Whitespace-only `q` trims to empty → 400, no network needed.
+    let res = server.get("/api/vault/geocode?q=%20%20").await;
+    res.assert_status(StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -855,7 +910,7 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
 
     let app: Router = Router::new()
@@ -1094,7 +1149,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
@@ -1387,7 +1442,7 @@ async fn sse_events_endpoint_returns_stream() {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
 
     let app: Router = Router::new()
@@ -1529,7 +1584,7 @@ async fn create_page_emits_sync_notification() {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
 
     let app: Router = Router::new()

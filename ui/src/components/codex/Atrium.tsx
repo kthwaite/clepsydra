@@ -20,9 +20,8 @@ import {
 } from "./atrium-data";
 import { Card } from "./Card";
 import { formatRelativeTime } from "./codex-time";
-import { DayArc } from "./DayArc";
 import { shortFolio } from "./folio-utils";
-import { MoonDisc } from "./MoonDisc";
+import { SkyCard } from "./SkyCard";
 import { moonPhase, sunArcPosition } from "./sky";
 
 export function Atrium() {
@@ -36,6 +35,7 @@ export function Atrium() {
   const { data: location } = useLocation();
   const openSearch = useUiStore((s) => s.openSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
+  const openLocation = useUiStore((s) => s.openLocation);
 
   const items = content?.items ?? [];
   const now = useClock();
@@ -113,6 +113,10 @@ export function Atrium() {
       place: location?.label ?? null,
     };
   }, [location, now]);
+
+  const located =
+    (location?.latitude ?? null) !== null &&
+    (location?.longitude ?? null) !== null;
 
   const aphorism = APHORISMS[dayOfYear(now) % APHORISMS.length];
 
@@ -244,31 +248,12 @@ export function Atrium() {
           </Card>
         )}
       </div>
-      <Card
+      <SkyCard
         className="col-span-12 lg:col-span-5"
-        label="Sky"
-        caption="FIG. III"
-      >
-        <div className="grid grid-cols-[96px_1fr] gap-4">
-          <MoonDisc info={sky.moon} />
-          <div className="cl-mono flex flex-col gap-1.5 text-[11px]">
-            <div className="border-b border-rule pb-1.5 font-medium uppercase tracking-[0.2em] text-ink">
-              {sky.moon.phaseName} · {sky.moon.illumPct}%
-            </div>
-            <KVLine k="Sunrise" v={sky.sunrise} />
-            <KVLine k="Sunset" v={sky.sunset} />
-            <KVLine k="Light left" v={sky.lightLeft} />
-            {sky.place && <KVLine k="At" v={sky.place} />}
-          </div>
-        </div>
-        <DayArc
-          t={sky.arc.t}
-          x={sky.arc.x}
-          y={sky.arc.y}
-          sunriseLabel={sky.sunrise}
-          sunsetLabel={sky.sunset}
-        />
-      </Card>
+        sky={sky}
+        hasLocation={located}
+        onEdit={openLocation}
+      />
 
       {/* HEATMAP (col-8) + TAGS (col-4) */}
       <Card
@@ -413,17 +398,6 @@ export function Atrium() {
 }
 
 /* ── presentational ───────────────────────────────────────────────────── */
-
-function KVLine({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-        {k}
-      </span>
-      <span className="text-ink-2">{v}</span>
-    </div>
-  );
-}
 
 const HEAT_LEVEL = [
   "bg-rule-soft",

@@ -11,6 +11,7 @@ pub mod config;
 pub mod context;
 pub mod derivation;
 pub mod derivers;
+pub mod geocode;
 pub mod grep;
 pub mod hooks;
 pub mod import;

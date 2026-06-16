@@ -1,0 +1,258 @@
+import { type FormEvent, type KeyboardEvent, useState } from "react";
+import {
+  type GeocodeCandidate,
+  useGeocode,
+  useUpdateLocation,
+} from "#/api/location";
+import { useUiStore } from "#/store/ui";
+
+/** Operator console for the vault location used by the Atrium Sky card.
+ * Three inputs feed the same lat/long/label fields: manual entry, browser
+ * geolocation, and a backend Nominatim city search. Mirrors InscribeModal's
+ * vessel-diegetic overlay (scrim dismiss, Escape, role=dialog, cl-mono chrome). */
+export function LocationModal() {
+  const isOpen = useUiStore((s) => s.isLocationOpen);
+  const onClose = useUiStore((s) => s.closeLocation);
+  const [lat, setLat] = useState("");
+  const [lon, setLon] = useState("");
+  const [label, setLabel] = useState("");
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const update = useUpdateLocation();
+  const geocode = useGeocode();
+
+  if (!isOpen) return null;
+
+  const reset = () => {
+    setLat("");
+    setLon("");
+    setLabel("");
+    setQuery("");
+    setError(null);
+  };
+
+  const dismiss = () => {
+    reset();
+    onClose();
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape" && !e.defaultPrevented) {
+      e.stopPropagation();
+      dismiss();
+    }
+  };
+
+  const useMyLocation = () => {
+    setError(null);
+    const geo = navigator.geolocation;
+    if (!geo) {
+      setError("geolocation unavailable in this browser");
+      return;
+    }
+    geo.getCurrentPosition(
+      (pos) => {
+        setLat(String(pos.coords.latitude));
+        setLon(String(pos.coords.longitude));
+      },
+      (err) => setError(err.message || "geolocation denied"),
+    );
+  };
+
+  const runSearch = () => {
+    const q = query.trim();
+    if (!q) return;
+    setError(null);
+    geocode.mutate(q);
+  };
+
+  const pickCandidate = (c: GeocodeCandidate) => {
+    setLat(String(c.latitude));
+    setLon(String(c.longitude));
+    setLabel(c.label);
+  };
+
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const latNum = Number.parseFloat(lat);
+    const lonNum = Number.parseFloat(lon);
+    if (lat.trim() === "" || lon.trim() === "") {
+      setError("latitude and longitude are required");
+      return;
+    }
+    if (Number.isNaN(latNum) || Number.isNaN(lonNum)) {
+      setError("latitude and longitude must be numbers");
+      return;
+    }
+    if (latNum < -90 || latNum > 90) {
+      setError("latitude must be between -90 and 90");
+      return;
+    }
+    if (lonNum < -180 || lonNum > 180) {
+      setError("longitude must be between -180 and 180");
+      return;
+    }
+    update.mutate(
+      {
+        latitude: latNum,
+        longitude: lonNum,
+        label: label.trim() || null,
+      },
+      { onSuccess: () => dismiss() },
+    );
+  };
+
+  const candidates = geocode.data ?? [];
+  const mutationError = update.error ? String(update.error.message) : null;
+
+  return (
+    <div
+      onMouseDown={dismiss}
+      onKeyDown={onKeyDown}
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/35 pt-20"
+    >
+      <form
+        onMouseDown={(e) => e.stopPropagation()}
+        onSubmit={save}
+        role="dialog"
+        aria-label="Location"
+        className="w-[88%] max-w-[520px] border-[1.5px] border-ink bg-paper text-ink font-body"
+      >
+        {/* terminal header */}
+        <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
+          <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
+            ◎ Location
+          </span>
+          <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+            FORM CLP-GEO-01 / REV.01
+          </span>
+        </div>
+
+        <div className="px-4 py-3">
+          {/* manual coordinates */}
+          <div className="mb-2.5 grid grid-cols-2 gap-3">
+            <Field label="01 · Latitude">
+              <input
+                type="number"
+                step="any"
+                aria-label="Latitude"
+                value={lat}
+                onChange={(e) => setLat(e.target.value)}
+                placeholder="-90 … 90"
+                className="cl-mono mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+              />
+            </Field>
+            <Field label="02 · Longitude">
+              <input
+                type="number"
+                step="any"
+                aria-label="Longitude"
+                value={lon}
+                onChange={(e) => setLon(e.target.value)}
+                placeholder="-180 … 180"
+                className="cl-mono mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+              />
+            </Field>
+          </div>
+          <Field label="03 · Label · optional">
+            <input
+              aria-label="Label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. London, UK"
+              className="cl-mono mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+            />
+          </Field>
+
+          {/* browser geolocation */}
+          <div className="mb-2.5">
+            <button type="button" className="cl-btn" onClick={useMyLocation}>
+              ⌖ use my current location
+            </button>
+          </div>
+
+          {/* city search */}
+          <Field label="04 · City search">
+            <div className="mt-1 flex gap-2">
+              <input
+                aria-label="Search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    runSearch();
+                  }
+                }}
+                placeholder="city name"
+                className="cl-mono w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+              />
+              <button
+                type="button"
+                className="cl-btn"
+                onClick={runSearch}
+                disabled={geocode.isPending}
+              >
+                {geocode.isPending ? "…" : "search"}
+              </button>
+            </div>
+          </Field>
+          {candidates.length > 0 && (
+            <ul className="mb-2.5 flex flex-col border border-rule">
+              {candidates.map((c) => (
+                <li key={`${c.latitude},${c.longitude},${c.label}`}>
+                  <button
+                    type="button"
+                    onClick={() => pickCandidate(c)}
+                    className="cl-mono block w-full border-b border-dotted border-rule-soft px-2 py-1.5 text-left text-[11px] text-ink-2 last:border-b-0 hover:bg-paper-edge hover:text-ink"
+                  >
+                    {c.label}
+                    <span className="ml-2 text-[9px] tabular-nums text-ink-mute">
+                      {c.latitude.toFixed(3)}, {c.longitude.toFixed(3)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {(error || mutationError) && (
+            <div className="cl-mono mb-2 text-[11px] text-hot">
+              ⁂ {error ?? mutationError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="cl-btn" onClick={dismiss}>
+              cancel
+            </button>
+            <button
+              type="submit"
+              className="cl-btn cl-btn-hot"
+              disabled={update.isPending}
+            >
+              {update.isPending ? "saving…" : "◎ save location"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-2.5 block">
+      <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}

@@ -77,6 +77,8 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::bcl::get_bcl,
         // Location
         crate::api::location::get_location,
+        crate::api::location::put_location,
+        crate::api::location::geocode_search,
         // Uptime
         crate::api::uptime::get_uptime,
         // Board
@@ -153,6 +155,9 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::bcl::BclResponse,
             // Location
             crate::api::location::LocationResponse,
+            crate::api::location::UpdateLocationRequest,
+            crate::api::location::GeocodeResponse,
+            crate::api::location::GeocodeResultDto,
             // Uptime
             crate::api::uptime::UptimeResponse,
             // Board

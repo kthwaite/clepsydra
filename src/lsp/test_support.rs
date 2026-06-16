@@ -84,7 +84,7 @@ pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
         delete_hooks: Arc::new(vec![]),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
 
     let backend = LspBackend {

@@ -411,7 +411,7 @@ pub(crate) async fn build_app_state(
         delete_hooks,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,
-        location,
+        location: parking_lot::RwLock::new(location),
     }))
 }
 

@@ -4,6 +4,7 @@ import { CodexFrame } from "#/components/codex/CodexFrame";
 import { CommandPalette } from "#/components/codex/CommandPalette";
 import { InscribeModal } from "#/components/codex/InscribeModal";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
+import { LocationModal } from "#/components/codex/LocationModal";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
 import { ShortcutHelpModal } from "#/components/codex/ShortcutHelpModal";
 import { RouteError } from "#/components/RouteError";
@@ -29,6 +30,7 @@ export const Route = createRootRoute({
         <CommandPalette />
         <SettingsModal />
         <InscribeModal />
+        <LocationModal />
         <ShortcutHelpModal />
         <LinkPreviewLayer />
         <BootSequence />

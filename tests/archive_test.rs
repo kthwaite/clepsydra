@@ -56,7 +56,7 @@ fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
         delete_hooks: Arc::new(delete_hooks),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
-        location: None,
+        location: parking_lot::RwLock::new(None),
     });
 
     let app: Router = Router::new()
