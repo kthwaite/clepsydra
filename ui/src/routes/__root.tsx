@@ -9,6 +9,7 @@ import { ReadingProgressProvider } from "#/components/codex/ReadingProgressConte
 import { ShortcutHelpModal } from "#/components/codex/ShortcutHelpModal";
 import { RouteError } from "#/components/RouteError";
 import { SettingsModal } from "#/components/SettingsModal";
+import { Toaster } from "#/components/ui/Toaster";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 
 export const Route = createRootRoute({
@@ -34,6 +35,7 @@ export const Route = createRootRoute({
         <ShortcutHelpModal />
         <LinkPreviewLayer />
         <BootSequence />
+        <Toaster />
       </ReadingProgressProvider>
     </>
   ),

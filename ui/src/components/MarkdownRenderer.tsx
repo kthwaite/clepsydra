@@ -1,11 +1,37 @@
+import { type ReactNode, useRef } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
+import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 interface MarkdownRendererProps {
   content: string;
+}
+
+/**
+ * A fenced code block with a hover-reveal copy button. The button reads the
+ * rendered text straight off the <pre>, so it copies exactly what's shown
+ * regardless of inline markup.
+ */
+function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  return (
+    <div className="group relative">
+      <pre
+        ref={ref}
+        className="overflow-x-auto border border-border bg-muted p-4 font-mono text-sm"
+      >
+        {children}
+      </pre>
+      <CopyButton
+        getText={() => ref.current?.textContent ?? ""}
+        label="Copy code"
+        className="absolute right-2 top-2 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+      />
+    </div>
+  );
 }
 
 const remarkPlugins: PluggableList = [
@@ -76,13 +102,8 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
             {children}
           </td>
         ),
-        pre: ({ children, ...props }) => (
-          <pre
-            className="overflow-x-auto border border-border bg-muted p-4 font-mono text-sm"
-            {...props}
-          >
-            {children}
-          </pre>
+        pre: ({ children }) => (
+          <MarkdownCodeBlock>{children}</MarkdownCodeBlock>
         ),
         code: ({ children, className: codeClassName, ...props }) => {
           if (codeClassName) {

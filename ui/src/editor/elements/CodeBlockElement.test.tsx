@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createEditor, type Descendant } from "slate";
 import {
   Editable,
@@ -6,9 +7,13 @@ import {
   Slate,
   withReact,
 } from "slate-react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CodeBlockElement } from "#/editor/elements/CodeBlockElement";
 import type { CodeBlockElement as CodeBlockElementType } from "#/editor/types";
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 function renderInEditor(language?: string) {
   const editor = withReact(createEditor());
@@ -60,6 +65,16 @@ describe("CodeBlockElement", () => {
     expect((editor.children[0] as { language?: string }).language).toBe(
       "python",
     );
+  });
+
+  it("copies the code text when the copy button is pressed", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    renderInEditor("rust");
+
+    await user.click(screen.getByRole("button", { name: "Copy code" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("fn main() {}"));
   });
 
   it("selecting Plain text clears the code block's language", () => {
