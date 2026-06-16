@@ -1,6 +1,6 @@
 import SunCalc from "suncalc";
 
-const MOON_NAMES = [
+export const MOON_NAMES = [
   "New",
   "Waxing crescent",
   "First quarter",
@@ -10,7 +10,7 @@ const MOON_NAMES = [
   "Last quarter",
   "Waning crescent",
 ];
-const MOON_GLYPHS = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
+export const MOON_GLYPHS = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];
 
 export interface MoonInfo {
   phaseName: string;
