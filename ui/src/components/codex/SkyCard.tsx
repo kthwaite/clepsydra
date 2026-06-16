@@ -1,3 +1,4 @@
+import { Cog } from "lucide-react";
 import { cn } from "#/lib/cn";
 import { Card } from "./Card";
 import { DayArc } from "./DayArc";
@@ -18,7 +19,7 @@ export interface SkyData {
  * The Atrium "Sky" card. The moon phase is accurate regardless of location, but
  * sunrise/sunset/light-left are only meaningful once a vault location is set —
  * so when `hasLocation` is false the body is greyed and a "set location" CTA
- * overlays it. When located, an unobtrusive "edit" control re-opens the picker.
+ * overlays it. A cog in the card header re-opens the location picker.
  */
 export function SkyCard({
   sky,
@@ -32,7 +33,21 @@ export function SkyCard({
   className?: string;
 }) {
   return (
-    <Card className={className} label="Sky" caption="FIG. III">
+    <Card
+      className={className}
+      label="Sky"
+      caption="FIG. III"
+      action={
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label="Edit location"
+          className="text-ink-mute transition-colors hover:text-accent"
+        >
+          <Cog className="h-3 w-3" />
+        </button>
+      }
+    >
       <div className="relative">
         <div className={cn(!hasLocation && "pointer-events-none opacity-40")}>
           <div className="grid grid-cols-[96px_1fr] gap-4">
@@ -56,17 +71,7 @@ export function SkyCard({
           />
         </div>
 
-        {hasLocation ? (
-          <div className="mt-2 flex justify-end">
-            <button
-              type="button"
-              onClick={onEdit}
-              className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent"
-            >
-              edit
-            </button>
-          </div>
-        ) : (
+        {!hasLocation && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
             <p className="cl-marg m-0 max-w-[24ch]">
               Set your location for accurate sun times.

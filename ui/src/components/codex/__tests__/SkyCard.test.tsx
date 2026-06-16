@@ -22,7 +22,7 @@ function makeSky(overrides: Partial<SkyData> = {}): SkyData {
 }
 
 describe("SkyCard", () => {
-  it("renders sun values and an edit control when located", async () => {
+  it("renders sun values and a cog that opens the picker when located", async () => {
     const user = userEvent.setup();
     const onEdit = vi.fn();
     render(<SkyCard sky={makeSky()} hasLocation={true} onEdit={onEdit} />);
@@ -32,8 +32,7 @@ describe("SkyCard", () => {
     expect(screen.getByText("London")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /set location/i })).toBeNull();
 
-    const edit = screen.getByRole("button", { name: /edit/i });
-    await user.click(edit);
+    await user.click(screen.getByRole("button", { name: /edit location/i }));
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
@@ -48,11 +47,12 @@ describe("SkyCard", () => {
       />,
     );
 
-    const cta = screen.getByRole("button", { name: /set location/i });
-    await user.click(cta);
+    await user.click(screen.getByRole("button", { name: /set location/i }));
     expect(onEdit).toHaveBeenCalledTimes(1);
 
-    // No "edit" affordance is shown while unlocated (the CTA covers it).
-    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
+    // The header cog remains available as the persistent picker affordance.
+    expect(
+      screen.getByRole("button", { name: /edit location/i }),
+    ).toBeInTheDocument();
   });
 });

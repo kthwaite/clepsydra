@@ -2,7 +2,9 @@ import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { useStats } from "#/api/index";
+import { useLocation } from "#/api/location";
 import { formatRelativeTime } from "#/components/codex/codex-time";
+import { LocationForm } from "#/components/codex/LocationForm";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
 import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
@@ -15,6 +17,7 @@ const sections: { id: SettingsSection; label: string }[] = [
   { id: "general", label: "General" },
   { id: "navigation", label: "Navigation" },
   { id: "appearance", label: "Appearance" },
+  { id: "location", label: "Location" },
   { id: "editor", label: "Editor" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -111,6 +114,10 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
 
   if (section === "appearance") {
     return <OperatorPreferences />;
+  }
+
+  if (section === "location") {
+    return <LocationSettings />;
   }
 
   if (section === "editor") {
@@ -221,6 +228,38 @@ function OperatorPreferences() {
           {diegetic ? "on" : "off"}
         </button>
       </Row>
+    </div>
+  );
+}
+
+function LocationSettings() {
+  const { data: location } = useLocation();
+  const configured = location?.latitude != null && location?.longitude != null;
+  return (
+    <div className="space-y-4">
+      <div className="border border-border bg-card p-4">
+        <h4 className="cl-mono mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+          § Vault location
+        </h4>
+        <p className="text-sm text-muted-foreground">
+          Sets the coordinates the Atrium sky panel uses for sunrise, sunset,
+          and the day-arc. Saved to{" "}
+          <code className="cl-mono text-foreground">
+            .clepsydra/location.toml
+          </code>
+          .
+        </p>
+        <p className="cl-mono mt-2 text-[12px] text-foreground">
+          {configured
+            ? `${location?.latitude}, ${location?.longitude}${
+                location?.label ? ` · ${location.label}` : ""
+              }`
+            : "Not configured"}
+        </p>
+      </div>
+      <div className="border border-border bg-card">
+        <LocationForm initial={location} />
+      </div>
     </div>
   );
 }

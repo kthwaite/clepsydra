@@ -4,6 +4,7 @@ export type SettingsSection =
   | "general"
   | "navigation"
   | "appearance"
+  | "location"
   | "editor"
   | "advanced";
 

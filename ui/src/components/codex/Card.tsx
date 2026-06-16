@@ -12,6 +12,7 @@ const PIP_CLASS: Record<Pip, string> = {
 export function Card({
   label,
   caption,
+  action,
   pip = "cool",
   tight = false,
   className,
@@ -19,6 +20,7 @@ export function Card({
 }: {
   label: string;
   caption?: ReactNode;
+  action?: ReactNode;
   pip?: Pip;
   tight?: boolean;
   className?: string;
@@ -35,11 +37,14 @@ export function Card({
             {label}
           </span>
         </div>
-        {caption ? (
-          <span className="cl-mono whitespace-nowrap text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            {caption}
-          </span>
-        ) : null}
+        <div className="flex flex-shrink-0 items-center gap-2.5">
+          {caption ? (
+            <span className="cl-mono whitespace-nowrap text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+              {caption}
+            </span>
+          ) : null}
+          {action}
+        </div>
       </div>
       <div className={tight ? "" : "p-3.5"}>{children}</div>
     </section>

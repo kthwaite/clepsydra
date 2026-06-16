@@ -2,14 +2,19 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { updateMutate, geocodeMutate, geocodeState } = vi.hoisted(() => ({
-  updateMutate: vi.fn(),
-  geocodeMutate: vi.fn(),
-  geocodeState: {
-    data: undefined as unknown,
-    isPending: false,
-  },
-}));
+const { updateMutate, geocodeMutate, geocodeState, locationState } = vi.hoisted(
+  () => ({
+    updateMutate: vi.fn(),
+    geocodeMutate: vi.fn(),
+    geocodeState: {
+      data: undefined as unknown,
+      isPending: false,
+    },
+    locationState: {
+      data: undefined as unknown,
+    },
+  }),
+);
 
 vi.mock("#/api/location", () => ({
   useUpdateLocation: () => ({
@@ -22,6 +27,7 @@ vi.mock("#/api/location", () => ({
     data: geocodeState.data,
     isPending: geocodeState.isPending,
   }),
+  useLocation: () => ({ data: locationState.data }),
 }));
 
 import { LocationModal } from "#/components/codex/LocationModal";
@@ -32,7 +38,22 @@ describe("LocationModal", () => {
     vi.clearAllMocks();
     geocodeState.data = undefined;
     geocodeState.isPending = false;
+    locationState.data = undefined;
     useUiStore.setState({ isLocationOpen: true });
+  });
+
+  it("prefills the fields from the current location", () => {
+    locationState.data = { latitude: 48.85, longitude: 2.35, label: "Paris" };
+    render(<LocationModal />);
+    expect(screen.getByRole("spinbutton", { name: /latitude/i })).toHaveValue(
+      48.85,
+    );
+    expect(screen.getByRole("spinbutton", { name: /longitude/i })).toHaveValue(
+      2.35,
+    );
+    expect(screen.getByRole("textbox", { name: /label/i })).toHaveValue(
+      "Paris",
+    );
   });
 
   it("returns null when closed", () => {
