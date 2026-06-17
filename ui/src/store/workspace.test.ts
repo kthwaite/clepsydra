@@ -69,6 +69,25 @@ describe("useWorkspaceStore openTab wiring", () => {
   });
 });
 
+describe("useWorkspaceStore clearActiveTab", () => {
+  it("clears the active tab without removing any tabs", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+      quires: {},
+    });
+    const store = useWorkspaceStore.getState();
+    store.addTab({ id: "g1", type: "graph", label: "Graph" });
+    expect(useWorkspaceStore.getState().activeTabId).toBe("g1");
+
+    useWorkspaceStore.getState().clearActiveTab();
+
+    expect(useWorkspaceStore.getState().activeTabId).toBeNull();
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
+  });
+});
+
 describe("useWorkspaceStore updateTabPath", () => {
   it("updates the target tab's path and leaves other tabs untouched", () => {
     useWorkspaceStore.setState({

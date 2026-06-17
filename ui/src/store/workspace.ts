@@ -72,6 +72,8 @@ interface WorkspaceActions {
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
   activateTab: (tabId: string) => void;
+  /** Drop focus without closing any tab — surfaces the empty-state launcher. */
+  clearActiveTab: () => void;
   togglePin: (tabId: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   updateTabLabel: (tabId: string, label: string) => void;
@@ -255,6 +257,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
                 : state.openHistory,
           };
         });
+      },
+
+      clearActiveTab() {
+        set({ activeTabId: null });
       },
 
       togglePin(tabId) {
