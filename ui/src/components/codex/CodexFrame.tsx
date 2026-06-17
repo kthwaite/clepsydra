@@ -73,8 +73,12 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       navigate({ to: "/workspace" });
     } else if (target === "tasking") navigate({ to: "/tasking" });
     else if (target === "folio") {
+      const store = useWorkspaceStore.getState();
       const firstPage = workspaceTabs.find((t) => t.type === "page");
-      if (firstPage) useWorkspaceStore.getState().activateTab(firstPage.id);
+      // With no folio open, drop focus off any lingering graph tab so the
+      // workspace shows the FolioLauncher empty state rather than the graph.
+      if (firstPage) store.activateTab(firstPage.id);
+      else store.clearActiveTab();
       navigate({ to: "/workspace" });
     }
   };
