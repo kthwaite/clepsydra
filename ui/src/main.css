@@ -1,18 +1,21 @@
-@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap");
 @import "tailwindcss";
 @import "@fontsource-variable/jetbrains-mono";
+/* Inter via the optical-size axis: one dual-axis face (wght 100–900 + opsz)
+   so large display text picks up Inter's "Display" optical shapes automatically
+   and body text stays in the text-optimized cut. See font-optical-sizing on body. */
+@import "@fontsource-variable/inter/opsz.css";
 
 /* =============================================================================
    CLEPSYDRA — VESSEL tokens
    Classified technical modernism: warm-grey achromatic field, barbican accent,
-   mono chrome (JetBrains Mono) + sans prose/display (Satoshi). Dark is the base;
+   mono chrome (JetBrains Mono) + sans prose/display (Inter). Dark is the base;
    "paper" is the light override. Radius zero; hard offset shadows.
    ============================================================================= */
 
 @theme {
     /* Typography stacks ---------------------------------------------------- */
     --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    --font-sans: "Satoshi", "Helvetica Neue", Arial, sans-serif;
+    --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
     --font-body: var(--font-sans);
     /* Legacy aliases retained so existing components keep resolving. Serif/slab
        are dropped from the design — they now point at the sans face; the
@@ -273,6 +276,7 @@ body {
     line-height: 1.5;
     letter-spacing: 0.005em;
     font-feature-settings: "tnum" 1, "zero" 1, "calt" 0;
+    font-optical-sizing: auto;
     -webkit-font-smoothing: antialiased;
     text-rendering: geometricPrecision;
 }
