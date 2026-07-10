@@ -2719,6 +2719,80 @@ async fn interrupted_attachment_upload_leaves_no_partial_files() {
     assert_eq!(remaining_files, 0, "temporary upload file was not removed");
 }
 
+#[tokio::test]
+async fn cancelled_attachment_upload_removes_temporary_file() {
+    let (app, tmp) = setup_app();
+    let boundary = "----cancelledattachmentboundary";
+    let header = Bytes::from(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cancel.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npartial"
+    ));
+    let (sender, receiver) = mpsc::channel(1);
+    sender.send(Ok::<_, std::io::Error>(header)).await.unwrap();
+    let request = Request::post("/api/vault/attachments/cancel.bin")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from_stream(ReceiverStream::new(receiver)))
+        .unwrap();
+    let upload = tokio::spawn(app.oneshot(request));
+    let attachment_dir = tmp.path().join("vault/_attachments");
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if fs::read_dir(&attachment_dir)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("upload did not create a temporary file");
+
+    let temporary_name = fs::read_dir(&attachment_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .into_string()
+        .unwrap();
+    assert!(temporary_name.starts_with(".upload-"));
+    assert_eq!(temporary_name.len(), ".upload-".len() + 32);
+
+    upload.abort();
+    assert!(upload.await.unwrap_err().is_cancelled());
+    drop(sender);
+
+    let remaining_files = fs::read_dir(attachment_dir)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        remaining_files, 0,
+        "cancelling the handler must synchronously unlink its temporary file"
+    );
+}
+
+#[tokio::test]
+async fn attachment_upload_with_long_valid_basename_uses_bounded_temporary_name() {
+    let (server, _tmp) = setup_server();
+    let boundary = "----longattachmentboundary";
+    let file_name = format!("{}.bin", "a".repeat(240));
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post(&format!("/api/vault/attachments/{file_name}"))
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+}
+
 // ---------------------------------------------------------------------------
 // Full-text search
 // ---------------------------------------------------------------------------

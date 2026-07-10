@@ -487,6 +487,7 @@ dependencies = [
  "ropey",
  "rusqlite",
  "rust-embed",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml",
