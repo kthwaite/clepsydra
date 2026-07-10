@@ -115,9 +115,10 @@ where
     SyncParent: FnOnce(&Path) -> io::Result<()>,
     RemoveTemporary: FnOnce(&Path) -> io::Result<()>,
 {
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "destination has no parent")
-    })?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let file_name = path.file_name().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "destination has no file name")
     })?;
@@ -174,7 +175,6 @@ where
         ),
     }
 }
-
 
 fn create_temporary_file(
     parent: &Path,

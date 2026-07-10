@@ -4,10 +4,10 @@ use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
-use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::mutation_coordinator::{
     MutationCoordinator, atomic_replace, atomic_replace_with,
 };
+use clepsydra::vault::path::VaultPath;
 
 use tempfile::TempDir;
 
@@ -637,6 +637,70 @@ async fn mutation_coordinator_allows_different_paths_concurrently() {
 }
 
 #[tokio::test]
+async fn mutation_coordinator_deduplicates_repeated_paths() {
+    use std::time::Duration;
+
+    let coordinator = MutationCoordinator::new();
+    let path = VaultPath::new("notes/repeated.md").unwrap();
+
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        coordinator.lock_paths(&[path.clone(), path]),
+    )
+    .await
+    .expect("duplicate normalized paths caused self-deadlock");
+}
+
+#[tokio::test]
+async fn mutation_coordinator_orders_opposing_multi_path_requests() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let first_path = VaultPath::new("notes/first.md").unwrap();
+    let second_path = VaultPath::new("notes/second.md").unwrap();
+    let initial_guard = coordinator
+        .lock_paths(std::slice::from_ref(&first_path))
+        .await;
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::channel(2);
+
+    let reverse_coordinator = Arc::clone(&coordinator);
+    let reverse_first = first_path.clone();
+    let reverse_second = second_path.clone();
+    let reverse_started = started_tx.clone();
+    let reverse = tokio::spawn(async move {
+        reverse_started.send(()).await.unwrap();
+        let _guard = reverse_coordinator
+            .lock_paths(&[reverse_second, reverse_first])
+            .await;
+    });
+
+    let forward_coordinator = Arc::clone(&coordinator);
+    let forward = tokio::spawn(async move {
+        started_tx.send(()).await.unwrap();
+        let _guard = forward_coordinator
+            .lock_paths(&[first_path, second_path])
+            .await;
+    });
+
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(1), started_rx.recv())
+            .await
+            .expect("a lock request did not start")
+            .expect("a lock request exited before starting");
+    }
+    tokio::task::yield_now().await;
+    drop(initial_guard);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        reverse.await.unwrap();
+        forward.await.unwrap();
+    })
+    .await
+    .expect("opposite-order multi-path requests deadlocked");
+}
+
+#[tokio::test]
 async fn mutation_coordinator_prunes_expired_lock_entries() {
     let coordinator = MutationCoordinator::new();
     let expired_path = VaultPath::new("notes/expired.md").unwrap();
@@ -700,6 +764,31 @@ fn mutation_coordinator_atomic_replace_writes_complete_new_content() {
     atomic_replace(&path, b"complete new content").unwrap();
 
     assert_eq!(fs::read(path).unwrap(), b"complete new content");
+}
+
+#[test]
+fn mutation_coordinator_atomic_replace_supports_bare_relative_destination() {
+    const CHILD_MARKER: &str = "CLEPSYDRA_BARE_RELATIVE_ATOMIC_REPLACE_CHILD";
+
+    if std::env::var_os(CHILD_MARKER).is_some() {
+        let path = std::path::Path::new("page.md");
+        fs::write(path, b"old content").unwrap();
+        atomic_replace(path, b"complete new content").unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"complete new content");
+        return;
+    }
+
+    let isolated_directory = TempDir::new().unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("mutation_coordinator_atomic_replace_supports_bare_relative_destination")
+        .arg("--nocapture")
+        .env(CHILD_MARKER, "1")
+        .current_dir(isolated_directory.path())
+        .status()
+        .unwrap();
+
+    assert!(status.success(), "isolated child test failed: {status}");
 }
 
 #[test]
