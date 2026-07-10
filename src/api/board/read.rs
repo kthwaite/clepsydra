@@ -482,17 +482,18 @@ fn extract_link_or_str(meta: &serde_json::Value, key: &str) -> Option<String> {
     }
 }
 
-/// Count checkbox blocks for every page in one grouped query.
+/// Count checkbox blocks for every TASK page in one grouped query.
 ///
-/// Pages without checkbox blocks are absent and callers default them to `[0, 0]`.
+/// TASK pages without checkbox blocks are absent and callers default them to `[0, 0]`.
 fn count_checks_by_page(
     conn: &rusqlite::Connection,
 ) -> Result<HashMap<String, [u32; 2]>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT page_id, COUNT(*), COALESCE(SUM(value = 'done'), 0) \
-           FROM block_properties \
-          WHERE key = 'status' \
-          GROUP BY page_id",
+        "SELECT bp.page_id, COUNT(*), COALESCE(SUM(bp.value = 'done'), 0) \
+           FROM block_properties bp \
+           JOIN pages p ON p.id = bp.page_id AND p.kind = 'TASK' \
+          WHERE bp.key = 'status' \
+          GROUP BY bp.page_id",
     )?;
     stmt.query_map([], |row| {
         let page_id = row.get::<_, String>(0)?;
@@ -528,15 +529,25 @@ mod tests {
     fn checklist_counts_are_aggregated_for_multiple_pages() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE block_properties (
+            "CREATE TABLE pages (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL
+            );
+            CREATE TABLE block_properties (
                 page_id TEXT NOT NULL,
                 key TEXT NOT NULL,
                 value TEXT NOT NULL
             );
+            INSERT INTO pages (id, kind) VALUES
+                ('todo-page', 'TASK'),
+                ('done-page', 'TASK'),
+                ('cancelled-page', 'TASK'),
+                ('non-task-page', 'NOTE');
             INSERT INTO block_properties (page_id, key, value) VALUES
                 ('todo-page', 'status', 'todo'),
                 ('done-page', 'status', 'done'),
                 ('cancelled-page', 'status', 'cancelled'),
+                ('non-task-page', 'status', 'done'),
                 ('done-page', 'other', 'done');",
         )
         .unwrap();
@@ -547,5 +558,6 @@ mod tests {
         assert_eq!(counts.get("done-page"), Some(&[1, 1]));
         assert_eq!(counts.get("cancelled-page"), Some(&[0, 1]));
         assert_eq!(counts.get("empty-page"), None);
+        assert_eq!(counts.get("non-task-page"), None);
     }
 }
