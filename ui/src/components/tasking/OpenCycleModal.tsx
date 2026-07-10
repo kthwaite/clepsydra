@@ -16,6 +16,7 @@ import { useBoardStore } from "#/store/board";
 import { BoardModalFrame } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { cycleStats } from "./board-stats";
+import { CycleMetric } from "./board-presentation";
 
 // ── OpenCycleModal ────────────────────────────────────────────────────────────
 
@@ -111,40 +112,22 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
 
               {/* Stats row */}
               <div className="flex gap-[20px]" data-testid="open-cycle-stats">
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    COMMITTED
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                    data-testid="open-cycle-committed"
-                  >
-                    {String(committed).padStart(2, "0")}
-                  </b>
-                </div>
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    CHECKS
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                    data-testid="open-cycle-checks"
-                  >
-                    {String(checkTot).padStart(2, "0")}
-                  </b>
-                </div>
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    → STATE
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none"
-                    style={{ color: "var(--cool)" }}
-                    data-testid="open-cycle-state"
-                  >
-                    ACTIVE
-                  </b>
-                </div>
+                <CycleMetric
+                  label="COMMITTED"
+                  value={committed}
+                  testId="open-cycle-committed"
+                />
+                <CycleMetric
+                  label="CHECKS"
+                  value={checkTot}
+                  testId="open-cycle-checks"
+                />
+                <CycleMetric
+                  label="→ STATE"
+                  value="ACTIVE"
+                  color="var(--cool)"
+                  testId="open-cycle-state"
+                />
               </div>
 
               {/* No tasks callout */}

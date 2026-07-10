@@ -20,6 +20,7 @@ import { useBoardStore } from "#/store/board";
 import { BoardModalFrame } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { sealStats } from "./board-stats";
+import { CycleMetric } from "./board-presentation";
 import { EdField, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
 
 // ── SealCycleModal ────────────────────────────────────────────────────────────
@@ -126,52 +127,28 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
 
               {/* Stats row */}
               <div className="flex gap-[20px]" data-testid="seal-cycle-stats">
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    COMMITTED
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                    data-testid="seal-cycle-committed"
-                  >
-                    {String(committed).padStart(2, "0")}
-                  </b>
-                </div>
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    SEALED
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                    style={{ color: "var(--cool)" }}
-                    data-testid="seal-cycle-sealed"
-                  >
-                    {String(sealed).padStart(2, "0")}
-                  </b>
-                </div>
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    CARRYOVER
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                    style={carryover > 0 ? { color: "var(--hot)" } : undefined}
-                    data-testid="seal-cycle-carryover"
-                  >
-                    {String(carryover).padStart(2, "0")}
-                  </b>
-                </div>
-                <div className="flex min-w-[78px] flex-col gap-[3px]">
-                  <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                    RATE
-                  </span>
-                  <b
-                    className="cl-display text-[20px] font-black leading-none [font-variant-numeric:tabular-nums]"
-                    data-testid="seal-cycle-rate"
-                  >
-                    {pct}%
-                  </b>
-                </div>
+                <CycleMetric
+                  label="COMMITTED"
+                  value={committed}
+                  testId="seal-cycle-committed"
+                />
+                <CycleMetric
+                  label="SEALED"
+                  value={sealed}
+                  color="var(--cool)"
+                  testId="seal-cycle-sealed"
+                />
+                <CycleMetric
+                  label="CARRYOVER"
+                  value={carryover}
+                  color={carryover > 0 ? "var(--hot)" : undefined}
+                  testId="seal-cycle-carryover"
+                />
+                <CycleMetric
+                  label="RATE"
+                  value={`${pct}%`}
+                  testId="seal-cycle-rate"
+                />
               </div>
 
               {/* Progress bar */}

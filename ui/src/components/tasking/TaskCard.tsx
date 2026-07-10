@@ -7,6 +7,7 @@
 
 import type { BoardTask } from "#/api/board";
 import { checklistProgress } from "./board-stats";
+import { ChecklistBar } from "./board-presentation";
 
 // ── priority colour maps ──────────────────────────────────────────────────────
 
@@ -120,18 +121,11 @@ export function TaskCard({
       {/* Checklist progress bar */}
       {total > 0 && (
         <div className="mb-[7px] flex items-center gap-[7px]">
-          <span
-            className="flex-1 border border-[var(--rule)] bg-[var(--bg-3)]"
-            style={{ height: 4 }}
-          >
-            <i
-              className="block h-full"
-              style={{
-                width: `${pct}%`,
-                background: checksDone ? "var(--cool)" : "var(--ink-2)",
-              }}
-            />
-          </span>
+          <ChecklistBar
+            percent={pct}
+            isComplete={checksDone}
+            className="h-[4px] flex-1"
+          />
           <span className="cl-mono font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-3)]">
             {done}/{total}
           </span>

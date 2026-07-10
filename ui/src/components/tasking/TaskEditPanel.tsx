@@ -37,6 +37,7 @@ import { useDeleteTask, usePatchTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { opKey } from "./board-constants";
 import { checklistProgress } from "./board-stats";
+import { ChecklistBar } from "./board-presentation";
 import {
   DispositionRow,
   EdField,
@@ -293,7 +294,7 @@ export function TaskEditPanel({
   );
 
   // Checklist progress (read-only: decision 7)
-  const { done, total, percent: pct } = checklistProgress(task.checks);
+  const { done, total, percent: pct, isComplete } = checklistProgress(task.checks);
 
   const barColor = PRI_BAR_COLOR[task.priority] ?? "var(--ink-3)";
   const priTextColor = PRI_TEXT_COLOR[task.priority] ?? "var(--ink-mute)";
@@ -495,19 +496,12 @@ export function TaskEditPanel({
           >
             <div className="flex flex-col gap-[8px]">
               {/* Progress bar */}
-              <div className="h-[6px] w-full border border-[var(--rule)] bg-[var(--bg-3)]">
-                <i
-                  className="block h-full"
-                  style={{
-                    width: `${pct}%`,
-                    background:
-                      total > 0 && done === total
-                        ? "var(--cool)"
-                        : "var(--ink-2)",
-                  }}
-                  data-testid="edit-panel-checklist-bar"
-                />
-              </div>
+              <ChecklistBar
+                percent={pct}
+                isComplete={isComplete}
+                className="h-[6px] w-full"
+                indicatorTestId="edit-panel-checklist-bar"
+              />
               {/* Open page link */}
               <button
                 type="button"
