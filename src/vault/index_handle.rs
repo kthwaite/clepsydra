@@ -4,6 +4,7 @@ use super::Vault;
 use super::index::{
     BacklinkWithContext, BuildStats, IndexError, SearchResult, SimilarRow, VaultIndex,
 };
+use super::index_policy::{self, IndexMutation, IndexPolicyError};
 use super::path::VaultPath;
 use super::sync::{ChangeEvent, SyncEngine, SyncStats};
 
@@ -95,6 +96,19 @@ impl IndexHandle {
     pub async fn index_page(&self, vp: VaultPath) -> Result<bool, IndexError> {
         self.with_index(move |index, vault| index.index_page(vault, &vp))
             .await?
+    }
+
+    /// Apply one intent-level mutation policy as a single serialized index operation.
+    pub async fn apply_mutation(
+        &self,
+        path: VaultPath,
+        mutation: IndexMutation,
+    ) -> Result<(), IndexPolicyError> {
+        self.with_index(move |index, vault| {
+            index_policy::apply_mutation(index, vault, &path, mutation)
+        })
+        .await
+        .map_err(IndexPolicyError::IndexThread)?
     }
 
     /// Remove a page from the index.

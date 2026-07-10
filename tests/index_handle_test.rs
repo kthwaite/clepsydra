@@ -1,8 +1,9 @@
 use std::fs;
 
 use clepsydra::vault::Vault;
-use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex};
 use clepsydra::vault::index_handle::IndexHandle;
+use clepsydra::vault::index_policy::{IndexMutation, IndexPolicyError, IndexPolicyOperation};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::sync::ChangeEvent;
@@ -441,4 +442,369 @@ No links.
         .unwrap();
 
     assert_eq!(resolved, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Intent-level mutation policies
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn mutation_policy_created_resolves_outgoing_and_existing_inbound_links() {
+    let source = r#"---
+id: 00000000-0000-0000-0000-000000000201
+title: Source
+---
+See [[Created]].
+"#;
+    let destination = r#"---
+id: 00000000-0000-0000-0000-000000000202
+title: Destination
+---
+Existing destination.
+"#;
+    let (_tmp, vault) = setup_vault(&[("source.md", source), ("destination.md", destination)]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+    handle.resolve_links().await.unwrap();
+
+    let created = r#"---
+id: 00000000-0000-0000-0000-000000000203
+title: Created
+---
+New page links to [[Destination]].
+"#;
+    fs::write(vault.root().join("created.md"), created).unwrap();
+
+    handle
+        .apply_mutation(
+            VaultPath::new("created.md").unwrap(),
+            IndexMutation::Created,
+        )
+        .await
+        .unwrap();
+
+    let inbound = handle
+        .reverse_deps(VaultPath::new("created.md").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        inbound.iter().map(VaultPath::as_str).collect::<Vec<_>>(),
+        vec!["source.md"]
+    );
+
+    let destination_inbound = handle
+        .reverse_deps(VaultPath::new("destination.md").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        destination_inbound
+            .iter()
+            .map(VaultPath::as_str)
+            .collect::<Vec<_>>(),
+        vec!["created.md"]
+    );
+
+    let unresolved = handle
+        .with_index(|index, _vault| index.unresolved_with_candidates())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(unresolved.iter().all(|link| link.target_raw != "Created"));
+}
+
+#[tokio::test]
+async fn mutation_policy_content_changed_rebuilds_outgoing_and_reverse_dependencies() {
+    let target = r#"---
+id: 00000000-0000-0000-0000-000000000204
+title: Old Name
+---
+Old content links to [[Old Destination]].
+"#;
+    let old_source = r#"---
+id: 00000000-0000-0000-0000-000000000205
+title: Old Source
+---
+See [[Old Name]].
+"#;
+    let new_source = r#"---
+id: 00000000-0000-0000-0000-000000000206
+title: New Source
+---
+See [[New Name]].
+"#;
+    let destination = r#"---
+id: 00000000-0000-0000-0000-000000000207
+title: Destination
+---
+Destination content.
+"#;
+    let old_destination = r#"---
+id: 00000000-0000-0000-0000-000000000215
+title: Old Destination
+---
+Old destination content.
+"#;
+    let (_tmp, vault) = setup_vault(&[
+        ("target.md", target),
+        ("old-source.md", old_source),
+        ("new-source.md", new_source),
+        ("destination.md", destination),
+        ("old-destination.md", old_destination),
+    ]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+    handle.resolve_links().await.unwrap();
+
+    let changed_target = r#"---
+id: 00000000-0000-0000-0000-000000000204
+title: New Name
+---
+Changed page now links to [[Destination]].
+"#;
+    fs::write(vault.root().join("target.md"), changed_target).unwrap();
+
+    handle
+        .apply_mutation(
+            VaultPath::new("target.md").unwrap(),
+            IndexMutation::ContentChanged,
+        )
+        .await
+        .unwrap();
+
+    let inbound = handle
+        .reverse_deps(VaultPath::new("target.md").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        inbound.iter().map(VaultPath::as_str).collect::<Vec<_>>(),
+        vec!["new-source.md"]
+    );
+
+    let destination_inbound = handle
+        .reverse_deps(VaultPath::new("destination.md").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        destination_inbound
+            .iter()
+            .map(VaultPath::as_str)
+            .collect::<Vec<_>>(),
+        vec!["target.md"]
+    );
+    assert!(
+        handle
+            .reverse_deps(VaultPath::new("old-destination.md").unwrap())
+            .await
+            .unwrap()
+            .is_empty(),
+        "outgoing links removed by the content change must not remain indexed"
+    );
+
+    let unresolved = handle
+        .with_index(|index, _vault| index.unresolved_with_candidates())
+        .await
+        .unwrap()
+        .unwrap();
+    let stale_link = unresolved
+        .iter()
+        .find(|link| link.source_path == "old-source.md" && link.target_raw == "Old Name")
+        .expect("the removed canonical name should leave the old link unresolved");
+    assert_eq!(stale_link.reason, UnresolvedReason::NoMatch);
+}
+
+#[tokio::test]
+async fn mutation_policy_moved_preserves_links_and_removes_the_stale_path() {
+    let target = r#"---
+id: 00000000-0000-0000-0000-000000000208
+title: Movable
+---
+Moved page links to [[Destination]].
+"#;
+    let title_source = r#"---
+id: 00000000-0000-0000-0000-000000000209
+title: Title Source
+---
+See [[Movable]].
+"#;
+    let old_path_source = r#"---
+id: 00000000-0000-0000-0000-000000000210
+title: Old Path Source
+---
+See [[notes/old]].
+"#;
+    let destination = r#"---
+id: 00000000-0000-0000-0000-000000000211
+title: Destination
+---
+Destination content.
+"#;
+    let (_tmp, vault) = setup_vault(&[
+        ("notes/old.md", target),
+        ("title-source.md", title_source),
+        ("old-path-source.md", old_path_source),
+        ("destination.md", destination),
+    ]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+    handle.resolve_links().await.unwrap();
+
+    fs::rename(
+        vault.root().join("notes/old.md"),
+        vault.root().join("notes/new.md"),
+    )
+    .unwrap();
+    let moved_with_repaired_id = target.replace(
+        "00000000-0000-0000-0000-000000000208",
+        "00000000-0000-0000-0000-000000000216",
+    );
+    fs::write(vault.root().join("notes/new.md"), moved_with_repaired_id).unwrap();
+    handle
+        .apply_mutation(
+            VaultPath::new("notes/new.md").unwrap(),
+            IndexMutation::Moved {
+                old_path: VaultPath::new("notes/old.md").unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let search = handle.search("Movable".into(), 10).await.unwrap();
+    assert!(search.iter().any(|result| result.path == "notes/new.md"));
+    assert!(search.iter().all(|result| result.path != "notes/old.md"));
+
+    let inbound = handle
+        .reverse_deps(VaultPath::new("notes/new.md").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        inbound.iter().map(VaultPath::as_str).collect::<Vec<_>>(),
+        vec!["title-source.md"]
+    );
+
+    let destination_inbound = handle
+        .reverse_deps(VaultPath::new("destination.md").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        destination_inbound
+            .iter()
+            .map(VaultPath::as_str)
+            .collect::<Vec<_>>(),
+        vec!["notes/new.md"]
+    );
+
+    let unresolved = handle
+        .with_index(|index, _vault| index.unresolved_with_candidates())
+        .await
+        .unwrap()
+        .unwrap();
+    let stale_link = unresolved
+        .iter()
+        .find(|link| link.source_path == "old-path-source.md" && link.target_raw == "notes/old")
+        .expect("the old path link should be unresolved after the move");
+    assert_eq!(stale_link.reason, UnresolvedReason::NoMatch);
+}
+
+#[tokio::test]
+async fn mutation_policy_deleted_invalidates_inbound_and_removes_outgoing_links() {
+    let target = r#"---
+id: 00000000-0000-0000-0000-000000000212
+title: Disposable
+---
+Deleted page links to [[Destination]].
+"#;
+    let source = r#"---
+id: 00000000-0000-0000-0000-000000000213
+title: Source
+---
+See [[Disposable]].
+"#;
+    let destination = r#"---
+id: 00000000-0000-0000-0000-000000000214
+title: Destination
+---
+Destination content.
+"#;
+    let (_tmp, vault) = setup_vault(&[
+        ("disposable.md", target),
+        ("source.md", source),
+        ("destination.md", destination),
+    ]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+    handle.resolve_links().await.unwrap();
+
+    fs::remove_file(vault.root().join("disposable.md")).unwrap();
+    handle
+        .apply_mutation(
+            VaultPath::new("disposable.md").unwrap(),
+            IndexMutation::Deleted,
+        )
+        .await
+        .unwrap();
+
+    let search = handle.search("Disposable".into(), 10).await.unwrap();
+    assert!(
+        search.iter().all(|result| result.path != "disposable.md"),
+        "the deleted page must be removed from full-text search"
+    );
+    assert!(
+        handle
+            .reverse_deps(VaultPath::new("destination.md").unwrap())
+            .await
+            .unwrap()
+            .is_empty(),
+        "outgoing links from the deleted page must be removed"
+    );
+
+    let unresolved = handle
+        .with_index(|index, _vault| index.unresolved_with_candidates())
+        .await
+        .unwrap()
+        .unwrap();
+    let invalidated = unresolved
+        .iter()
+        .find(|link| link.source_path == "source.md" && link.target_raw == "Disposable")
+        .expect("the inbound link should remain as an unresolved link");
+    assert_eq!(invalidated.reason, UnresolvedReason::NoMatch);
+
+    let stale_target_path_count: i64 = handle
+        .with_index(|index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM links WHERE target_path = 'disposable.md'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(stale_target_path_count, 0);
+}
+
+#[tokio::test]
+async fn mutation_policy_preserves_typed_operation_errors() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let handle = build_handle(&vault);
+    let missing_path = VaultPath::new("missing.md").unwrap();
+
+    let error = handle
+        .apply_mutation(missing_path.clone(), IndexMutation::Created)
+        .await
+        .unwrap_err();
+
+    match error {
+        IndexPolicyError::Operation {
+            operation,
+            path,
+            source: IndexError::Io(source),
+        } => {
+            assert_eq!(operation, IndexPolicyOperation::IndexPage);
+            assert_eq!(path, missing_path);
+            assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+        }
+        other => panic!("expected a typed index-page I/O error, got {other:?}"),
+    }
 }
