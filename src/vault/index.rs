@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use chrono::Utc;
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -500,17 +500,18 @@ impl VaultIndex {
 
         let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
 
-        // Check if hash matches DB -> skip if unchanged
-        let existing_hash: Option<String> = self
+        // Check if hash matches DB -> skip if unchanged. Keep the stored identity
+        // so a repaired frontmatter ID can replace the row at the same path.
+        let existing_page: Option<(String, String)> = self
             .conn
             .query_row(
-                "SELECT content_hash FROM pages WHERE path = ?1",
+                "SELECT id, content_hash FROM pages WHERE path = ?1",
                 params![vault_path.as_str()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .ok();
+            .optional()?;
 
-        if existing_hash.as_deref() == Some(&content_hash) {
+        if existing_page.as_ref().map(|(_, hash)| hash.as_str()) == Some(&content_hash) {
             return Ok(false);
         }
 
@@ -548,6 +549,20 @@ impl VaultIndex {
         let kind_str = kind.as_str();
         let project = page.meta.project.clone();
         let word_count = page.body.split_whitespace().count() as i64;
+
+        // `pages.path` is unique independently of the page ID. If frontmatter
+        // repair changed the ID in place, remove the old identity and every
+        // row derived from it before inserting the replacement. Most derived
+        // tables cascade from `pages`; FTS must be maintained explicitly.
+        if let Some((existing_id, _)) = &existing_page
+            && existing_id != &page_id
+        {
+            tx.execute(
+                "DELETE FROM pages_fts WHERE page_id = ?1",
+                params![existing_id],
+            )?;
+            tx.execute("DELETE FROM pages WHERE id = ?1", params![existing_id])?;
+        }
 
         tx.execute(
             "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, word_count)
@@ -630,7 +645,7 @@ impl VaultIndex {
                 params![vault_path.as_str()],
                 |row| row.get(0),
             )
-            .ok();
+            .optional()?;
         if let Some(ref pid) = page_id {
             self.conn
                 .execute("DELETE FROM pages_fts WHERE page_id = ?1", params![pid])?;
@@ -660,7 +675,7 @@ impl VaultIndex {
                 params![vault_path.as_str()],
                 |row| row.get(0),
             )
-            .ok();
+            .optional()?;
         let page_id = match page_id {
             Some(id) => id,
             None => {
@@ -697,7 +712,7 @@ impl VaultIndex {
                 params![vault_path.as_str()],
                 |row| row.get(0),
             )
-            .ok();
+            .optional()?;
 
         let mut source_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -710,8 +725,7 @@ impl VaultIndex {
             )?;
             let paths: Vec<String> = stmt
                 .query_map(params![page_id], |row| row.get(0))?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<Result<_, _>>()?;
             source_paths.extend(paths);
 
             // Pages with unresolved links matching this page's canonical names
@@ -720,8 +734,7 @@ impl VaultIndex {
                 .prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
             let cns: Vec<String> = cn_stmt
                 .query_map(params![page_id], |row| row.get(0))?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<Result<_, _>>()?;
             drop(cn_stmt);
 
             for cn in &cns {
@@ -732,8 +745,7 @@ impl VaultIndex {
                 )?;
                 let paths: Vec<String> = stmt
                     .query_map(params![cn], |row| row.get(0))?
-                    .filter_map(|r| r.ok())
-                    .collect();
+                    .collect::<Result<_, _>>()?;
                 source_paths.extend(paths);
             }
         }
@@ -762,7 +774,7 @@ impl VaultIndex {
                 params![vault_path.as_str()],
                 |row| row.get(0),
             )
-            .ok();
+            .optional()?;
 
         let page_id = match page_id {
             Some(id) => id,
@@ -1224,8 +1236,7 @@ fn resolve_outgoing_wikilinks(
         .query_map(params![page_id], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<_, _>>()?;
     drop(stmt);
 
     for (source_id, span_start, target_canonical) in &outgoing {
@@ -1239,8 +1250,7 @@ fn resolve_outgoing_wikilinks(
             .query_map(params![target_canonical], |row| {
                 Ok((row.get(0)?, row.get(1)?))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<_, _>>()?;
         drop(lookup);
 
         if matches.len() == 1 {
@@ -1272,8 +1282,7 @@ fn resolve_outgoing_block_refs(
         .query_map(params![page_id], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<_, _>>()?;
     drop(block_ref_stmt);
 
     for (source_id, span_start, block_id) in &outgoing_block_refs {
@@ -1284,8 +1293,7 @@ fn resolve_outgoing_block_refs(
         )?;
         let matches: Vec<(String, String)> = lookup
             .query_map(params![block_id], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<_, _>>()?;
         drop(lookup);
 
         if matches.len() == 1 {
@@ -1313,8 +1321,7 @@ fn resolve_incoming_wikilinks(
         tx.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
     let canonical_names: Vec<String> = cn_stmt
         .query_map(params![page_id], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<_, _>>()?;
     drop(cn_stmt);
 
     for cn in &canonical_names {
@@ -1324,8 +1331,7 @@ fn resolve_incoming_wikilinks(
         )?;
         let unresolved: Vec<(String, i64)> = stmt
             .query_map(params![cn], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<_, _>>()?;
         drop(stmt);
 
         for (source_id, span_start) in &unresolved {
@@ -1365,8 +1371,7 @@ fn resolve_incoming_block_refs(
         tx.prepare("SELECT block_id FROM blocks WHERE page_id = ?1 AND block_id IS NOT NULL")?;
     let page_block_ids: Vec<String> = block_id_stmt
         .query_map(params![page_id], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<_, _>>()?;
     drop(block_id_stmt);
 
     for bid in &page_block_ids {
@@ -1376,8 +1381,7 @@ fn resolve_incoming_block_refs(
         )?;
         let unresolved: Vec<(String, i64)> = stmt
             .query_map(params![bid], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<_, _>>()?;
         drop(stmt);
 
         for (source_id, span_start) in &unresolved {

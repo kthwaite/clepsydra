@@ -556,7 +556,7 @@ Old destination content.
     handle.resolve_links().await.unwrap();
 
     let changed_target = r#"---
-id: 00000000-0000-0000-0000-000000000204
+id: 00000000-0000-0000-0000-000000000217
 title: New Name
 ---
 Changed page now links to [[Destination]].
@@ -570,6 +570,30 @@ Changed page now links to [[Destination]].
         )
         .await
         .unwrap();
+
+    let stale_identity_rows: i64 = handle
+        .with_index(|index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM pages WHERE id = ?1) +
+                        (SELECT COUNT(*) FROM pages_fts WHERE page_id = ?1) +
+                        (SELECT COUNT(*) FROM canonical_names WHERE page_id = ?1) +
+                        (SELECT COUNT(*) FROM links WHERE source_id = ?1) +
+                        (SELECT COUNT(*) FROM tags WHERE page_id = ?1) +
+                        (SELECT COUNT(*) FROM blocks WHERE page_id = ?1)",
+                    ["00000000-0000-0000-0000-000000000204"],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        stale_identity_rows, 0,
+        "same-path identity replacement must remove the old page, FTS, and derived rows"
+    );
 
     let inbound = handle
         .reverse_deps(VaultPath::new("target.md").unwrap())
@@ -806,5 +830,48 @@ async fn mutation_policy_preserves_typed_operation_errors() {
             assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
         }
         other => panic!("expected a typed index-page I/O error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn mutation_policy_propagates_index_query_decode_failures() {
+    let page = r#"---
+id: 00000000-0000-0000-0000-000000000218
+title: Corrupted Hash
+---
+Content.
+"#;
+    let (_tmp, vault) = setup_vault(&[("corrupted.md", page)]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+    handle
+        .with_index(|index, _vault| {
+            index
+                .connection()
+                .execute(
+                    "UPDATE pages SET content_hash = x'00' WHERE path = 'corrupted.md'",
+                    [],
+                )
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
+    let path = VaultPath::new("corrupted.md").unwrap();
+    let error = handle
+        .apply_mutation(path.clone(), IndexMutation::Created)
+        .await
+        .unwrap_err();
+
+    match error {
+        IndexPolicyError::Operation {
+            operation,
+            path: error_path,
+            source: IndexError::Sqlite(rusqlite::Error::InvalidColumnType(..)),
+        } => {
+            assert_eq!(operation, IndexPolicyOperation::IndexPage);
+            assert_eq!(error_path, path);
+        }
+        other => panic!("expected a typed SQLite decoding error, got {other:?}"),
     }
 }
