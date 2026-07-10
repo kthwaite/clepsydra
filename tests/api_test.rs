@@ -2,9 +2,10 @@ use std::fs;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::http::StatusCode;
+use axum::body::{Body, Bytes};
+use axum::http::{Request, StatusCode};
 use axum_test::TestServer;
-use tokio::sync::broadcast;
+use tokio::sync::{Barrier, broadcast, mpsc};
 
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
@@ -15,6 +16,8 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
+use tokio_stream::wrappers::ReceiverStream;
+use tower::ServiceExt;
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
     Arc::new(vec![Box::new(AcademicMoveHook)])
@@ -22,6 +25,12 @@ fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
 
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
+    let (app, tmp) = setup_app();
+    let server = TestServer::new(app).unwrap();
+    (server, tmp)
+}
+
+fn setup_app() -> (Router, TempDir) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
@@ -53,12 +62,42 @@ fn setup_server() -> (TestServer, TempDir) {
         location: parking_lot::RwLock::new(None),
     });
 
-    let app: Router = Router::new()
+    let app = Router::new()
         .nest("/api/vault", api_router())
         .with_state(state);
 
-    let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    (app, tmp)
+}
+
+fn delayed_multipart_request(
+    boundary: &str,
+    payload: Vec<u8>,
+    barrier: Arc<Barrier>,
+) -> Request<Body> {
+    let header = Bytes::from(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"race.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    ));
+    let trailer = Bytes::from(format!("\r\n--{boundary}--\r\n"));
+    let (sender, receiver) = mpsc::channel(1);
+
+    tokio::spawn(async move {
+        sender.send(Ok::<_, std::io::Error>(header)).await.unwrap();
+        sender
+            .send(Ok::<_, std::io::Error>(Bytes::new()))
+            .await
+            .unwrap();
+        barrier.wait().await;
+        sender.send(Ok(Bytes::from(payload))).await.unwrap();
+        sender.send(Ok(trailer)).await.unwrap();
+    });
+
+    Request::post("/api/vault/attachments/race.bin")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from_stream(ReceiverStream::new(receiver)))
+        .unwrap()
 }
 
 #[tokio::test]
@@ -2611,6 +2650,73 @@ async fn upload_attachment_conflict() {
         .bytes(body.into_bytes().into())
         .await
         .assert_status(StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn simultaneous_attachment_uploads_install_exactly_one_payload() {
+    let (app, tmp) = setup_app();
+    let boundary = "----concurrentattachmentboundary";
+    let first_payload = vec![b'a'; 1024 * 1024];
+    let second_payload = vec![b'b'; 1024 * 1024];
+    let barrier = Arc::new(Barrier::new(2));
+
+    let first_request =
+        delayed_multipart_request(boundary, first_payload.clone(), Arc::clone(&barrier));
+    let second_request =
+        delayed_multipart_request(boundary, second_payload.clone(), Arc::clone(&barrier));
+    let first = app.clone().oneshot(first_request);
+    let second = app.oneshot(second_request);
+
+    let (first_response, second_response) = tokio::join!(first, second);
+    let first_response = first_response.unwrap();
+    let second_response = second_response.unwrap();
+    let statuses = [first_response.status(), second_response.status()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|&&status| status == StatusCode::CREATED)
+            .count(),
+        1,
+        "expected exactly one successful upload, got {statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|&&status| status == StatusCode::CONFLICT)
+            .count(),
+        1,
+        "expected exactly one conflict, got {statuses:?}"
+    );
+
+    let expected_payload = if first_response.status() == StatusCode::CREATED {
+        &first_payload
+    } else {
+        &second_payload
+    };
+    let stored = fs::read(tmp.path().join("vault/_attachments/race.bin")).unwrap();
+    assert_eq!(&stored, expected_payload);
+}
+
+#[tokio::test]
+async fn interrupted_attachment_upload_leaves_no_partial_files() {
+    let (server, tmp) = setup_server();
+    let boundary = "----interruptedattachmentboundary";
+    let incomplete_body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"partial.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nincomplete"
+    );
+
+    let response = server
+        .post("/api/vault/attachments/partial.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(incomplete_body.into_bytes().into())
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::BAD_REQUEST);
+    let attachment_dir = tmp.path().join("vault/_attachments");
+    let remaining_files = fs::read_dir(attachment_dir)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(remaining_files, 0, "temporary upload file was not removed");
 }
 
 // ---------------------------------------------------------------------------

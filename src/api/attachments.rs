@@ -1,7 +1,7 @@
 //! Handlers for managing attachments in the vault.
 //! Attachments are files stored in a designated folder within the vault, and can be
 //! uploaded, listed, retrieved, and deleted via the API.
-use std::fs;
+use std::io::ErrorKind;
 use std::sync::Arc;
 
 use axum::Json;
@@ -12,7 +12,9 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Serialize;
+use tokio::io::AsyncWriteExt;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
@@ -126,32 +128,104 @@ pub async fn upload_attachment(
 
     let abs_path = state.vault.resolve(&vault_path);
 
-    if abs_path.exists() {
+    if tokio::fs::try_exists(&abs_path)
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to check attachment: {e}")))?
+    {
         return Err(ApiError::conflict(format!(
             "attachment already exists: {path}"
         )));
     }
 
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+    let parent = abs_path
+        .parent()
+        .ok_or_else(|| ApiError::internal("attachment path has no parent".to_string()))?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
+
+    let file_name = abs_path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    let (temp_path, mut temp_file) = loop {
+        let candidate = parent.join(format!(".{file_name}.{}.upload", Uuid::now_v7()));
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+            .await
+        {
+            Ok(file) => break (candidate, file),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(ApiError::internal(format!(
+                    "failed to create temporary attachment: {error}"
+                )));
+            }
+        }
+    };
+
+    let upload_result = async {
+        let mut field = multipart
+            .next_field()
+            .await
+            .map_err(|e| ApiError::bad_request(format!("invalid multipart: {e}")))?
+            .ok_or_else(|| ApiError::bad_request("no file field in multipart body".to_string()))?;
+        let mut size = 0_u64;
+
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|e| ApiError::bad_request(format!("failed to read file: {e}")))?
+        {
+            temp_file
+                .write_all(&chunk)
+                .await
+                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+            size = size
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| ApiError::internal("attachment size overflow".to_string()))?;
+        }
+
+        temp_file
+            .flush()
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to flush attachment: {e}")))?;
+        temp_file
+            .sync_all()
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to sync attachment: {e}")))?;
+        drop(temp_file);
+
+        tokio::fs::hard_link(&temp_path, &abs_path)
+            .await
+            .map_err(|error| {
+                if error.kind() == ErrorKind::AlreadyExists {
+                    ApiError::conflict(format!("attachment already exists: {path}"))
+                } else {
+                    ApiError::internal(format!("failed to install attachment: {error}"))
+                }
+            })?;
+
+        Ok::<u64, ApiError>(size)
     }
+    .await;
 
-    let field = multipart
-        .next_field()
-        .await
-        .map_err(|e| ApiError::bad_request(format!("invalid multipart: {e}")))?
-        .ok_or_else(|| ApiError::bad_request("no file field in multipart body".to_string()))?;
+    let cleanup_result = tokio::fs::remove_file(&temp_path).await;
+    let size = match upload_result {
+        Ok(size) => {
+            cleanup_result.map_err(|e| {
+                ApiError::internal(format!("failed to remove temporary attachment: {e}"))
+            })?;
+            size
+        }
+        Err(error) => {
+            let _ = cleanup_result;
+            return Err(error);
+        }
+    };
 
-    let bytes = field
-        .bytes()
-        .await
-        .map_err(|e| ApiError::bad_request(format!("failed to read file: {e}")))?;
-
-    fs::write(&abs_path, &bytes)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    let size = bytes.len() as u64;
     let name = abs_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -193,7 +267,8 @@ pub async fn get_attachment(
         return Err(ApiError::not_found(format!("attachment not found: {path}")));
     }
 
-    let bytes = fs::read(&abs_path)
+    let bytes = tokio::fs::read(&abs_path)
+        .await
         .map_err(|e| ApiError::internal(format!("failed to read attachment: {e}")))?;
 
     let content_type = mime_guess::from_path(&abs_path)
@@ -236,7 +311,8 @@ pub async fn delete_attachment(
         return Err(ApiError::not_found(format!("attachment not found: {path}")));
     }
 
-    fs::remove_file(&abs_path)
+    tokio::fs::remove_file(&abs_path)
+        .await
         .map_err(|e| ApiError::internal(format!("failed to delete attachment: {e}")))?;
 
     Ok(StatusCode::NO_CONTENT.into_response())
