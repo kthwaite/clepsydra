@@ -29,6 +29,7 @@ impl MutationCoordinator {
 
         let locks = {
             let mut table = self.locks.lock();
+            table.retain(|_, lock| lock.strong_count() != 0);
             keys.into_iter()
                 .map(|key| {
                     if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
@@ -52,6 +53,15 @@ impl MutationCoordinator {
             _locks: locks,
         }
     }
+
+    /// Return the number of retained lock identities.
+    ///
+    /// This is exposed for deterministic verification that expired weak
+    /// entries do not accumulate.
+    #[doc(hidden)]
+    pub fn lock_table_len(&self) -> usize {
+        self.locks.lock().len()
+    }
 }
 
 impl Default for MutationCoordinator {
@@ -73,6 +83,38 @@ static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// The temporary file is created alongside the destination so the final
 /// rename remains within one filesystem.
 pub fn atomic_replace(path: &Path, content: &[u8]) -> io::Result<()> {
+    atomic_replace_with(
+        path,
+        content,
+        |file, content| {
+            file.write_all(content)?;
+            file.sync_all()
+        },
+        |temporary_path, destination| fs::rename(temporary_path, destination),
+        |parent| fs::File::open(parent)?.sync_all(),
+        |temporary_path| fs::remove_file(temporary_path),
+    )
+}
+
+/// Atomic replacement implementation with injectable filesystem operations.
+///
+/// The operation seams make failure ordering and error semantics deterministic
+/// to test without relying on platform permissions or a failing filesystem.
+#[doc(hidden)]
+pub fn atomic_replace_with<WriteAndSync, Rename, SyncParent, RemoveTemporary>(
+    path: &Path,
+    content: &[u8],
+    write_and_sync: WriteAndSync,
+    rename: Rename,
+    sync_parent: SyncParent,
+    remove_temporary: RemoveTemporary,
+) -> io::Result<()>
+where
+    WriteAndSync: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+    Rename: FnOnce(&Path, &Path) -> io::Result<()>,
+    SyncParent: FnOnce(&Path) -> io::Result<()>,
+    RemoveTemporary: FnOnce(&Path) -> io::Result<()>,
+{
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "destination has no parent")
     })?;
@@ -81,21 +123,56 @@ pub fn atomic_replace(path: &Path, content: &[u8]) -> io::Result<()> {
     })?;
 
     let (temporary_path, mut temporary_file) = create_temporary_file(parent, file_name)?;
-    if let Err(error) = temporary_file
-        .write_all(content)
-        .and_then(|()| temporary_file.sync_all())
-    {
+    if let Err(primary_error) = write_and_sync(&mut temporary_file, content) {
         drop(temporary_file);
-        let _ = fs::remove_file(&temporary_path);
-        return Err(error);
+        return Err(cleanup_error(
+            primary_error,
+            &temporary_path,
+            remove_temporary,
+        ));
     }
 
     drop(temporary_file);
-    if let Err(error) = fs::rename(&temporary_path, path) {
-        let _ = fs::remove_file(&temporary_path);
-        return Err(error);
+    if let Err(primary_error) = rename(&temporary_path, path) {
+        return Err(cleanup_error(
+            primary_error,
+            &temporary_path,
+            remove_temporary,
+        ));
     }
-    Ok(())
+
+    sync_parent(parent).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "rename completed for {}; failed to sync parent directory {}: {error}; \
+                 destination may contain the new content",
+                path.display(),
+                parent.display()
+            ),
+        )
+    })
+}
+
+fn cleanup_error<RemoveTemporary>(
+    primary_error: io::Error,
+    temporary_path: &Path,
+    remove_temporary: RemoveTemporary,
+) -> io::Error
+where
+    RemoveTemporary: FnOnce(&Path) -> io::Result<()>,
+{
+    match remove_temporary(temporary_path) {
+        Ok(()) => primary_error,
+        Err(cleanup_error) => io::Error::new(
+            primary_error.kind(),
+            format!(
+                "{primary_error}; additionally failed to remove temporary file {}: \
+                 {cleanup_error}",
+                temporary_path.display()
+            ),
+        ),
+    }
 }
 
 

@@ -5,7 +5,9 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
 use clepsydra::vault::path::VaultPath;
-use clepsydra::vault::mutation_coordinator::{MutationCoordinator, atomic_replace};
+use clepsydra::vault::mutation_coordinator::{
+    MutationCoordinator, atomic_replace, atomic_replace_with,
+};
 
 use tempfile::TempDir;
 
@@ -634,24 +636,159 @@ async fn mutation_coordinator_allows_different_paths_concurrently() {
     second.await.unwrap();
 }
 
-#[cfg(unix)]
+#[tokio::test]
+async fn mutation_coordinator_prunes_expired_lock_entries() {
+    let coordinator = MutationCoordinator::new();
+    let expired_path = VaultPath::new("notes/expired.md").unwrap();
+    drop(coordinator.lock_paths(&[expired_path]).await);
+    assert_eq!(coordinator.lock_table_len(), 1);
+
+    let live_path = VaultPath::new("notes/live.md").unwrap();
+    let _guard = coordinator.lock_paths(&[live_path]).await;
+
+    assert_eq!(
+        coordinator.lock_table_len(),
+        1,
+        "requesting a new lock should prune expired weak entries"
+    );
+}
+
 #[test]
-fn mutation_coordinator_atomic_replace_preserves_old_content_on_write_failure() {
-    use std::os::unix::fs::PermissionsExt;
+fn mutation_coordinator_atomic_replace_cleans_partial_temp_after_write_failure() {
+    use std::io::{self, Write};
 
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("page.md");
     fs::write(&path, b"old content").unwrap();
 
-    let original_permissions = fs::metadata(tmp.path()).unwrap().permissions();
-    fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o555)).unwrap();
-    let result = atomic_replace(&path, b"complete new content");
-    fs::set_permissions(tmp.path(), original_permissions).unwrap();
-
-    assert!(result.is_err(), "the forced pre-rename failure succeeded");
-    let content = fs::read(&path).unwrap();
-    assert!(
-        content == b"old content" || content == b"complete new content",
-        "atomic replacement exposed partial content: {content:?}"
+    let result = atomic_replace_with(
+        &path,
+        b"complete new content",
+        |file, _| {
+            file.write_all(b"partial")?;
+            Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "injected write failure",
+            ))
+        },
+        |temporary_path, destination| fs::rename(temporary_path, destination),
+        |_| Ok(()),
+        |temporary_path| fs::remove_file(temporary_path),
     );
+
+    let error = result.expect_err("the injected write failure succeeded");
+    assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+    assert_eq!(fs::read(&path).unwrap(), b"old content");
+    assert!(
+        fs::read_dir(tmp.path())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".clepsydra-tmp-")),
+        "failed replacement leaked a temporary file"
+    );
+}
+
+#[test]
+fn mutation_coordinator_atomic_replace_writes_complete_new_content() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"old content").unwrap();
+
+    atomic_replace(&path, b"complete new content").unwrap();
+
+    assert_eq!(fs::read(path).unwrap(), b"complete new content");
+}
+
+#[test]
+fn mutation_coordinator_atomic_replace_reports_primary_and_cleanup_failures() {
+    use std::io::{self, Write};
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"old content").unwrap();
+
+    let result = atomic_replace_with(
+        &path,
+        b"complete new content",
+        |file, _| {
+            file.write_all(b"partial")?;
+            Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "injected primary failure",
+            ))
+        },
+        |temporary_path, destination| fs::rename(temporary_path, destination),
+        |_| Ok(()),
+        |temporary_path| {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "injected cleanup failure for {}",
+                    temporary_path.display()
+                ),
+            ))
+        },
+    );
+
+    let error = result.expect_err("the injected failures succeeded");
+    assert_eq!(
+        error.kind(),
+        io::ErrorKind::WriteZero,
+        "the primary error kind must be preserved"
+    );
+    let message = error.to_string();
+    assert!(message.contains("injected primary failure"), "{message}");
+    assert!(message.contains("injected cleanup failure"), "{message}");
+    assert!(message.contains(".page.md.clepsydra-tmp-"), "{message}");
+    assert_eq!(fs::read(&path).unwrap(), b"old content");
+
+    let leaked_temp = fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|entry| {
+            entry
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains(".clepsydra-tmp-")
+        })
+        .expect("injected cleanup failure should leave the reported temp file");
+    fs::remove_file(leaked_temp).unwrap();
+}
+
+#[test]
+fn mutation_coordinator_atomic_replace_reports_post_rename_sync_failure() {
+    use std::io::{self, Write};
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"old content").unwrap();
+
+    let result = atomic_replace_with(
+        &path,
+        b"complete new content",
+        |file, content| {
+            file.write_all(content)?;
+            file.sync_all()
+        },
+        |temporary_path, destination| fs::rename(temporary_path, destination),
+        |_| {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "injected parent sync failure",
+            ))
+        },
+        |temporary_path| fs::remove_file(temporary_path),
+    );
+
+    let error = result.expect_err("the injected parent sync failure succeeded");
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+    let message = error.to_string();
+    assert!(message.contains("injected parent sync failure"), "{message}");
+    assert!(message.contains("rename completed"), "{message}");
+    assert!(message.contains("may contain the new content"), "{message}");
+    assert_eq!(fs::read(&path).unwrap(), b"complete new content");
 }
