@@ -22,7 +22,7 @@ use crate::vault::path::VaultPath;
 use super::read::build_board_cycle_dto;
 use super::{
     BoardCycle, CreateCycleRequest, PatchCycleRequest, ensure_cycle_exists, extra_str,
-    fetch_cycle_codes, next_code_number, path_stem,
+    fetch_cycle_codes, path_stem, reserve_next_code_number,
 };
 
 // ---------------------------------------------------------------------------
@@ -74,8 +74,8 @@ pub(crate) async fn create_cycle(
             explicit
         }
         None => {
-            // Auto-generate: max S-(\d+) among existing CYCLE stems, +1 (min 1)
-            let next_num = next_code_number(&state, "CYCLE", "S-").await?;
+            // Auto-generate from a transactional CYCLE-family reservation.
+            let next_num = reserve_next_code_number(&state, "CYCLE", "S-").await?;
             format!("S-{next_num}")
         }
     };

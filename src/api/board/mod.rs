@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
+use crate::vault::index::reserve_code_number;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -330,20 +331,22 @@ fn max_code_number(
     Ok(max)
 }
 
-/// Allocate the next sequential code number (max existing + 1, min 1) for a
-/// page kind via the index. Shared by the TSK-NNNN and S-NN allocators.
-async fn next_code_number(
+/// Reserve the next sequential code number for a page kind through the
+/// single index thread.
+async fn reserve_next_code_number(
     state: &AppState,
     kind: &'static str,
     prefix: &'static str,
 ) -> Result<u32, ApiError> {
     state
         .index
-        .with_index(move |index, _vault| max_code_number(index.connection(), kind, prefix))
+        .with_index(move |index, _vault| {
+            let observed_max = max_code_number(index.connection(), kind, prefix)?;
+            reserve_code_number(index.connection_mut(), kind, observed_max)
+        })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))
-        .map(|max| max + 1)
 }
 
 // ---------------------------------------------------------------------------

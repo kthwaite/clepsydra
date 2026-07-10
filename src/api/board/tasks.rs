@@ -20,8 +20,8 @@ use crate::vault::path::VaultPath;
 
 use super::read::build_board_task_dto;
 use super::{
-    BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, next_code_number,
-    path_stem, validate_priority, validate_status,
+    BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, path_stem,
+    reserve_next_code_number, validate_priority, validate_status,
 };
 
 // ---------------------------------------------------------------------------
@@ -63,8 +63,8 @@ pub(crate) async fn create_task(
         ensure_cycle_exists(&state, cycle_code).await?;
     }
 
-    // 3. Allocate code: scan TASK stems for TSK-NNNN, take max+1
-    let next_num = next_code_number(&state, "TASK", "TSK-").await?;
+    // 3. Reserve the next TASK code through the index transaction.
+    let next_num = reserve_next_code_number(&state, "TASK", "TSK-").await?;
     let code = format!("TSK-{next_num:04}");
 
     // 4. Determine vault path
@@ -151,38 +151,9 @@ pub(crate) async fn create_task(
                 .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Paranoia path: bump by one and retry once
-            let vault_path_str2 = match &body.project {
-                Some(p) => format!("tasks/{p}/TSK-{:04}.md", next_num + 1),
-                None => format!("tasks/TSK-{:04}.md", next_num + 1),
-            };
-            let vault_path2 = VaultPath::new(&vault_path_str2)
-                .map_err(|e| ApiError::internal(format!("invalid retry path: {e}")))?;
-            let abs_path2 = state.vault.resolve(&vault_path2);
-            let code2 = format!("TSK-{:04}", next_num + 1);
-            // Plain (non-atomic) write by design: at single-user scale a second
-            // consecutive collision is not worth guarding against.
-            let content2 = write_page_content(&meta, &page_body);
-            fs::write(&abs_path2, &content2)
-                .map_err(|e| ApiError::internal(format!("failed to write retry file: {e}")))?;
-            // Re-index the retry file and return
-            let vp2 = vault_path2.clone();
-            state
-                .index
-                .with_index(move |index, vault| {
-                    index.index_page(vault, &vp2)?;
-                    index.resolve_links_for_page(&vp2)?;
-                    Ok::<_, crate::vault::index::IndexError>(())
-                })
-                .await
-                .map_err(|e| ApiError::internal(e.to_string()))?
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-            let _ = state.change_tx.send(SyncNotification::IndexChanged {
-                upserted: vec![vault_path_str2.clone()],
-                removed: vec![],
-            });
-            let task_dto = build_board_task_dto(&state, &vault_path2, &code2).await?;
-            return Ok((StatusCode::CREATED, Json(task_dto)).into_response());
+            return Err(ApiError::conflict(format!(
+                "task file already exists: {vault_path_str}"
+            )));
         }
         Err(e) => {
             return Err(ApiError::internal(format!("failed to create file: {e}")));

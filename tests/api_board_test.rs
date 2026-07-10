@@ -1051,3 +1051,65 @@ async fn patch_cycle_rejects_bad_state_and_unknown_carry_target() {
         .await;
     res2.assert_status(axum::http::StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn concurrent_create_requests_reserve_unique_task_and_cycle_codes() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let task_a = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "task a" }));
+    let task_b = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "task b" }));
+    let cycle_a = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "cycle a",
+            "start": "2026-07-06",
+            "end": "2026-07-12"
+        }));
+    let cycle_b = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "cycle b",
+            "start": "2026-07-13",
+            "end": "2026-07-19"
+        }));
+
+    let (task_a, task_b, cycle_a, cycle_b) = tokio::join!(task_a, task_b, cycle_a, cycle_b);
+    for response in [&task_a, &task_b, &cycle_a, &cycle_b] {
+        assert_eq!(
+            response.status_code(),
+            axum::http::StatusCode::CREATED,
+            "concurrent create failed: {}",
+            response.text()
+        );
+    }
+
+    let mut task_codes = [
+        task_a.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        task_b.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    ];
+    task_codes.sort();
+    assert_eq!(task_codes, ["TSK-0001", "TSK-0002"]);
+
+    let mut cycle_codes = [
+        cycle_a.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        cycle_b.json::<serde_json::Value>()["code"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    ];
+    cycle_codes.sort();
+    assert_eq!(cycle_codes, ["S-1", "S-2"]);
+}

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use clepsydra::vault::Vault;
 use clepsydra::vault::config::DisambiguationStrategy;
 use clepsydra::vault::derivation::{Deriver, IndexedPage};
-use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex};
+use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_code_number};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use rusqlite::Transaction;
@@ -1305,4 +1305,31 @@ fn resolve_links_for_page_resolves_block_refs() {
             .any(|bl| bl.source_path == "referrer.md" && bl.kind == "block_ref"),
         "block_ref backlink should still exist after re-index + per-page resolve"
     );
+}
+
+#[test]
+fn code_reservation_initializes_from_observed_max_and_advances_monotonically() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("cache.db");
+    let index = VaultIndex::open(&db_path).unwrap();
+    drop(index);
+
+    let mut conn = rusqlite::Connection::open(&db_path).unwrap();
+    assert_eq!(reserve_code_number(&mut conn, "TASK", 481).unwrap(), 482);
+    assert_eq!(reserve_code_number(&mut conn, "TASK", 481).unwrap(), 483);
+    assert_eq!(reserve_code_number(&mut conn, "TASK", 900).unwrap(), 484);
+}
+
+#[test]
+fn code_reservation_keeps_families_independent() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("cache.db");
+    let index = VaultIndex::open(&db_path).unwrap();
+    drop(index);
+
+    let mut conn = rusqlite::Connection::open(&db_path).unwrap();
+    assert_eq!(reserve_code_number(&mut conn, "TASK", 7).unwrap(), 8);
+    assert_eq!(reserve_code_number(&mut conn, "CYCLE", 13).unwrap(), 14);
+    assert_eq!(reserve_code_number(&mut conn, "TASK", 7).unwrap(), 9);
+    assert_eq!(reserve_code_number(&mut conn, "CYCLE", 13).unwrap(), 15);
 }

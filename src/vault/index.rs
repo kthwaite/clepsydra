@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use chrono::Utc;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 use thiserror::Error;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -204,6 +204,11 @@ CREATE TABLE IF NOT EXISTS block_properties (
 
 CREATE INDEX IF NOT EXISTS idx_block_props_key_value ON block_properties(key, value);
 
+CREATE TABLE IF NOT EXISTS code_counters (
+    family      TEXT PRIMARY KEY,
+    next_value  INTEGER NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     page_id UNINDEXED,
     path UNINDEXED,
@@ -212,6 +217,38 @@ CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     tokenize='porter unicode61'
 );
 "#;
+
+/// Atomically reserve the next code number for `family`.
+///
+/// The first reservation starts after `observed_max`; later reservations use
+/// the persisted counter even if the caller observes a different maximum.
+pub fn reserve_code_number(
+    conn: &mut Connection,
+    family: &str,
+    observed_max: u32,
+) -> rusqlite::Result<u32> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(
+        "INSERT INTO code_counters (family, next_value) VALUES (?1, ?2)
+         ON CONFLICT(family) DO NOTHING",
+        params![family, i64::from(observed_max) + 1],
+    )?;
+
+    let reserved: i64 = tx.query_row(
+        "SELECT next_value FROM code_counters WHERE family = ?1",
+        params![family],
+        |row| row.get(0),
+    )?;
+    let reserved = u32::try_from(reserved)
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, reserved))?;
+
+    tx.execute(
+        "UPDATE code_counters SET next_value = next_value + 1 WHERE family = ?1",
+        params![family],
+    )?;
+    tx.commit()?;
+    Ok(reserved)
+}
 
 // ---------------------------------------------------------------------------
 // VaultIndex
@@ -288,6 +325,11 @@ impl VaultIndex {
     /// Borrow the underlying connection (primarily for test inspection).
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+
+    /// Mutably borrow the underlying connection for internal transactional work.
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     /// Register an additional deriver to run during index builds.
