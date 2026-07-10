@@ -18,6 +18,7 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
+use crate::vault::atomic_file::install_noreplace;
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -42,48 +43,6 @@ pub fn router() -> Router<Arc<AppState>> {
             .post(upload_attachment)
             .delete(delete_attachment),
     )
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_vendor = "apple",
-    target_os = "redox"
-))]
-fn install_noreplace(source: &FsPath, destination: &FsPath) -> io::Result<()> {
-    use rustix::fs::{CWD, RenameFlags, renameat_with};
-    use rustix::io::Errno;
-
-    renameat_with(CWD, source, CWD, destination, RenameFlags::NOREPLACE).map_err(|error| {
-        if matches!(error, Errno::NOSYS | Errno::INVAL | Errno::NOTSUP) {
-            io::Error::new(
-                ErrorKind::Unsupported,
-                format!("atomic no-replace rename is unsupported: {error}"),
-            )
-        } else {
-            error.into()
-        }
-    })
-}
-
-#[cfg(windows)]
-fn install_noreplace(source: &FsPath, destination: &FsPath) -> io::Result<()> {
-    // std::fs::rename maps to a no-replace move on Windows.
-    std::fs::rename(source, destination)
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_vendor = "apple",
-    target_os = "redox",
-    windows
-)))]
-fn install_noreplace(_source: &FsPath, _destination: &FsPath) -> io::Result<()> {
-    Err(io::Error::new(
-        ErrorKind::Unsupported,
-        "atomic no-replace rename is unsupported on this operating system",
-    ))
 }
 
 fn attachment_io_error(error: io::Error, action: &str, path: &str) -> ApiError {

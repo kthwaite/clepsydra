@@ -1,12 +1,11 @@
 use std::fs;
 
 use clepsydra::vault::Vault;
+use clepsydra::vault::atomic_file::{atomic_create, atomic_replace, atomic_replace_with};
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
-use clepsydra::vault::mutation_coordinator::{
-    MutationCoordinator, atomic_replace, atomic_replace_with,
-};
+use clepsydra::vault::mutation_coordinator::MutationCoordinator;
 use clepsydra::vault::path::VaultPath;
 
 use tempfile::TempDir;
@@ -744,13 +743,11 @@ fn mutation_coordinator_atomic_replace_cleans_partial_temp_after_write_failure()
     assert_eq!(error.kind(), io::ErrorKind::WriteZero);
     assert_eq!(fs::read(&path).unwrap(), b"old content");
     assert!(
-        fs::read_dir(tmp.path())
+        fs::read_dir(tmp.path()).unwrap().all(|entry| !entry
             .unwrap()
-            .all(|entry| !entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .contains(".clepsydra-tmp-")),
+            .file_name()
+            .to_string_lossy()
+            .contains(".clepsydra-tmp-")),
         "failed replacement leaked a temporary file"
     );
 }
@@ -764,6 +761,51 @@ fn mutation_coordinator_atomic_replace_writes_complete_new_content() {
     atomic_replace(&path, b"complete new content").unwrap();
 
     assert_eq!(fs::read(path).unwrap(), b"complete new content");
+}
+
+#[cfg(unix)]
+#[test]
+fn mutation_coordinator_atomic_replace_preserves_unix_mode() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"old content").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+    atomic_replace(&path, b"complete new content").unwrap();
+
+    assert_eq!(fs::metadata(path).unwrap().mode() & 0o7777, 0o640);
+}
+
+#[test]
+fn mutation_coordinator_atomic_create_publishes_complete_content() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+
+    atomic_create(&path, b"complete new content").unwrap();
+
+    assert_eq!(fs::read(path).unwrap(), b"complete new content");
+}
+
+#[test]
+fn mutation_coordinator_atomic_create_collision_preserves_destination_and_cleans_temp() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"existing content").unwrap();
+
+    let error = atomic_create(&path, b"new content").expect_err("create replaced destination");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read(path).unwrap(), b"existing content");
+    assert!(
+        fs::read_dir(tmp.path()).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".clepsydra-tmp-")),
+        "rejected create leaked a temporary file"
+    );
 }
 
 #[test]
@@ -814,10 +856,7 @@ fn mutation_coordinator_atomic_replace_reports_primary_and_cleanup_failures() {
         |temporary_path| {
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                format!(
-                    "injected cleanup failure for {}",
-                    temporary_path.display()
-                ),
+                format!("injected cleanup failure for {}", temporary_path.display()),
             ))
         },
     );
@@ -876,7 +915,10 @@ fn mutation_coordinator_atomic_replace_reports_post_rename_sync_failure() {
     let error = result.expect_err("the injected parent sync failure succeeded");
     assert_eq!(error.kind(), io::ErrorKind::Other);
     let message = error.to_string();
-    assert!(message.contains("injected parent sync failure"), "{message}");
+    assert!(
+        message.contains("injected parent sync failure"),
+        "{message}"
+    );
     assert!(message.contains("rename completed"), "{message}");
     assert!(message.contains("may contain the new content"), "{message}");
     assert_eq!(fs::read(&path).unwrap(), b"complete new content");

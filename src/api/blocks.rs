@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::block_id::BlockId;
+use crate::vault::atomic_file::atomic_replace;
 use crate::vault::block::parse_blocks;
-use crate::vault::mutation_coordinator::atomic_replace;
+use crate::vault::block_id::BlockId;
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -283,7 +283,9 @@ async fn assign_block_id(
         )));
     }
     if !body.is_char_boundary(span_start) || !body.is_char_boundary(span_end) {
-        return Err(ApiError::conflict("Block target is not on UTF-8 boundaries"));
+        return Err(ApiError::conflict(
+            "Block target is not on UTF-8 boundaries",
+        ));
     }
 
     let file_span_end = body_offset
@@ -299,7 +301,9 @@ async fn assign_block_id(
             file_span_end
         };
     if !content.is_char_boundary(insert_pos) {
-        return Err(ApiError::conflict("Block target is not on a UTF-8 boundary"));
+        return Err(ApiError::conflict(
+            "Block target is not on a UTF-8 boundary",
+        ));
     }
 
     let id_str = BlockId::generate().to_string();
