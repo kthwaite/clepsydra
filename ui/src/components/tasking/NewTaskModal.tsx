@@ -4,10 +4,10 @@
  * Opened by openTaskModal() with optional { project, status, cycle } presets.
  * On success: closes the modal and opens the edit panel on the new task.
  *
- * Built on the same react-aria-components primitives as the house dialog
- * (ui/src/components/ui/dialog.tsx): ModalOverlay/Modal/Dialog give us the
- * focus trap, focus restore, Escape dismissal and scrim-click dismissal for
- * free. We use the primitives directly rather than the house <Dialog>
+ * Built on BoardModalFrame, which wraps the same react-aria-components
+ * primitives as the house dialog (ui/src/components/ui/dialog.tsx):
+ * ModalOverlay/Modal/Dialog provide focus trapping, focus restoration, Escape
+ * dismissal and scrim-click dismissal. We do not use the house <Dialog>
  * wrapper because its fixed header (Heading + X icon) and justify-end footer
  * slots don't fit the authoritative board chrome (prompt glyph + sub-line +
  * ESC chip header; split footer with the ⌘↵ hint) from
@@ -27,14 +27,10 @@
  */
 
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import {
-  Modal,
-  ModalOverlay,
-  Dialog as RACDialog,
-} from "react-aria-components";
 import type { BoardCycle, BoardOperation } from "#/api/board";
 import { useCreateTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
+import { BoardModalFrame } from "./BoardModalFrame";
 import { opKey } from "./board-constants";
 import {
   DispositionRow,
@@ -140,25 +136,15 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
   };
 
   return (
-    <ModalOverlay
-      isOpen
-      onOpenChange={(open) => {
-        if (!open) closeTaskModal();
-      }}
-      isDismissable
-      className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
-      data-testid="new-task-modal-backdrop"
+    <BoardModalFrame
+      ariaLabel="New Tasking"
+      widthClassName="w-[660px]"
+      backdropTestId="new-task-modal-backdrop"
+      modalTestId="new-task-modal"
+      onClose={closeTaskModal}
+      onKeyDown={handleKeyDown}
+      constrainHeight
     >
-      <Modal className="w-[660px] max-w-[94vw]">
-        <RACDialog aria-label="New Tasking" className="outline-none">
-          <div
-            className="flex max-h-[82vh] flex-col border border-[var(--ink-3)] bg-[var(--bg)]"
-            style={{
-              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
-            }}
-            onKeyDown={handleKeyDown}
-            data-testid="new-task-modal"
-          >
             {/* Header */}
             <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
               <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
@@ -352,9 +338,6 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
                 </button>
               </div>
             </div>
-          </div>
-        </RACDialog>
-      </Modal>
-    </ModalOverlay>
+    </BoardModalFrame>
   );
 }

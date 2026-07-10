@@ -14,14 +14,10 @@
  */
 
 import { useEffect, useState } from "react";
-import {
-  Modal,
-  ModalOverlay,
-  Dialog as RACDialog,
-} from "react-aria-components";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
+import { BoardModalFrame } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { sealStats } from "./board-stats";
 import { EdField, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
@@ -90,24 +86,13 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
   };
 
   return (
-    <ModalOverlay
-      isOpen
-      onOpenChange={(open) => {
-        if (!open) closeCycleModal();
-      }}
-      isDismissable
-      className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
-      data-testid="seal-cycle-modal-backdrop"
+    <BoardModalFrame
+      ariaLabel="Seal Cycle"
+      widthClassName="w-[460px]"
+      backdropTestId="seal-cycle-modal-backdrop"
+      modalTestId="seal-cycle-modal"
+      onClose={closeCycleModal}
     >
-      <Modal className="w-[460px] max-w-[94vw]">
-        <RACDialog aria-label="Seal Cycle" className="outline-none">
-          <div
-            className="flex flex-col border border-[var(--ink-3)] bg-[var(--bg)]"
-            style={{
-              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
-            }}
-            data-testid="seal-cycle-modal"
-          >
             {/* Header */}
             <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
               <span className="cl-display text-[16px] font-extrabold text-[var(--ink)]">
@@ -261,9 +246,6 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
                 </button>
               </div>
             </div>
-          </div>
-        </RACDialog>
-      </Modal>
-    </ModalOverlay>
+    </BoardModalFrame>
   );
 }

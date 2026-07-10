@@ -7,18 +7,14 @@
  * Opened by openCycleModal({ kind: "new" }).
  * On success: closeCycleModal + setCycleSel(created.code) + setMode("cycle").
  *
- * Uses the same RAC ModalOverlay/Modal/RACDialog primitives as NewTaskModal.
+ * Uses the shared BoardModalFrame shell.
  */
 
 import { useEffect, useRef, useState } from "react";
-import {
-  Modal,
-  ModalOverlay,
-  Dialog as RACDialog,
-} from "react-aria-components";
 import type { BoardCycle } from "#/api/board";
 import { useCreateCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
+import { BoardModalFrame } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
 
@@ -160,30 +156,20 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
   };
 
   return (
-    <ModalOverlay
-      isOpen
-      onOpenChange={(open) => {
-        if (!open) closeCycleModal();
+    <BoardModalFrame
+      ariaLabel="New Cycle"
+      widthClassName="w-[600px]"
+      backdropTestId="new-cycle-modal-backdrop"
+      modalTestId="new-cycle-modal"
+      onClose={closeCycleModal}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          commit();
+        }
       }}
-      isDismissable
-      className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
-      data-testid="new-cycle-modal-backdrop"
+      constrainHeight
     >
-      <Modal className="w-[600px] max-w-[94vw]">
-        <RACDialog aria-label="New Cycle" className="outline-none">
-          <div
-            className="flex max-h-[82vh] flex-col border border-[var(--ink-3)] bg-[var(--bg)]"
-            style={{
-              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                commit();
-              }
-            }}
-            data-testid="new-cycle-modal"
-          >
             {/* Header */}
             <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
               <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
@@ -315,9 +301,6 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
                 </button>
               </div>
             </div>
-          </div>
-        </RACDialog>
-      </Modal>
-    </ModalOverlay>
+    </BoardModalFrame>
   );
 }

@@ -10,14 +10,10 @@
  * Small confirm modal (.board-modal-sm = 460px wide in prototype).
  */
 
-import {
-  Modal,
-  ModalOverlay,
-  Dialog as RACDialog,
-} from "react-aria-components";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
+import { BoardModalFrame } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { cycleStats } from "./board-stats";
 
@@ -62,24 +58,13 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
   };
 
   return (
-    <ModalOverlay
-      isOpen
-      onOpenChange={(open) => {
-        if (!open) closeCycleModal();
-      }}
-      isDismissable
-      className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
-      data-testid="open-cycle-modal-backdrop"
+    <BoardModalFrame
+      ariaLabel="Open Cycle"
+      widthClassName="w-[460px]"
+      backdropTestId="open-cycle-modal-backdrop"
+      modalTestId="open-cycle-modal"
+      onClose={closeCycleModal}
     >
-      <Modal className="w-[460px] max-w-[94vw]">
-        <RACDialog aria-label="Open Cycle" className="outline-none">
-          <div
-            className="flex flex-col border border-[var(--ink-3)] bg-[var(--bg)]"
-            style={{
-              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
-            }}
-            data-testid="open-cycle-modal"
-          >
             {/* Header */}
             <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
               <span
@@ -217,9 +202,6 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
                 </button>
               </div>
             </div>
-          </div>
-        </RACDialog>
-      </Modal>
-    </ModalOverlay>
+    </BoardModalFrame>
   );
 }
