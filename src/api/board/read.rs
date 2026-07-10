@@ -2,6 +2,7 @@
 //! used by the mutation handlers (read from the index after a write so
 //! responses always match what a subsequent GET would return).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
@@ -398,6 +399,8 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         })?
         .collect::<Result<_, _>>()?;
 
+    let checks_by_page = count_checks_by_page(conn)?;
+
     let mut tasks: Vec<BoardTask> = Vec::new();
     for (id_str, path, title, meta_json, project, updated_at, tags_raw) in task_rows {
         let id = match Uuid::parse_str(&id_str) {
@@ -432,7 +435,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 .collect()
         };
 
-        let checks = count_checks(conn, &id_str)?;
+        let checks = checks_by_page.get(&id_str).copied().unwrap_or([0, 0]);
         let updated_at_str = updated_at.unwrap_or_default();
 
         tasks.push(BoardTask {
@@ -479,6 +482,27 @@ fn extract_link_or_str(meta: &serde_json::Value, key: &str) -> Option<String> {
     }
 }
 
+/// Count checkbox blocks for every page in one grouped query.
+///
+/// Pages without checkbox blocks are absent and callers default them to `[0, 0]`.
+fn count_checks_by_page(
+    conn: &rusqlite::Connection,
+) -> Result<HashMap<String, [u32; 2]>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT page_id, COUNT(*), COALESCE(SUM(value = 'done'), 0) \
+           FROM block_properties \
+          WHERE key = 'status' \
+          GROUP BY page_id",
+    )?;
+    stmt.query_map([], |row| {
+        let page_id = row.get::<_, String>(0)?;
+        let total = row.get::<_, u32>(1)?;
+        let done = row.get::<_, u32>(2)?;
+        Ok((page_id, [done, total]))
+    })?
+    .collect()
+}
+
 /// Count checkbox blocks for a page: returns [done, total].
 /// "done" = status = 'done'; total = all blocks with a 'status' property
 /// (i.e. all checkbox items — todo, done, cancelled).
@@ -492,4 +516,36 @@ fn count_checks(conn: &rusqlite::Connection, page_id: &str) -> Result<[u32; 2], 
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     Ok([done, total])
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::count_checks_by_page;
+
+    #[test]
+    fn checklist_counts_are_aggregated_for_multiple_pages() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE block_properties (
+                page_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL
+            );
+            INSERT INTO block_properties (page_id, key, value) VALUES
+                ('todo-page', 'status', 'todo'),
+                ('done-page', 'status', 'done'),
+                ('cancelled-page', 'status', 'cancelled'),
+                ('done-page', 'other', 'done');",
+        )
+        .unwrap();
+
+        let counts = count_checks_by_page(&conn).unwrap();
+
+        assert_eq!(counts.get("todo-page"), Some(&[0, 1]));
+        assert_eq!(counts.get("done-page"), Some(&[1, 1]));
+        assert_eq!(counts.get("cancelled-page"), Some(&[0, 1]));
+        assert_eq!(counts.get("empty-page"), None);
+    }
 }

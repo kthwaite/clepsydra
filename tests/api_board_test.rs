@@ -143,6 +143,56 @@ async fn board_aggregates_operations_cycles_tasks() {
     assert_eq!(checks[1], 3, "total count should be 3");
 }
 
+#[tokio::test]
+async fn checklist_counts_preserve_checkbox_semantics_across_tasks() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        for (name, id, body) in [
+            ("TSK-0001", "01951234-0000-7000-8000-000000000101", ""),
+            (
+                "TSK-0002",
+                "01951234-0000-7000-8000-000000000102",
+                "- [ ] todo\n",
+            ),
+            (
+                "TSK-0003",
+                "01951234-0000-7000-8000-000000000103",
+                "- [x] done\n",
+            ),
+            (
+                "TSK-0004",
+                "01951234-0000-7000-8000-000000000104",
+                "- [-] cancelled\n",
+            ),
+        ] {
+            std::fs::write(
+                root.join(format!("tasks/{name}.md")),
+                format!("---\nid: {id}\ntitle: {name}\ntype: TASK\n---\n{body}"),
+            )
+            .unwrap();
+        }
+    });
+
+    let response = server.get("/api/vault/board").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let tasks = body["tasks"].as_array().unwrap();
+
+    let counts_for = |code: &str| {
+        tasks
+            .iter()
+            .find(|task| task["code"] == code)
+            .unwrap_or_else(|| panic!("{code} missing from board response: {tasks:?}"))["checks"]
+            .clone()
+    };
+
+    assert_eq!(counts_for("TSK-0001"), serde_json::json!([0, 0]));
+    assert_eq!(counts_for("TSK-0002"), serde_json::json!([0, 1]));
+    assert_eq!(counts_for("TSK-0003"), serde_json::json!([1, 1]));
+    assert_eq!(counts_for("TSK-0004"), serde_json::json!([0, 1]));
+}
+
 // ---------------------------------------------------------------------------
 // PROJECT without board: true is excluded
 // ---------------------------------------------------------------------------
