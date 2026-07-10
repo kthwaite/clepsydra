@@ -33,6 +33,56 @@ interface ScopeRailProps {
   tasks: BoardTask[];
 }
 
+interface CycleNavRowProps {
+  code: string;
+  displayCode: string;
+  state: string;
+  windowLabel: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+}
+
+function CycleNavRow({
+  code,
+  displayCode,
+  state,
+  windowLabel,
+  count,
+  active,
+  onSelect,
+}: CycleNavRowProps) {
+  return (
+    <button
+      type="button"
+      data-cycle-code={code}
+      className={cn(
+        "cl-mono flex w-full min-w-0 cursor-pointer items-center gap-2 border-l-2 px-[var(--pad)] py-[5px] text-left transition-colors hover:bg-[var(--paper-edge)]",
+        active
+          ? "border-l-[var(--hot)] bg-[var(--paper)]"
+          : "border-l-transparent",
+      )}
+      onClick={onSelect}
+    >
+      <CycleStatePip state={state} />
+      <span className="flex-shrink-0 text-[10px] tracking-[0.06em] text-[var(--ink)]">
+        {displayCode}
+      </span>
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] tracking-[0.04em] text-[var(--ink-mute)]">
+        {windowLabel}
+      </span>
+      <span
+        className={cn(
+          "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
+          active && "border-[var(--ink-mute)] text-[var(--ink)]",
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
 export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
   // Field selectors (useShallow) — the rail must not re-render on ephemeral
   // modal/edit state changes elsewhere in the store.
@@ -72,6 +122,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
   ).length;
 
   const showUnfiled = hasUnfiledTasks(tasks, operations);
+  const backlogCount = tasks.filter((task) => !task.cycle).length;
 
   function handleNewTasking() {
     if (opFilter === "ALL" || opFilter === "UNFILED") {
@@ -250,80 +301,35 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
         </div>
 
         {/* Per-cycle rows */}
-        {cycles.map((cycle) => {
-          const count = tasks.filter((t) => t.cycle === cycle.code).length;
-          const active = mode === "cycle" && cycleSel === cycle.code;
-          const win = fmtCycleWindow(cycle.start, cycle.end);
-          return (
-            <button
-              key={cycle.id}
-              type="button"
-              className={cn(
-                "cl-mono flex w-full min-w-0 cursor-pointer items-center gap-2 border-l-2 px-[var(--pad)] py-[5px] text-left transition-colors hover:bg-[var(--paper-edge)]",
-                active
-                  ? "border-l-[var(--hot)] bg-[var(--paper)]"
-                  : "border-l-transparent",
-              )}
-              onClick={() => {
-                setCycleSel(cycle.code);
-                setMode("cycle");
-              }}
-            >
-              <CycleStatePip state={cycle.state} />
-              <span className="flex-shrink-0 text-[10px] tracking-[0.06em] text-[var(--ink)]">
-                {cycle.code}
-              </span>
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] tracking-[0.04em] text-[var(--ink-mute)]">
-                {win}
-              </span>
-              <span
-                className={cn(
-                  "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
-                  active && "border-[var(--ink-mute)] text-[var(--ink)]",
-                )}
-              >
-                {count}
-              </span>
-            </button>
-          );
-        })}
+        {cycles.map((cycle) => (
+          <CycleNavRow
+            key={cycle.id}
+            code={cycle.code}
+            displayCode={cycle.code}
+            state={cycle.state}
+            windowLabel={fmtCycleWindow(cycle.start, cycle.end)}
+            count={tasks.filter((task) => task.cycle === cycle.code).length}
+            active={mode === "cycle" && cycleSel === cycle.code}
+            onSelect={() => {
+              setCycleSel(cycle.code);
+              setMode("cycle");
+            }}
+          />
+        ))}
 
         {/* BKLG pseudo-row */}
-        {(() => {
-          const bklgCount = tasks.filter((t) => !t.cycle).length;
-          const active = mode === "cycle" && cycleSel === "BACKLOG";
-          return (
-            <button
-              type="button"
-              className={cn(
-                "cl-mono flex w-full cursor-pointer items-center gap-2 border-l-2 px-[var(--pad)] py-[5px] text-left transition-colors hover:bg-[var(--paper-edge)]",
-                active
-                  ? "border-l-[var(--hot)] bg-[var(--paper)]"
-                  : "border-l-transparent",
-              )}
-              onClick={() => {
-                setCycleSel("BACKLOG");
-                setMode("cycle");
-              }}
-            >
-              <CycleStatePip state="BACKLOG" />
-              <span className="flex-shrink-0 text-[10px] tracking-[0.06em] text-[var(--ink)]">
-                BKLG
-              </span>
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] tracking-[0.04em] text-[var(--ink-mute)]">
-                unscheduled
-              </span>
-              <span
-                className={cn(
-                  "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
-                  active && "border-[var(--ink-mute)] text-[var(--ink)]",
-                )}
-              >
-                {bklgCount}
-              </span>
-            </button>
-          );
-        })()}
+        <CycleNavRow
+          code="BACKLOG"
+          displayCode="BKLG"
+          state="BACKLOG"
+          windowLabel="unscheduled"
+          count={backlogCount}
+          active={mode === "cycle" && cycleSel === "BACKLOG"}
+          onSelect={() => {
+            setCycleSel("BACKLOG");
+            setMode("cycle");
+          }}
+        />
       </div>
     </aside>
   );

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
@@ -92,15 +92,38 @@ describe("ScopeRail", () => {
     expect(screen.queryByText("UNFILED")).not.toBeInTheDocument();
   });
 
-  it("renders cycle rows with codes", () => {
+  it("renders a real cycle with its code, window, state pip, and task count", () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("C-01")).toBeInTheDocument();
-    expect(screen.getByText("C-02")).toBeInTheDocument();
+    const row = screen.getByText("C-01").closest("button");
+
+    expect(row).not.toBeNull();
+    expect(within(row!).getByText("C-01")).toBeInTheDocument();
+    expect(within(row!).getByText("05.26 — 06.08")).toBeInTheDocument();
+    expect(within(row!).getByText("3")).toBeInTheDocument();
+    expect(row!.querySelector(".animate-pulse")).toHaveStyle({
+      background: "var(--cool)",
+    });
   });
 
-  it("renders BKLG pseudo-row", () => {
-    wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("BKLG")).toBeInTheDocument();
+  it("renders backlog as unscheduled and counts only tasks without a cycle", () => {
+    const taskWithAnotherCycle = {
+      ...tasks[0],
+      id: "task-with-another-cycle",
+      cycle: "C-99",
+    };
+    wrap(
+      <ScopeRail
+        operations={operations}
+        cycles={cycles}
+        tasks={[...tasks, taskWithAnotherCycle]}
+      />,
+    );
+    const row = screen.getByText("BKLG").closest("button");
+
+    expect(row).not.toBeNull();
+    expect(within(row!).getByText("BKLG")).toBeInTheDocument();
+    expect(within(row!).getByText("unscheduled")).toBeInTheDocument();
+    expect(within(row!).getByText("2")).toBeInTheDocument();
   });
 
   it("renders the + NEW TASKING button", () => {
@@ -168,6 +191,28 @@ describe("ScopeRail", () => {
     const state = useBoardStore.getState();
     expect(state.cycleSel).toBe("BACKLOG");
     expect(state.mode).toBe("cycle");
+  });
+
+  it("applies active classes to the selected real cycle row", () => {
+    useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
+    wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
+    const row = screen.getByText("C-01").closest("button");
+
+    expect(row).toHaveClass(
+      "border-l-[var(--hot)]",
+      "bg-[var(--paper)]",
+    );
+  });
+
+  it("applies active classes to the selected backlog row", () => {
+    useBoardStore.setState({ mode: "cycle", cycleSel: "BACKLOG" });
+    wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
+    const row = screen.getByText("BKLG").closest("button");
+
+    expect(row).toHaveClass(
+      "border-l-[var(--hot)]",
+      "bg-[var(--paper)]",
+    );
   });
 
   it("+ NEW TASKING opens taskModal with no project when ALL", async () => {
