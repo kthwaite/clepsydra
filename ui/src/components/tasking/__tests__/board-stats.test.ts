@@ -39,8 +39,10 @@ describe("checklistProgress", () => {
       percent: 25,
       isComplete: false,
     });
+    expect(checklistProgress([1, 3]).percent).toBeCloseTo(100 / 3, 12);
     expect(checklistProgress([4, 4]).isComplete).toBe(true);
     expect(checklistProgress([5, 4]).isComplete).toBe(false);
+    expect(checklistProgress([5, 4]).percent).toBe(125);
   });
 });
 

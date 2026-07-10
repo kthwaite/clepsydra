@@ -8,7 +8,9 @@ export interface ChecklistProgress {
 }
 
 export function checklistProgress(checks: number[]): ChecklistProgress {
-  const [done, total] = checks.length >= 2 ? [checks[0], checks[1]] : [0, 0];
+  const hasProgress = checks.length >= 2;
+  const done = hasProgress ? checks[0] : 0;
+  const total = hasProgress ? checks[1] : 0;
   return {
     done,
     total,
