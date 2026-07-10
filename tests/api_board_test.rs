@@ -603,7 +603,7 @@ async fn create_task_persists_all_optional_fields() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn patch_task_project_change_moves_file() {
+async fn project_assignment_patch_task_moves_to_set_project() {
     let (server, tmp) = setup_server_with(|root| {
         std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
         std::fs::write(
@@ -644,7 +644,7 @@ async fn patch_task_project_change_moves_file() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn patch_task_project_clear_moves_to_tasks_root() {
+async fn project_assignment_patch_task_explicit_clear_moves_to_root() {
     let (server, tmp) = setup_server_with(|root| {
         std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
         std::fs::write(
@@ -682,6 +682,47 @@ async fn patch_task_project_clear_moves_to_tasks_root() {
     assert!(
         !content.contains("project:"),
         "frontmatter should not carry project, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn project_assignment_patch_task_destination_collision_returns_409() {
+    let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/op-b")).unwrap();
+        std::fs::write(
+            root.join("tasks/op-a/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000072\n\
+             title: SOURCE\ntype: TASK\nproject: op-a\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/op-b/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000073\n\
+             title: OCCUPIED\ntype: TASK\nproject: op-b\n\
+             status: TRIAGE\npriority: P2\n---\n",
+        )
+        .unwrap();
+    });
+
+    let response = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000072")
+        .json(&serde_json::json!({ "project": "op-b" }))
+        .await;
+
+    response.assert_status(axum::http::StatusCode::CONFLICT);
+    let vault_root = tmp.path().join("vault");
+    let persisted = std::fs::read_to_string(vault_root.join("tasks/op-a/TSK-0001.md")).unwrap();
+    assert!(
+        persisted.contains("project: op-a"),
+        "a rejected refile must preserve the original project: {persisted}"
+    );
+    assert!(
+        std::fs::read_to_string(vault_root.join("tasks/op-b/TSK-0001.md"))
+            .unwrap()
+            .contains("OCCUPIED"),
+        "the destination must not be overwritten"
     );
 }
 

@@ -15,6 +15,9 @@ use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::kind::Kind;
+use crate::vault::mutation_coordinator::{
+    MutationNotification, ProjectAssignment, UpdatePageCommand,
+};
 use crate::vault::page::{Page, PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
@@ -200,6 +203,7 @@ pub(crate) async fn create_task(
         (status = 200, description = "Task updated", body = BoardTask),
         (status = 400, description = "Invalid input", body = crate::api::error::ApiError),
         (status = 404, description = "Task not found", body = crate::api::error::ApiError),
+        (status = 409, description = "Destination or stale mutation conflict", body = crate::api::error::ApiError),
         (status = 500, description = "Internal server error", body = crate::api::error::ApiError)
     )
 )]
@@ -213,13 +217,13 @@ pub(crate) async fn patch_task(
     // an already-loaded PageMeta). "BACKLOG" is the no-cycle sentinel: setting
     // it behaves exactly like null (clear the key). Any other set value must
     // match an existing CYCLE page stem, same rule as POST.
-    let cycle_field: Option<Option<String>> = match body.cycle {
-        Some(Some(ref c)) if c == "BACKLOG" => Some(None),
-        Some(Some(ref c)) => {
+    let cycle_field: Option<Option<String>> = match &body.cycle {
+        Some(Some(c)) if c == "BACKLOG" => Some(None),
+        Some(Some(c)) => {
             ensure_cycle_exists(&state, c).await?;
             Some(Some(c.clone()))
         }
-        ref other => other.clone(),
+        other => other.clone(),
     };
 
     // 1. Resolve path by UUID
@@ -250,6 +254,8 @@ pub(crate) async fn patch_task(
     }
 
     // 2. Load file
+    let expected_content = fs::read_to_string(&abs_path)
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
@@ -265,7 +271,7 @@ pub(crate) async fn patch_task(
     }
 
     // status (validate)
-    if let Some(ref status) = body.status {
+    if let Some(status) = &body.status {
         validate_status(status)?;
         meta.extra.insert(
             "status".to_string(),
@@ -274,7 +280,7 @@ pub(crate) async fn patch_task(
     }
 
     // priority (validate)
-    if let Some(ref priority) = body.priority {
+    if let Some(priority) = &body.priority {
         validate_priority(priority)?;
         meta.extra.insert(
             "priority".to_string(),
@@ -290,86 +296,48 @@ pub(crate) async fn patch_task(
     apply_tri_state(&mut meta, "hold", &body.hold);
     apply_tri_state(&mut meta, "link", &body.link);
 
-    // project change: update meta.project. An empty string is an explicit
-    // clear (mirrors pages-assign's clear_project). The refile route differs:
-    // a set project goes through the conservative reconcile_page, but a clear
-    // must use project_path_cleared + move_page_to — the conservative
-    // projection never strips a subfolder when project is absent, so
-    // reconcile_page alone would leave the file orphaned in the old folder.
-    let project_cleared = matches!(body.project.as_deref(), Some(""));
-    let project_changed = body.project.is_some() && !project_cleared;
-    if project_cleared {
-        meta.project = None;
-    } else if let Some(ref p) = body.project {
-        meta.project = Some(p.clone());
-    }
-
-    // 4. Bump updated_at
+    let project = match &body.project {
+        Some(project) if project.is_empty() => {
+            meta.project = None;
+            ProjectAssignment::Clear
+        }
+        Some(project) => {
+            meta.project = Some(project.clone());
+            ProjectAssignment::Set(project.clone())
+        }
+        None => ProjectAssignment::Unchanged,
+    };
+    let reconcile = body.project.is_some();
     meta.updated_at = Some(Utc::now());
 
-    // 5. Write file
-    let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // 6. Invalidate + reindex + resolve + refile (handles project change/clear)
-    let path_for_index = page_path.clone();
-    let hooks = Arc::clone(&state.hooks);
-    let declared_kind = meta.kind;
-    let final_path = state
-        .index
-        .with_index(move |index, vault| {
-            let vp = VaultPath::new(&path_for_index)
-                .map_err(|e| crate::vault::index::IndexError::Other(e.to_string()))?;
-            index.invalidate_links_to(&vp)?;
-            index.index_page(vault, &vp)?;
-            index.resolve_links_for_page(&vp)?;
-            let deps = index.reverse_deps(&vp)?;
-            for dep_path in &deps {
-                index.resolve_links_for_page(dep_path)?;
-            }
-            // Refile on project change. An explicit clear strips the subfolder
-            // via project_path_cleared + move_page_to (same as pages-assign's
-            // clear_project branch); a set project uses the conservative
-            // reconcile_page.
-            let moved = if project_cleared {
-                match crate::vault::projection::project_path_cleared(&path_for_index, declared_kind)
-                {
-                    Some(dest) => crate::vault::reconcile::move_page_to(
-                        vault,
-                        index,
-                        &path_for_index,
-                        &dest,
-                        &hooks,
-                    )?,
-                    None => None,
-                }
-            } else if project_changed {
-                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index, &hooks)?
-            } else {
-                None
-            };
-            Ok::<_, crate::vault::index::IndexError>(moved.unwrap_or(path_for_index))
-        })
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vault_path,
+                expected_content,
+                meta,
+                body: page_body,
+                project,
+                reconcile,
+            },
+            &notify,
+        )
         .await
-        .map_err(|e| ApiError::internal(format!("patch task failed: {e}")))?
-        .map_err(|e| ApiError::internal(format!("patch task failed: {e}")))?;
+        .map_err(crate::api::mutation_error)?;
 
-    // 7. Broadcast
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![final_path.clone()],
-        removed: if final_path != page_path {
-            vec![page_path.clone()]
-        } else {
-            vec![]
-        },
-    });
-
-    // 8. Return BoardTask at final path
-    let final_vp = VaultPath::new(&final_path)
-        .map_err(|e| ApiError::internal(format!("invalid final path: {e}")))?;
-    let code = path_stem(&final_path).to_ascii_uppercase();
-    let task_dto = build_board_task_dto(&state, &final_vp, &code).await?;
+    let final_path = result.path.as_str();
+    let code = path_stem(final_path).to_ascii_uppercase();
+    let task_dto = build_board_task_dto(&state, &result.path, &code).await?;
     Ok(Json(task_dto))
 }
 

@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -19,7 +18,10 @@ use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
-use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::mutation_coordinator::{
+    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
+};
+use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -430,14 +432,6 @@ pub async fn create_page(
     let vault_path =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
-    let abs_path = state.vault.resolve(&vault_path);
-
-    // Create parent directories
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-
     // Build PageMeta
     let mut meta = PageMeta::new();
     if let Some(title) = body.title {
@@ -449,52 +443,36 @@ pub async fn create_page(
     if let Some(aliases) = body.aliases {
         meta.aliases = aliases;
     }
-
     let page_body = body.body.unwrap_or_default();
 
-    // Write file atomically: create_new prevents overwriting a file
-    // created by a concurrent endpoint (e.g. archive ingest).
-    let content = write_page_content(&meta, &page_body);
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&abs_path)
-    {
-        Ok(mut file) => {
-            file.write_all(content.as_bytes())
-                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(ApiError::conflict(format!("page already exists: {path}")));
-        }
-        Err(e) => {
-            return Err(ApiError::internal(format!("failed to create file: {e}")));
-        }
-    }
-
-    // Re-index the file
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path,
+                meta,
+                body: page_body,
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     Ok((
         StatusCode::CREATED,
-        Json(page_detail_from_meta(&vault_path, meta, page_body)),
+        Json(page_detail_from_meta(
+            &result.path,
+            result.meta,
+            result.body,
+        )),
     )
         .into_response())
 }
@@ -522,18 +500,18 @@ pub async fn update_page(
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
     let abs_path = state.vault.resolve(&vault_path);
-    if !abs_path.exists() {
-        return Err(ApiError::not_found(format!("page not found: {path}")));
-    }
-
-    // Read existing page
+    let expected_content = fs::read_to_string(&abs_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ApiError::not_found(format!("page not found: {path}"))
+        } else {
+            ApiError::internal(format!("failed to read page: {error}"))
+        }
+    })?;
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
-
     let mut meta = page.meta;
     let mut page_body = page.body;
 
-    // Update only provided fields
     if let Some(title) = body.title {
         meta.title = Some(title);
     }
@@ -546,41 +524,38 @@ pub async fn update_page(
     if let Some(new_body) = body.body {
         page_body = new_body;
     }
-
-    // Set updated_at
     meta.updated_at = Some(Utc::now());
 
-    // Write back
-    let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vault_path,
+                expected_content,
+                meta,
+                body: page_body,
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
-    // Re-index
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.invalidate_links_to(&vp)?;
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                let deps = index.reverse_deps(&vp)?;
-                for dep_path in &deps {
-                    index.resolve_links_for_page(dep_path)?;
-                }
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
-
-    Ok(Json(page_detail_from_meta(&vault_path, meta, page_body)))
+    Ok(Json(page_detail_from_meta(
+        &result.path,
+        result.meta,
+        result.body,
+    )))
 }
 
 #[utoipa::path(
@@ -826,6 +801,7 @@ fn validate_project_slug(p: &str) -> Result<(), String> {
         (status = 200, description = "Assigned + reconciled", body = PageDetailResponse),
         (status = 400, description = "Invalid path or unknown kind", body = ApiError),
         (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Destination or stale mutation conflict", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
@@ -834,106 +810,70 @@ pub async fn assign_page(
     Path(path): Path<String>,
     Json(body): Json<AssignRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    // 1. Validate + load the page at its current path.
     let vp =
         VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
     let abs = state.vault.resolve(&vp);
-    if !abs.exists() {
-        return Err(ApiError::not_found(format!("page not found: {path}")));
-    }
+    let expected_content = fs::read_to_string(&abs).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ApiError::not_found(format!("page not found: {path}"))
+        } else {
+            ApiError::internal(format!("failed to read page: {error}"))
+        }
+    })?;
     let mut page = Page::from_file(&abs, vp.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    // No-op guard: nothing to assign means nothing to write/reconcile. Return
-    // the current detail without touching the file or the index.
     if body.kind.is_none() && body.project.is_none() && !body.clear_project {
         return Ok(Json(page_detail_from_page(&page, &vp)));
     }
 
-    // 2. Mutate declared kind/project in the loaded meta.
-    if let Some(ref token) = body.kind {
+    if let Some(token) = &body.kind {
         let parsed = crate::vault::kind::Kind::from_token(token)
             .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))?;
         page.meta.kind = Some(parsed);
     }
-    if body.clear_project {
+    let project = if body.clear_project {
         page.meta.project = None;
-    } else if let Some(ref project) = body.project {
+        ProjectAssignment::Clear
+    } else if let Some(project) = &body.project {
         validate_project_slug(project).map_err(ApiError::bad_request)?;
         page.meta.project = Some(project.clone());
-    }
-
-    // Stamp updated_at (mirrors update_page). created_at is left intact —
-    // Plan 2's filename-date projection derives from created_at.
+        ProjectAssignment::Set(project.clone())
+    } else {
+        ProjectAssignment::Unchanged
+    };
     page.meta.updated_at = Some(Utc::now());
 
-    // 3. Write the updated frontmatter back to the file in place.
-    // Note: there is a bounded window between this write and the index update
-    // below — if the process dies in between, the on-disk frontmatter is ahead
-    // of the index. This is self-healing: the next serve-startup sweep re-reads
-    // the (correct) frontmatter and reconciles from it, so the drift resolves.
-    let content = write_page_content(&page.meta, &page.body);
-    std::fs::write(&abs, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // 4 + 5. Reindex at the current path, resolve its links, then reconcile
-    // (may move the page + rewrite inbound links). `reconcile_page` needs the
-    // `&mut` index, so all steps run inside the same `with_index` closure.
-    // Hooks (e.g. AcademicMoveHook) fire on a reconcile move, so forward them.
-    let path_for_index = path.clone();
-    let hooks = Arc::clone(&state.hooks);
-    let clear_project = body.clear_project;
-    let declared_kind = page.meta.kind;
-    let final_path = state
-        .index
-        .with_index(move |index, vault| {
-            let vp = VaultPath::new(&path_for_index)
-                .map_err(|e| crate::vault::index::IndexError::Other(e.to_string()))?;
-            index.index_page(vault, &vp)?;
-            index.resolve_links_for_page(&vp)?;
-            // An explicit clear_project strips the subfolder (deliberate user
-            // action). The conservative sweep — reconcile_page via project_path
-            // — never strips on absent project, so route explicit clears
-            // through project_path_cleared + move_page_to instead.
-            let moved = if clear_project {
-                match crate::vault::projection::project_path_cleared(&path_for_index, declared_kind)
-                {
-                    Some(dest) => crate::vault::reconcile::move_page_to(
-                        vault,
-                        index,
-                        &path_for_index,
-                        &dest,
-                        &hooks,
-                    )?,
-                    None => None,
-                }
-            } else {
-                crate::vault::reconcile::reconcile_page(vault, index, &path_for_index, &hooks)?
-            };
-            Ok::<_, crate::vault::index::IndexError>(moved.unwrap_or(path_for_index))
-        })
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vp,
+                expected_content,
+                meta: page.meta,
+                body: page.body,
+                project,
+                reconcile: true,
+            },
+            &notify,
+        )
         .await
-        .map_err(|e| ApiError::internal(format!("assign failed: {e}")))?
-        .map_err(|e| ApiError::internal(format!("assign failed: {e}")))?;
+        .map_err(super::mutation_error)?;
 
-    // 6. Broadcast the change. If the page moved, the old path was removed.
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![final_path.clone()],
-        removed: if final_path != path {
-            vec![path.clone()]
-        } else {
-            vec![]
-        },
-    });
-
-    // 7. Return the PageDetail at the FINAL path.
-    let final_vp = VaultPath::new(&final_path)
-        .map_err(|e| ApiError::internal(format!("invalid final path: {e}")))?;
-    let final_abs = state.vault.resolve(&final_vp);
-    let page = Page::from_file(&final_abs, final_vp.clone())
-        .map_err(|e| ApiError::internal(format!("failed to read assigned page: {e}")))?;
-
-    Ok(Json(page_detail_from_page(&page, &final_vp)))
+    Ok(Json(page_detail_from_meta(
+        &result.path,
+        result.meta,
+        result.body,
+    )))
 }
 
 #[utoipa::path(

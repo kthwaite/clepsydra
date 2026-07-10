@@ -57,6 +57,27 @@ pub struct AppState {
     pub location: parking_lot::RwLock<Option<crate::vault::location::Location>>,
 }
 
+pub(crate) fn mutation_error(
+    error: crate::vault::mutation_coordinator::MutationError,
+) -> error::ApiError {
+    use crate::vault::mutation_coordinator::MutationError;
+
+    match error {
+        MutationError::InvalidInput(message) => error::ApiError::bad_request(message),
+        MutationError::NotFound(path) => {
+            error::ApiError::not_found(format!("page not found: {}", path.as_str()))
+        }
+        MutationError::Conflict(message) => error::ApiError::conflict(message),
+        MutationError::Stale(path) => {
+            error::ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
+        }
+        MutationError::Filesystem { .. }
+        | MutationError::Index { .. }
+        | MutationError::Reconcile { .. }
+        | MutationError::Hook { .. } => error::ApiError::internal(error.to_string()),
+    }
+}
+
 /// Build the API router mounted at `/api/vault`.
 pub fn api_router() -> Router<Arc<AppState>> {
     api_router_with_archive_limit(100 * 1024 * 1024) // default 100 MB

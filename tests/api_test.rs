@@ -167,7 +167,7 @@ async fn geocode_rejects_blank_query() {
 }
 
 #[tokio::test]
-async fn create_and_get_page() {
+async fn page_mutation_create_preserves_response_dto() {
     let (server, _tmp) = setup_server();
 
     // Create a page
@@ -195,7 +195,7 @@ async fn create_and_get_page() {
 }
 
 #[tokio::test]
-async fn create_duplicate_returns_409() {
+async fn page_mutation_create_duplicate_returns_409() {
     let (server, _tmp) = setup_server();
 
     // Create a page
@@ -1340,7 +1340,7 @@ async fn create_page_resolves_links() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn update_page_resolves_links_bidirectionally() {
+async fn page_mutation_update_resolves_links_bidirectionally() {
     let (server, _tmp) = setup_server();
 
     // Create source with no links
@@ -1378,6 +1378,226 @@ async fn update_page_resolves_links_bidirectionally() {
     let backlinks: Vec<serde_json::Value> = res.json();
     assert_eq!(backlinks.len(), 1);
     assert_eq!(backlinks[0]["source_path"], "source.md");
+}
+
+#[tokio::test]
+async fn page_mutation_project_assignment_destination_collision_returns_409() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000199
+title: Source
+type: NOTE
+---
+Source body.
+";
+    let destination = "\
+---
+id: 00000000-0000-0000-0000-000000000200
+title: Occupied
+type: NOTE
+project: occupied
+---
+Destination body.
+";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/source.md", source),
+        ("notes/occupied/source.md", destination),
+    ]);
+
+    let response = server
+        .post("/api/vault/pages-assign/notes/source.md")
+        .json(&serde_json::json!({ "project": "occupied" }))
+        .await;
+
+    response.assert_status(StatusCode::CONFLICT);
+    let vault_root = tmp.path().join("vault");
+    let persisted = fs::read_to_string(vault_root.join("notes/source.md")).unwrap();
+    assert!(
+        !persisted.contains("project: occupied"),
+        "a rejected assignment must not modify the source: {persisted}"
+    );
+    assert!(
+        fs::read_to_string(vault_root.join("notes/occupied/source.md"))
+            .unwrap()
+            .contains("Destination body."),
+        "the collision destination must not be overwritten"
+    );
+}
+
+#[tokio::test]
+async fn page_mutation_project_assignment_set_clear_and_unchanged_preserve_contracts() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000202
+title: Source
+type: NOTE
+---
+Source body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/source.md", source)]);
+    let original = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+
+    let unchanged = server
+        .post("/api/vault/pages-assign/notes/source.md")
+        .json(&serde_json::json!({}))
+        .await;
+    unchanged.assert_status_ok();
+    assert_eq!(
+        unchanged.json::<serde_json::Value>()["path"],
+        "notes/source.md"
+    );
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap(),
+        original,
+        "an unchanged assignment must not stamp or rewrite the page"
+    );
+
+    let assigned = server
+        .post("/api/vault/pages-assign/notes/source.md")
+        .json(&serde_json::json!({ "project": "project-a" }))
+        .await;
+    assigned.assert_status_ok();
+    let assigned_body: serde_json::Value = assigned.json();
+    assert_eq!(assigned_body["path"], "notes/project-a/source.md");
+    assert_eq!(assigned_body["project"], "project-a");
+
+    let cleared = server
+        .post("/api/vault/pages-assign/notes/project-a/source.md")
+        .json(&serde_json::json!({ "clear_project": true }))
+        .await;
+    cleared.assert_status_ok();
+    let cleared_body: serde_json::Value = cleared.json();
+    assert_eq!(cleared_body["path"], "notes/source.md");
+    assert!(cleared_body["project"].is_null());
+    assert!(
+        !fs::read_to_string(tmp.path().join("vault/notes/source.md"))
+            .unwrap()
+            .contains("project:"),
+        "explicit clear must remove project frontmatter"
+    );
+}
+
+#[tokio::test]
+async fn page_mutation_reports_index_failure_after_filesystem_success_without_notification() {
+    use clepsydra::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let _ = handle
+        .with_index(|_, _| -> () { panic!("terminate index thread for failure test") })
+        .await;
+
+    let notified = std::sync::atomic::AtomicBool::new(false);
+    let notify = |_: MutationNotification| {
+        notified.store(true, std::sync::atomic::Ordering::SeqCst);
+    };
+    let error = MutationCoordinator::new()
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("failure.md").unwrap(),
+                meta: PageMeta::new(),
+                body: "persisted".to_string(),
+            },
+            &notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Index {
+            filesystem_applied: true,
+            ..
+        }
+    ));
+    assert!(
+        tmp.path().join("failure.md").exists(),
+        "filesystem success must be reported rather than rolled back implicitly"
+    );
+    assert!(
+        !notified.load(std::sync::atomic::Ordering::SeqCst),
+        "notification must follow successful indexing"
+    );
+}
+
+#[tokio::test]
+async fn page_mutation_projected_move_invokes_hook_before_notification() {
+    use clepsydra::vault::hooks::PostMoveHook;
+    use clepsydra::vault::mutation_coordinator::{
+        MutationCoordinator, MutationNotification, ProjectAssignment, UpdatePageCommand,
+    };
+    use clepsydra::vault::page::Page;
+    use clepsydra::vault::path::VaultPath;
+
+    struct OrderingHook {
+        events: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+    }
+
+    impl PostMoveHook for OrderingHook {
+        fn on_page_moved(
+            &self,
+            _old_path: &VaultPath,
+            _new_path: &VaultPath,
+            _page_id: &uuid::Uuid,
+            _vault: &Vault,
+            _index: &VaultIndex,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            self.events.lock().push("hook");
+            Ok(())
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("notes")).unwrap();
+    fs::write(
+        tmp.path().join("notes/source.md"),
+        "---\nid: 00000000-0000-0000-0000-000000000201\n\
+         title: Source\ntype: NOTE\n---\nbody\n",
+    )
+    .unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let mut index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let path = VaultPath::new("notes/source.md").unwrap();
+    let expected_content = fs::read_to_string(vault.resolve(&path)).unwrap();
+    let mut page = Page::from_file(&vault.resolve(&path), path.clone()).unwrap();
+    page.meta.project = Some("project-a".to_string());
+    let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let hooks: Arc<Vec<Box<dyn PostMoveHook>>> = Arc::new(vec![Box::new(OrderingHook {
+        events: Arc::clone(&events),
+    })]);
+    let notify = |_: MutationNotification| events.lock().push("notify");
+
+    let result = MutationCoordinator::new()
+        .update_page(
+            &vault,
+            &handle,
+            hooks,
+            UpdatePageCommand {
+                path,
+                expected_content,
+                meta: page.meta,
+                body: page.body,
+                project: ProjectAssignment::Set("project-a".to_string()),
+                reconcile: true,
+            },
+            &notify,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.path.as_str(), "notes/project-a/source.md");
+    assert_eq!(*events.lock(), vec!["hook", "notify"]);
 }
 
 #[tokio::test]
