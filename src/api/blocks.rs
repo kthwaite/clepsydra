@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use super::AppState;
 use super::error::ApiError;
 use crate::vault::block_id::BlockId;
+use crate::vault::block::parse_blocks;
+use crate::vault::mutation_coordinator::atomic_replace;
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -214,73 +216,97 @@ async fn assign_block_id(
 ) -> Result<Json<AssignIdResponse>, ApiError> {
     let vault_path = VaultPath::new(&req.page_path)
         .map_err(|e| ApiError::bad_request(format!("Invalid path: {}", e)))?;
-
     let span_start = req.span_start;
     let page_path = req.page_path.clone();
 
-    // Step 1: Look up the block's span_end
-    let span_end = state
+    let _guard = state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&vault_path))
+        .await;
+
+    let lookup_path = page_path.clone();
+    let indexed_block = state
         .index
         .with_index(move |index, _vault| {
             let conn = index.connection();
             let mut stmt = conn.prepare(
-                "SELECT span_end FROM blocks WHERE page_id = (SELECT id FROM pages WHERE path = ?1) AND span_start = ?2"
+                "SELECT span_end, content, block_id
+                 FROM blocks
+                 WHERE page_id = (SELECT id FROM pages WHERE path = ?1)
+                   AND span_start = ?2",
             )?;
 
-            match stmt.query_row(params![&page_path, span_start], |row| {
-                row.get::<_, i64>(0)
+            match stmt.query_row(params![&lookup_path, span_start], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             }) {
-                Ok(v) => Ok::<_, rusqlite::Error>(Some(v)),
+                Ok(block) => Ok::<_, rusqlite::Error>(Some(block)),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(e),
+                Err(error) => Err(error),
             }
         })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let span_end = span_end.ok_or_else(|| {
-        ApiError::not_found(format!(
-            "Block not found at path={}, span_start={}",
-            req.page_path, span_start
+    let (span_end, indexed_content, indexed_block_id) = indexed_block.ok_or_else(|| {
+        ApiError::conflict(format!(
+            "Block target is stale at path={}, span_start={}",
+            page_path, span_start
         ))
     })?;
 
-    // Step 2: Generate a new block ID
-    let new_id = BlockId::generate();
-    let id_str = new_id.to_string();
-
-    // Step 3: Read the source file
     let abs_path = state.vault.resolve(&vault_path);
     let mut content = std::fs::read_to_string(&abs_path)
         .map_err(|e| ApiError::internal(format!("Failed to read file: {}", e)))?;
-
-    // Step 4: Insert the block ID before the trailing newline at span_end.
-    // span_end is body-relative (parse_blocks operates on body after frontmatter),
-    // so we must find where the body starts in the file.
     let body_offset = find_body_offset(&content);
-    let file_span_end = body_offset + span_end as usize;
-    if file_span_end > content.len() {
-        return Err(ApiError::internal("span_end exceeds file length"));
+    let body = content
+        .get(body_offset..)
+        .ok_or_else(|| ApiError::conflict("Block target is stale"))?;
+    let span_start = usize::try_from(span_start)
+        .map_err(|_| ApiError::conflict("Block target has an invalid span_start"))?;
+    let span_end = usize::try_from(span_end)
+        .map_err(|_| ApiError::conflict("Block target has an invalid span_end"))?;
+    let current_block = parse_blocks(body).into_iter().find(|block| {
+        block.span.start == span_start
+            && block.span.end == span_end
+            && block.content == indexed_content
+            && block.block_id == indexed_block_id
+    });
+    if current_block.is_none() {
+        return Err(ApiError::conflict(format!(
+            "Block target is stale at path={}, span_start={}",
+            page_path, span_start
+        )));
+    }
+    if !body.is_char_boundary(span_start) || !body.is_char_boundary(span_end) {
+        return Err(ApiError::conflict("Block target is not on UTF-8 boundaries"));
     }
 
-    // Find the position to insert (before the newline at span_end)
+    let file_span_end = body_offset
+        .checked_add(span_end)
+        .ok_or_else(|| ApiError::conflict("Block target span overflowed"))?;
+    if file_span_end > content.len() || !content.is_char_boundary(file_span_end) {
+        return Err(ApiError::conflict("Block target is stale"));
+    }
     let insert_pos =
         if file_span_end > 0 && content.as_bytes().get(file_span_end - 1) == Some(&b'\n') {
             file_span_end - 1
         } else {
             file_span_end
         };
+    if !content.is_char_boundary(insert_pos) {
+        return Err(ApiError::conflict("Block target is not on a UTF-8 boundary"));
+    }
 
-    // Insert the block reference
-    let block_ref = format!(" ^{}", id_str);
-    content.insert_str(insert_pos, &block_ref);
-
-    // Step 5: Write the file back
-    std::fs::write(&abs_path, &content)
+    let id_str = BlockId::generate().to_string();
+    content.insert_str(insert_pos, &format!(" ^{}", id_str));
+    atomic_replace(&abs_path, content.as_bytes())
         .map_err(|e| ApiError::internal(format!("Failed to write file: {}", e)))?;
 
-    // Step 6: Re-index the page
     let vp = vault_path.clone();
     state
         .index

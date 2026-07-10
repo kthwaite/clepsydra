@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum_test::TestServer;
+use axum::http::StatusCode;
 use tokio::sync::broadcast;
 
 use clepsydra::api::{AppState, api_router};
@@ -145,4 +146,112 @@ async fn assign_block_id_to_block() {
     // Verify the block is now fetchable by ID
     let get_response = server.get(&format!("/api/vault/blocks/{block_id}")).await;
     get_response.assert_status_ok();
+}
+
+#[tokio::test]
+async fn assign_block_id_concurrently_preserves_every_successful_assignment() {
+    let (server, dir) = setup_server_with_files(|root| {
+        std::fs::write(
+            root.join("page.md"),
+            "---\ntitle: Test\n---\n- First untagged item\n- Second untagged item\n",
+        )
+        .unwrap();
+    });
+
+    let first_search = server
+        .get("/api/vault/blocks/search?q=First%20untagged")
+        .await;
+    first_search.assert_status_ok();
+    let first_blocks: Vec<serde_json::Value> = first_search.json();
+    let first_span_start = first_blocks[0]["span_start"].as_i64().unwrap();
+
+    let second_search = server
+        .get("/api/vault/blocks/search?q=Second%20untagged")
+        .await;
+    second_search.assert_status_ok();
+    let second_blocks: Vec<serde_json::Value> = second_search.json();
+    let second_span_start = second_blocks[0]["span_start"].as_i64().unwrap();
+
+    let first_request = server
+        .post("/api/vault/blocks/assign-id")
+        .json(&serde_json::json!({
+            "page_path": "page.md",
+            "span_start": first_span_start
+        }));
+    let second_request = server
+        .post("/api/vault/blocks/assign-id")
+        .json(&serde_json::json!({
+            "page_path": "page.md",
+            "span_start": second_span_start
+        }));
+    let (first_response, second_response) = tokio::join!(first_request, second_request);
+
+    let first_status = first_response.status_code();
+    let second_status = second_response.status_code();
+    assert!(
+        (first_status == StatusCode::OK && second_status == StatusCode::OK)
+            || (first_status == StatusCode::OK && second_status == StatusCode::CONFLICT)
+            || (first_status == StatusCode::CONFLICT && second_status == StatusCode::OK),
+        "expected two successes or one success plus one conflict, got {first_status} and {second_status}"
+    );
+
+    let first_id = (first_status == StatusCode::OK).then(|| {
+        let body: serde_json::Value = first_response.json();
+        body["block_id"].as_str().unwrap().to_owned()
+    });
+    let second_id = (second_status == StatusCode::OK).then(|| {
+        let body: serde_json::Value = second_response.json();
+        body["block_id"].as_str().unwrap().to_owned()
+    });
+    let content = std::fs::read_to_string(dir.path().join("vault/page.md")).unwrap();
+
+    if let Some(id) = first_id {
+        assert!(
+            content.contains(&format!("First untagged item ^{id}")),
+            "successful first assignment was lost: {content}"
+        );
+    }
+    if let Some(id) = second_id {
+        assert!(
+            content.contains(&format!("Second untagged item ^{id}")),
+            "successful second assignment was lost: {content}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn assign_block_id_rejects_stale_target_without_changing_content() {
+    let (server, dir) = setup_server_with_files(|root| {
+        std::fs::write(
+            root.join("page.md"),
+            "---\ntitle: Test\n---\n- Original untagged item\n",
+        )
+        .unwrap();
+    });
+
+    let search_response = server
+        .get("/api/vault/blocks/search?q=Original%20untagged")
+        .await;
+    search_response.assert_status_ok();
+    let blocks: Vec<serde_json::Value> = search_response.json();
+    let span_start = blocks[0]["span_start"].as_i64().unwrap();
+
+    let page_path = dir.path().join("vault/page.md");
+    let changed_content = "---\ntitle: Test\n---\nPreface inserted after indexing.\n\n- Original untagged item\n";
+    std::fs::write(&page_path, changed_content).unwrap();
+
+    let response = server
+        .post("/api/vault/blocks/assign-id")
+        .json(&serde_json::json!({
+            "page_path": "page.md",
+            "span_start": span_start
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CONFLICT);
+    assert_eq!(
+        std::fs::read_to_string(page_path).unwrap(),
+        changed_content,
+        "stale assignment must leave the page unchanged"
+    );
 }
