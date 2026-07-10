@@ -409,6 +409,7 @@ pub(crate) async fn build_app_state(
         change_tx: change_broadcast_tx,
         hooks,
         delete_hooks,
+        mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,
         location: parking_lot::RwLock::new(location),

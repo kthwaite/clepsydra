@@ -25,6 +25,7 @@ pub mod kind;
 pub mod link;
 pub mod location;
 pub mod mutation;
+pub mod mutation_coordinator;
 pub mod new_note;
 pub mod page;
 pub mod page_filename;

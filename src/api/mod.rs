@@ -41,6 +41,7 @@ pub struct AppState {
     pub change_tx: broadcast::Sender<SyncNotification>,
     pub hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostMoveHook>>>,
     pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
+    pub mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,

@@ -5,6 +5,7 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
 use clepsydra::vault::path::VaultPath;
+use clepsydra::vault::mutation_coordinator::{MutationCoordinator, atomic_replace};
 
 use tempfile::TempDir;
 
@@ -574,4 +575,83 @@ fn folder_move_internal_refs_no_orphan_outside() {
     let new_b = vault.resolve(&VaultPath::new("archive/b.md").unwrap());
     assert!(new_a.exists(), "archive/a.md should exist");
     assert!(new_b.exists(), "archive/b.md should exist");
+}
+
+#[tokio::test]
+async fn mutation_coordinator_serializes_the_same_path() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let path = VaultPath::new("notes/shared.md").unwrap();
+    let first_guard = coordinator.lock_paths(std::slice::from_ref(&path)).await;
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
+
+    let second_coordinator = Arc::clone(&coordinator);
+    let second_path = path.clone();
+    let second = tokio::spawn(async move {
+        let _guard = second_coordinator.lock_paths(&[second_path]).await;
+        entered_tx.send(()).await.unwrap();
+    });
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), entered_rx.recv())
+            .await
+            .is_err(),
+        "a second mutation entered while the first path guard was held"
+    );
+
+    drop(first_guard);
+    tokio::time::timeout(Duration::from_secs(1), entered_rx.recv())
+        .await
+        .expect("second mutation remained blocked after the guard dropped")
+        .expect("second mutation exited without entering");
+    second.await.unwrap();
+}
+
+#[tokio::test]
+async fn mutation_coordinator_allows_different_paths_concurrently() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let first_path = VaultPath::new("notes/first.md").unwrap();
+    let first_guard = coordinator.lock_paths(&[first_path]).await;
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
+
+    let second_coordinator = Arc::clone(&coordinator);
+    let second = tokio::spawn(async move {
+        let second_path = VaultPath::new("notes/second.md").unwrap();
+        let _guard = second_coordinator.lock_paths(&[second_path]).await;
+        entered_tx.send(()).await.unwrap();
+    });
+
+    tokio::time::timeout(Duration::from_secs(1), entered_rx.recv())
+        .await
+        .expect("an unrelated path was blocked")
+        .expect("unrelated mutation exited without entering");
+    drop(first_guard);
+    second.await.unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn mutation_coordinator_atomic_replace_preserves_old_content_on_write_failure() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"old content").unwrap();
+
+    let original_permissions = fs::metadata(tmp.path()).unwrap().permissions();
+    fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    let result = atomic_replace(&path, b"complete new content");
+    fs::set_permissions(tmp.path(), original_permissions).unwrap();
+
+    assert!(result.is_err(), "the forced pre-rename failure succeeded");
+    let content = fs::read(&path).unwrap();
+    assert!(
+        content == b"old content" || content == b"complete new content",
+        "atomic replacement exposed partial content: {content:?}"
+    );
 }

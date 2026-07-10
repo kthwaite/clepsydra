@@ -57,6 +57,7 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
         change_tx,
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
+        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
         location: parking_lot::RwLock::new(None),

@@ -54,6 +54,7 @@ fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
         change_tx,
         hooks: production_hooks(),
         delete_hooks: Arc::new(delete_hooks),
+        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
         location: parking_lot::RwLock::new(None),

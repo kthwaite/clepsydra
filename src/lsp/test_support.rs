@@ -82,6 +82,7 @@ pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
         change_tx,
         hooks: Arc::new(vec![]),
         delete_hooks: Arc::new(vec![]),
+        mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl: None,
         location: parking_lot::RwLock::new(None),
