@@ -24,6 +24,7 @@ import {
   PRI_ORDER,
   StatePip,
 } from "./board-constants";
+import { checklistProgress } from "./board-stats";
 
 /** Shared grid tracks for the header row and task rows (.bk-row). */
 const BK_COLS = "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px";
@@ -156,8 +157,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
 
           {/* Task rows */}
           {g.items.map((t) => {
-            const [done, total] =
-              t.checks.length >= 2 ? [t.checks[0], t.checks[1]] : [0, 0];
+            const { done, total } = checklistProgress(t.checks);
 
             return (
               <button

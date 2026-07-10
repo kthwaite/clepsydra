@@ -6,7 +6,7 @@
  *
  * - resolveCycle: exported pure helper; determines the displayed cycle from
  *   the persisted cycleSel store value and the live cycles array.
- * - cycleStats: exported pure helper; computes committed/sealed/field/hold/
+ * - board-stats: pure helpers compute committed/sealed/field/hold/
  *   check counts and sealed percentage.
  * - CycleView: renders the header (window·state, h2 label, goal, actions),
  *   right-side metrics + synthetic burndown Spark, progress bar, and
@@ -26,6 +26,7 @@ import {
   PriChip,
   StatePip,
 } from "./board-constants";
+import { checklistProgress, cycleStats } from "./board-stats";
 
 // ── resolveCycle ──────────────────────────────────────────────────────────────
 
@@ -70,39 +71,6 @@ export function resolveCycle(
   if (activeCycle) return activeCycle;
   if (cycles.length > 0) return cycles[0];
   return BACKLOG_PSEUDO_CYCLE;
-}
-
-// ── cycleStats ────────────────────────────────────────────────────────────────
-
-export interface CycleStatsResult {
-  committed: number;
-  sealed: number;
-  field: number;
-  hold: number;
-  checkDone: number;
-  checkTot: number;
-  pct: number;
-}
-
-/**
- * Computes aggregate statistics for a set of cycle items.
- * `pct` is 0 when committed = 0 (guards against division by zero).
- */
-export function cycleStats(items: BoardTask[]): CycleStatsResult {
-  const committed = items.length;
-  const sealed = items.filter((t) => t.status === "SEALED").length;
-  const field = items.filter((t) => t.status === "FIELD").length;
-  const hold = items.filter((t) => !!t.hold).length;
-  const checkDone = items.reduce(
-    (a, t) => a + (t.checks.length >= 2 ? t.checks[0] : 0),
-    0,
-  );
-  const checkTot = items.reduce(
-    (a, t) => a + (t.checks.length >= 2 ? t.checks[1] : 0),
-    0,
-  );
-  const pct = committed ? Math.round((sealed / committed) * 100) : 0;
-  return { committed, sealed, field, hold, checkDone, checkTot, pct };
 }
 
 // ── CycleView ─────────────────────────────────────────────────────────────────
@@ -392,8 +360,7 @@ export function CycleView({
 
               {/* Task rows */}
               {g.items.map((t) => {
-                const [d, total] =
-                  t.checks.length >= 2 ? [t.checks[0], t.checks[1]] : [0, 0];
+                const { done: d, total } = checklistProgress(t.checks);
 
                 return (
                   <button

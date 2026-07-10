@@ -18,7 +18,8 @@ import type { BoardCycle, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { isoAddDays, NewCycleModal, newCyclePrefill } from "../NewCycleModal";
 import { OpenCycleModal } from "../OpenCycleModal";
-import { SealCycleModal, sealStats } from "../SealCycleModal";
+import { sealStats } from "../board-stats";
+import { SealCycleModal } from "../SealCycleModal";
 import { TaskingScreen } from "../TaskingScreen";
 import { BOARD_FIXTURE, stubBoardFetch } from "./fixtures";
 

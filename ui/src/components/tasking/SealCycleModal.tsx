@@ -23,33 +23,8 @@ import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { fmtCycleWindow } from "./board-constants";
-import { cycleStats } from "./CycleView";
+import { sealStats } from "./board-stats";
 import { EdField, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
-
-// ── sealStats ─────────────────────────────────────────────────────────────────
-
-export interface SealStatsResult {
-  committed: number;
-  sealed: number;
-  carryover: number;
-  pct: number;
-}
-
-/**
- * Pure helper — stats for a specific cycle's tasks (by code).
- *
- * Reuses cycleStats for the base counts; adds carryover (committed − sealed).
- */
-export function sealStats(tasks: BoardTask[], code: string): SealStatsResult {
-  const items = tasks.filter((t) => t.cycle === code);
-  const base = cycleStats(items);
-  return {
-    committed: base.committed,
-    sealed: base.sealed,
-    carryover: base.committed - base.sealed,
-    pct: base.pct,
-  };
-}
 
 // ── SealCycleModal ────────────────────────────────────────────────────────────
 

@@ -13,7 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { CycleView, cycleStats, resolveCycle } from "../CycleView";
+import { cycleStats } from "../board-stats";
+import { CycleView, resolveCycle } from "../CycleView";
 import { TaskingScreen } from "../TaskingScreen";
 import {
   BOARD_FIXTURE,

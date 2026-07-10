@@ -6,6 +6,7 @@
  */
 
 import type { BoardTask } from "#/api/board";
+import { checklistProgress } from "./board-stats";
 
 // ── priority colour maps ──────────────────────────────────────────────────────
 
@@ -45,10 +46,12 @@ export function TaskCard({
   onClick,
   onOpenDossier,
 }: TaskCardProps) {
-  const [done, total] =
-    t.checks.length >= 2 ? [t.checks[0], t.checks[1]] : [0, 0];
-  const pct = total > 0 ? (done / total) * 100 : 0;
-  const checksDone = total > 0 && done === total;
+  const {
+    done,
+    total,
+    percent: pct,
+    isComplete: checksDone,
+  } = checklistProgress(t.checks);
 
   const priColor = PRI_TEXT_COLOR[t.priority] ?? "var(--ink-mute)";
   const barColor = PRI_BAR_COLOR[t.priority] ?? "var(--ink-3)";

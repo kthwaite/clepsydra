@@ -19,7 +19,7 @@ import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { fmtCycleWindow } from "./board-constants";
-import { cycleStats } from "./CycleView";
+import { cycleStats } from "./board-stats";
 
 // ── OpenCycleModal ────────────────────────────────────────────────────────────
 
