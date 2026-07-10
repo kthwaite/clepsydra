@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useSearch, useTags } from "#/api/index";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -239,17 +240,14 @@ export function CommandPalette() {
   if (!open) return null;
 
   return (
-    <div
-      onMouseDown={close}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/35 pt-20"
+    <CodexModalShell
+      ariaLabel="Command console"
+      maxWidthClassName="max-w-[680px]"
+      onDismiss={close}
+      onKeyDown={onKey}
+      panelClassName="flex flex-col"
+      widthClassName="w-[92%]"
     >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={onKey}
-        role="dialog"
-        aria-label="Command console"
-        className="flex w-[92%] max-w-[680px] flex-col border-[1.5px] border-ink bg-paper text-ink font-body"
-      >
         {/* header / channel */}
         <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
           <span className="cl-mono text-[9px] tracking-[0.16em] text-ink-mute">
@@ -359,7 +357,6 @@ export function CommandPalette() {
           </span>
           <span className="ml-auto">{filtered.length} HITS</span>
         </div>
-      </div>
-    </div>
+    </CodexModalShell>
   );
 }

@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import { CodexModalShell } from "./CodexModalShell";
 import { useLocation } from "#/api/location";
 import { useUiStore } from "#/store/ui";
 import { LocationForm } from "./LocationForm";
@@ -13,25 +13,13 @@ export function LocationModal() {
 
   if (!isOpen) return null;
 
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape" && !e.defaultPrevented) {
-      e.stopPropagation();
-      onClose();
-    }
-  };
 
   return (
-    <div
-      onMouseDown={onClose}
-      onKeyDown={onKeyDown}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/35 pt-20"
+    <CodexModalShell
+      ariaLabel="Location"
+      maxWidthClassName="max-w-[520px]"
+      onDismiss={onClose}
     >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Location"
-        className="w-[88%] max-w-[520px] border-[1.5px] border-ink bg-paper text-ink font-body"
-      >
         <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
           <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
             ◎ Location
@@ -41,7 +29,6 @@ export function LocationModal() {
           </span>
         </div>
         <LocationForm initial={current} onSaved={onClose} onCancel={onClose} />
-      </div>
-    </div>
+    </CodexModalShell>
   );
 }

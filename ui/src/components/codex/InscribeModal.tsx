@@ -1,9 +1,10 @@
-import { type FormEvent, type KeyboardEvent, useRef, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { useTags } from "#/api/index";
 import { useAssignPage, useCreatePage } from "#/api/pages";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagsInput } from "#/components/codex/TagsInput";
+import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
@@ -114,29 +115,14 @@ export function InscribeModal() {
     onClose();
   };
 
-  // Esc dismisses unless an inner control already consumed it (TagsInput's
-  // suggestion list calls preventDefault; react-aria popovers render in a
-  // portal and never bubble here).
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape" && !e.defaultPrevented) {
-      e.stopPropagation();
-      dismiss();
-    }
-  };
 
   return (
-    <div
-      onMouseDown={dismiss}
-      onKeyDown={onKeyDown}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/35 pt-20"
+    <CodexModalShell
+      ariaLabel="Intake"
+      maxWidthClassName="max-w-[520px]"
+      onDismiss={dismiss}
     >
-      <form
-        onMouseDown={(e) => e.stopPropagation()}
-        onSubmit={submit}
-        role="dialog"
-        aria-label="Intake"
-        className="w-[88%] max-w-[520px] border-[1.5px] border-ink bg-paper text-ink font-body"
-      >
+      <form onSubmit={submit}>
         {/* terminal header */}
         <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
           <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
@@ -213,7 +199,7 @@ export function InscribeModal() {
           </div>
         </div>
       </form>
-    </div>
+    </CodexModalShell>
   );
 }
 

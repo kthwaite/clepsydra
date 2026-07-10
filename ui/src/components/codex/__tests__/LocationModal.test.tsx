@@ -121,7 +121,7 @@ describe("LocationModal", () => {
 
   it("searches the city query and fills fields from a selected candidate", async () => {
     const user = userEvent.setup();
-    render(<LocationModal />);
+    const { rerender } = render(<LocationModal />);
 
     await user.type(screen.getByRole("textbox", { name: /search/i }), "Paris");
     await user.click(screen.getByRole("button", { name: /search/i }));
@@ -131,10 +131,10 @@ describe("LocationModal", () => {
     geocodeState.data = [
       { label: "Paris, France", latitude: 48.85, longitude: 2.35 },
     ];
-    render(<LocationModal />);
+    rerender(<LocationModal />);
 
     await user.click(screen.getByRole("button", { name: /Paris, France/i }));
-    await user.click(screen.getAllByRole("button", { name: /save/i })[1]);
+    await user.click(screen.getByRole("button", { name: /save/i }));
 
     expect(updateMutate).toHaveBeenCalledTimes(1);
     const [body] = updateMutate.mock.calls[0];

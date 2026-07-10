@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { CodexModalShell } from "./CodexModalShell";
 import { formatChord, shortcutsByGroup } from "#/lib/shortcuts";
 import { useUiStore } from "#/store/ui";
 
@@ -6,31 +6,17 @@ export function ShortcutHelpModal() {
   const open = useUiStore((s) => s.isShortcutHelpOpen);
   const close = useUiStore((s) => s.closeShortcutHelp);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) {
-        e.preventDefault();
-        close();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, close]);
 
   if (!open) return null;
 
   return (
-    <div
-      onMouseDown={close}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/35 pt-20"
+    <CodexModalShell
+      ariaLabel="Keyboard shortcuts"
+      maxWidthClassName="max-w-[560px]"
+      onDismiss={close}
+      panelClassName="flex flex-col"
+      widthClassName="w-[92%]"
     >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Keyboard shortcuts"
-        className="flex w-[92%] max-w-[560px] flex-col border-[1.5px] border-ink bg-paper font-body text-ink"
-      >
         {/* header */}
         <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
           <span className="cl-mono text-[9px] tracking-[0.16em] text-ink-mute">
@@ -73,7 +59,6 @@ export function ShortcutHelpModal() {
             </section>
           ))}
         </div>
-      </div>
-    </div>
+    </CodexModalShell>
   );
 }

@@ -53,6 +53,22 @@ describe("InscribeModal", () => {
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
   });
 
+  it("resets local fields after backdrop dismissal", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<InscribeModal />);
+    const title = screen.getByRole("textbox", { name: "Title" });
+    await user.type(title, "Discard me");
+
+    const overlay = document.body.querySelector(".fixed.inset-0");
+    expect(overlay).toBeInstanceOf(HTMLElement);
+    await user.click(overlay as HTMLElement);
+    expect(useUiStore.getState().isInscribeOpen).toBe(false);
+
+    useUiStore.setState({ isInscribeOpen: true });
+    rerender(<InscribeModal />);
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("");
+  });
+
   it("creates the page at the kind-projected canonical path", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
@@ -101,6 +117,7 @@ describe("InscribeModal", () => {
     render(<InscribeModal />);
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Tagged");
     await user.type(screen.getByRole("combobox", { name: "Tags" }), "ru");
+    expect(screen.getByRole("listbox", { name: "Tag suggestions" })).toBeVisible();
     await user.keyboard("{Tab}");
     await user.click(screen.getByRole("button", { name: /commit to archive/ }));
     const [vars] = createMutate.mock.calls[0];
