@@ -201,8 +201,8 @@ mod tests {
         assert_eq!(
             tokens,
             [
-                "NOTE", "PROJECT", "JOURNAL", "TODO", "QUOTE", "BOOK", "CAPTURE", "CODE",
-                "PERSON", "TASK", "CYCLE"
+                "NOTE", "PROJECT", "JOURNAL", "TODO", "QUOTE", "BOOK", "CAPTURE", "CODE", "PERSON",
+                "TASK", "CYCLE"
             ]
         );
     }

@@ -28,19 +28,18 @@ pub const BRIMLEY_DAYS: i64 = 18_530;
 pub fn load_or_seed(vault_root: &Path) -> Option<NaiveDate> {
     let vault_path = vault_root.join(VAULT_RELATIVE_PATH);
 
-    if !vault_path.exists() {
-        if let Some(home_path) = home_config_path()
-            && home_path.exists()
-        {
-            if let Err(e) = seed_from_home(&home_path, &vault_path) {
-                tracing::warn!(error = %e, "failed to seed BCL config from ~/.config/bcl");
-            } else {
-                tracing::info!(
-                    src = %home_path.display(),
-                    dst = %vault_path.display(),
-                    "seeded BCL config from home"
-                );
-            }
+    if !vault_path.exists()
+        && let Some(home_path) = home_config_path()
+        && home_path.exists()
+    {
+        if let Err(e) = seed_from_home(&home_path, &vault_path) {
+            tracing::warn!(error = %e, "failed to seed BCL config from ~/.config/bcl");
+        } else {
+            tracing::info!(
+                src = %home_path.display(),
+                dst = %vault_path.display(),
+                "seeded BCL config from home"
+            );
         }
     }
 

@@ -149,7 +149,7 @@ fn rewrite_markdown_link(link_text: &str, new_url: &str, base_offset: usize) -> 
 /// Apply collected edits to `content` in reverse byte-offset order.
 fn apply_edits(content: &str, mut edits: Vec<Edit>) -> String {
     // Sort by start descending so that later edits don't invalidate earlier spans.
-    edits.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.range.start));
 
     let mut result = content.to_string();
     for edit in edits {

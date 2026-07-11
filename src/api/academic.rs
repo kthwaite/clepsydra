@@ -267,6 +267,7 @@ async fn cite_key_in_use(state: &AppState, cite_key: &str, exclude_page_id: Opti
 // ---------------------------------------------------------------------------
 
 /// Internal work creation logic shared by the create_work endpoint and importers.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_work_internal(
     state: &AppState,
     title: String,
@@ -450,8 +451,7 @@ pub async fn import_bibtex(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> Result<Json<ImportResponse>, ApiError> {
-    let entries =
-        crate::vault::import::parse_bibtex(&body).map_err(|e| ApiError::bad_request(e))?;
+    let entries = crate::vault::import::parse_bibtex(&body).map_err(ApiError::bad_request)?;
 
     let mut results = Vec::with_capacity(entries.len());
 
@@ -817,9 +817,6 @@ fn should_save_zotero_checkpoint(results: &[ImportResult]) -> bool {
     let created_count = results.iter().filter(|r| r.status == "created").count() as u64;
     created_count > 0 || results.iter().any(|r| r.status == "skipped")
 }
-
-/// Re-index a single page by vault-relative path (used after writing changes
-/// during an import).
 
 /// Handle a dedup-hit on an existing work via the zotero_key path.
 ///

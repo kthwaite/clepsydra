@@ -813,8 +813,10 @@ fn compute_diffs_detects_year_change() {
     let item = make_article_item();
     let entry = map_to_import_entry(&item);
 
-    let mut local_meta = clepsydra::vault::page::PageMeta::default();
-    local_meta.title = Some("Attention Is All You Need".to_string());
+    let mut local_meta = clepsydra::vault::page::PageMeta {
+        title: Some("Attention Is All You Need".to_string()),
+        ..Default::default()
+    };
     local_meta
         .extra
         .insert("year".to_string(), serde_yaml::Value::Number(2016.into()));

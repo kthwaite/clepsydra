@@ -683,7 +683,7 @@ mod tests {
         let slug = slugify(&title, 20);
         assert_eq!(slug.chars().count(), 20);
         // Verify it doesn't panic and is valid UTF-8
-        assert!(slug.is_ascii() || !slug.is_empty() || slug.len() > 0);
+        assert!(slug.is_ascii() || !slug.is_empty() || !slug.is_empty());
     }
 
     #[test]

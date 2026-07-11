@@ -331,6 +331,89 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
     blocks
 }
 
+/// Convert a `BlockBuilder` into a `Block` and push it onto the result vec.
+fn emit_block(blocks: &mut Vec<Block>, builder: BlockBuilder) {
+    let mut content = builder.text_parts.join("");
+
+    // For list items without a TaskListMarker, check for `[-]` cancelled pattern
+    let checkbox = if builder.block_type == BlockType::ListItem && builder.checkbox.is_none() {
+        if extract_cancelled_checkbox(&mut content) {
+            Some(CheckboxState::Cancelled)
+        } else {
+            None
+        }
+    } else {
+        builder.checkbox
+    };
+
+    // Post-process: extract block ID and inline properties
+    let (block_id, mut properties) = postprocess_content(&mut content);
+
+    // Set status property from checkbox state
+    if let Some(state) = checkbox {
+        let status = match state {
+            CheckboxState::Todo => "todo",
+            CheckboxState::Done => "done",
+            CheckboxState::Cancelled => "cancelled",
+        };
+        properties.insert("status".to_string(), status.to_string());
+    }
+
+    blocks.push(Block {
+        block_type: builder.block_type,
+        content,
+        block_id,
+        properties,
+        checkbox,
+        depth: builder.list_depth,
+        parent_index: None, // assigned later
+        order_index: 0,     // assigned later
+        span: builder.span_start..builder.span_end,
+    });
+}
+
+/// Assign `parent_index` and `order_index` to each block based on depth.
+///
+/// Uses a stack of `(depth, block_index)` pairs. For each block at depth D:
+/// - Pop entries with depth >= D (they are not ancestors).
+/// - The remaining top-of-stack entry (if any, with depth < D) is the parent.
+/// - Push the current block onto the stack.
+///
+/// `order_index` counts siblings sharing the same parent.
+fn assign_parents_and_order(blocks: &mut [Block]) {
+    // Stack entries: (depth, index_in_blocks_vec)
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    // Track per-parent sibling count: parent_index (None → usize::MAX sentinel) → next order
+    let mut sibling_counter: HashMap<usize, usize> = HashMap::new();
+    // Sentinel for top-level blocks (no parent)
+    const NO_PARENT: usize = usize::MAX;
+
+    for (i, block) in blocks.iter_mut().enumerate() {
+        let depth = block.depth;
+
+        // Pop entries at same or deeper level
+        while let Some(&(d, _)) = stack.last() {
+            if d >= depth {
+                stack.pop();
+            } else {
+                break;
+            }
+        }
+
+        // Determine parent
+        let parent_index = stack.last().map(|&(_, idx)| idx);
+        block.parent_index = parent_index;
+
+        // Assign order_index
+        let parent_key = parent_index.unwrap_or(NO_PARENT);
+        let order = sibling_counter.entry(parent_key).or_insert(0);
+        block.order_index = *order;
+        *order += 1;
+
+        stack.push((depth, i));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,88 +497,5 @@ mod tests {
             blocks[0].span.end, 42,
             "blockquote end span should win over range_end"
         );
-    }
-}
-
-/// Convert a `BlockBuilder` into a `Block` and push it onto the result vec.
-fn emit_block(blocks: &mut Vec<Block>, builder: BlockBuilder) {
-    let mut content = builder.text_parts.join("");
-
-    // For list items without a TaskListMarker, check for `[-]` cancelled pattern
-    let checkbox = if builder.block_type == BlockType::ListItem && builder.checkbox.is_none() {
-        if extract_cancelled_checkbox(&mut content) {
-            Some(CheckboxState::Cancelled)
-        } else {
-            None
-        }
-    } else {
-        builder.checkbox
-    };
-
-    // Post-process: extract block ID and inline properties
-    let (block_id, mut properties) = postprocess_content(&mut content);
-
-    // Set status property from checkbox state
-    if let Some(state) = checkbox {
-        let status = match state {
-            CheckboxState::Todo => "todo",
-            CheckboxState::Done => "done",
-            CheckboxState::Cancelled => "cancelled",
-        };
-        properties.insert("status".to_string(), status.to_string());
-    }
-
-    blocks.push(Block {
-        block_type: builder.block_type,
-        content,
-        block_id,
-        properties,
-        checkbox,
-        depth: builder.list_depth,
-        parent_index: None, // assigned later
-        order_index: 0,     // assigned later
-        span: builder.span_start..builder.span_end,
-    });
-}
-
-/// Assign `parent_index` and `order_index` to each block based on depth.
-///
-/// Uses a stack of `(depth, block_index)` pairs. For each block at depth D:
-/// - Pop entries with depth >= D (they are not ancestors).
-/// - The remaining top-of-stack entry (if any, with depth < D) is the parent.
-/// - Push the current block onto the stack.
-///
-/// `order_index` counts siblings sharing the same parent.
-fn assign_parents_and_order(blocks: &mut [Block]) {
-    // Stack entries: (depth, index_in_blocks_vec)
-    let mut stack: Vec<(usize, usize)> = Vec::new();
-    // Track per-parent sibling count: parent_index (None → usize::MAX sentinel) → next order
-    let mut sibling_counter: HashMap<usize, usize> = HashMap::new();
-    // Sentinel for top-level blocks (no parent)
-    const NO_PARENT: usize = usize::MAX;
-
-    for (i, block) in blocks.iter_mut().enumerate() {
-        let depth = block.depth;
-
-        // Pop entries at same or deeper level
-        while let Some(&(d, _)) = stack.last() {
-            if d >= depth {
-                stack.pop();
-            } else {
-                break;
-            }
-        }
-
-        // Determine parent
-        let parent_index = stack.last().map(|&(_, idx)| idx);
-        block.parent_index = parent_index;
-
-        // Assign order_index
-        let parent_key = parent_index.unwrap_or(NO_PARENT);
-        let order = sibling_counter.entry(parent_key).or_insert(0);
-        block.order_index = *order;
-        *order += 1;
-
-        stack.push((depth, i));
     }
 }

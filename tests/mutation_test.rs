@@ -1035,12 +1035,7 @@ fn mutation_coordinator_atomic_replace_reports_post_rename_sync_failure() {
             file.sync_all()
         },
         |temporary_path, destination| fs::rename(temporary_path, destination),
-        |_| {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "injected parent sync failure",
-            ))
-        },
+        |_| Err(io::Error::other("injected parent sync failure")),
         |temporary_path| fs::remove_file(temporary_path),
     );
 

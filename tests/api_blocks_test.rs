@@ -211,9 +211,10 @@ async fn assign_block_id_concurrently_preserves_every_successful_assignment() {
     let first_status = first_response.status_code();
     let second_status = second_response.status_code();
     assert!(
-        (first_status == StatusCode::OK && second_status == StatusCode::OK)
-            || (first_status == StatusCode::OK && second_status == StatusCode::CONFLICT)
-            || (first_status == StatusCode::CONFLICT && second_status == StatusCode::OK),
+        [first_status, second_status]
+            .iter()
+            .all(|status| matches!(*status, StatusCode::OK | StatusCode::CONFLICT))
+            && (first_status == StatusCode::OK || second_status == StatusCode::OK),
         "expected two successes or one success plus one conflict, got {first_status} and {second_status}"
     );
 

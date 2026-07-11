@@ -73,7 +73,11 @@ fn default_excluded_patterns() -> Vec<String> {
 }
 
 fn default_linkable_properties() -> Vec<String> {
-    vec!["tags".to_string(), "aliases".to_string(), "link".to_string()]
+    vec![
+        "tags".to_string(),
+        "aliases".to_string(),
+        "link".to_string(),
+    ]
 }
 
 /// Configuration for the academic library subsystem.

@@ -1712,7 +1712,7 @@ fn collect_indexed_pages(
 /// Between passes: when pages share a UUID, keep the oldest (by created_at, then
 /// mtime) and reassign + rewrite the rest.
 fn resolve_duplicate_uuids(
-    parsed_files: &mut Vec<IndexedPage>,
+    parsed_files: &mut [IndexedPage],
     stats: &mut BuildStats,
 ) -> Result<(), IndexError> {
     // Group parsed files by UUID

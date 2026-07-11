@@ -692,13 +692,13 @@ pub fn apply_source_wins_to_meta(
         );
     }
 
-    if let Some(import_val) = meta.extra.get_mut("import") {
-        if let serde_yaml::Value::Mapping(import_map) = import_val {
-            import_map.insert(
-                serde_yaml::Value::String("imported_at".to_string()),
-                serde_yaml::Value::String(chrono::Utc::now().to_rfc3339()),
-            );
-        }
+    if let Some(import_val) = meta.extra.get_mut("import")
+        && let serde_yaml::Value::Mapping(import_map) = import_val
+    {
+        import_map.insert(
+            serde_yaml::Value::String("imported_at".to_string()),
+            serde_yaml::Value::String(chrono::Utc::now().to_rfc3339()),
+        );
     }
 }
 
