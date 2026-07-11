@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
@@ -13,6 +12,7 @@ use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::index::find_body_start;
+use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -313,17 +313,16 @@ async fn update_task_status(
         }
     };
 
-    // Read the file from disk
     let abs_path = state.vault.resolve(&vault_path);
-    if !abs_path.exists() {
-        return Err(ApiError::not_found(format!(
-            "page not found: {}",
-            body.page_path
-        )));
-    }
-
-    let content = fs::read_to_string(&abs_path)
-        .map_err(|e| ApiError::internal(format!("failed to read file: {e}")))?;
+    let content = tokio::fs::read_to_string(&abs_path)
+        .await
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ApiError::not_found(format!("page not found: {}", body.page_path))
+            } else {
+                ApiError::internal(format!("failed to read file: {error}"))
+            }
+        })?;
 
     let body_start = find_body_start(&content);
     let body_text = &content[body_start..];
@@ -367,31 +366,28 @@ async fn update_task_status(
     new_content.push_str(replacement);
     new_content.push_str(&content[absolute_offset + 3..]);
 
-    // Write file back to disk
-    fs::write(&abs_path, &new_content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // Re-index the page
-    let vp = vault_path.clone();
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .replace_page_content(
+            &state.vault,
+            &state.index,
+            ReplacePageContentCommand {
+                path: vault_path.clone(),
+                expected_content: content,
+                content: new_content,
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
     let page_path_str = body.page_path.clone();
     let span_start_i64 = body.span_start;
-
-    state
-        .index
-        .with_index(move |index, vault| {
-            index.index_page(vault, &vp)?;
-            index.resolve_links_for_page(&vp)?;
-            Ok::<_, crate::vault::index::IndexError>(())
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    // Emit change notification
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
 
     // Fetch the updated task from the index
     let vp2 = vault_path.clone();

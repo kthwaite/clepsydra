@@ -3877,3 +3877,99 @@ async fn import_zotero_doi_path_manual() {
         "manual policy on DOI path with matching fields should yield 'skipped'"
     );
 }
+
+#[tokio::test]
+async fn concurrent_create_from_link_is_exclusive() {
+    let (server, _tmp) = setup_server();
+    let first = server
+        .post("/api/vault/index/create-from-link")
+        .json(&serde_json::json!({
+            "target_raw": "Concurrent Link",
+            "folder": "notes",
+            "body": "first"
+        }));
+    let second = server
+        .post("/api/vault/index/create-from-link")
+        .json(&serde_json::json!({
+            "target_raw": "Concurrent Link",
+            "folder": "notes",
+            "body": "second"
+        }));
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn concurrent_academic_work_create_is_exclusive() {
+    let (server, _tmp) = setup_server();
+    let request = serde_json::json!({
+        "work_type": "paper",
+        "title": "Concurrent Academic Work"
+    });
+    let first = server.post("/api/vault/academic/works").json(&request);
+    let second = server.post("/api/vault/academic/works").json(&request);
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CREATED)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn concurrent_academic_updates_return_one_stale_conflict() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Concurrent Update"
+        }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["id"].as_str().unwrap();
+    let first = server
+        .put(&format!("/api/vault/academic/works/by-id/{id}"))
+        .json(&serde_json::json!({ "rating": 4 }));
+    let second = server
+        .put(&format!("/api/vault/academic/works/by-id/{id}"))
+        .json(&serde_json::json!({ "rating": 5 }));
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [first.status_code(), second.status_code()];
+    assert_eq!(
+        statuses.iter().filter(|status| status.is_success()).count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1
+    );
+}

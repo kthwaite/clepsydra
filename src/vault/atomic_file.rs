@@ -7,13 +7,44 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// Failure phase for an atomic publication attempt.
+///
+/// Callers must compensate or reconcile `PublishedButNotDurable`: the
+/// destination already contains the requested bytes even though the parent
+/// directory flush failed.
+#[derive(Debug, thiserror::Error)]
+pub enum AtomicPublicationError {
+    #[error("atomic publication did not publish: {0}")]
+    NotPublished(#[source] io::Error),
+    #[error("atomic publication completed but was not durable: {0}")]
+    PublishedButNotDurable(#[source] io::Error),
+}
+
+impl AtomicPublicationError {
+    pub fn kind(&self) -> io::ErrorKind {
+        match self {
+            Self::NotPublished(error) | Self::PublishedButNotDurable(error) => error.kind(),
+        }
+    }
+
+    pub fn filesystem_applied(&self) -> bool {
+        matches!(self, Self::PublishedButNotDurable(_))
+    }
+
+    pub fn into_inner(self) -> io::Error {
+        match self {
+            Self::NotPublished(error) | Self::PublishedButNotDurable(error) => error,
+        }
+    }
+}
+
 /// Publish a fully written file without replacing an existing destination.
 ///
 /// The temporary file is created and synced beside the destination before the
 /// atomic no-replace operation makes it visible. On Unix, the parent directory
 /// is then synced so the new directory entry is durable. Windows cannot provide
 /// the same guarantee through the filesystem APIs used by this crate.
-pub fn atomic_create(path: &Path, content: &[u8]) -> io::Result<()> {
+pub fn atomic_create(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
     atomic_write_with(
         path,
         content,
@@ -35,8 +66,10 @@ pub fn atomic_create(path: &Path, content: &[u8]) -> io::Result<()> {
 /// rename remains within one filesystem. Metadata not represented by the
 /// standard filesystem permissions API is platform-specific and is not part
 /// of the vault filesystem abstraction.
-pub fn atomic_replace(path: &Path, content: &[u8]) -> io::Result<()> {
-    let permissions = fs::metadata(path)?.permissions();
+pub fn atomic_replace(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
+    let permissions = fs::metadata(path)
+        .map_err(AtomicPublicationError::NotPublished)?
+        .permissions();
     atomic_write_with(
         path,
         content,
@@ -63,14 +96,16 @@ pub fn atomic_replace_with<WriteAndSync, Rename, SyncParent, RemoveTemporary>(
     rename: Rename,
     sync_parent: SyncParent,
     remove_temporary: RemoveTemporary,
-) -> io::Result<()>
+) -> Result<(), AtomicPublicationError>
 where
     WriteAndSync: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
     Rename: FnOnce(&Path, &Path) -> io::Result<()>,
     SyncParent: FnOnce(&Path) -> io::Result<()>,
     RemoveTemporary: FnOnce(&Path) -> io::Result<()>,
 {
-    let permissions = fs::metadata(path)?.permissions();
+    let permissions = fs::metadata(path)
+        .map_err(AtomicPublicationError::NotPublished)?
+        .permissions();
     atomic_write_with(
         path,
         content,
@@ -90,7 +125,7 @@ fn atomic_write_with<WriteAndSync, Publish, SyncParent, RemoveTemporary>(
     publish: Publish,
     sync_parent: SyncParent,
     remove_temporary: RemoveTemporary,
-) -> io::Result<()>
+) -> Result<(), AtomicPublicationError>
 where
     WriteAndSync: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
     Publish: FnOnce(&Path, &Path) -> io::Result<()>,
@@ -101,41 +136,43 @@ where
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let file_name = path.file_name().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "destination has no file name")
-    })?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "destination has no file name"))
+        .map_err(AtomicPublicationError::NotPublished)?;
 
-    let (temporary_path, mut temporary_file) = create_temporary_file(parent, file_name)?;
+    let (temporary_path, mut temporary_file) =
+        create_temporary_file(parent, file_name).map_err(AtomicPublicationError::NotPublished)?;
     if let Some(permissions) = permissions
         && let Err(primary_error) = temporary_file.set_permissions(permissions)
     {
         drop(temporary_file);
-        return Err(cleanup_error(
+        return Err(AtomicPublicationError::NotPublished(cleanup_error(
             primary_error,
             &temporary_path,
             remove_temporary,
-        ));
+        )));
     }
     if let Err(primary_error) = write_and_sync(&mut temporary_file, content) {
         drop(temporary_file);
-        return Err(cleanup_error(
+        return Err(AtomicPublicationError::NotPublished(cleanup_error(
             primary_error,
             &temporary_path,
             remove_temporary,
-        ));
+        )));
     }
 
     drop(temporary_file);
     if let Err(primary_error) = publish(&temporary_path, path) {
-        return Err(cleanup_error(
+        return Err(AtomicPublicationError::NotPublished(cleanup_error(
             primary_error,
             &temporary_path,
             remove_temporary,
-        ));
+        )));
     }
 
     sync_parent(parent).map_err(|error| {
-        io::Error::new(
+        AtomicPublicationError::PublishedButNotDurable(io::Error::new(
             error.kind(),
             format!(
                 "rename completed for {}; failed to sync parent directory {}: {error}; \
@@ -143,7 +180,7 @@ where
                 path.display(),
                 parent.display()
             ),
-        )
+        ))
     })
 }
 
@@ -165,8 +202,36 @@ fn sync_parent(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(windows))]
 fn replace(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let succeeded = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if succeeded == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn remove_temporary(path: &Path) -> io::Result<()> {

@@ -1,6 +1,5 @@
 //! API endpoints for ingesting web page archives, including associated blobs stored in
 //! the CAS.
-use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
@@ -18,8 +17,8 @@ use super::error::ApiError;
 use super::events::SyncNotification;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_policy::IndexMutation;
-use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError, MutationNotification};
-use crate::vault::page::PageMeta;
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +82,58 @@ where
                 error: error.to_string(),
             });
         }
+    }
+    failures
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
+pub enum PageCompensationAction {
+    DeleteIndex,
+    RebuildIndex,
+}
+
+#[doc(hidden)]
+pub async fn compensate_page_with<
+    Remove,
+    RemoveFuture,
+    RemoveError,
+    Repair,
+    RepairFuture,
+    RepairError,
+>(
+    page_path: &str,
+    remove_file: Remove,
+    repair_index: Repair,
+) -> Vec<CompensationFailure>
+where
+    Remove: FnOnce() -> RemoveFuture,
+    RemoveFuture: Future<Output = Result<(), RemoveError>>,
+    RemoveError: std::fmt::Display,
+    Repair: FnOnce(PageCompensationAction) -> RepairFuture,
+    RepairFuture: Future<Output = Result<(), RepairError>>,
+    RepairError: std::fmt::Display,
+{
+    let mut failures = Vec::new();
+    let action = match remove_file().await {
+        Ok(()) => PageCompensationAction::DeleteIndex,
+        Err(error) => {
+            failures.push(CompensationFailure {
+                hash: format!("page-file:{page_path}"),
+                error: error.to_string(),
+            });
+            PageCompensationAction::RebuildIndex
+        }
+    };
+    if let Err(error) = repair_index(action).await {
+        let operation = match action {
+            PageCompensationAction::DeleteIndex => "page-index-delete",
+            PageCompensationAction::RebuildIndex => "page-index-rebuild",
+        };
+        failures.push(CompensationFailure {
+            hash: format!("{operation}:{page_path}"),
+            error: error.to_string(),
+        });
     }
     failures
 }
@@ -474,6 +525,7 @@ async fn ingest_archive(
     // 5. Create and index the page through the reviewed Created policy.
     let meta = build_archive_meta(&req, &decoded_blobs);
     let page_id = meta.id.to_string();
+    let expected_page_content = write_page_content(&meta, &req.markdown_body);
     let notify = |notification: MutationNotification| {
         let _ = state.change_tx.send(SyncNotification::IndexChanged {
             upserted: notification.upserted,
@@ -494,37 +546,68 @@ async fn ingest_archive(
         )
         .await
     {
-        if matches!(
-            &error,
-            MutationError::Index {
-                filesystem_applied: true,
-                ..
-            }
-        ) {
+        let mut compensation_failures = Vec::new();
+        if error.filesystem_applied() {
+            let _compensation_guard = state
+                .mutation_coordinator
+                .lock_paths(std::slice::from_ref(&vault_path))
+                .await;
             let absolute = state.vault.resolve(&vault_path);
-            if let Err(cleanup_error) = fs::remove_file(&absolute) {
-                tracing::error!(
-                    path = %vault_path.as_str(),
-                    error = %cleanup_error,
-                    primary_error = %error,
-                    "archive page compensation failed"
-                );
-            }
-            if let Err(cleanup_error) = state
-                .index
-                .apply_mutation(vault_path.clone(), IndexMutation::Deleted)
-                .await
-            {
-                tracing::error!(
-                    path = %vault_path.as_str(),
-                    error = %cleanup_error,
-                    primary_error = %error,
-                    "archive index compensation failed"
-                );
-            }
+            let path = vault_path.as_str().to_string();
+            let index_path = vault_path.clone();
+            let repair_state = Arc::clone(&state);
+            compensation_failures.extend(
+                compensate_page_with(
+                    &path,
+                    || async {
+                        match tokio::fs::read_to_string(&absolute).await {
+                            Ok(current) if current == expected_page_content => {
+                                tokio::fs::remove_file(&absolute)
+                                    .await
+                                    .map_err(|error| error.to_string())
+                            }
+                            Ok(_) => {
+                                Err("archive page changed before compensation; preserving file"
+                                    .to_string())
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            Err(error) => Err(error.to_string()),
+                        }
+                    },
+                    |action| async move {
+                        let mutation = match action {
+                            PageCompensationAction::DeleteIndex => IndexMutation::Deleted,
+                            PageCompensationAction::RebuildIndex => IndexMutation::Created,
+                        };
+                        repair_state
+                            .index
+                            .apply_mutation(index_path, mutation)
+                            .await
+                            .map_err(|error| error.to_string())
+                    },
+                )
+                .await,
+            );
+        }
+        {
+            let cas = state.cas.lock();
+            compensation_failures.extend(compensate_hashes(&stored_hashes, |hash| {
+                cas.decrement_ref(hash)
+            }));
+        }
+        for failure in &compensation_failures {
+            tracing::error!(
+                target = %failure.hash,
+                error = %failure.error,
+                primary_error = %error,
+                "archive compensation failed"
+            );
         }
         let primary = crate::api::mutation_error(error);
-        return Err(rollback_cas(primary, &state, &stored_hashes));
+        return Err(attach_compensation_failures(
+            primary,
+            &compensation_failures,
+        ));
     }
 
     // 8. Return response
@@ -951,5 +1034,51 @@ mod tests {
                 }]
             }))
         );
+    }
+
+    #[tokio::test]
+    async fn page_compensation_rebuilds_index_after_file_removal_failure_and_aggregates_errors() {
+        let mut actions = Vec::new();
+        let failures = compensate_page_with(
+            "archives/page.md",
+            || async { Err::<(), _>("file is busy") },
+            |action| {
+                actions.push(action);
+                async { Err::<(), _>("index unavailable") }
+            },
+        )
+        .await;
+
+        assert_eq!(actions, vec![PageCompensationAction::RebuildIndex]);
+        assert_eq!(
+            failures,
+            vec![
+                CompensationFailure {
+                    hash: "page-file:archives/page.md".to_string(),
+                    error: "file is busy".to_string(),
+                },
+                CompensationFailure {
+                    hash: "page-index-rebuild:archives/page.md".to_string(),
+                    error: "index unavailable".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn page_compensation_deletes_index_only_after_file_removal_succeeds() {
+        let mut actions = Vec::new();
+        let failures = compensate_page_with(
+            "archives/page.md",
+            || async { Ok::<(), String>(()) },
+            |action| {
+                actions.push(action);
+                async { Ok::<(), String>(()) }
+            },
+        )
+        .await;
+
+        assert!(failures.is_empty());
+        assert_eq!(actions, vec![PageCompensationAction::DeleteIndex]);
     }
 }

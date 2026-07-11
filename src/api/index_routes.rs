@@ -17,7 +17,8 @@ use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
-use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -796,50 +797,32 @@ pub async fn create_from_link(
         vault_path = crate::api::error::parse_request_path(&combined, "invalid folder path")?;
     }
 
-    let abs_path = state.vault.resolve(&vault_path);
-    if abs_path.exists() {
-        return Err(ApiError::conflict(format!(
-            "page already exists: {}",
-            vault_path.as_str()
-        )));
-    }
-
-    // Create parent directories
-    if let Some(parent) = abs_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-
     // Build PageMeta
     let mut meta = PageMeta::new();
     meta.title = Some(body.target_raw.clone());
 
     let page_body = body.body.unwrap_or_default();
 
-    // Write file
-    let content = write_page_content(&meta, &page_body);
-    std::fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // Index the new page and resolve links
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(format!("index failed: {e}")))?
-            .map_err(|e| ApiError::internal(format!("index failed: {e}")))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta: meta.clone(),
+                body: page_body.clone(),
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     Ok((
         StatusCode::CREATED,

@@ -64,6 +64,17 @@ async fn require_attachment_file(abs_path: &FsPath, path: &str) -> Result<(), Ap
     }
 }
 
+async fn run_blocking_attachment_scan<T>(
+    scan: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(scan)
+        .await
+        .map_err(|error| ApiError::internal(format!("attachment scan task failed: {error}")))
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -81,43 +92,37 @@ async fn require_attachment_file(abs_path: &FsPath, path: &str) -> Result<(), Ap
 pub async fn list_attachments(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AttachmentInfo>>, ApiError> {
-    let attachment_folder = &state.vault.config().vault.attachment_folder;
-    let abs_dir = state.vault.root().join(attachment_folder);
-
-    if !abs_dir.is_dir() {
-        return Ok(Json(Vec::new()));
-    }
-
-    let mut attachments = Vec::new();
-
-    for entry in walkdir::WalkDir::new(&abs_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        let abs_path = entry.path();
-        let rel = abs_path
-            .strip_prefix(state.vault.root())
-            .unwrap_or(abs_path);
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
-        // Strip the attachment folder prefix so paths are relative to the
-        // attachment folder — get/delete handlers prepend it back.
-        let rel_str = rel_str
-            .strip_prefix(attachment_folder)
-            .unwrap_or(&rel_str)
-            .trim_start_matches('/')
-            .to_string();
-        let name = entry.file_name().to_string_lossy().to_string();
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-
-        attachments.push(AttachmentInfo {
-            name,
-            path: rel_str,
-            size,
-        });
-    }
-
-    attachments.sort_by(|a, b| a.path.cmp(&b.path));
+    let attachment_folder = state.vault.config().vault.attachment_folder.clone();
+    let vault_root = state.vault.root().to_path_buf();
+    let attachments = run_blocking_attachment_scan(move || {
+        let abs_dir = vault_root.join(&attachment_folder);
+        if !abs_dir.is_dir() {
+            return Vec::new();
+        }
+        let mut attachments = Vec::new();
+        for entry in walkdir::WalkDir::new(&abs_dir)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+        {
+            let absolute = entry.path();
+            let relative = absolute.strip_prefix(&vault_root).unwrap_or(absolute);
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            let path = relative
+                .strip_prefix(&attachment_folder)
+                .unwrap_or(&relative)
+                .trim_start_matches('/')
+                .to_string();
+            attachments.push(AttachmentInfo {
+                name: entry.file_name().to_string_lossy().to_string(),
+                path,
+                size: entry.metadata().map(|metadata| metadata.len()).unwrap_or(0),
+            });
+        }
+        attachments.sort_by(|left, right| left.path.cmp(&right.path));
+        attachments
+    })
+    .await?;
     Ok(Json(attachments))
 }
 
@@ -154,16 +159,11 @@ pub async fn upload_attachment(
         .await
         .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
 
-    let temp_parent = parent.to_path_buf();
-    let temporary = tokio::task::spawn_blocking(move || {
-        tempfile::Builder::new()
-            .prefix(".upload-")
-            .rand_bytes(32)
-            .tempfile_in(temp_parent)
-    })
-    .await
-    .map_err(|e| ApiError::internal(format!("failed to create temporary attachment: {e}")))?
-    .map_err(|e| ApiError::internal(format!("failed to create temporary attachment: {e}")))?;
+    let temporary = tempfile::Builder::new()
+        .prefix(".upload-")
+        .rand_bytes(32)
+        .tempfile_in(parent)
+        .map_err(|e| ApiError::internal(format!("failed to create temporary attachment: {e}")))?;
     let (temporary_file, temporary_path) = temporary.into_parts();
     let mut temporary_file = tokio::fs::File::from_std(temporary_file);
 
@@ -302,4 +302,19 @@ pub async fn delete_attachment(
         .map_err(|error| attachment_io_error(error, "delete", &path))?;
 
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn attachment_scan_runs_off_the_tokio_worker() {
+        let runtime_thread = std::thread::current().id();
+        let scan_thread = run_blocking_attachment_scan(|| std::thread::current().id())
+            .await
+            .unwrap();
+
+        assert_ne!(scan_thread, runtime_thread);
+    }
 }

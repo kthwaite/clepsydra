@@ -484,3 +484,62 @@ async fn filter_tasks_comma_separated_status() {
     assert!(statuses.contains(&"todo"));
     assert!(statuses.contains(&"cancelled"));
 }
+
+#[tokio::test]
+async fn concurrent_status_updates_on_one_page_preserve_both_tasks() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/concurrent-status.md")
+        .json(&serde_json::json!({
+            "title": "Concurrent",
+            "body": "- [ ] First\n- [ ] Second\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let tasks: serde_json::Value = server
+        .get("/api/vault/tasks?page=concurrent-status.md")
+        .await
+        .json();
+    let spans: Vec<i64> = tasks["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["span_start"].as_i64().unwrap())
+        .collect();
+
+    let first = server
+        .put("/api/vault/tasks/status")
+        .json(&serde_json::json!({
+            "page_path": "concurrent-status.md",
+            "span_start": spans[0],
+            "status": "done"
+        }));
+    let second = server
+        .put("/api/vault/tasks/status")
+        .json(&serde_json::json!({
+            "page_path": "concurrent-status.md",
+            "span_start": spans[1],
+            "status": "cancelled"
+        }));
+    let (first, second) = tokio::join!(first, second);
+    assert!(
+        first.status_code().is_success() || first.status_code() == axum::http::StatusCode::CONFLICT
+    );
+    assert!(
+        second.status_code().is_success()
+            || second.status_code() == axum::http::StatusCode::CONFLICT
+    );
+
+    let page: serde_json::Value = server
+        .get("/api/vault/pages/concurrent-status.md")
+        .await
+        .json();
+    let body = page["body"].as_str().unwrap();
+    if first.status_code().is_success() {
+        assert!(body.contains("- [x] First"), "{body}");
+    }
+    if second.status_code().is_success() {
+        assert!(body.contains("- [-] Second"), "{body}");
+    }
+}

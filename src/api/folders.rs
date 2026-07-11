@@ -16,7 +16,6 @@ use super::error::ApiError;
 use super::pages::{PageSummary, page_summary_from_row};
 use crate::api::events::SyncNotification;
 use crate::vault::mutation::{MutationOp, MutationPlanner};
-use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -483,123 +482,35 @@ pub async fn delete_folder(
     Query(query): Query<DeleteFolderQuery>,
 ) -> Result<Response, ApiError> {
     let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
-
-    let abs_path = state.vault.resolve(&vault_path);
-    if !abs_path.is_dir() {
-        return Err(ApiError::not_found(format!("folder not found: {path}")));
-    }
-
-    // Collect page metadata BEFORE deletion so post-delete hooks can run.
-    // Pages with unparseable frontmatter are skipped — matches the best-effort
-    // semantics used by `delete_page`.
-    let hook_targets: Vec<(VaultPath, PageMeta)> = if query.recursive {
-        collect_pages_for_hooks(&state, &abs_path)
-    } else {
-        Vec::new()
-    };
-
-    if query.recursive {
-        fs::remove_dir_all(&abs_path)
-            .map_err(|e| ApiError::internal(format!("failed to delete folder: {e}")))?;
-    } else {
-        fs::remove_dir(&abs_path).map_err(|e| {
-            if matches!(e.raw_os_error(), Some(66) | Some(39))
-                || e.to_string().contains("not empty")
-                || e.to_string().contains("Directory not empty")
-            {
-                ApiError::conflict("folder is not empty; use recursive=true to delete")
-            } else {
-                ApiError::internal(format!("failed to delete folder: {e}"))
+    let result = state
+        .mutation_coordinator
+        .delete_folder(&state.vault, &state.index, vault_path, query.recursive)
+        .await
+        .map_err(|error| match error {
+            crate::vault::mutation_coordinator::MutationError::NotFound(_) => {
+                ApiError::not_found(format!("folder not found: {path}"))
             }
+            error => super::mutation_error(error),
         })?;
+
+    if !result.removed.is_empty() {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: Vec::new(),
+            removed: result.removed,
+        });
     }
-
-    // Remove orphaned pages from the index via SyncEngine (handles dependency re-resolution)
-    {
-        let folder_prefix = format!("{}/", vault_path.as_str());
-        let orphaned = state
-            .index
-            .with_index(move |index, vault| {
-                // Find pages that were under this folder
-                let orphaned: Vec<String> = {
-                    let mut stmt = index
-                        .connection()
-                        .prepare("SELECT path FROM pages WHERE path LIKE ?1")?;
-                    stmt.query_map(params![format!("{}%", folder_prefix)], |row| {
-                        row.get::<_, String>(0)
-                    })?
-                    .filter_map(|r| r.ok())
-                    .collect()
-                };
-
-                if !orphaned.is_empty() {
-                    use crate::vault::sync::{ChangeEvent, SyncEngine};
-                    let events: Vec<ChangeEvent> = orphaned
-                        .iter()
-                        .filter_map(|p| VaultPath::new(p).ok())
-                        .map(ChangeEvent::Remove)
-                        .collect();
-                    SyncEngine::process_events(&events, vault, index)?;
-                }
-
-                Ok::<_, crate::vault::index::IndexError>(orphaned)
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-
-        if !orphaned.is_empty() {
-            let _ = state.change_tx.send(SyncNotification::IndexChanged {
-                upserted: vec![],
-                removed: orphaned,
-            });
-        }
-    }
-
-    // Fire post-delete hooks for each page that was under the folder.
-    // Hook errors are logged but do not fail the request (matches `delete_page`).
-    for (vp, meta) in &hook_targets {
+    for (page_path, meta) in &result.hook_targets {
         for hook in state.delete_hooks.iter() {
-            if let Err(e) = hook.on_page_deleted(vp, &meta.id, meta) {
-                tracing::warn!("delete hook error for {}: {e}", vp.as_str());
+            if let Err(error) = hook.on_page_deleted(page_path, &meta.id, meta) {
+                tracing::warn!("delete hook error for {}: {error}", page_path.as_str());
             }
         }
     }
-
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// Walk a folder and parse markdown frontmatter for each `.md` file, returning
 /// `(VaultPath, PageMeta)` pairs suitable for invoking `PostDeleteHook`s.
-fn collect_pages_for_hooks(
-    state: &AppState,
-    folder_abs: &std::path::Path,
-) -> Vec<(VaultPath, PageMeta)> {
-    let root = state.vault.root();
-    let mut targets = Vec::new();
-    for entry in walkdir::WalkDir::new(folder_abs)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) != Some("md") {
-            continue;
-        }
-        let Ok(rel) = p.strip_prefix(root) else {
-            continue;
-        };
-        let Ok(child_vp) = VaultPath::new(&rel.to_string_lossy()) else {
-            continue;
-        };
-        if let Ok(page) = Page::from_file(p, child_vp.clone()) {
-            targets.push((child_vp, page.meta));
-        }
-    }
-    targets
-}
 
 // ---------------------------------------------------------------------------
 // Move folder handler

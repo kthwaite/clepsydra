@@ -52,6 +52,9 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 walkdir = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 axum-test = "18"
 serial_test = "3"

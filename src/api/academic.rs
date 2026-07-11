@@ -1,6 +1,5 @@
 //! API handlers for academic work and annotation management.
 use std::collections::HashMap;
-use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
@@ -24,7 +23,10 @@ use crate::vault::academic::{
     work_meta_to_extra,
 };
 use crate::vault::canonical::CanonicalName;
-use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::mutation_coordinator::{
+    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
+};
+use crate::vault::page::{Page, PageMeta, parse_frontmatter};
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -322,13 +324,6 @@ pub(crate) async fn create_work_internal(
     let vault_path =
         crate::api::error::parse_internal_path(&vault_path_str, "invalid generated path")?;
 
-    let abs_path = state.vault.resolve(&vault_path);
-    if abs_path.exists() {
-        return Err(ApiError::conflict(format!(
-            "page already exists: {vault_path_str}"
-        )));
-    }
-
     // 5. Build PageMeta
     let mut meta = PageMeta::new();
     meta.title = Some(title.clone());
@@ -353,36 +348,26 @@ pub(crate) async fn create_work_internal(
 
     let page_body = body.unwrap_or_default();
 
-    // 6. Create parent directories and write file
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-
-    let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // 7. Index page + resolve links
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    // 8. Send SyncNotification
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta: meta.clone(),
+                body: page_body.clone(),
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     // 9. Build response — reconstruct WorkMeta from the extra we just set
     let wm = extra_to_work_meta(&meta.extra);
@@ -408,6 +393,45 @@ pub(crate) async fn create_work_internal(
         tags: meta.tags,
         body: page_body,
     })
+}
+
+async fn mutate_academic_page(
+    state: &AppState,
+    path: crate::vault::path::VaultPath,
+    mutate: impl FnOnce(&mut PageMeta, &mut String) -> Result<(), ApiError>,
+) -> Result<(PageMeta, String), ApiError> {
+    let absolute = state.vault.resolve(&path);
+    let expected_content = tokio::fs::read_to_string(&absolute)
+        .await
+        .map_err(|error| ApiError::internal(format!("Failed to read page: {error}")))?;
+    let (mut meta, mut body) = parse_frontmatter(&expected_content)
+        .map_err(|error| ApiError::internal(format!("Failed to parse page: {error}")))?;
+    mutate(&mut meta, &mut body)?;
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path,
+                expected_content,
+                meta,
+                body,
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
+    Ok((result.meta, result.body))
 }
 
 #[utoipa::path(
@@ -705,19 +729,17 @@ pub async fn import_isbn_handler(
 
 /// Apply source-wins merge: overwrite mapped metadata fields from the import entry,
 /// preserving the page body and local-only frontmatter fields.
-fn apply_source_wins(
+async fn apply_source_wins(
     state: &AppState,
     page_path: &str,
     entry: &crate::vault::import::BibImportEntry,
 ) -> Result<(), ApiError> {
-    let vp = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
-    let abs_path = state.vault.resolve(&vp);
-    let mut page = Page::from_file(&abs_path, vp.clone())
-        .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-    crate::vault::import_zotero::apply_source_wins_to_meta(&mut page.meta, entry);
-    let content = write_page_content(&page.meta, &page.body);
-    fs::write(&abs_path, content)
-        .map_err(|e| ApiError::internal(format!("Failed to write page: {e}")))?;
+    let path = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
+    mutate_academic_page(state, path, |meta, _body| {
+        crate::vault::import_zotero::apply_source_wins_to_meta(meta, entry);
+        Ok(())
+    })
+    .await?;
     Ok(())
 }
 
@@ -729,82 +751,64 @@ async fn patch_zotero_provenance(
     item: &crate::vault::import_zotero::ZoteroItem,
     zotero_data_dir: &std::path::Path,
 ) -> Result<(), ApiError> {
-    let vp = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
-    let abs_path = state.vault.resolve(&vp);
-
-    let mut page = Page::from_file(&abs_path, vp.clone())
-        .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
-
-    // Build import section
-    let mut import_map = serde_yaml::Mapping::new();
-    import_map.insert(
-        serde_yaml::Value::String("source".to_string()),
-        serde_yaml::Value::String("zotero".to_string()),
-    );
-    import_map.insert(
-        serde_yaml::Value::String("zotero_key".to_string()),
-        serde_yaml::Value::String(item.zotero_key.clone()),
-    );
-    import_map.insert(
-        serde_yaml::Value::String("zotero_item_id".to_string()),
-        serde_yaml::Value::Number(item.item_id.into()),
-    );
-    import_map.insert(
-        serde_yaml::Value::String("imported_at".to_string()),
-        serde_yaml::Value::String(Utc::now().to_rfc3339()),
-    );
-
-    page.meta
-        .extra
-        .insert("import".to_string(), serde_yaml::Value::Mapping(import_map));
-
-    // Resolve and add attachment references
-    let mut assets: Vec<String> = Vec::new();
-    let mut pdf_url: Option<String> = None;
-    for att in &item.pdf_attachments {
+    let path = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
+    let mut assets = Vec::new();
+    let mut pdf_url = None;
+    for attachment in &item.pdf_attachments {
         if let Some(resolved) =
-            crate::vault::import_zotero::resolve_attachment_path(zotero_data_dir, att)
+            crate::vault::import_zotero::resolve_attachment_path(zotero_data_dir, attachment)
         {
-            match att.link_mode {
+            match attachment.link_mode {
                 0 | 2 => assets.push(resolved),
                 1 | 3 => pdf_url = Some(resolved),
                 _ => {}
             }
         }
     }
-    if !assets.is_empty() {
-        page.meta.extra.insert(
-            "assets".to_string(),
-            serde_yaml::to_value(&assets).unwrap_or_default(),
+    let zotero_key = item.zotero_key.clone();
+    let item_id = item.item_id;
+    let imported_at = Utc::now().to_rfc3339();
+    mutate_academic_page(state, path, move |meta, _body| {
+        let mut import_map = serde_yaml::Mapping::new();
+        import_map.insert(
+            serde_yaml::Value::String("source".to_string()),
+            serde_yaml::Value::String("zotero".to_string()),
         );
-    }
-    if let Some(url) = pdf_url {
-        let urls_val = page
-            .meta
-            .extra
-            .entry("urls".to_string())
-            .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
-        if let serde_yaml::Value::Mapping(m) = urls_val {
-            m.insert(
-                serde_yaml::Value::String("pdf".into()),
-                serde_yaml::Value::String(url),
+        import_map.insert(
+            serde_yaml::Value::String("zotero_key".to_string()),
+            serde_yaml::Value::String(zotero_key),
+        );
+        import_map.insert(
+            serde_yaml::Value::String("zotero_item_id".to_string()),
+            serde_yaml::Value::Number(item_id.into()),
+        );
+        import_map.insert(
+            serde_yaml::Value::String("imported_at".to_string()),
+            serde_yaml::Value::String(imported_at),
+        );
+        meta.extra
+            .insert("import".to_string(), serde_yaml::Value::Mapping(import_map));
+        if !assets.is_empty() {
+            meta.extra.insert(
+                "assets".to_string(),
+                serde_yaml::to_value(&assets).unwrap_or_default(),
             );
         }
-    }
-
-    // Write back
-    let new_content = write_page_content(&page.meta, &page.body);
-    fs::write(&abs_path, new_content)
-        .map_err(|e| ApiError::internal(format!("Failed to write page: {e}")))?;
-
-    // Re-index
-    state
-        .index
-        .with_index(move |index, vault| index.index_page(vault, &vp))
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
+        if let Some(url) = pdf_url {
+            let urls = meta
+                .extra
+                .entry("urls".to_string())
+                .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+            if let serde_yaml::Value::Mapping(mapping) = urls {
+                mapping.insert(
+                    serde_yaml::Value::String("pdf".into()),
+                    serde_yaml::Value::String(url),
+                );
+            }
+        }
+        Ok(())
+    })
+    .await?;
     Ok(())
 }
 
@@ -816,16 +820,6 @@ fn should_save_zotero_checkpoint(results: &[ImportResult]) -> bool {
 
 /// Re-index a single page by vault-relative path (used after writing changes
 /// during an import).
-async fn reindex_page(state: &AppState, path: &str) -> Result<(), ApiError> {
-    let vp = crate::api::error::parse_internal_path(path, "Invalid vault path")?;
-    state
-        .index
-        .with_index(move |index, vault| index.index_page(vault, &vp))
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    Ok(())
-}
 
 /// Handle a dedup-hit on an existing work via the zotero_key path.
 ///
@@ -892,8 +886,7 @@ async fn handle_zk_existing(
     if action.kind == ItemActionKind::ApplySourceWins {
         let mut sw_entry = entry;
         sw_entry.cite_key = derived_cite_key.expect("SourceWins derives a cite_key");
-        apply_source_wins(state, &path, &sw_entry)?;
-        reindex_page(state, &path).await?;
+        apply_source_wins(state, &path, &sw_entry).await?;
     }
 
     Ok(ImportResult {
@@ -941,8 +934,7 @@ async fn handle_doi_existing(
     };
 
     if action.kind == ItemActionKind::ApplySourceWins {
-        apply_source_wins(state, &path, entry)?;
-        reindex_page(state, &path).await?;
+        apply_source_wins(state, &path, entry).await?;
     }
 
     Ok(ImportResult {
@@ -1554,12 +1546,12 @@ pub async fn update_work(
     let vault_path = crate::api::error::parse_internal_path(&page_path, "invalid stored path")?;
     let abs_path = state.vault.resolve(&vault_path);
 
-    // 3. Read existing file
-    let page = Page::from_file(&abs_path, vault_path.clone())
-        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
-
-    let mut meta = page.meta;
-    let mut page_body = page.body;
+    // 3. Read existing file and retain the exact revision for CAS.
+    let expected_content = tokio::fs::read_to_string(&abs_path)
+        .await
+        .map_err(|error| ApiError::internal(format!("failed to read page: {error}")))?;
+    let (mut meta, mut page_body) = parse_frontmatter(&expected_content)
+        .map_err(|error| ApiError::internal(format!("failed to parse page: {error}")))?;
 
     // 4. Extract current WorkMeta
     let mut wm = extra_to_work_meta(&meta.extra)
@@ -1619,35 +1611,30 @@ pub async fn update_work(
     meta.extra = work_meta_to_extra(&wm);
     meta.updated_at = Some(Utc::now());
 
-    let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // 7. Re-index
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.invalidate_links_to(&vp)?;
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                let deps = index.reverse_deps(&vp)?;
-                for dep_path in &deps {
-                    index.resolve_links_for_page(dep_path)?;
-                }
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    // 8. Send SyncNotification
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vault_path.clone(),
+                expected_content,
+                meta: meta.clone(),
+                body: page_body.clone(),
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     // 9. Return updated WorkDetail
     Ok(Json(WorkDetail {
@@ -1730,13 +1717,6 @@ pub async fn create_annotation(
     let vault_path =
         crate::api::error::parse_internal_path(&vault_path_str, "invalid generated path")?;
 
-    let abs_path = state.vault.resolve(&vault_path);
-    if abs_path.exists() {
-        return Err(ApiError::conflict(format!(
-            "annotation file already exists: {vault_path_str}"
-        )));
-    }
-
     // 4. Build PageMeta
     let work_id_uuid: uuid::Uuid = req
         .work_id
@@ -1758,36 +1738,26 @@ pub async fn create_annotation(
 
     let page_body = req.body.unwrap_or_default();
 
-    // 5. Create parent directories and write file
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-
-    let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // 6. Index + resolve
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    // 7. Send SyncNotification
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta: meta.clone(),
+                body: page_body.clone(),
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     // 8. Return 201
     Ok((

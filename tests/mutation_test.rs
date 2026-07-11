@@ -1,7 +1,10 @@
 use std::fs;
+use std::sync::Arc;
 
 use clepsydra::vault::Vault;
-use clepsydra::vault::atomic_file::{atomic_create, atomic_replace, atomic_replace_with};
+use clepsydra::vault::atomic_file::{
+    AtomicPublicationError, atomic_create, atomic_replace, atomic_replace_with,
+};
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
@@ -704,16 +707,47 @@ async fn mutation_coordinator_prunes_expired_lock_entries() {
     let coordinator = MutationCoordinator::new();
     let expired_path = VaultPath::new("notes/expired.md").unwrap();
     drop(coordinator.lock_paths(&[expired_path]).await);
-    assert_eq!(coordinator.lock_table_len(), 1);
+    assert_eq!(coordinator.lock_table_len(), 2);
 
     let live_path = VaultPath::new("notes/live.md").unwrap();
     let _guard = coordinator.lock_paths(&[live_path]).await;
 
     assert_eq!(
         coordinator.lock_table_len(),
-        1,
+        2,
         "requesting a new lock should prune expired weak entries"
     );
+}
+
+#[tokio::test]
+async fn subtree_lock_blocks_descendant_mutation_but_not_sibling_subtree() {
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let folder = VaultPath::new("projects/alpha").unwrap();
+    let descendant = VaultPath::new("projects/alpha/task.md").unwrap();
+    let sibling = VaultPath::new("projects/beta/task.md").unwrap();
+    let folder_guard = coordinator.lock_subtree(&folder).await;
+
+    let blocked_coordinator = Arc::clone(&coordinator);
+    let blocked = tokio::spawn(async move {
+        let _guard = blocked_coordinator.lock_paths(&[descendant]).await;
+    });
+    let sibling_coordinator = Arc::clone(&coordinator);
+    let sibling = tokio::spawn(async move {
+        let _guard = sibling_coordinator.lock_paths(&[sibling]).await;
+    });
+
+    tokio::time::timeout(std::time::Duration::from_millis(200), sibling)
+        .await
+        .expect("sibling subtree was unnecessarily blocked")
+        .unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut Box::pin(blocked))
+            .await
+            .is_err(),
+        "descendant mutation entered while subtree deletion lock was held"
+    );
+
+    drop(folder_guard);
 }
 
 #[test]
@@ -937,4 +971,49 @@ fn mutation_coordinator_atomic_replace_reports_post_rename_sync_failure() {
     assert!(message.contains("rename completed"), "{message}");
     assert!(message.contains("may contain the new content"), "{message}");
     assert_eq!(fs::read(&path).unwrap(), b"complete new content");
+}
+
+#[test]
+fn atomic_replace_distinguishes_not_published_from_published_but_not_durable() {
+    use std::io::{self, Write};
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("page.md");
+    fs::write(&path, b"old content").unwrap();
+
+    let before_publish = atomic_replace_with(
+        &path,
+        b"new content",
+        |file, _| {
+            file.write_all(b"partial")?;
+            Err(io::Error::new(io::ErrorKind::WriteZero, "write failed"))
+        },
+        |temporary, destination| fs::rename(temporary, destination),
+        |_| Ok(()),
+        |temporary| fs::remove_file(temporary),
+    )
+    .expect_err("write failure unexpectedly published");
+    assert!(matches!(
+        before_publish,
+        AtomicPublicationError::NotPublished(_)
+    ));
+    assert_eq!(fs::read(&path).unwrap(), b"old content");
+
+    let after_publish = atomic_replace_with(
+        &path,
+        b"new content",
+        |file, content| {
+            file.write_all(content)?;
+            file.sync_all()
+        },
+        |temporary, destination| fs::rename(temporary, destination),
+        |_| Err(io::Error::other("directory sync failed")),
+        |temporary| fs::remove_file(temporary),
+    )
+    .expect_err("directory sync failure unexpectedly reported durable");
+    assert!(matches!(
+        after_publish,
+        AtomicPublicationError::PublishedButNotDurable(_)
+    ));
+    assert_eq!(fs::read(&path).unwrap(), b"new content");
 }

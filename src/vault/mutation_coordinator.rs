@@ -1,25 +1,25 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use thiserror::Error;
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use super::Vault;
-use super::atomic_file::{atomic_create, atomic_replace};
+use super::atomic_file::{AtomicPublicationError, atomic_create, atomic_replace};
 use super::hooks::PostMoveHook;
 use super::index::IndexError;
 use super::index_handle::IndexHandle;
 use super::index_policy::{IndexMutation, IndexPolicyError};
-use super::page::{PageMeta, write_page_content};
+use super::page::{Page, PageMeta, write_page_content};
 use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
-    locks: parking_lot::Mutex<HashMap<VaultPath, Weak<Mutex<()>>>>,
+    locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -77,6 +77,12 @@ pub struct PageMutationResult {
     pub body: String,
 }
 
+#[derive(Debug)]
+pub struct DeleteFolderResult {
+    pub removed: Vec<String>,
+    pub hook_targets: Vec<(VaultPath, PageMeta)>,
+}
+
 #[derive(Debug, Error)]
 pub enum MutationError {
     #[error("invalid mutation input: {0}")]
@@ -87,8 +93,11 @@ pub enum MutationError {
     Conflict(String),
     #[error("stale page content: {0}")]
     Stale(VaultPath),
-    #[error("filesystem mutation failed for {path}: {source}")]
+    #[error(
+        "filesystem mutation failed after filesystem_applied={filesystem_applied} for {path}: {source}"
+    )]
     Filesystem {
+        filesystem_applied: bool,
         path: PathBuf,
         #[source]
         source: io::Error,
@@ -112,6 +121,43 @@ pub enum MutationError {
     },
 }
 
+impl MutationError {
+    pub fn filesystem_applied(&self) -> bool {
+        match self {
+            Self::Filesystem {
+                filesystem_applied, ..
+            }
+            | Self::Index {
+                filesystem_applied, ..
+            }
+            | Self::Reconcile {
+                filesystem_applied, ..
+            }
+            | Self::Hook {
+                filesystem_applied, ..
+            } => *filesystem_applied,
+            Self::InvalidInput(_) | Self::NotFound(_) | Self::Conflict(_) | Self::Stale(_) => false,
+        }
+    }
+}
+
+async fn run_blocking_fs<T>(
+    path: PathBuf,
+    guard: MutationGuard,
+    operation: impl FnOnce() -> Result<T, MutationError> + Send + 'static,
+) -> Result<(MutationGuard, T), MutationError>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || operation().map(|result| (guard, result)))
+        .await
+        .map_err(|error| MutationError::Filesystem {
+            filesystem_applied: false,
+            path,
+            source: io::Error::other(format!("blocking filesystem task failed: {error}")),
+        })?
+}
+
 impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
@@ -119,37 +165,61 @@ impl MutationCoordinator {
         }
     }
 
-    /// Lock all requested paths in lexical order, preventing lock-order cycles.
+    /// Lock the requested paths for mutation and every ancestor for subtree
+    /// exclusion. Ancestors use shared locks, so mutations in sibling
+    /// subtrees proceed concurrently while a folder deletion excludes all
+    /// descendants.
     pub async fn lock_paths(&self, paths: &[VaultPath]) -> MutationGuard {
-        let mut keys = paths.to_vec();
-        keys.sort_unstable_by(|left, right| left.as_str().cmp(right.as_str()));
-        keys.dedup();
+        let mut requests = BTreeMap::<String, bool>::new();
+        for path in paths {
+            let components = path.as_str().split('/').collect::<Vec<_>>();
+            for end in 1..components.len() {
+                requests.entry(components[..end].join("/")).or_insert(false);
+            }
+            requests.insert(path.as_str().to_string(), true);
+        }
 
         let locks = {
             let mut table = self.locks.lock();
             table.retain(|_, lock| lock.strong_count() != 0);
-            keys.into_iter()
-                .map(|key| {
-                    if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
+            requests
+                .into_iter()
+                .map(|(key, write)| {
+                    let key = VaultPath::new(&key).expect("normalized path prefix");
+                    let lock = if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
                         lock
                     } else {
-                        let lock = Arc::new(Mutex::new(()));
+                        let lock = Arc::new(RwLock::new(()));
                         table.insert(key, Arc::downgrade(&lock));
                         lock
-                    }
+                    };
+                    (lock, write)
                 })
                 .collect::<Vec<_>>()
         };
 
         let mut guards = Vec::with_capacity(locks.len());
-        for lock in &locks {
-            guards.push(Arc::clone(lock).lock_owned().await);
+        for (lock, write) in &locks {
+            guards.push(if *write {
+                MutationLockGuard::Write {
+                    _guard: Arc::clone(lock).write_owned().await,
+                }
+            } else {
+                MutationLockGuard::Read {
+                    _guard: Arc::clone(lock).read_owned().await,
+                }
+            });
         }
 
         MutationGuard {
             _guards: guards,
-            _locks: locks,
+            _locks: locks.into_iter().map(|(lock, _)| lock).collect(),
         }
+    }
+
+    /// Exclude every mutation below `folder` until the returned guard drops.
+    pub async fn lock_subtree(&self, folder: &VaultPath) -> MutationGuard {
+        self.lock_paths(std::slice::from_ref(folder)).await
     }
 
     pub async fn create_page(
@@ -159,28 +229,41 @@ impl MutationCoordinator {
         command: CreatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
     ) -> Result<PageMutationResult, MutationError> {
-        let _guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
+        let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
-        if let Some(parent) = absolute.parent() {
-            fs::create_dir_all(parent).map_err(|source| MutationError::Filesystem {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-
+        let blocking_path = absolute.clone();
+        let page_path = command.path.clone();
         let content = write_page_content(&command.meta, &command.body);
-        if let Err(source) = atomic_create(&absolute, content.as_bytes()) {
-            if source.kind() == io::ErrorKind::AlreadyExists {
-                return Err(MutationError::Conflict(format!(
-                    "page already exists: {}",
-                    command.path.as_str()
-                )));
+        let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
+            if let Some(parent) = blocking_path.parent() {
+                fs::create_dir_all(parent).map_err(|source| MutationError::Filesystem {
+                    filesystem_applied: false,
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
             }
-            return Err(MutationError::Filesystem {
-                path: absolute,
-                source,
-            });
-        }
+            match atomic_create(&blocking_path, content.as_bytes()) {
+                Ok(()) => Ok(None),
+                Err(AtomicPublicationError::NotPublished(source))
+                    if source.kind() == io::ErrorKind::AlreadyExists =>
+                {
+                    Err(MutationError::Conflict(format!(
+                        "page already exists: {}",
+                        page_path.as_str()
+                    )))
+                }
+                Err(AtomicPublicationError::NotPublished(source)) => {
+                    Err(MutationError::Filesystem {
+                        filesystem_applied: false,
+                        path: blocking_path,
+                        source,
+                    })
+                }
+                Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
+            }
+        })
+        .await?;
+        let _guard = guard;
 
         index
             .apply_mutation(command.path.clone(), IndexMutation::Created)
@@ -189,6 +272,13 @@ impl MutationCoordinator {
                 filesystem_applied: true,
                 source,
             })?;
+        if let Some(source) = durability_error {
+            return Err(MutationError::Filesystem {
+                filesystem_applied: true,
+                path: absolute,
+                source,
+            });
+        }
 
         notify(MutationNotification {
             upserted: vec![command.path.as_str().to_string()],
@@ -208,30 +298,44 @@ impl MutationCoordinator {
         command: ReplacePageContentCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
     ) -> Result<VaultPath, MutationError> {
-        let _guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
+        let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
-        let current = match fs::read_to_string(&absolute) {
-            Ok(current) => current,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                return Err(MutationError::NotFound(command.path));
+        let blocking_path = absolute.clone();
+        let expected_content = command.expected_content;
+        let replacement_content = command.content;
+        let page_path = command.path.clone();
+        let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
+            let current = match fs::read_to_string(&blocking_path) {
+                Ok(current) => current,
+                Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                    return Err(MutationError::NotFound(page_path));
+                }
+                Err(source) => {
+                    return Err(MutationError::Filesystem {
+                        filesystem_applied: false,
+                        path: blocking_path,
+                        source,
+                    });
+                }
+            };
+            if current != expected_content {
+                return Err(MutationError::Stale(page_path));
             }
-            Err(source) => {
-                return Err(MutationError::Filesystem {
-                    path: absolute,
-                    source,
-                });
+            match atomic_replace(&blocking_path, replacement_content.as_bytes()) {
+                Ok(()) => Ok(None),
+                Err(AtomicPublicationError::NotPublished(source)) => {
+                    Err(MutationError::Filesystem {
+                        filesystem_applied: false,
+                        path: blocking_path,
+                        source,
+                    })
+                }
+                Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
             }
-        };
-        if current != command.expected_content {
-            return Err(MutationError::Stale(command.path));
-        }
+        })
+        .await?;
+        let _guard = guard;
 
-        atomic_replace(&absolute, command.content.as_bytes()).map_err(|source| {
-            MutationError::Filesystem {
-                path: absolute,
-                source,
-            }
-        })?;
         index
             .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
             .await
@@ -239,6 +343,13 @@ impl MutationCoordinator {
                 filesystem_applied: true,
                 source,
             })?;
+        if let Some(source) = durability_error {
+            return Err(MutationError::Filesystem {
+                filesystem_applied: true,
+                path: absolute,
+                source,
+            });
+        }
         notify(MutationNotification {
             upserted: vec![command.path.as_str().to_string()],
             removed: Vec::new(),
@@ -293,41 +404,54 @@ impl MutationCoordinator {
         if let Some(destination) = &projected_path {
             locked_paths.push(destination.clone());
         }
-        let _guard = self.lock_paths(&locked_paths).await;
-
+        let guard = self.lock_paths(&locked_paths).await;
         let absolute = vault.resolve(&command.path);
-        let current = match fs::read_to_string(&absolute) {
-            Ok(current) => current,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                return Err(MutationError::NotFound(command.path));
+        let blocking_path = absolute.clone();
+        let page_path = command.path.clone();
+        let expected_content = command.expected_content.clone();
+        let content = write_page_content(&command.meta, &command.body);
+        let destination_check = projected_path
+            .as_ref()
+            .map(|destination| (destination.clone(), vault.resolve(destination)));
+        let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
+            let current = match fs::read_to_string(&blocking_path) {
+                Ok(current) => current,
+                Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                    return Err(MutationError::NotFound(page_path));
+                }
+                Err(source) => {
+                    return Err(MutationError::Filesystem {
+                        filesystem_applied: false,
+                        path: blocking_path,
+                        source,
+                    });
+                }
+            };
+            if current != expected_content {
+                return Err(MutationError::Stale(page_path));
             }
-            Err(source) => {
-                return Err(MutationError::Filesystem {
-                    path: absolute,
-                    source,
-                });
-            }
-        };
-        if current != command.expected_content {
-            return Err(MutationError::Stale(command.path));
-        }
-        if let Some(destination) = &projected_path {
-            let destination_absolute = vault.resolve(destination);
-            if destination_absolute.exists() {
+            if let Some((destination, destination_absolute)) = destination_check
+                && destination_absolute.exists()
+            {
                 return Err(MutationError::Conflict(format!(
                     "destination already exists: {}",
                     destination.as_str()
                 )));
             }
-        }
-
-        let content = write_page_content(&command.meta, &command.body);
-        atomic_replace(&absolute, content.as_bytes()).map_err(|source| {
-            MutationError::Filesystem {
-                path: absolute.clone(),
-                source,
+            match atomic_replace(&blocking_path, content.as_bytes()) {
+                Ok(()) => Ok(None),
+                Err(AtomicPublicationError::NotPublished(source)) => {
+                    Err(MutationError::Filesystem {
+                        filesystem_applied: false,
+                        path: blocking_path,
+                        source,
+                    })
+                }
+                Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
             }
-        })?;
+        })
+        .await?;
+        let _guard = guard;
 
         index
             .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
@@ -378,6 +502,14 @@ impl MutationCoordinator {
             command.path.clone()
         };
 
+        if let Some(source) = durability_error {
+            return Err(MutationError::Filesystem {
+                filesystem_applied: true,
+                path: absolute,
+                source,
+            });
+        }
+
         notify(MutationNotification {
             upserted: vec![final_path.as_str().to_string()],
             removed: if final_path != command.path {
@@ -390,6 +522,115 @@ impl MutationCoordinator {
             path: final_path,
             meta: command.meta,
             body: command.body,
+        })
+    }
+
+    pub async fn delete_folder(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        folder: VaultPath,
+        recursive: bool,
+    ) -> Result<DeleteFolderResult, MutationError> {
+        let guard = self.lock_subtree(&folder).await;
+        let prefix = format!("{}/", folder.as_str());
+        let indexed_prefix = prefix.clone();
+        let indexed_paths = index
+            .with_index(move |vault_index, _vault| {
+                let mut statement = vault_index
+                    .connection()
+                    .prepare("SELECT path FROM pages WHERE path LIKE ?1 ORDER BY path")?;
+                let paths = statement
+                    .query_map(rusqlite::params![format!("{indexed_prefix}%")], |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .filter_map(Result::ok)
+                    .filter_map(|path| VaultPath::new(&path).ok())
+                    .collect::<Vec<_>>();
+                Ok::<_, IndexError>(paths)
+            })
+            .await
+            .map_err(|source| MutationError::Reconcile {
+                filesystem_applied: false,
+                source,
+            })?
+            .map_err(|source| MutationError::Reconcile {
+                filesystem_applied: false,
+                source,
+            })?;
+
+        let absolute = vault.resolve(&folder);
+        let vault_root = vault.root().to_path_buf();
+        let blocking_path = absolute.clone();
+        let folder_for_error = folder.clone();
+        let (guard, hook_targets) = run_blocking_fs(absolute.clone(), guard, move || {
+            if !blocking_path.is_dir() {
+                return Err(MutationError::NotFound(folder_for_error));
+            }
+            let mut hook_targets = Vec::new();
+            if recursive {
+                for entry in walkdir::WalkDir::new(&blocking_path)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.file_type().is_file())
+                {
+                    if entry.path().extension().and_then(|value| value.to_str()) != Some("md") {
+                        continue;
+                    }
+                    let Ok(relative) = entry.path().strip_prefix(&vault_root) else {
+                        continue;
+                    };
+                    let relative = relative.to_string_lossy().replace('\\', "/");
+                    let Ok(path) = VaultPath::new(&relative) else {
+                        continue;
+                    };
+                    if let Ok(page) = Page::from_file(entry.path(), path.clone()) {
+                        hook_targets.push((path, page.meta));
+                    }
+                }
+                fs::remove_dir_all(&blocking_path).map_err(|source| MutationError::Filesystem {
+                    filesystem_applied: false,
+                    path: blocking_path,
+                    source,
+                })?;
+            } else {
+                fs::remove_dir(&blocking_path).map_err(|source| {
+                    if source.kind() == io::ErrorKind::DirectoryNotEmpty
+                        || matches!(source.raw_os_error(), Some(66) | Some(39))
+                        || source.to_string().contains("not empty")
+                        || source.to_string().contains("Directory not empty")
+                    {
+                        MutationError::Conflict(
+                            "folder is not empty; use recursive=true to delete".to_string(),
+                        )
+                    } else {
+                        MutationError::Filesystem {
+                            filesystem_applied: false,
+                            path: blocking_path,
+                            source,
+                        }
+                    }
+                })?;
+            }
+            Ok(hook_targets)
+        })
+        .await?;
+        let _guard = guard;
+
+        let mut removed = Vec::with_capacity(indexed_paths.len());
+        for path in indexed_paths {
+            index
+                .apply_mutation(path.clone(), IndexMutation::Deleted)
+                .await
+                .map_err(|source| MutationError::Index {
+                    filesystem_applied: true,
+                    source,
+                })?;
+            removed.push(path.as_str().to_string());
+        }
+        Ok(DeleteFolderResult {
+            removed,
+            hook_targets,
         })
     }
 
@@ -410,7 +651,76 @@ impl Default for MutationCoordinator {
 }
 
 /// An owned set of path locks. The locks are released when this guard drops.
+enum MutationLockGuard {
+    Read { _guard: OwnedRwLockReadGuard<()> },
+    Write { _guard: OwnedRwLockWriteGuard<()> },
+}
+
 pub struct MutationGuard {
-    _guards: Vec<OwnedMutexGuard<()>>,
-    _locks: Vec<Arc<Mutex<()>>>,
+    _guards: Vec<MutationLockGuard>,
+    _locks: Vec<Arc<RwLock<()>>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelling_blocking_phase_keeps_path_locked_until_io_finishes() {
+        let coordinator = Arc::new(MutationCoordinator::new());
+        let path = VaultPath::new("notes/cancelled.md").unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = Arc::clone(&coordinator);
+        let worker_path = path.clone();
+        let mutation = tokio::spawn(async move {
+            let guard = worker.lock_paths(std::slice::from_ref(&worker_path)).await;
+            run_blocking_fs(PathBuf::from("cancelled.md"), guard, move || {
+                let _ = started_tx.send(());
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+            .await
+        });
+
+        started_rx.await.unwrap();
+        mutation.abort();
+        let contender = Arc::clone(&coordinator);
+        let contender_path = path.clone();
+        let blocked = tokio::spawn(async move {
+            contender
+                .lock_paths(std::slice::from_ref(&contender_path))
+                .await
+        });
+        let mut blocked = Box::pin(blocked);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut blocked)
+                .await
+                .is_err(),
+            "cancellation released the path lock while blocking I/O was still running"
+        );
+
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), &mut blocked)
+            .await
+            .expect("path lock did not release after blocking I/O finished")
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn filesystem_phase_runs_off_the_tokio_worker() {
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("notes/blocking.md").unwrap();
+        let guard = coordinator.lock_paths(std::slice::from_ref(&path)).await;
+        let runtime_thread = std::thread::current().id();
+
+        let (_guard, filesystem_thread) =
+            run_blocking_fs(PathBuf::from("blocking.md"), guard, || {
+                Ok(std::thread::current().id())
+            })
+            .await
+            .unwrap();
+
+        assert_ne!(filesystem_thread, runtime_thread);
+    }
 }

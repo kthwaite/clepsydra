@@ -508,6 +508,7 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "walkdir",
+ "windows-sys 0.61.2",
  "wiremock",
 ]
 
