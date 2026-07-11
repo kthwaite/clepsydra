@@ -670,6 +670,44 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
 }
 
 #[tokio::test]
+async fn folder_authority_propagates_index_row_type_errors_as_internal_errors() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("topic")).unwrap();
+            fs::write(
+                root.join("topic/corrupted.md"),
+                "---\ntitle: Corrupted\n---\nCorrupted body.\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _vault| {
+            index.connection().execute(
+                "UPDATE pages SET title = x'80' WHERE path = 'topic/corrupted.md'",
+                [],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = fixture.server.get("/api/vault/folders/topic").await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], 500);
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("Invalid column type Blob")),
+        "expected the SQLite row-mapping error, got: {body}"
+    );
+}
+
+#[tokio::test]
 async fn list_attachments_empty() {
     let (server, _tmp) = setup_server();
 

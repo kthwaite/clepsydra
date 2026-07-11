@@ -209,6 +209,7 @@ pub async fn list_folder_contents(
             filesystem_authoritative_page_summaries(index, &md_children)
         })
         .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     sort_folder_listing(&mut folders, &mut pages);
@@ -260,22 +261,25 @@ fn classify_dir_entries(
 fn filesystem_authoritative_page_summaries(
     index: &crate::vault::index::VaultIndex,
     markdown_files: &[(String, VaultPath)],
-) -> Vec<PageSummary> {
+) -> rusqlite::Result<Vec<PageSummary>> {
     markdown_files
         .iter()
         .map(|(name, vault_path)| {
-            index
-                .connection()
-                .query_row(
-                    "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
-                            p.project,
-                            COALESCE((SELECT group_concat(t.tag, char(31))
-                                        FROM tags t WHERE t.page_id = p.id), '')
-                       FROM pages p WHERE p.path = ?1",
-                    params![vault_path.as_str()],
-                    page_summary_from_row,
-                )
-                .unwrap_or_else(|_| build_page_summary_fallback(name, vault_path))
+            match index.connection().query_row(
+                "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
+                        p.project,
+                        COALESCE((SELECT group_concat(t.tag, char(31))
+                                    FROM tags t WHERE t.page_id = p.id), '')
+                   FROM pages p WHERE p.path = ?1",
+                params![vault_path.as_str()],
+                page_summary_from_row,
+            ) {
+                Ok(summary) => Ok(summary),
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    Ok(build_page_summary_fallback(name, vault_path))
+                }
+                Err(error) => Err(error),
+            }
         })
         .collect()
 }
