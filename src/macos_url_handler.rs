@@ -27,7 +27,7 @@ pub fn applescript_source(binary: &Path) -> String {
 /// Info.plist. Index 1 (obsidian) exists only when compat is requested.
 pub fn plistbuddy_commands(include_obsidian: bool) -> Vec<String> {
     let mut cmds = vec![
-        format!("Set :CFBundleIdentifier {BUNDLE_ID}"),
+        format!("Add :CFBundleIdentifier string {BUNDLE_ID}"),
         "Add :CFBundleURLTypes array".to_string(),
         "Add :CFBundleURLTypes:0 dict".to_string(),
         "Add :CFBundleURLTypes:0:CFBundleURLName string Clepsydra deep link".to_string(),
@@ -77,6 +77,14 @@ pub fn install(
     run_checked(compile, "osacompile")?;
 
     let plist = app_path.join("Contents/Info.plist");
+    // PlistBuddy has no upsert: delete any existing CFBundleIdentifier first
+    // (ignoring failure when the key is absent) so the Add below succeeds in
+    // both plist states.
+    let _ = Command::new("/usr/libexec/PlistBuddy")
+        .arg("-c")
+        .arg("Delete :CFBundleIdentifier")
+        .arg(&plist)
+        .status();
     for cmd in plistbuddy_commands(include_obsidian) {
         let mut pb = Command::new("/usr/libexec/PlistBuddy");
         pb.arg("-c").arg(&cmd).arg(&plist);

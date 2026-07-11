@@ -21,7 +21,7 @@ fn plist_commands_register_clepsydra_scheme() {
     assert!(cmds.iter().all(|c| !c.contains("string obsidian")));
     assert!(
         cmds.iter()
-            .any(|c| c.starts_with("Set :CFBundleIdentifier"))
+            .any(|c| c == "Add :CFBundleIdentifier string md.clepsydra.url-handler")
     );
 }
 
