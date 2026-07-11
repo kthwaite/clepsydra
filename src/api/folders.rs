@@ -203,32 +203,10 @@ pub async fn list_folder_contents(
     let (mut folders, md_children) =
         classify_dir_entries(&path, entries.flatten(), |vp| state.vault.is_excluded(vp));
 
-    // Look up all markdown children in the index in one closure
     let mut pages = state
         .index
         .with_index(move |index, _vault| {
-            let mut pages = Vec::new();
-            for (name, vp) in &md_children {
-                let summary: Option<PageSummary> = index
-                    .connection()
-                    .query_row(
-                        "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
-                                p.project,
-                                COALESCE((SELECT group_concat(t.tag, char(31))
-                                            FROM tags t WHERE t.page_id = p.id), '')
-                           FROM pages p WHERE p.path = ?1",
-                        params![vp.as_str()],
-                        page_summary_from_row,
-                    )
-                    .ok();
-
-                if let Some(s) = summary {
-                    pages.push(s);
-                } else {
-                    pages.push(build_page_summary_fallback(name, vp));
-                }
-            }
-            pages
+            filesystem_authoritative_page_summaries(index, &md_children)
         })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -274,6 +252,32 @@ fn classify_dir_entries(
         }
     }
     (folders, md_children)
+}
+
+/// Build summaries only for markdown files observed in the directory. The
+/// index enriches those filesystem members but never contributes membership;
+/// a missing index row receives the stable fallback below.
+fn filesystem_authoritative_page_summaries(
+    index: &crate::vault::index::VaultIndex,
+    markdown_files: &[(String, VaultPath)],
+) -> Vec<PageSummary> {
+    markdown_files
+        .iter()
+        .map(|(name, vault_path)| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
+                            p.project,
+                            COALESCE((SELECT group_concat(t.tag, char(31))
+                                        FROM tags t WHERE t.page_id = p.id), '')
+                       FROM pages p WHERE p.path = ?1",
+                    params![vault_path.as_str()],
+                    page_summary_from_row,
+                )
+                .unwrap_or_else(|_| build_page_summary_fallback(name, vault_path))
+        })
+        .collect()
 }
 
 /// Synthetic page summary for an md file that has no index row yet.

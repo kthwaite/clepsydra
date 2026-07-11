@@ -198,46 +198,14 @@ pub fn assign_router() -> Router<Arc<AppState>> {
 }
 
 // ---------------------------------------------------------------------------
-// Shared PageDetail constructors
+// Canonical PageDetail mapping
 // ---------------------------------------------------------------------------
 
-/// Build a `PageDetail` from an owned `Page` (borrowed) and its `VaultPath`.
-///
-/// Callers MUST pass the page's OWN vault path (e.g. `move_page` passes the
-/// destination path). Resolves the kind from `vault_path` + `page.meta.kind`
-/// and derives the canonical name from the title (else the filename).
-pub(crate) fn page_detail_from_page(page: &Page, vault_path: &VaultPath) -> PageDetail {
-    let canonical = if let Some(ref title) = page.meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) =
-        crate::vault::kind::resolve(vault_path.as_str(), page.meta.kind);
-
-    PageDetail {
-        path: vault_path.as_str().to_string(),
-        canonical_name: canonical.as_str().to_string(),
-        meta: page.meta.clone(),
-        body: page.body.clone(),
-        kind: resolved_kind.as_str().to_string(),
-        inferred,
-        project: page.meta.project.clone(),
-    }
-}
-
-/// Build a `PageDetail` from a (typically already-mutated/consumed) `PageMeta`
-/// plus an owned body string and its `VaultPath`.
-///
-/// Callers MUST pass the page's OWN vault path (create/update sites pass the
-/// new/destination path). `meta` is consumed into the returned struct.
-pub(crate) fn page_detail_from_meta(
-    vault_path: &VaultPath,
-    meta: PageMeta,
-    body: String,
-) -> PageDetail {
-    let canonical = if let Some(ref title) = meta.title {
+/// Map the owned page fields returned by reads and mutations into the public
+/// detail response. Taking the path, metadata, and body together keeps every
+/// page-detail endpoint on one output mapping without cloning page contents.
+pub(crate) fn page_detail(vault_path: VaultPath, meta: PageMeta, body: String) -> PageDetail {
+    let canonical = if let Some(title) = &meta.title {
         CanonicalName::from_title(title)
     } else {
         CanonicalName::from_filename(vault_path.filename())
@@ -356,7 +324,7 @@ pub async fn get_page(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail_from_page(&page, &vault_path)))
+    Ok(Json(page_detail(page.path, page.meta, page.body)))
 }
 
 #[utoipa::path(
@@ -405,7 +373,7 @@ pub async fn get_page_by_id(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail_from_page(&page, &vault_path)))
+    Ok(Json(page_detail(page.path, page.meta, page.body)))
 }
 
 #[utoipa::path(
@@ -465,11 +433,7 @@ pub async fn create_page(
 
     Ok((
         StatusCode::CREATED,
-        Json(page_detail_from_meta(
-            &result.path,
-            result.meta,
-            result.body,
-        )),
+        Json(page_detail(result.path, result.meta, result.body)),
     )
         .into_response())
 }
@@ -547,11 +511,7 @@ pub async fn update_page(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok(Json(page_detail_from_meta(
-        &result.path,
-        result.meta,
-        result.body,
-    )))
+    Ok(Json(page_detail(result.path, result.meta, result.body)))
 }
 
 #[utoipa::path(
@@ -759,7 +719,7 @@ pub async fn move_page(
     let page = Page::from_file(&dest_abs, dest_vp.clone())
         .map_err(|e| ApiError::internal(format!("failed to read moved page: {e}")))?;
 
-    Ok(Json(page_detail_from_page(&page, &dest_vp)))
+    Ok(Json(page_detail(page.path, page.meta, page.body)))
 }
 
 /// Validate a `project` slug before it is persisted to frontmatter and used to
@@ -816,7 +776,7 @@ pub async fn assign_page(
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
     if body.kind.is_none() && body.project.is_none() && !body.clear_project {
-        return Ok(Json(page_detail_from_page(&page, &vp)));
+        return Ok(Json(page_detail(page.path, page.meta, page.body)));
     }
 
     if let Some(token) = &body.kind {
@@ -861,11 +821,7 @@ pub async fn assign_page(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok(Json(page_detail_from_meta(
-        &result.path,
-        result.meta,
-        result.body,
-    )))
+    Ok(Json(page_detail(result.path, result.meta, result.body)))
 }
 
 #[utoipa::path(

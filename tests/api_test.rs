@@ -154,6 +154,162 @@ async fn page_mutation_create_preserves_response_dto() {
 }
 
 #[tokio::test]
+async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
+    let (server, _tmp) = setup_server();
+
+    let response = server
+        .post("/api/vault/pages/detail.md")
+        .json(&serde_json::json!({
+            "title": "Detail",
+            "tags": ["mapping"],
+            "aliases": ["Detail alias"],
+            "body": "Initial body."
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+
+    let response = server.get("/api/vault/pages/detail.md").await;
+    response.assert_status_ok();
+    let fetched: serde_json::Value = response.json();
+    assert_eq!(
+        created, fetched,
+        "create and path GET detail mappings differ"
+    );
+
+    let id = fetched["meta"]["id"].as_str().unwrap();
+    let response = server.get(&format!("/api/vault/pages/by-id/{id}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        response.json::<serde_json::Value>(),
+        fetched,
+        "by-id and path GET detail mappings differ"
+    );
+
+    let response = server
+        .put("/api/vault/pages/detail.md")
+        .json(&serde_json::json!({
+            "title": "Updated detail",
+            "tags": ["mapping", "updated"],
+            "aliases": ["Updated alias"],
+            "body": "Updated body."
+        }))
+        .await;
+    response.assert_status_ok();
+    let updated: serde_json::Value = response.json();
+    let response = server.get("/api/vault/pages/detail.md").await;
+    response.assert_status_ok();
+    assert_eq!(
+        updated,
+        response.json::<serde_json::Value>(),
+        "update and path GET detail mappings differ"
+    );
+
+    let response = server
+        .post("/api/vault/pages-move/detail.md")
+        .json(&serde_json::json!({ "destination": "moved/detail.md" }))
+        .await;
+    response.assert_status_ok();
+    let moved: serde_json::Value = response.json();
+    let response = server.get("/api/vault/pages/moved/detail.md").await;
+    response.assert_status_ok();
+    assert_eq!(
+        moved,
+        response.json::<serde_json::Value>(),
+        "move and path GET detail mappings differ"
+    );
+
+    let response = server
+        .post("/api/vault/pages-assign/moved/detail.md")
+        .json(&serde_json::json!({}))
+        .await;
+    response.assert_status_ok();
+    let assigned: serde_json::Value = response.json();
+    let response = server.get("/api/vault/pages/moved/detail.md").await;
+    response.assert_status_ok();
+    assert_eq!(
+        assigned,
+        response.json::<serde_json::Value>(),
+        "assign and path GET detail mappings differ"
+    );
+}
+
+#[tokio::test]
+async fn page_detail_mapping_matches_get_for_journal_and_link_endpoints() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("source.md"),
+                "---\ntitle: Source\n---\nSee [[CreatedFromLink]].\n",
+            )
+            .unwrap();
+        })
+        .build();
+    let server = fixture.server;
+
+    let response = server
+        .post("/api/vault/index/create-from-link")
+        .json(&serde_json::json!({
+            "target_raw": "CreatedFromLink",
+            "folder": ""
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let linked: serde_json::Value = response.json();
+    let linked_path = linked["path"].as_str().unwrap();
+    let response = server.get(&format!("/api/vault/pages/{linked_path}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        linked,
+        response.json::<serde_json::Value>(),
+        "create-from-link and path GET detail mappings differ"
+    );
+
+    let response = server.get("/api/vault/journal/today").await;
+    response.assert_status_ok();
+    let mut today: serde_json::Value = response.json();
+    let today_path = today["path"].as_str().unwrap().to_string();
+    today
+        .as_object_mut()
+        .unwrap()
+        .remove("carried_forward")
+        .unwrap();
+    let response = server.get(&format!("/api/vault/pages/{today_path}")).await;
+    response.assert_status_ok();
+    let journal_page: serde_json::Value = response.json();
+    assert_eq!(
+        today, journal_page,
+        "journal today and path GET detail mappings differ"
+    );
+
+    let date = today_path
+        .strip_prefix("journals/")
+        .and_then(|path| path.strip_suffix(".md"))
+        .unwrap();
+    let response = server.get(&format!("/api/vault/journal/{date}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        response.json::<serde_json::Value>(),
+        journal_page,
+        "journal date and path GET detail mappings differ"
+    );
+
+    let response = server
+        .post("/api/vault/journal/today/capture")
+        .json(&serde_json::json!({ "content": "Captured detail." }))
+        .await;
+    response.assert_status_ok();
+    let captured: serde_json::Value = response.json();
+    let response = server.get(&format!("/api/vault/pages/{today_path}")).await;
+    response.assert_status_ok();
+    assert_eq!(
+        captured,
+        response.json::<serde_json::Value>(),
+        "journal capture and path GET detail mappings differ"
+    );
+}
+
+#[tokio::test]
 async fn page_mutation_create_duplicate_returns_409() {
     let (server, _tmp) = setup_server();
 
@@ -439,6 +595,78 @@ async fn lists_folder_contents_sorted() {
         "expected exactly 1 subfolder: {folders:?}"
     );
     assert!(folders.iter().any(|f| f["name"].as_str() == Some("sub")));
+}
+
+#[tokio::test]
+async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
+    const INDEXED_ID: &str = "01951234-0000-7000-8000-000000000101";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("topic")).unwrap();
+            fs::write(
+                root.join("topic/indexed.md"),
+                format!(
+                    "---\nid: {INDEXED_ID}\ntitle: Indexed title\ntags:\n  - indexed\nproject: alpha\n---\nIndexed body.\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join("topic/stale.md"),
+                "---\ntitle: Stale title\n---\nStale body.\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            fs::remove_file(state.vault.root().join("topic/stale.md")).unwrap();
+            fs::write(
+                state.vault.root().join("topic/filesystem-only.md"),
+                "---\ntitle: Unindexed title\n---\nUnindexed body.\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    let response = fixture.server.get("/api/vault/folders/topic").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let pages = body["pages"].as_array().expect("pages array");
+
+    assert_eq!(
+        pages
+            .iter()
+            .map(|page| page["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["topic/filesystem-only.md", "topic/indexed.md"],
+        "filesystem membership should omit stale index rows and remain path-sorted"
+    );
+
+    let indexed = pages
+        .iter()
+        .find(|page| page["path"] == "topic/indexed.md")
+        .unwrap();
+    assert_eq!(indexed["id"], INDEXED_ID);
+    assert_eq!(indexed["title"], "Indexed title");
+    assert_eq!(indexed["canonical_name"], "indexed title");
+    assert_eq!(indexed["project"], "alpha");
+    assert_eq!(indexed["tags"], serde_json::json!(["indexed"]));
+
+    let filesystem_only = pages
+        .iter()
+        .find(|page| page["path"] == "topic/filesystem-only.md")
+        .unwrap();
+    assert_eq!(
+        filesystem_only,
+        &serde_json::json!({
+            "id": "",
+            "path": "topic/filesystem-only.md",
+            "title": null,
+            "canonical_name": "filesystem-only",
+            "kind": "NOTE",
+            "inferred": true,
+            "tags": []
+        }),
+        "filesystem-only pages should use the deterministic fallback summary"
+    );
 }
 
 #[tokio::test]

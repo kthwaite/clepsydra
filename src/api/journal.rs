@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
-use super::pages::{PageDetail, page_detail_from_meta, page_detail_from_page};
+use super::pages::{PageDetail, page_detail};
 use super::tasks::TaskItem;
 use crate::api::events::SyncNotification;
 use crate::vault::mutation_coordinator::{
@@ -156,7 +156,7 @@ async fn get_today(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    let detail = page_detail_from_page(&page, &vault_path);
+    let detail = page_detail(page.path, page.meta, page.body);
 
     // Query for carried-forward tasks: incomplete tasks from recent journals
     // (past 7 days, excluding today).
@@ -274,7 +274,7 @@ async fn get_by_date(
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail_from_page(&page, &vault_path)))
+    Ok(Json(page_detail(page.path, page.meta, page.body)))
 }
 
 /// GET /journal/range?from=YYYY-MM-DD&to=YYYY-MM-DD — list journals in range.
@@ -415,11 +415,7 @@ async fn capture_today(
 
     Ok((
         StatusCode::OK,
-        Json(page_detail_from_meta(
-            &result.path,
-            result.meta,
-            result.body,
-        )),
+        Json(page_detail(result.path, result.meta, result.body)),
     )
         .into_response())
 }

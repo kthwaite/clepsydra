@@ -12,7 +12,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::{ApiError, parse_internal_path};
-use super::pages::page_detail_from_meta;
+use super::pages::page_detail;
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
@@ -843,7 +843,7 @@ pub async fn create_from_link(
 
     Ok((
         StatusCode::CREATED,
-        Json(page_detail_from_meta(&vault_path, meta, page_body)),
+        Json(page_detail(vault_path, meta, page_body)),
     )
         .into_response())
 }
