@@ -1,5 +1,6 @@
 pub mod api;
 pub mod app_config;
+pub mod deeplink;
 pub mod doctor;
 pub mod lsp;
 pub mod vault;
