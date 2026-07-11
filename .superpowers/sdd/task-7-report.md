@@ -73,3 +73,15 @@ Preserved contracts include:
 - `cargo check --all-targets` — passed.
 - `cargo test` — 762 passed across 36 suites on the final run. An earlier run exposed the pre-existing timing-sensitive `cancelled_attachment_upload_removes_temporary_file`; it passed in isolation immediately afterward and the complete rerun passed.
 - Strict `cargo clippy --all-targets -- -D warnings` remains blocked only by the previously reported out-of-scope warnings; the remediation introduced no Clippy finding.
+
+## Windows parent-sync remediation
+
+- Status: complete. Parent-directory synchronization remains `File::open(parent).sync_all()` on non-Windows platforms. On Windows it is an explicitly documented successful no-op because `std::fs` does not open directories with `FILE_FLAG_BACKUP_SEMANTICS` and the crate's current dependencies do not expose a verified directory-handle flush implementation. Successful atomic publication is therefore no longer reported as a guaranteed post-publication failure on Windows.
+- Added a Windows-gated contract test covering successful `atomic_create` and `atomic_replace` publication and content.
+- The Windows Rust target is not installed on this Darwin workstation (`rustup target list --installed` reports only `aarch64-apple-darwin`), so no Windows cross-target check was run and no toolchain was installed.
+- `cargo test --test mutation_test mutation_coordinator_atomic -- --nocapture` — 9 passed on Darwin; the Windows-gated test was not executable on this host.
+- `cargo check --all-targets` — passed.
+- `cargo test` — 762 passed across 36 suites.
+- `rustfmt --edition 2024 --check src/vault/atomic_file.rs tests/mutation_test.rs` — passed.
+- Repository-wide `cargo fmt --all -- --check` remains blocked by pre-existing formatting drift in `src/api/openapi.rs`, `src/vault/config.rs`, and `tests/api_blocks_test.rs`; neither touched Rust file has formatting drift.
+- Strict `cargo clippy --all-targets -- -D warnings` remains blocked by the previously reported out-of-scope warnings. The affected library and mutation-test targets pass with only those baseline lints allowed.

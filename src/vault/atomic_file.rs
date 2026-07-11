@@ -10,8 +10,9 @@ static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// Publish a fully written file without replacing an existing destination.
 ///
 /// The temporary file is created and synced beside the destination before the
-/// atomic no-replace operation makes it visible. The parent directory is then
-/// synced so the new directory entry is durable.
+/// atomic no-replace operation makes it visible. On Unix, the parent directory
+/// is then synced so the new directory entry is durable. Windows cannot provide
+/// the same guarantee through the filesystem APIs used by this crate.
 pub fn atomic_create(path: &Path, content: &[u8]) -> io::Result<()> {
     atomic_write_with(
         path,
@@ -146,8 +147,22 @@ where
     })
 }
 
+#[cfg(not(windows))]
 fn sync_parent(parent: &Path) -> io::Result<()> {
     fs::File::open(parent)?.sync_all()
+}
+
+/// Windows' standard filesystem API opens files without the directory-only
+/// `FILE_FLAG_BACKUP_SEMANTICS` flag, so `File::open(parent)` always fails.
+/// The crate has no dependency that exposes a verified directory handle and
+/// flush operation. Publication is already complete at this point; until such
+/// an implementation is available, parent synchronization is deliberately a
+/// successful no-op rather than reporting that every successful publication
+/// failed.
+#[cfg(windows)]
+#[allow(clippy::unnecessary_wraps)]
+fn sync_parent(_parent: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn replace(source: &Path, destination: &Path) -> io::Result<()> {

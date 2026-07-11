@@ -788,6 +788,21 @@ fn mutation_coordinator_atomic_create_publishes_complete_content() {
     assert_eq!(fs::read(path).unwrap(), b"complete new content");
 }
 
+#[cfg(windows)]
+#[test]
+fn mutation_coordinator_atomic_publication_succeeds_on_windows() {
+    let tmp = TempDir::new().unwrap();
+    let create_path = tmp.path().join("created.md");
+    let replace_path = tmp.path().join("replaced.md");
+    fs::write(&replace_path, b"old content").unwrap();
+
+    atomic_create(&create_path, b"created content").unwrap();
+    atomic_replace(&replace_path, b"replacement content").unwrap();
+
+    assert_eq!(fs::read(create_path).unwrap(), b"created content");
+    assert_eq!(fs::read(replace_path).unwrap(), b"replacement content");
+}
+
 #[test]
 fn mutation_coordinator_atomic_create_collision_preserves_destination_and_cleans_temp() {
     let tmp = TempDir::new().unwrap();
