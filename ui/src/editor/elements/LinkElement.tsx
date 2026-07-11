@@ -18,12 +18,15 @@ import {
   useState,
 } from "react";
 import type { RenderElementProps } from "slate-react";
+import { toast } from "sonner";
+import { resolveSchemeUrl } from "#/api/deeplink";
+import { isSchemeLink, openSchemeLink } from "#/editor/schemeLinks";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 type Props = RenderElementProps & { element: LinkElementType };
 
-/** External links open in the browser; everything else is a vault path. */
+/** External links open in the browser; scheme links resolve via the API; everything else is a vault path. */
 function isExternal(url: string): boolean {
   return /^(https?:|mailto:)/i.test(url);
 }
@@ -76,7 +79,13 @@ export function LinkElement({ attributes, children, element }: Props) {
   const doOpen = useCallback(
     (e: ReactMouseEvent) => {
       e.preventDefault();
-      if (isExternal(url)) {
+      if (isSchemeLink(url)) {
+        void openSchemeLink(url, {
+          resolve: resolveSchemeUrl,
+          openTab: (type, path) => openTab(type, path),
+          notify: (message) => toast.error(message),
+        });
+      } else if (isExternal(url)) {
         window.open(url, "_blank", "noopener,noreferrer");
       } else {
         openTab("page", url);
