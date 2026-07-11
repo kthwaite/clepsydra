@@ -148,3 +148,71 @@ pub fn deeplink_http_url(base: &str, raw_url: &str) -> String {
         utf8_percent_encode(raw_url, QUERY_VALUE)
     )
 }
+
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::vault::canonical::CanonicalName;
+
+/// Layered lookup: exact path → unique canonical name → unique shortid.
+///
+/// `raw` is tried alongside `decoded` for path matches because vault paths may
+/// legitimately contain percent-encoded bytes (VaultPath encodes `/` in slugs
+/// as `%2F`), so the encoded form can itself be the stored path.
+pub fn resolve_target(
+    conn: &Connection,
+    raw: &str,
+    decoded: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    // 1. Exact path, with and without a supplied `.md`.
+    let mut candidates: Vec<String> = Vec::new();
+    for t in [raw, decoded] {
+        candidates.push(t.to_string());
+        if !t.ends_with(".md") {
+            candidates.push(format!("{t}.md"));
+        }
+    }
+    candidates.dedup();
+    for cand in &candidates {
+        let hit: Option<String> = conn
+            .query_row(
+                "SELECT path FROM pages WHERE path = ?1",
+                params![cand],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if hit.is_some() {
+            return Ok(hit);
+        }
+    }
+
+    // 2. Canonical name of the last path segment; only a unique match counts
+    //    (mirrors wikilink resolution policy — ambiguity never picks silently).
+    let name = decoded.rsplit('/').next().unwrap_or(decoded);
+    let canonical = CanonicalName::new(name);
+    let mut stmt = conn.prepare(
+        "SELECT p.path FROM canonical_names cn JOIN pages p ON p.id = cn.page_id
+         WHERE cn.canonical_name = ?1",
+    )?;
+    let paths: Vec<String> = stmt
+        .query_map(params![canonical.as_str()], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    if let [only] = paths.as_slice() {
+        return Ok(Some(only.clone()));
+    }
+
+    // 3. Shortid: the third dot-segment of the canonical filename scheme
+    //    `<yyyymmdd>.<slug>.<shortid>.md`. Alphanumeric-only, so the LIKE
+    //    pattern needs no escaping.
+    if decoded.len() == 8 && decoded.chars().all(|c| c.is_ascii_alphanumeric()) {
+        let mut stmt =
+            conn.prepare("SELECT path FROM pages WHERE path LIKE '%.' || ?1 || '.md'")?;
+        let paths: Vec<String> = stmt
+            .query_map(params![decoded], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        if let [only] = paths.as_slice() {
+            return Ok(Some(only.clone()));
+        }
+    }
+
+    Ok(None)
+}

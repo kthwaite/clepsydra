@@ -120,3 +120,92 @@ fn deeplink_http_url_encodes_the_scheme_url() {
         "http://localhost:16667/deeplink?url=obsidian%3A%2F%2Fopen%3Fvault%3Db%26file%3DA%20B"
     );
 }
+
+use clepsydra::deeplink::resolve_target;
+use clepsydra::vault::Vault;
+use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::init::init_vault;
+
+/// Seed a vault with three pages and return an open, built index.
+/// - `projects/20260531.alpha.aB3dE9xZ.md` (title "Alpha Project")
+/// - `20260601.beta.Zz9Yy8Xx.md`           (title "Beta")
+/// - `dupe/20260601.beta2.Qq7Ww6Ee.md`     (title "Beta") — makes "beta" ambiguous
+fn seeded_index() -> (tempfile::TempDir, VaultIndex) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    std::fs::create_dir_all(root.join("projects")).unwrap();
+    std::fs::create_dir_all(root.join("dupe")).unwrap();
+    std::fs::write(
+        root.join("projects/20260531.alpha.aB3dE9xZ.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntitle: Alpha Project\ncreated_at: 2026-05-31T12:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("20260601.beta.Zz9Yy8Xx.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000a2\ntitle: Beta\ncreated_at: 2026-06-01T12:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("dupe/20260601.beta2.Qq7Ww6Ee.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000a3\ntitle: Beta\ncreated_at: 2026-06-01T13:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    let vault = Vault::open(&root).unwrap();
+    let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+    (tmp, index)
+}
+
+#[test]
+fn resolves_exact_path() {
+    let (_tmp, index) = seeded_index();
+    let hit = resolve_target(
+        index.connection(),
+        "projects/20260531.alpha.aB3dE9xZ.md",
+        "projects/20260531.alpha.aB3dE9xZ.md",
+    )
+    .unwrap();
+    assert_eq!(hit.as_deref(), Some("projects/20260531.alpha.aB3dE9xZ.md"));
+}
+
+#[test]
+fn resolves_path_without_md_extension() {
+    let (_tmp, index) = seeded_index();
+    let hit = resolve_target(
+        index.connection(),
+        "projects/20260531.alpha.aB3dE9xZ",
+        "projects/20260531.alpha.aB3dE9xZ",
+    )
+    .unwrap();
+    assert_eq!(hit.as_deref(), Some("projects/20260531.alpha.aB3dE9xZ.md"));
+}
+
+#[test]
+fn resolves_unique_canonical_name_case_insensitively() {
+    let (_tmp, index) = seeded_index();
+    let hit = resolve_target(index.connection(), "alpha%20project", "Alpha Project").unwrap();
+    assert_eq!(hit.as_deref(), Some("projects/20260531.alpha.aB3dE9xZ.md"));
+}
+
+#[test]
+fn ambiguous_canonical_name_is_a_miss() {
+    let (_tmp, index) = seeded_index();
+    let hit = resolve_target(index.connection(), "Beta", "Beta").unwrap();
+    assert_eq!(hit, None);
+}
+
+#[test]
+fn resolves_shortid() {
+    let (_tmp, index) = seeded_index();
+    let hit = resolve_target(index.connection(), "aB3dE9xZ", "aB3dE9xZ").unwrap();
+    assert_eq!(hit.as_deref(), Some("projects/20260531.alpha.aB3dE9xZ.md"));
+}
+
+#[test]
+fn unknown_target_is_a_miss() {
+    let (_tmp, index) = seeded_index();
+    let hit = resolve_target(index.connection(), "no-such-page", "no-such-page").unwrap();
+    assert_eq!(hit, None);
+}
