@@ -553,6 +553,23 @@ pub async fn move_folder(
         )));
     }
 
+    // Recheck both endpoints while holding deterministic subtree exclusions.
+    // Descendant page mutations take shared ancestor locks and therefore cannot
+    // race the folder plan or its filesystem/index publication.
+    let _folder_guard = state
+        .mutation_coordinator
+        .lock_paths(&[source_vp.clone(), dest_vp.clone()])
+        .await;
+    if !source_abs.is_dir() {
+        return Err(ApiError::not_found(format!("folder not found: {path}")));
+    }
+    if dest_abs.exists() {
+        return Err(ApiError::conflict(format!(
+            "destination already exists: {}",
+            body.destination
+        )));
+    }
+
     // Plan and execute
     let op = MutationOp::MoveFolder {
         source: path.clone(),

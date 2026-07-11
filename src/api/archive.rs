@@ -17,7 +17,9 @@ use super::error::ApiError;
 use super::events::SyncNotification;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_policy::IndexMutation;
-use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::mutation_coordinator::{
+    CreatePageCommand, MutationCoordinator, MutationGuard, MutationNotification,
+};
 use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
@@ -136,6 +138,14 @@ where
         });
     }
     failures
+}
+async fn lock_archive_page_compensation(
+    coordinator: &MutationCoordinator,
+    page_path: &VaultPath,
+) -> MutationGuard {
+    coordinator
+        .lock_paths(std::slice::from_ref(page_path))
+        .await
 }
 
 fn attach_compensation_failures(
@@ -548,10 +558,8 @@ async fn ingest_archive(
     {
         let mut compensation_failures = Vec::new();
         if error.filesystem_applied() {
-            let _compensation_guard = state
-                .mutation_coordinator
-                .lock_paths(std::slice::from_ref(&vault_path))
-                .await;
+            let _compensation_guard =
+                lock_archive_page_compensation(&state.mutation_coordinator, &vault_path).await;
             let absolute = state.vault.resolve(&vault_path);
             let path = vault_path.as_str().to_string();
             let index_path = vault_path.clone();
@@ -1080,5 +1088,33 @@ mod tests {
 
         assert!(failures.is_empty());
         assert_eq!(actions, vec![PageCompensationAction::DeleteIndex]);
+    }
+
+    #[tokio::test]
+    async fn archive_compensation_waits_for_the_page_mutation_lock() {
+        let coordinator = Arc::new(MutationCoordinator::new());
+        let page_path = VaultPath::new("archives/page.md").unwrap();
+        let mutation_guard = coordinator
+            .lock_paths(std::slice::from_ref(&page_path))
+            .await;
+        let contender = Arc::clone(&coordinator);
+        let contender_path = page_path.clone();
+        let compensation = tokio::spawn(async move {
+            lock_archive_page_compensation(&contender, &contender_path).await
+        });
+        let mut compensation = Box::pin(compensation);
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut compensation)
+                .await
+                .is_err(),
+            "archive compensation entered while a page mutation guard was held"
+        );
+
+        drop(mutation_guard);
+        tokio::time::timeout(std::time::Duration::from_secs(1), &mut compensation)
+            .await
+            .expect("archive compensation remained blocked after mutation completed")
+            .unwrap();
     }
 }

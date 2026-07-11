@@ -3973,3 +3973,41 @@ async fn concurrent_academic_updates_return_one_stale_conflict() {
         1
     );
 }
+
+#[tokio::test]
+async fn folder_move_waits_for_descendant_mutation_guard() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("source")).unwrap();
+            fs::write(
+                root.join("source/page.md"),
+                "---\nid: 01960000-0000-7000-8000-000000000001\ntitle: Page\n---\nbody",
+            )
+            .unwrap();
+        })
+        .build();
+    let (server, _tmp, state) = fixture.into_parts();
+    let descendant = clepsydra::vault::path::VaultPath::new("source/page.md").unwrap();
+    let guard = state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&descendant))
+        .await;
+    let request = server
+        .post("/api/vault/folders-move/source")
+        .json(&serde_json::json!({ "destination": "destination" }));
+    let mut request = Box::pin(async move { request.await });
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut request)
+            .await
+            .is_err(),
+        "folder move completed while a descendant mutation guard was held"
+    );
+
+    drop(guard);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(1), &mut request)
+        .await
+        .expect("folder move remained blocked after descendant guard released");
+    response.assert_status(StatusCode::OK);
+    assert!(state.vault.root().join("destination/page.md").is_file());
+}

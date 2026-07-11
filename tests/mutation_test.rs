@@ -6,9 +6,11 @@ use clepsydra::vault::atomic_file::{
     AtomicPublicationError, atomic_create, atomic_replace, atomic_replace_with,
 };
 use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
-use clepsydra::vault::mutation_coordinator::MutationCoordinator;
+use clepsydra::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator};
+use clepsydra::vault::page::PageMeta;
 use clepsydra::vault::path::VaultPath;
 
 use tempfile::TempDir;
@@ -748,6 +750,87 @@ async fn subtree_lock_blocks_descendant_mutation_but_not_sibling_subtree() {
     );
 
     drop(folder_guard);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_create_finishes_indexing_after_filesystem_publication() {
+    let (tmp, index_vault) = setup_vault(&[]);
+    let db_path = index_vault.root().join(".clepsydra/cancel-shield.db");
+    let mut vault_index = VaultIndex::open(&db_path).unwrap();
+    vault_index.build(&index_vault).unwrap();
+    let index = IndexHandle::spawn(vault_index, index_vault);
+    let mutation_vault = Vault::open(&tmp.path().join("vault")).unwrap();
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let path = VaultPath::new("notes/cancelled-create.md").unwrap();
+    let absolute = mutation_vault.resolve(&path);
+
+    let (index_entered_tx, index_entered_rx) = std::sync::mpsc::channel();
+    let (index_release_tx, index_release_rx) = std::sync::mpsc::channel();
+    let blocking_index = index.clone();
+    let index_blocker = tokio::spawn(async move {
+        blocking_index
+            .with_index(move |_, _| {
+                index_entered_tx.send(()).unwrap();
+                index_release_rx.recv().unwrap();
+            })
+            .await
+    });
+    index_entered_rx.recv().unwrap();
+
+    let mutation_coordinator = Arc::clone(&coordinator);
+    let mutation_index = index.clone();
+    let mutation_path = path.clone();
+    let mutation = tokio::spawn(async move {
+        mutation_coordinator
+            .create_page(
+                &mutation_vault,
+                &mutation_index,
+                CreatePageCommand {
+                    path: mutation_path,
+                    meta: PageMeta::new(),
+                    body: "published".to_string(),
+                },
+                &|_| {},
+            )
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while !absolute.is_file() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("filesystem publication did not complete");
+    mutation.abort();
+    assert!(mutation.await.unwrap_err().is_cancelled());
+    index_release_tx.send(()).unwrap();
+    index_blocker.await.unwrap().unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let query_path = path.as_str().to_string();
+            let indexed = index
+                .with_index(move |vault_index, _| {
+                    vault_index
+                        .connection()
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM pages WHERE path = ?1)",
+                            rusqlite::params![query_path],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .unwrap_or(false)
+                })
+                .await
+                .unwrap();
+            if indexed {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled request left the published file unindexed");
 }
 
 #[test]

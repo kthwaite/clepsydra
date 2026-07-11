@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use thiserror::Error;
@@ -158,6 +159,26 @@ where
         })?
 }
 
+async fn run_shielded_mutation<T, Operation, OperationFuture>(
+    path: PathBuf,
+    operation: Operation,
+) -> Result<T, MutationError>
+where
+    T: Send + 'static,
+    Operation: FnOnce(Arc<AtomicBool>) -> OperationFuture,
+    OperationFuture: Future<Output = Result<T, MutationError>> + Send + 'static,
+{
+    let filesystem_applied = Arc::new(AtomicBool::new(false));
+    let operation_applied = Arc::clone(&filesystem_applied);
+    tokio::spawn(operation(operation_applied))
+        .await
+        .map_err(|error| MutationError::Filesystem {
+            filesystem_applied: filesystem_applied.load(Ordering::Acquire),
+            path,
+            source: io::Error::other(format!("shielded mutation task failed: {error}")),
+        })?
+}
+
 impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
@@ -231,64 +252,75 @@ impl MutationCoordinator {
     ) -> Result<PageMutationResult, MutationError> {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
-        let blocking_path = absolute.clone();
-        let page_path = command.path.clone();
-        let content = write_page_content(&command.meta, &command.body);
-        let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
-            if let Some(parent) = blocking_path.parent() {
-                fs::create_dir_all(parent).map_err(|source| MutationError::Filesystem {
-                    filesystem_applied: false,
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            }
-            match atomic_create(&blocking_path, content.as_bytes()) {
-                Ok(()) => Ok(None),
-                Err(AtomicPublicationError::NotPublished(source))
-                    if source.kind() == io::ErrorKind::AlreadyExists =>
-                {
-                    Err(MutationError::Conflict(format!(
-                        "page already exists: {}",
-                        page_path.as_str()
-                    )))
-                }
-                Err(AtomicPublicationError::NotPublished(source)) => {
-                    Err(MutationError::Filesystem {
-                        filesystem_applied: false,
-                        path: blocking_path,
-                        source,
+        let index = index.clone();
+        let result =
+            run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
+                let blocking_path = absolute.clone();
+                let page_path = command.path.clone();
+                let content = write_page_content(&command.meta, &command.body);
+                let (guard, durability_error) =
+                    run_blocking_fs(absolute.clone(), guard, move || {
+                        if let Some(parent) = blocking_path.parent() {
+                            fs::create_dir_all(parent).map_err(|source| {
+                                MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: parent.to_path_buf(),
+                                    source,
+                                }
+                            })?;
+                        }
+                        match atomic_create(&blocking_path, content.as_bytes()) {
+                            Ok(()) => Ok(None),
+                            Err(AtomicPublicationError::NotPublished(source))
+                                if source.kind() == io::ErrorKind::AlreadyExists =>
+                            {
+                                Err(MutationError::Conflict(format!(
+                                    "page already exists: {}",
+                                    page_path.as_str()
+                                )))
+                            }
+                            Err(AtomicPublicationError::NotPublished(source)) => {
+                                Err(MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path,
+                                    source,
+                                })
+                            }
+                            Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
+                                Ok(Some(source))
+                            }
+                        }
                     })
+                    .await?;
+                filesystem_applied.store(true, Ordering::Release);
+                let _guard = guard;
+                index
+                    .apply_mutation(command.path.clone(), IndexMutation::Created)
+                    .await
+                    .map_err(|source| MutationError::Index {
+                        filesystem_applied: true,
+                        source,
+                    })?;
+                if let Some(source) = durability_error {
+                    return Err(MutationError::Filesystem {
+                        filesystem_applied: true,
+                        path: absolute,
+                        source,
+                    });
                 }
-                Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
-            }
-        })
-        .await?;
-        let _guard = guard;
-
-        index
-            .apply_mutation(command.path.clone(), IndexMutation::Created)
-            .await
-            .map_err(|source| MutationError::Index {
-                filesystem_applied: true,
-                source,
-            })?;
-        if let Some(source) = durability_error {
-            return Err(MutationError::Filesystem {
-                filesystem_applied: true,
-                path: absolute,
-                source,
-            });
-        }
+                Ok(PageMutationResult {
+                    path: command.path,
+                    meta: command.meta,
+                    body: command.body,
+                })
+            })
+            .await?;
 
         notify(MutationNotification {
-            upserted: vec![command.path.as_str().to_string()],
+            upserted: vec![result.path.as_str().to_string()],
             removed: Vec::new(),
         });
-        Ok(PageMutationResult {
-            path: command.path,
-            meta: command.meta,
-            body: command.body,
-        })
+        Ok(result)
     }
 
     pub async fn replace_page_content(
@@ -300,61 +332,64 @@ impl MutationCoordinator {
     ) -> Result<VaultPath, MutationError> {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
-        let blocking_path = absolute.clone();
-        let expected_content = command.expected_content;
-        let replacement_content = command.content;
-        let page_path = command.path.clone();
-        let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
-            let current = match fs::read_to_string(&blocking_path) {
-                Ok(current) => current,
-                Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                    return Err(MutationError::NotFound(page_path));
+        let index = index.clone();
+        let path = run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
+            let blocking_path = absolute.clone();
+            let page_path = command.path.clone();
+            let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
+                let current = match fs::read_to_string(&blocking_path) {
+                    Ok(current) => current,
+                    Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                        return Err(MutationError::NotFound(page_path));
+                    }
+                    Err(source) => {
+                        return Err(MutationError::Filesystem {
+                            filesystem_applied: false,
+                            path: blocking_path,
+                            source,
+                        });
+                    }
+                };
+                if current != command.expected_content {
+                    return Err(MutationError::Stale(page_path));
                 }
-                Err(source) => {
-                    return Err(MutationError::Filesystem {
-                        filesystem_applied: false,
-                        path: blocking_path,
-                        source,
-                    });
+                match atomic_replace(&blocking_path, command.content.as_bytes()) {
+                    Ok(()) => Ok(None),
+                    Err(AtomicPublicationError::NotPublished(source)) => {
+                        Err(MutationError::Filesystem {
+                            filesystem_applied: false,
+                            path: blocking_path,
+                            source,
+                        })
+                    }
+                    Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
                 }
-            };
-            if current != expected_content {
-                return Err(MutationError::Stale(page_path));
+            })
+            .await?;
+            filesystem_applied.store(true, Ordering::Release);
+            let _guard = guard;
+            index
+                .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
+                .await
+                .map_err(|source| MutationError::Index {
+                    filesystem_applied: true,
+                    source,
+                })?;
+            if let Some(source) = durability_error {
+                return Err(MutationError::Filesystem {
+                    filesystem_applied: true,
+                    path: absolute,
+                    source,
+                });
             }
-            match atomic_replace(&blocking_path, replacement_content.as_bytes()) {
-                Ok(()) => Ok(None),
-                Err(AtomicPublicationError::NotPublished(source)) => {
-                    Err(MutationError::Filesystem {
-                        filesystem_applied: false,
-                        path: blocking_path,
-                        source,
-                    })
-                }
-                Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
-            }
+            Ok(command.path)
         })
         .await?;
-        let _guard = guard;
-
-        index
-            .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
-            .await
-            .map_err(|source| MutationError::Index {
-                filesystem_applied: true,
-                source,
-            })?;
-        if let Some(source) = durability_error {
-            return Err(MutationError::Filesystem {
-                filesystem_applied: true,
-                path: absolute,
-                source,
-            });
-        }
         notify(MutationNotification {
-            upserted: vec![command.path.as_str().to_string()],
+            upserted: vec![path.as_str().to_string()],
             removed: Vec::new(),
         });
-        Ok(command.path)
+        Ok(path)
     }
 
     pub async fn update_page(
@@ -406,123 +441,133 @@ impl MutationCoordinator {
         }
         let guard = self.lock_paths(&locked_paths).await;
         let absolute = vault.resolve(&command.path);
-        let blocking_path = absolute.clone();
-        let page_path = command.path.clone();
-        let expected_content = command.expected_content.clone();
-        let content = write_page_content(&command.meta, &command.body);
         let destination_check = projected_path
             .as_ref()
             .map(|destination| (destination.clone(), vault.resolve(destination)));
-        let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
-            let current = match fs::read_to_string(&blocking_path) {
-                Ok(current) => current,
-                Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                    return Err(MutationError::NotFound(page_path));
-                }
-                Err(source) => {
+        let original_path = command.path.clone();
+        let notification_source = original_path.clone();
+        let index = index.clone();
+        let result =
+            run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
+                let blocking_path = absolute.clone();
+                let page_path = command.path.clone();
+                let expected_content = command.expected_content.clone();
+                let content = write_page_content(&command.meta, &command.body);
+                let (guard, durability_error) =
+                    run_blocking_fs(absolute.clone(), guard, move || {
+                        let current = match fs::read_to_string(&blocking_path) {
+                            Ok(current) => current,
+                            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                                return Err(MutationError::NotFound(page_path));
+                            }
+                            Err(source) => {
+                                return Err(MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path,
+                                    source,
+                                });
+                            }
+                        };
+                        if current != expected_content {
+                            return Err(MutationError::Stale(page_path));
+                        }
+                        if let Some((destination, destination_absolute)) = destination_check
+                            && destination_absolute.exists()
+                        {
+                            return Err(MutationError::Conflict(format!(
+                                "destination already exists: {}",
+                                destination.as_str()
+                            )));
+                        }
+                        match atomic_replace(&blocking_path, content.as_bytes()) {
+                            Ok(()) => Ok(None),
+                            Err(AtomicPublicationError::NotPublished(source)) => {
+                                Err(MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path,
+                                    source,
+                                })
+                            }
+                            Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
+                                Ok(Some(source))
+                            }
+                        }
+                    })
+                    .await?;
+                filesystem_applied.store(true, Ordering::Release);
+                let _guard = guard;
+                index
+                    .apply_mutation(original_path.clone(), IndexMutation::ContentChanged)
+                    .await
+                    .map_err(|source| MutationError::Index {
+                        filesystem_applied: true,
+                        source,
+                    })?;
+
+                let final_path = if let Some(destination) = projected_path {
+                    let source = original_path.as_str().to_string();
+                    let destination_string = destination.as_str().to_string();
+                    let moved = index
+                        .with_index(move |vault_index, index_vault| {
+                            super::reconcile::move_page_to(
+                                index_vault,
+                                vault_index,
+                                &source,
+                                &destination_string,
+                                &hooks,
+                            )
+                        })
+                        .await
+                        .map_err(|source| MutationError::Reconcile {
+                            filesystem_applied: true,
+                            source,
+                        })?
+                        .map_err(|source| match source {
+                            IndexError::Other(message) => MutationError::Hook {
+                                filesystem_applied: true,
+                                message,
+                            },
+                            source => MutationError::Reconcile {
+                                filesystem_applied: true,
+                                source,
+                            },
+                        })?;
+                    let moved = moved.ok_or_else(|| {
+                        MutationError::Conflict(format!(
+                            "destination became unavailable: {}",
+                            destination.as_str()
+                        ))
+                    })?;
+                    VaultPath::new(&moved)
+                        .map_err(|error| MutationError::InvalidInput(error.to_string()))?
+                } else {
+                    original_path
+                };
+
+                if let Some(source) = durability_error {
                     return Err(MutationError::Filesystem {
-                        filesystem_applied: false,
-                        path: blocking_path,
+                        filesystem_applied: true,
+                        path: absolute,
                         source,
                     });
                 }
-            };
-            if current != expected_content {
-                return Err(MutationError::Stale(page_path));
-            }
-            if let Some((destination, destination_absolute)) = destination_check
-                && destination_absolute.exists()
-            {
-                return Err(MutationError::Conflict(format!(
-                    "destination already exists: {}",
-                    destination.as_str()
-                )));
-            }
-            match atomic_replace(&blocking_path, content.as_bytes()) {
-                Ok(()) => Ok(None),
-                Err(AtomicPublicationError::NotPublished(source)) => {
-                    Err(MutationError::Filesystem {
-                        filesystem_applied: false,
-                        path: blocking_path,
-                        source,
-                    })
-                }
-                Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
-            }
-        })
-        .await?;
-        let _guard = guard;
-
-        index
-            .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
-            .await
-            .map_err(|source| MutationError::Index {
-                filesystem_applied: true,
-                source,
-            })?;
-
-        let final_path = if let Some(destination) = projected_path {
-            let source = command.path.as_str().to_string();
-            let destination_string = destination.as_str().to_string();
-            let hooks = Arc::clone(&hooks);
-            let moved = index
-                .with_index(move |vault_index, index_vault| {
-                    super::reconcile::move_page_to(
-                        index_vault,
-                        vault_index,
-                        &source,
-                        &destination_string,
-                        &hooks,
-                    )
+                Ok(PageMutationResult {
+                    path: final_path,
+                    meta: command.meta,
+                    body: command.body,
                 })
-                .await
-                .map_err(|source| MutationError::Reconcile {
-                    filesystem_applied: true,
-                    source,
-                })?
-                .map_err(|source| match source {
-                    IndexError::Other(message) => MutationError::Hook {
-                        filesystem_applied: true,
-                        message,
-                    },
-                    source => MutationError::Reconcile {
-                        filesystem_applied: true,
-                        source,
-                    },
-                })?;
-            let moved = moved.ok_or_else(|| {
-                MutationError::Conflict(format!(
-                    "destination became unavailable: {}",
-                    destination.as_str()
-                ))
-            })?;
-            VaultPath::new(&moved)
-                .map_err(|error| MutationError::InvalidInput(error.to_string()))?
-        } else {
-            command.path.clone()
-        };
-
-        if let Some(source) = durability_error {
-            return Err(MutationError::Filesystem {
-                filesystem_applied: true,
-                path: absolute,
-                source,
-            });
-        }
+            })
+            .await?;
 
         notify(MutationNotification {
-            upserted: vec![final_path.as_str().to_string()],
-            removed: if final_path != command.path {
-                vec![command.path.as_str().to_string()]
+            upserted: vec![result.path.as_str().to_string()],
+            removed: if result.path != notification_source {
+                vec![notification_source.as_str().to_string()]
             } else {
                 Vec::new()
             },
         });
-        Ok(PageMutationResult {
-            path: final_path,
-            meta: command.meta,
-            body: command.body,
-        })
+        Ok(result)
     }
 
     pub async fn delete_folder(
@@ -561,77 +606,83 @@ impl MutationCoordinator {
 
         let absolute = vault.resolve(&folder);
         let vault_root = vault.root().to_path_buf();
-        let blocking_path = absolute.clone();
-        let folder_for_error = folder.clone();
-        let (guard, hook_targets) = run_blocking_fs(absolute.clone(), guard, move || {
-            if !blocking_path.is_dir() {
-                return Err(MutationError::NotFound(folder_for_error));
-            }
-            let mut hook_targets = Vec::new();
-            if recursive {
-                for entry in walkdir::WalkDir::new(&blocking_path)
-                    .into_iter()
-                    .filter_map(Result::ok)
-                    .filter(|entry| entry.file_type().is_file())
-                {
-                    if entry.path().extension().and_then(|value| value.to_str()) != Some("md") {
-                        continue;
-                    }
-                    let Ok(relative) = entry.path().strip_prefix(&vault_root) else {
-                        continue;
-                    };
-                    let relative = relative.to_string_lossy().replace('\\', "/");
-                    let Ok(path) = VaultPath::new(&relative) else {
-                        continue;
-                    };
-                    if let Ok(page) = Page::from_file(entry.path(), path.clone()) {
-                        hook_targets.push((path, page.meta));
-                    }
+        let index = index.clone();
+        run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
+            let blocking_path = absolute.clone();
+            let folder_for_error = folder.clone();
+            let (guard, hook_targets) = run_blocking_fs(absolute.clone(), guard, move || {
+                if !blocking_path.is_dir() {
+                    return Err(MutationError::NotFound(folder_for_error));
                 }
-                fs::remove_dir_all(&blocking_path).map_err(|source| MutationError::Filesystem {
-                    filesystem_applied: false,
-                    path: blocking_path,
-                    source,
-                })?;
-            } else {
-                fs::remove_dir(&blocking_path).map_err(|source| {
-                    if source.kind() == io::ErrorKind::DirectoryNotEmpty
-                        || matches!(source.raw_os_error(), Some(66) | Some(39))
-                        || source.to_string().contains("not empty")
-                        || source.to_string().contains("Directory not empty")
+                let mut hook_targets = Vec::new();
+                if recursive {
+                    for entry in walkdir::WalkDir::new(&blocking_path)
+                        .into_iter()
+                        .filter_map(Result::ok)
+                        .filter(|entry| entry.file_type().is_file())
                     {
-                        MutationError::Conflict(
-                            "folder is not empty; use recursive=true to delete".to_string(),
-                        )
-                    } else {
+                        if entry.path().extension().and_then(|value| value.to_str()) != Some("md") {
+                            continue;
+                        }
+                        let Ok(relative) = entry.path().strip_prefix(&vault_root) else {
+                            continue;
+                        };
+                        let relative = relative.to_string_lossy().replace('\\', "/");
+                        let Ok(path) = VaultPath::new(&relative) else {
+                            continue;
+                        };
+                        if let Ok(page) = Page::from_file(entry.path(), path.clone()) {
+                            hook_targets.push((path, page.meta));
+                        }
+                    }
+                    fs::remove_dir_all(&blocking_path).map_err(|source| {
                         MutationError::Filesystem {
                             filesystem_applied: false,
                             path: blocking_path,
                             source,
                         }
-                    }
-                })?;
+                    })?;
+                } else {
+                    fs::remove_dir(&blocking_path).map_err(|source| {
+                        if source.kind() == io::ErrorKind::DirectoryNotEmpty
+                            || matches!(source.raw_os_error(), Some(66) | Some(39))
+                            || source.to_string().contains("not empty")
+                            || source.to_string().contains("Directory not empty")
+                        {
+                            MutationError::Conflict(
+                                "folder is not empty; use recursive=true to delete".to_string(),
+                            )
+                        } else {
+                            MutationError::Filesystem {
+                                filesystem_applied: false,
+                                path: blocking_path,
+                                source,
+                            }
+                        }
+                    })?;
+                }
+                Ok(hook_targets)
+            })
+            .await?;
+            filesystem_applied.store(true, Ordering::Release);
+            let _guard = guard;
+            let mut removed = Vec::with_capacity(indexed_paths.len());
+            for path in indexed_paths {
+                index
+                    .apply_mutation(path.clone(), IndexMutation::Deleted)
+                    .await
+                    .map_err(|source| MutationError::Index {
+                        filesystem_applied: true,
+                        source,
+                    })?;
+                removed.push(path.as_str().to_string());
             }
-            Ok(hook_targets)
+            Ok(DeleteFolderResult {
+                removed,
+                hook_targets,
+            })
         })
-        .await?;
-        let _guard = guard;
-
-        let mut removed = Vec::with_capacity(indexed_paths.len());
-        for path in indexed_paths {
-            index
-                .apply_mutation(path.clone(), IndexMutation::Deleted)
-                .await
-                .map_err(|source| MutationError::Index {
-                    filesystem_applied: true,
-                    source,
-                })?;
-            removed.push(path.as_str().to_string());
-        }
-        Ok(DeleteFolderResult {
-            removed,
-            hook_targets,
-        })
+        .await
     }
 
     /// Return the number of retained lock identities.
@@ -722,5 +773,46 @@ mod tests {
             .unwrap();
 
         assert_ne!(filesystem_thread, runtime_thread);
+    }
+
+    #[tokio::test]
+    async fn cancelling_post_publish_wait_keeps_path_locked_until_index_phase_finishes() {
+        let coordinator = Arc::new(MutationCoordinator::new());
+        let path = VaultPath::new("notes/published.md").unwrap();
+        let guard = coordinator.lock_paths(std::slice::from_ref(&path)).await;
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let mutation = tokio::spawn(async move {
+            run_shielded_mutation(PathBuf::from("published.md"), move |_| async move {
+                let _guard = guard;
+                let _ = started_tx.send(());
+                let _ = release_rx.await;
+                Ok(())
+            })
+            .await
+        });
+
+        started_rx.await.unwrap();
+        mutation.abort();
+        let contender = Arc::clone(&coordinator);
+        let contender_path = path.clone();
+        let blocked = tokio::spawn(async move {
+            contender
+                .lock_paths(std::slice::from_ref(&contender_path))
+                .await
+        });
+        let mut blocked = Box::pin(blocked);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut blocked)
+                .await
+                .is_err(),
+            "cancellation released the path lock while index work was still running"
+        );
+
+        let _ = release_tx.send(());
+        tokio::time::timeout(std::time::Duration::from_secs(1), &mut blocked)
+            .await
+            .expect("path lock did not release after index work finished")
+            .unwrap();
     }
 }

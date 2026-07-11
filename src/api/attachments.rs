@@ -2,8 +2,8 @@
 //! Attachments are files stored in a designated folder within the vault, and can be
 //! uploaded, listed, retrieved, and deleted via the API.
 use std::io::{self, ErrorKind};
-use std::path::Path as FsPath;
-use std::sync::Arc;
+use std::path::{Path as FsPath, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::Router;
@@ -62,6 +62,98 @@ async fn require_attachment_file(abs_path: &FsPath, path: &str) -> Result<(), Ap
     } else {
         Err(ApiError::not_found(format!("attachment not found: {path}")))
     }
+}
+
+#[derive(Default)]
+struct PendingTemporaryState {
+    cancelled: bool,
+    temporary: Option<tempfile::NamedTempFile>,
+    creation_thread: Option<std::thread::ThreadId>,
+}
+
+struct PendingTemporaryCreation {
+    state: Arc<Mutex<PendingTemporaryState>>,
+    completed: std::sync::mpsc::Receiver<()>,
+    armed: bool,
+}
+
+impl Drop for PendingTemporaryCreation {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.cancelled = true;
+            drop(state.temporary.take());
+        }
+        let _ = self.completed.recv();
+        if let Ok(mut state) = self.state.lock() {
+            drop(state.temporary.take());
+        }
+    }
+}
+
+async fn create_upload_temporary_file(
+    parent: PathBuf,
+) -> Result<(tempfile::NamedTempFile, std::thread::ThreadId), ApiError> {
+    let state = Arc::new(Mutex::new(PendingTemporaryState::default()));
+    let worker_state = Arc::clone(&state);
+    let (completed_tx, completed_rx) = std::sync::mpsc::channel();
+    let mut pending = PendingTemporaryCreation {
+        state,
+        completed: completed_rx,
+        armed: true,
+    };
+    tokio::task::spawn_blocking(move || {
+        let result = (|| {
+            let temporary = tempfile::Builder::new()
+                .prefix(".upload-")
+                .rand_bytes(32)
+                .tempfile_in(parent)?;
+            let mut creation = worker_state
+                .lock()
+                .map_err(|_| io::Error::other("temporary attachment state poisoned"))?;
+            if creation.cancelled {
+                drop(creation);
+                drop(temporary);
+                return Err(io::Error::new(
+                    ErrorKind::Interrupted,
+                    "attachment upload cancelled during temporary file creation",
+                ));
+            }
+            creation.creation_thread = Some(std::thread::current().id());
+            creation.temporary = Some(temporary);
+            Ok(())
+        })();
+        let _ = completed_tx.send(());
+        result
+    })
+    .await
+    .map_err(|error| {
+        ApiError::internal(format!(
+            "temporary attachment creation task failed: {error}"
+        ))
+    })?
+    .map_err(|error| {
+        ApiError::internal(format!("failed to create temporary attachment: {error}"))
+    })?;
+
+    let (temporary, creation_thread) = {
+        let mut state = pending
+            .state
+            .lock()
+            .map_err(|_| ApiError::internal("temporary attachment state poisoned".to_string()))?;
+        (
+            state.temporary.take().ok_or_else(|| {
+                ApiError::internal("temporary attachment task returned no file".to_string())
+            })?,
+            state.creation_thread.take().ok_or_else(|| {
+                ApiError::internal("temporary attachment task returned no thread".to_string())
+            })?,
+        )
+    };
+    pending.armed = false;
+    Ok((temporary, creation_thread))
 }
 
 async fn run_blocking_attachment_scan<T>(
@@ -159,11 +251,7 @@ pub async fn upload_attachment(
         .await
         .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
 
-    let temporary = tempfile::Builder::new()
-        .prefix(".upload-")
-        .rand_bytes(32)
-        .tempfile_in(parent)
-        .map_err(|e| ApiError::internal(format!("failed to create temporary attachment: {e}")))?;
+    let (temporary, _creation_thread) = create_upload_temporary_file(parent.to_path_buf()).await?;
     let (temporary_file, temporary_path) = temporary.into_parts();
     let mut temporary_file = tokio::fs::File::from_std(temporary_file);
 
@@ -316,5 +404,18 @@ mod tests {
             .unwrap();
 
         assert_ne!(scan_thread, runtime_thread);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn attachment_temporary_creation_runs_off_the_tokio_worker() {
+        let parent = tempfile::tempdir().unwrap();
+        let runtime_thread = std::thread::current().id();
+        let (temporary, creation_thread) =
+            create_upload_temporary_file(parent.path().to_path_buf())
+                .await
+                .unwrap();
+
+        assert_ne!(creation_thread, runtime_thread);
+        drop(temporary);
     }
 }
