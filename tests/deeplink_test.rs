@@ -32,8 +32,14 @@ fn clepsydra_unknown_verb_is_error() {
 
 #[test]
 fn clepsydra_empty_target_is_error() {
-    assert_eq!(parse("clepsydra://page/").unwrap_err(), ParseError::MissingTarget);
-    assert_eq!(parse("clepsydra://page").unwrap_err(), ParseError::MissingTarget);
+    assert_eq!(
+        parse("clepsydra://page/").unwrap_err(),
+        ParseError::MissingTarget
+    );
+    assert_eq!(
+        parse("clepsydra://page").unwrap_err(),
+        ParseError::MissingTarget
+    );
 }
 
 #[test]
@@ -78,8 +84,14 @@ fn obsidian_absolute_path_form_is_unsupported() {
 
 #[test]
 fn other_schemes_are_rejected() {
-    assert_eq!(parse("https://example.com").unwrap_err(), ParseError::UnsupportedScheme);
-    assert_eq!(parse("not a url").unwrap_err(), ParseError::Malformed("missing ://".to_string()));
+    assert_eq!(
+        parse("https://example.com").unwrap_err(),
+        ParseError::UnsupportedScheme
+    );
+    assert_eq!(
+        parse("not a url").unwrap_err(),
+        ParseError::Malformed("missing ://".to_string())
+    );
 }
 
 #[test]

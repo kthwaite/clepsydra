@@ -40,10 +40,15 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedScheme => write!(f, "unsupported scheme (expected clepsydra:// or obsidian://)"),
+            Self::UnsupportedScheme => write!(
+                f,
+                "unsupported scheme (expected clepsydra:// or obsidian://)"
+            ),
             Self::UnsupportedAction(a) => write!(f, "unsupported action: {a}"),
             Self::MissingTarget => write!(f, "link has no target"),
-            Self::MissingFileParam => write!(f, "obsidian://open link is missing the file= parameter"),
+            Self::MissingFileParam => {
+                write!(f, "obsidian://open link is missing the file= parameter")
+            }
             Self::Malformed(m) => write!(f, "malformed link: {m}"),
         }
     }
@@ -108,9 +113,7 @@ pub fn parse(url: &str) -> Result<ParsedLink, ParseError> {
                     vault,
                 })
             } else if let Some(rest) = rest.strip_prefix("vault/") {
-                let (vault, target) = rest
-                    .split_once('/')
-                    .ok_or(ParseError::MissingTarget)?;
+                let (vault, target) = rest.split_once('/').ok_or(ParseError::MissingTarget)?;
                 if target.is_empty() {
                     return Err(ParseError::MissingTarget);
                 }
