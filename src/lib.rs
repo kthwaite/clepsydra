@@ -3,6 +3,7 @@ pub mod app_config;
 pub mod deeplink;
 pub mod doctor;
 pub mod lsp;
+pub mod macos_url_handler;
 pub mod vault;
 
 use std::path::{Path, PathBuf};

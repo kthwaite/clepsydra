@@ -100,6 +100,15 @@ enum Commands {
         dry_run: bool,
     },
     #[command(
+        about = "Register the clepsydra:// URL scheme with macOS",
+        long_about = "Build and install a small URL-handler app at ~/Applications/Clepsydra URL Handler.app that routes clepsydra:// links (and optionally obsidian:// links) to this clepsydra binary via `open-url`.\n\nmacOS only.",
+        after_help = "Examples:\n  clepsydra register-url\n  clepsydra register-url --obsidian   # also claim obsidian:// (competes with Obsidian if installed)"
+    )]
+    RegisterUrl {
+        #[arg(long, help = "Also register the obsidian:// scheme (compat mode)")]
+        obsidian: bool,
+    },
+    #[command(
         about = "Full-text search the vault index",
         long_about = "Search the vault's full-text index and print matches ranked by relevance.\n\nThe query is treated as a literal phrase by default; pass --raw to use FTS5 operator syntax (phrases, AND/OR, NEAR, prefix *).",
         after_help = "Examples:\n  clepsydra grep \"spaced repetition\"\n  clepsydra grep chloroplast --limit 5\n  clepsydra grep \"foo OR bar\" --raw"
@@ -193,6 +202,21 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 println!("{target}");
             } else {
                 std::process::Command::new("open").arg(&target).status()?;
+            }
+            Ok(0)
+        }
+        Commands::RegisterUrl { obsidian } => {
+            if !cfg!(target_os = "macos") {
+                return Err("register-url is only supported on macOS".into());
+            }
+            let binary = std::env::current_exe()?;
+            let app = clepsydra::macos_url_handler::install(&binary, obsidian)?;
+            println!("Installed URL handler at {}", app.display());
+            println!("Registered scheme: clepsydra://");
+            if obsidian {
+                println!(
+                    "Registered scheme: obsidian:// (note: competes with Obsidian.app if installed)"
+                );
             }
             Ok(0)
         }
@@ -448,5 +472,11 @@ mod cli_tests {
     #[tokio::test]
     async fn open_url_requires_a_url_argument() {
         assert!(Cli::try_parse_from(["clepsydra", "open-url"]).is_err());
+    }
+
+    #[test]
+    fn register_url_parses_with_and_without_obsidian_flag() {
+        assert!(Cli::try_parse_from(["clepsydra", "register-url"]).is_ok());
+        assert!(Cli::try_parse_from(["clepsydra", "register-url", "--obsidian"]).is_ok());
     }
 }
