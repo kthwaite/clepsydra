@@ -28,12 +28,28 @@ use crate::vault::Vault;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_handle::IndexHandle;
 
+/// Time source for date-sensitive API behavior.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> chrono::DateTime<chrono::Utc>;
+}
+
+/// Production UTC wall clock.
+#[derive(Debug, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now()
+    }
+}
+
 /// Shared application state threaded through all API handlers.
 pub struct AppState {
     /// Monotonic instant captured when this state is built at startup. The
     /// `/uptime` endpoint reports `started_at.elapsed()`, giving true server
     /// uptime independent of any client's tab lifetime.
     pub started_at: std::time::Instant,
+    pub clock: Arc<dyn Clock>,
     pub vault: Vault,
     pub index: IndexHandle,
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,

@@ -49,6 +49,7 @@ fn setup_app() -> (Router, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -941,6 +942,7 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -1181,6 +1183,7 @@ fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -1695,6 +1698,7 @@ async fn sse_events_endpoint_returns_stream() {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -1838,6 +1842,7 @@ async fn create_page_emits_sync_notification() {
     let mut rx = change_tx.subscribe();
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),

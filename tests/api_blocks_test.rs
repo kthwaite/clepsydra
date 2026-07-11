@@ -48,6 +48,7 @@ fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -69,16 +70,28 @@ fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
     (server, tmp, state)
 }
 
+async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {
+    tokio::time::timeout(std::time::Duration::from_secs(5), changes.recv())
+        .await
+        .expect("timed out waiting for index-change notification")
+        .expect("index-change notification channel closed")
+}
+
 #[tokio::test]
 async fn mutation_assign_id_emits_coordinator_notification() {
     let (server, _dir, state) = setup_server_with_state(|root| {
         std::fs::write(
+            root.join("target.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000090\ntitle: Target\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
             root.join("page.md"),
-            "---\ntitle: Test\n---\n- Notify this block\n",
+            "---\ntitle: Test\n---\n- Notify [[Target]] this block\n",
         )
         .unwrap();
     });
-    let search_response = server.get("/api/vault/blocks/search?q=Notify%20this").await;
+    let search_response = server.get("/api/vault/blocks/search?q=Notify").await;
     let blocks: Vec<serde_json::Value> = search_response.json();
     let span_start = blocks[0]["span_start"].as_i64().unwrap();
     let mut changes = state.change_tx.subscribe();
@@ -92,9 +105,25 @@ async fn mutation_assign_id_emits_coordinator_notification() {
         .await
         .assert_status_ok();
 
-    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
     assert_eq!(upserted, vec!["page.md"]);
     assert!(removed.is_empty());
+
+    let outlinks: Vec<serde_json::Value> =
+        server.get("/api/vault/index/outlinks/page.md").await.json();
+    assert_eq!(outlinks.len(), 1);
+    assert_eq!(outlinks[0]["target_raw"], "Target");
+    assert_eq!(outlinks[0]["target_path"], "target.md");
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "page.md");
+    assert!(
+        changes.try_recv().is_err(),
+        "block assignment must emit exactly one update notification"
+    );
 }
 
 #[tokio::test]

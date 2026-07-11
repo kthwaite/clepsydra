@@ -4,11 +4,11 @@ use std::sync::Arc;
 use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 
 use clepsydra::api::events::SyncNotification;
-use clepsydra::api::{AppState, api_router};
+use clepsydra::api::{AppState, Clock, api_router};
 use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::cas::ContentStore;
@@ -20,6 +20,21 @@ use tempfile::TempDir;
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
     Arc::new(vec![Box::new(AcademicMoveHook)])
+}
+
+const FIXED_NOW: &str = "2042-05-17T23:59:59Z";
+
+#[derive(Debug)]
+struct FixedClock(DateTime<Utc>);
+
+impl Clock for FixedClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.0
+    }
+}
+
+fn fixed_now() -> DateTime<Utc> {
+    FIXED_NOW.parse().unwrap()
 }
 
 fn setup_server() -> (TestServer, TempDir) {
@@ -56,6 +71,7 @@ fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(FixedClock(fixed_now())),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -77,8 +93,35 @@ fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
     (server, tmp, state)
 }
 
+async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {
+    tokio::time::timeout(std::time::Duration::from_secs(5), changes.recv())
+        .await
+        .expect("timed out waiting for index-change notification")
+        .expect("index-change notification channel closed")
+}
+
 fn today_str() -> String {
-    Utc::now().format("%Y-%m-%d").to_string()
+    fixed_now().format("%Y-%m-%d").to_string()
+}
+
+#[tokio::test]
+async fn mutation_creation_emits_exact_coordinator_notification() {
+    let journal_path = format!("journals/{}.md", today_str());
+    let (server, _tmp, state) = setup_server_with_state(|_| {});
+    let mut changes = state.change_tx.subscribe();
+
+    server
+        .get("/api/vault/journal/today")
+        .await
+        .assert_status_ok();
+
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec![journal_path]);
+    assert!(removed.is_empty());
+    assert!(
+        changes.try_recv().is_err(),
+        "journal creation must emit exactly one notification"
+    );
 }
 
 #[tokio::test]
@@ -95,18 +138,44 @@ async fn mutation_capture_emits_coordinator_notification() {
             ),
         )
         .unwrap();
+        std::fs::write(
+            root.join("target.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000098\ntitle: Target\n---\n",
+        )
+        .unwrap();
     });
     let mut changes = state.change_tx.subscribe();
 
     server
         .post("/api/vault/journal/today/capture")
-        .json(&serde_json::json!({ "content": "policy mutation" }))
+        .json(&serde_json::json!({ "content": "[[Target]] policy mutation" }))
         .await
         .assert_status_ok();
 
-    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
-    assert_eq!(upserted, vec![journal_path]);
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec![journal_path.clone()]);
     assert!(removed.is_empty());
+
+    let outlinks: Vec<serde_json::Value> = server
+        .get(&format!("/api/vault/index/outlinks/{journal_path}"))
+        .await
+        .json();
+    let target_link = outlinks
+        .iter()
+        .find(|link| link["target_raw"] == "Target")
+        .expect("captured wikilink must be indexed");
+    assert_eq!(target_link["target_path"], "target.md");
+
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], journal_path);
+    assert!(
+        changes.try_recv().is_err(),
+        "journal capture must emit exactly one update notification"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +407,7 @@ async fn range_rejects_invalid_dates() {
 #[tokio::test]
 async fn today_journal_includes_carried_forward_tasks() {
     let yesterday = {
-        let today = Utc::now().date_naive();
+        let today = fixed_now().date_naive();
         (today - chrono::Duration::days(1))
             .format("%Y-%m-%d")
             .to_string()

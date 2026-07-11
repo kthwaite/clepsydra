@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, http::StatusCode};
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +104,9 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
 
     // Build template
     let mut meta = PageMeta::new();
+    let now = state.clock.now();
+    meta.created_at = Some(now);
+    meta.updated_at = Some(now);
     meta.title = Some(date.to_string());
     meta.tags = vec!["journal".to_string()];
 
@@ -146,7 +149,7 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
 async fn get_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<JournalTodayResponse>, ApiError> {
-    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let date = state.clock.now().format("%Y-%m-%d").to_string();
     let (vault_path, _created) = ensure_journal(&state, &date).await?;
 
     let abs_path = state.vault.resolve(&vault_path);
@@ -321,7 +324,7 @@ async fn get_recent(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RecentQuery>,
 ) -> Result<Json<Vec<JournalSummary>>, ApiError> {
-    let today = Utc::now().date_naive();
+    let today = state.clock.now().date_naive();
     let from = today - chrono::Duration::days(i64::from(query.days));
 
     let from_str = from.format("%Y-%m-%d").to_string();
@@ -363,7 +366,8 @@ async fn capture_today(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CaptureRequest>,
 ) -> Result<Response, ApiError> {
-    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let now = state.clock.now();
+    let date = now.format("%Y-%m-%d").to_string();
     let (vault_path, _created) = ensure_journal(&state, &date).await?;
 
     let abs_path = state.vault.resolve(&vault_path);
@@ -383,7 +387,7 @@ async fn capture_today(
     new_body.push('\n');
 
     let mut meta = page.meta;
-    meta.updated_at = Some(Utc::now());
+    meta.updated_at = Some(now);
     let notify = |notification: MutationNotification| {
         let _ = state.change_tx.send(SyncNotification::IndexChanged {
             upserted: notification.upserted,

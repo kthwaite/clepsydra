@@ -45,6 +45,7 @@ fn setup_server() -> (TestServer, TempDir) {
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),

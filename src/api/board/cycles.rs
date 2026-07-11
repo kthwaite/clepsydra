@@ -300,8 +300,9 @@ pub(crate) async fn patch_cycle(
             .index
             .with_index(move |index, _vault| {
                 let conn = index.connection();
-                let mut stmt =
-                    conn.prepare("SELECT path, meta_json FROM pages WHERE kind = 'TASK'")?;
+                let mut stmt = conn.prepare(
+                    "SELECT path, meta_json FROM pages WHERE kind = 'TASK' ORDER BY path",
+                )?;
                 let rows: Vec<(String, String)> = stmt
                     .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                     .collect::<Result<_, _>>()?;

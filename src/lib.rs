@@ -402,6 +402,7 @@ pub(crate) async fn build_app_state(
 
     Ok(Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(crate::api::SystemClock),
         vault,
         index: index_handle,
         cas: cas_arc,

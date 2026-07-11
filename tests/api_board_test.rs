@@ -46,6 +46,7 @@ fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
     let (change_tx, _) = broadcast::channel(64);
     let state = Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        clock: Arc::new(clepsydra::api::SystemClock),
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
@@ -67,34 +68,127 @@ fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
     (server, tmp, state)
 }
 
+async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {
+    tokio::time::timeout(std::time::Duration::from_secs(5), changes.recv())
+        .await
+        .expect("timed out waiting for index-change notification")
+        .expect("index-change notification channel closed")
+}
+
 #[tokio::test]
-async fn mutation_creates_emit_coordinator_notifications() {
-    let (server, _tmp, state) = setup_server_with_state(|_| {});
+async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
+    let (server, _tmp, state) = setup_server_with_state(|root| {
+        std::fs::write(
+            root.join("target.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000090\ntitle: Target\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("cycle-source.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000091\ntitle: Cycle source\n---\n[[S-42]]\n",
+        )
+        .unwrap();
+    });
     let mut changes = state.change_tx.subscribe();
 
-    server
+    let task: serde_json::Value = server
         .post("/api/vault/board/tasks")
-        .json(&serde_json::json!({ "title": "notified task" }))
+        .json(&serde_json::json!({
+            "title": "notified task",
+            "link": "Target"
+        }))
         .await
-        .assert_status(axum::http::StatusCode::CREATED);
-    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
-    assert_eq!(upserted.len(), 1);
-    assert!(upserted[0].starts_with("tasks/TSK-"));
+        .json();
+    let task_path = task["path"].as_str().unwrap();
+    let task_id = task["id"].as_str().unwrap();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec![task_path]);
     assert!(removed.is_empty());
+
+    let outlinks: Vec<serde_json::Value> = server
+        .get(&format!("/api/vault/index/outlinks/{task_path}"))
+        .await
+        .json();
+    assert_eq!(outlinks.len(), 1);
+    assert_eq!(outlinks[0]["target_raw"], "Target");
+    assert_eq!(outlinks[0]["target_path"], "target.md");
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], task_path);
+
+    server
+        .patch(&format!("/api/vault/board/tasks/{task_id}"))
+        .json(&serde_json::json!({ "link": null }))
+        .await
+        .assert_status_ok();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec![task_path]);
+    assert!(removed.is_empty());
+    let outlinks: Vec<serde_json::Value> = server
+        .get(&format!("/api/vault/index/outlinks/{task_path}"))
+        .await
+        .json();
+    assert!(outlinks.is_empty());
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/target.md")
+        .await
+        .json();
+    assert!(
+        backlinks.is_empty(),
+        "clearing the task link must remove its reverse dependency"
+    );
 
     server
         .post("/api/vault/board/cycles")
         .json(&serde_json::json!({
+            "code": "S-42",
             "label": "notified cycle",
-            "start": "2026-07-13",
-            "end": "2026-07-19"
+            "start": "2042-05-18",
+            "end": "2042-05-24"
         }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
-    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
-    assert_eq!(upserted.len(), 1);
-    assert!(upserted[0].starts_with("cycles/S-"));
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["cycles/S-42.md"]);
     assert!(removed.is_empty());
+
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/cycles/S-42.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "cycle-source.md");
+
+    let cycle: serde_json::Value = server.get("/api/vault/board").await.json();
+    let cycle_id = cycle["cycles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["code"] == "S-42")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    server
+        .patch(&format!("/api/vault/board/cycles/{cycle_id}"))
+        .json(&serde_json::json!({ "goal": "updated policy goal" }))
+        .await
+        .assert_status_ok();
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["cycles/S-42.md"]);
+    assert!(removed.is_empty());
+    let backlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/backlinks/cycles/S-42.md")
+        .await
+        .json();
+    assert_eq!(backlinks.len(), 1);
+    assert_eq!(backlinks[0]["source_path"], "cycle-source.md");
+    assert!(
+        changes.try_recv().is_err(),
+        "task and cycle routes must emit only the asserted notifications"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,10 +1096,9 @@ async fn create_cycle_rejects_duplicate_code() {
 // PATCH /board/cycles/{id} — seal cycle, carry non-sealed tasks to BACKLOG
 // ---------------------------------------------------------------------------
 
-/// Seed two cycles S-13 (ACTIVE) + S-14 (PLANNED) plus two tasks in S-13.
-/// Returns (server, tmp, cycle_uuid_s13, task_sealed_uuid, task_field_uuid).
-fn setup_cycle_with_tasks() -> (TestServer, TempDir) {
-    setup_server_with(|root| {
+/// Seed two cycles plus one sealed and two open tasks in S-13.
+fn setup_cycle_with_tasks() -> (TestServer, TempDir, Arc<AppState>) {
+    setup_server_with_state(|root| {
         std::fs::create_dir_all(root.join("cycles")).unwrap();
         // S-13 ACTIVE
         std::fs::write(
@@ -1023,6 +1116,11 @@ fn setup_cycle_with_tasks() -> (TestServer, TempDir) {
              start: \"2026-04-20\"\nend: \"2026-04-26\"\n---\n",
         )
         .unwrap();
+        std::fs::write(
+            root.join("target.md"),
+            "---\nid: 01951234-0000-7000-8000-ccc000000001\ntitle: Target\n---\n",
+        )
+        .unwrap();
 
         std::fs::create_dir_all(root.join("tasks")).unwrap();
         // SEALED task in S-13 — should stay in S-13 after carryover
@@ -1036,7 +1134,13 @@ fn setup_cycle_with_tasks() -> (TestServer, TempDir) {
         std::fs::write(
             root.join("tasks/TSK-0002.md"),
             "---\nid: 01951234-0000-7000-8000-bbb000000002\n\
-             title: Open Task\ntype: TASK\nstatus: FIELD\npriority: P1\ncycle: S-13\n---\n",
+             title: Open Task\ntype: TASK\nstatus: FIELD\npriority: P1\ncycle: S-13\n---\n[[Target]]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0003.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000003\n\
+             title: Another Open Task\ntype: TASK\nstatus: TRIAGE\npriority: P2\ncycle: S-13\n---\n",
         )
         .unwrap();
     })
@@ -1044,7 +1148,8 @@ fn setup_cycle_with_tasks() -> (TestServer, TempDir) {
 
 #[tokio::test]
 async fn seal_cycle_routes_carryover_to_backlog() {
-    let (server, tmp) = setup_cycle_with_tasks();
+    let (server, tmp, state) = setup_cycle_with_tasks();
+    let mut changes = state.change_tx.subscribe();
 
     let res = server
         .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
@@ -1057,6 +1162,19 @@ async fn seal_cycle_routes_carryover_to_backlog() {
 
     let body: serde_json::Value = res.json();
     assert_eq!(body["state"], "CLOSED", "cycle state: {body}");
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["cycles/S-13.md"]);
+    assert!(removed.is_empty());
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["tasks/TSK-0002.md"]);
+    assert!(removed.is_empty());
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["tasks/TSK-0003.md"]);
+    assert!(removed.is_empty());
+    assert!(
+        changes.try_recv().is_err(),
+        "carryover must emit exactly one notification per successful page"
+    );
 
     let vault_root = tmp.path().join("vault");
 
@@ -1066,6 +1184,15 @@ async fn seal_cycle_routes_carryover_to_backlog() {
         !field_content.contains("cycle:"),
         "FIELD task should have cycle removed, got:\n{field_content}"
     );
+    let outlinks: Vec<serde_json::Value> = server
+        .get("/api/vault/index/outlinks/tasks/TSK-0002.md")
+        .await
+        .json();
+    let target_link = outlinks
+        .iter()
+        .find(|link| link["target_raw"] == "Target")
+        .expect("carryover reindex must preserve and resolve task links");
+    assert_eq!(target_link["target_path"], "target.md");
 
     // SEALED task (TSK-0001): cycle should still be S-13
     let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
@@ -1096,7 +1223,7 @@ async fn seal_cycle_routes_carryover_to_backlog() {
 
 #[tokio::test]
 async fn seal_cycle_can_carry_to_next_cycle() {
-    let (server, tmp) = setup_cycle_with_tasks();
+    let (server, tmp, _state) = setup_cycle_with_tasks();
 
     let res = server
         .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
@@ -1130,7 +1257,7 @@ async fn seal_cycle_can_carry_to_next_cycle() {
 
 #[tokio::test]
 async fn seal_cycle_without_carry_leaves_tasks() {
-    let (server, tmp) = setup_cycle_with_tasks();
+    let (server, tmp, _state) = setup_cycle_with_tasks();
 
     let res = server
         .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
@@ -1145,6 +1272,75 @@ async fn seal_cycle_without_carry_leaves_tasks() {
     assert!(
         content.contains("cycle: S-13"),
         "without carry_to, FIELD task cycle should remain S-13, got:\n{content}"
+    );
+}
+
+#[tokio::test]
+async fn carryover_later_task_failure_preserves_prior_mutations_and_notifications() {
+    let (server, tmp, state) = setup_server_with_state(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000001\ntitle: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0001.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000001\ntitle: First\ntype: TASK\nstatus: FIELD\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0002.md"),
+            "---\nid: 01951234-0000-7000-8000-bbb000000002\ntitle: Later\ntype: TASK\nstatus: FIELD\ncycle: S-13\n---\n",
+        )
+        .unwrap();
+    });
+    state
+        .index
+        .with_index(|index, _| {
+            index
+                .connection()
+                .execute_batch("PRAGMA reverse_unordered_selects = ON")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let vault_root = tmp.path().join("vault");
+    std::fs::write(vault_root.join("tasks/TSK-0002.md"), [0xff]).unwrap();
+    let mut changes = state.change_tx.subscribe();
+
+    let response = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
+        .json(&serde_json::json!({
+            "state": "CLOSED",
+            "carry_to": "BACKLOG"
+        }))
+        .await;
+    response.assert_status_internal_server_error();
+
+    let cycle = std::fs::read_to_string(vault_root.join("cycles/S-13.md")).unwrap();
+    assert!(cycle.contains("state: CLOSED"));
+    let first = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
+    assert!(
+        !first.contains("cycle:"),
+        "first carryover must remain applied"
+    );
+    assert_eq!(
+        std::fs::read(vault_root.join("tasks/TSK-0002.md")).unwrap(),
+        [0xff],
+        "the failing later task must remain untouched"
+    );
+
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["cycles/S-13.md"]);
+    assert!(removed.is_empty());
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    assert_eq!(upserted, vec!["tasks/TSK-0001.md"]);
+    assert!(removed.is_empty());
+    assert!(
+        changes.try_recv().is_err(),
+        "the failed later task must not emit a notification"
     );
 }
 
