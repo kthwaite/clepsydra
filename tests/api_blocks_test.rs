@@ -2,10 +2,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::Router;
-use axum_test::TestServer;
 use axum::http::StatusCode;
+use axum_test::TestServer;
 use tokio::sync::broadcast;
 
+use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
@@ -21,6 +22,11 @@ fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
 }
 
 fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
+    let (server, tmp, _) = setup_server_with_state(pre_index);
+    (server, tmp)
+}
+
+fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir, Arc<AppState>) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
@@ -57,10 +63,38 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
 
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
-        .with_state(state);
+        .with_state(Arc::clone(&state));
 
     let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    (server, tmp, state)
+}
+
+#[tokio::test]
+async fn mutation_assign_id_emits_coordinator_notification() {
+    let (server, _dir, state) = setup_server_with_state(|root| {
+        std::fs::write(
+            root.join("page.md"),
+            "---\ntitle: Test\n---\n- Notify this block\n",
+        )
+        .unwrap();
+    });
+    let search_response = server.get("/api/vault/blocks/search?q=Notify%20this").await;
+    let blocks: Vec<serde_json::Value> = search_response.json();
+    let span_start = blocks[0]["span_start"].as_i64().unwrap();
+    let mut changes = state.change_tx.subscribe();
+
+    server
+        .post("/api/vault/blocks/assign-id")
+        .json(&serde_json::json!({
+            "page_path": "page.md",
+            "span_start": span_start
+        }))
+        .await
+        .assert_status_ok();
+
+    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    assert_eq!(upserted, vec!["page.md"]);
+    assert!(removed.is_empty());
 }
 
 #[tokio::test]
@@ -237,7 +271,8 @@ async fn assign_block_id_rejects_stale_target_without_changing_content() {
     let span_start = blocks[0]["span_start"].as_i64().unwrap();
 
     let page_path = dir.path().join("vault/page.md");
-    let changed_content = "---\ntitle: Test\n---\nPreface inserted after indexing.\n\n- Original untagged item\n";
+    let changed_content =
+        "---\ntitle: Test\n---\nPreface inserted after indexing.\n\n- Original untagged item\n";
     std::fs::write(&page_path, changed_content).unwrap();
 
     let response = server

@@ -2,7 +2,6 @@
 //! including the seal-with-carryover flow.
 
 use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -16,7 +15,10 @@ use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::kind::Kind;
-use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::mutation_coordinator::{
+    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
+};
+use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 use super::read::build_board_cycle_dto;
@@ -84,13 +86,6 @@ pub(crate) async fn create_cycle(
     let vault_path_str = format!("cycles/{code}.md");
     let vault_path = VaultPath::new(&vault_path_str)
         .map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
-    let abs_path = state.vault.resolve(&vault_path);
-
-    // Create parent directory
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
 
     // 4. Build PageMeta
     let mut meta = PageMeta::new();
@@ -114,46 +109,26 @@ pub(crate) async fn create_cycle(
             .insert("goal".to_string(), serde_yaml::Value::String(g.clone()));
     }
 
-    // 5. Atomic create_new write
-    let content = write_page_content(&meta, "");
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&abs_path)
-    {
-        Ok(mut file) => {
-            file.write_all(content.as_bytes())
-                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(ApiError::conflict(format!(
-                "cycle file already exists: {vault_path_str}"
-            )));
-        }
-        Err(e) => {
-            return Err(ApiError::internal(format!("failed to create file: {e}")));
-        }
-    }
-
-    // 6. Re-index + resolve links + broadcast
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path_str.clone()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta,
+                body: String::new(),
+            },
+            &notify,
+        )
+        .await
+        .map_err(crate::api::mutation_error)?;
 
     // 7. Build and return BoardCycle DTO
     let cycle_dto = build_board_cycle_dto(&state, &vault_path).await?;
@@ -242,6 +217,8 @@ pub(crate) async fn patch_cycle(
     }
 
     // 4. Load the cycle file
+    let expected_content = fs::read_to_string(&abs_path)
+        .map_err(|e| ApiError::internal(format!("failed to read cycle page: {e}")))?;
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
     let mut meta = page.meta;
@@ -278,26 +255,32 @@ pub(crate) async fn patch_cycle(
             .insert("end".to_string(), serde_yaml::Value::String(e.clone()));
     }
 
-    // 6. Bump updated_at and write cycle file
+    // 6. Bump updated_at and update the cycle through the mutation policy.
     meta.updated_at = Some(Utc::now());
-    let content = write_page_content(&meta, &page_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write cycle file: {e}")))?;
-
-    // Re-index the cycle page itself
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vault_path.clone(),
+                expected_content,
+                meta,
+                body: page_body,
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+        .map_err(crate::api::mutation_error)?;
 
     // 7. Carryover: only when closing AND carry_to is set
     //
@@ -308,7 +291,6 @@ pub(crate) async fn patch_cycle(
     // No cross-file transaction — acceptable by design per ADR 0001 reconcile posture.
     // Failure of an individual rewrite is surfaced as 500 (first error wins) but the
     // cycle page itself has already been updated.
-    let mut upserted_paths: Vec<String> = vec![page_path.clone()];
 
     if is_closing && let Some(ref carry) = body.carry_to {
         // Collect task paths to rewrite. One statement fetches path +
@@ -348,6 +330,8 @@ pub(crate) async fn patch_cycle(
             if !tabs_path.exists() {
                 continue; // stale index entry — skip
             }
+            let expected_task_content = fs::read_to_string(&tabs_path)
+                .map_err(|e| ApiError::internal(format!("failed to read task: {e}")))?;
             let task_page = Page::from_file(&tabs_path, tvp.clone())
                 .map_err(|e| ApiError::internal(format!("failed to read task: {e}")))?;
             let mut task_meta = task_page.meta;
@@ -363,33 +347,26 @@ pub(crate) async fn patch_cycle(
             }
             task_meta.updated_at = Some(Utc::now());
 
-            let task_content = write_page_content(&task_meta, &task_body);
-            fs::write(&tabs_path, &task_content).map_err(|e| {
-                ApiError::internal(format!("failed to write task {task_path}: {e}"))
-            })?;
-
-            // Re-index this task
-            let tvp2 = tvp.clone();
             state
-                .index
-                .with_index(move |index, vault| {
-                    index.index_page(vault, &tvp2)?;
-                    index.resolve_links_for_page(&tvp2)?;
-                    Ok::<_, crate::vault::index::IndexError>(())
-                })
+                .mutation_coordinator
+                .update_page(
+                    &state.vault,
+                    &state.index,
+                    Arc::clone(&state.hooks),
+                    UpdatePageCommand {
+                        path: tvp,
+                        expected_content: expected_task_content,
+                        meta: task_meta,
+                        body: task_body,
+                        project: ProjectAssignment::Unchanged,
+                        reconcile: false,
+                    },
+                    &notify,
+                )
                 .await
-                .map_err(|e| ApiError::internal(e.to_string()))?
-                .map_err(|e| ApiError::internal(e.to_string()))?;
-
-            upserted_paths.push(task_path);
+                .map_err(crate::api::mutation_error)?;
         }
     }
-
-    // 8. Broadcast once with all modified paths
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: upserted_paths,
-        removed: vec![],
-    });
 
     // 9. Return updated BoardCycle DTO
     let cycle_dto = build_board_cycle_dto(&state, &vault_path).await?;

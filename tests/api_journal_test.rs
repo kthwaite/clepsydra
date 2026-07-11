@@ -7,6 +7,7 @@ use axum_test::TestServer;
 use chrono::Utc;
 use tokio::sync::broadcast;
 
+use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
@@ -29,6 +30,11 @@ fn setup_server() -> (TestServer, TempDir) {
 /// `init_vault` and before the index build. Use this to seed the vault with
 /// files that must be indexed before the server starts.
 fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
+    let (server, tmp, _) = setup_server_with_state(pre_index);
+    (server, tmp)
+}
+
+fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir, Arc<AppState>) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
@@ -65,14 +71,42 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
 
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
-        .with_state(state);
+        .with_state(Arc::clone(&state));
 
     let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    (server, tmp, state)
 }
 
 fn today_str() -> String {
     Utc::now().format("%Y-%m-%d").to_string()
+}
+
+#[tokio::test]
+async fn mutation_capture_emits_coordinator_notification() {
+    let today = today_str();
+    let journal_path = format!("journals/{today}.md");
+    let seeded_path = journal_path.clone();
+    let (server, _tmp, state) = setup_server_with_state(move |root| {
+        std::fs::create_dir_all(root.join("journals")).unwrap();
+        std::fs::write(
+            root.join(&seeded_path),
+            format!(
+                "---\nid: 01951234-0000-7000-8000-000000000099\ntitle: {today}\ntags:\n  - journal\n---\n"
+            ),
+        )
+        .unwrap();
+    });
+    let mut changes = state.change_tx.subscribe();
+
+    server
+        .post("/api/vault/journal/today/capture")
+        .json(&serde_json::json!({ "content": "policy mutation" }))
+        .await
+        .assert_status_ok();
+
+    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    assert_eq!(upserted, vec![journal_path]);
+    assert!(removed.is_empty());
 }
 
 // ---------------------------------------------------------------------------

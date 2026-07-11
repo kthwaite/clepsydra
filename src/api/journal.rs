@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -17,7 +16,10 @@ use super::error::ApiError;
 use super::pages::{PageDetail, page_detail_from_meta, page_detail_from_page};
 use super::tasks::TaskItem;
 use crate::api::events::SyncNotification;
-use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::mutation_coordinator::{
+    CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
+};
+use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -100,60 +102,35 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
         return Ok((vault_path, false));
     }
 
-    // Create parent directory
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-
     // Build template
     let mut meta = PageMeta::new();
     meta.title = Some(date.to_string());
     meta.tags = vec!["journal".to_string()];
 
-    let body = String::new();
-    let content = write_page_content(&meta, &body);
-
-    // Write atomically
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&abs_path)
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    match state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta,
+                body: String::new(),
+            },
+            &notify,
+        )
+        .await
     {
-        Ok(mut file) => {
-            file.write_all(content.as_bytes())
-                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Another request created it concurrently; that's fine.
-            return Ok((vault_path, false));
-        }
-        Err(e) => {
-            return Err(ApiError::internal(format!("failed to create file: {e}")));
-        }
+        Ok(_) => Ok((vault_path, true)),
+        Err(MutationError::Conflict(_)) if abs_path.exists() => Ok((vault_path, false)),
+        Err(error) => Err(crate::api::mutation_error(error)),
     }
-
-    // Index the new page
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
-
-    Ok((vault_path, true))
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +369,8 @@ async fn capture_today(
     let abs_path = state.vault.resolve(&vault_path);
 
     // Read current page
+    let expected_content = fs::read_to_string(&abs_path)
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
@@ -403,36 +382,40 @@ async fn capture_today(
     new_body.push_str(&req.content);
     new_body.push('\n');
 
-    // Write back
     let mut meta = page.meta;
     meta.updated_at = Some(Utc::now());
-    let content = write_page_content(&meta, &new_body);
-    fs::write(&abs_path, &content)
-        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-
-    // Re-index
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vault_path,
+                expected_content,
+                meta,
+                body: new_body,
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+        .map_err(crate::api::mutation_error)?;
 
     Ok((
         StatusCode::OK,
-        Json(page_detail_from_meta(&vault_path, meta, new_body)),
+        Json(page_detail_from_meta(
+            &result.path,
+            result.meta,
+            result.body,
+        )),
     )
         .into_response())
 }

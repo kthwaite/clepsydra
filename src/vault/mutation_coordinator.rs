@@ -61,6 +61,15 @@ pub struct UpdatePageCommand {
     pub reconcile: bool,
 }
 
+/// An exact-content replacement for adapters that mutate source spans without
+/// reserializing page metadata (for example block ID assignment).
+#[derive(Debug)]
+pub struct ReplacePageContentCommand {
+    pub path: VaultPath,
+    pub expected_content: String,
+    pub content: String,
+}
+
 #[derive(Debug)]
 pub struct PageMutationResult {
     pub path: VaultPath,
@@ -190,6 +199,51 @@ impl MutationCoordinator {
             meta: command.meta,
             body: command.body,
         })
+    }
+
+    pub async fn replace_page_content(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        command: ReplacePageContentCommand,
+        notify: &(dyn Fn(MutationNotification) + Send + Sync),
+    ) -> Result<VaultPath, MutationError> {
+        let _guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
+        let absolute = vault.resolve(&command.path);
+        let current = match fs::read_to_string(&absolute) {
+            Ok(current) => current,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                return Err(MutationError::NotFound(command.path));
+            }
+            Err(source) => {
+                return Err(MutationError::Filesystem {
+                    path: absolute,
+                    source,
+                });
+            }
+        };
+        if current != command.expected_content {
+            return Err(MutationError::Stale(command.path));
+        }
+
+        atomic_replace(&absolute, command.content.as_bytes()).map_err(|source| {
+            MutationError::Filesystem {
+                path: absolute,
+                source,
+            }
+        })?;
+        index
+            .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
+            .await
+            .map_err(|source| MutationError::Index {
+                filesystem_applied: true,
+                source,
+            })?;
+        notify(MutationNotification {
+            upserted: vec![command.path.as_str().to_string()],
+            removed: Vec::new(),
+        });
+        Ok(command.path)
     }
 
     pub async fn update_page(

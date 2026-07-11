@@ -1,7 +1,6 @@
 //! API endpoints for ingesting web page archives, including associated blobs stored in
 //! the CAS.
 use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -18,7 +17,9 @@ use super::AppState;
 use super::error::ApiError;
 use super::events::SyncNotification;
 use crate::vault::cas::ContentStore;
-use crate::vault::page::{PageMeta, write_page_content};
+use crate::vault::index_policy::IndexMutation;
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError, MutationNotification};
+use crate::vault::page::PageMeta;
 use crate::vault::path::VaultPath;
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +59,82 @@ pub enum ArchiveStatus {
     Created,
     AlreadyExists,
     ContentChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CompensationFailure {
+    pub hash: String,
+    pub error: String,
+}
+
+#[doc(hidden)]
+pub fn compensate_hashes<E>(
+    hashes: &[String],
+    mut decrement: impl FnMut(&str) -> Result<(), E>,
+) -> Vec<CompensationFailure>
+where
+    E: std::fmt::Display,
+{
+    let mut failures = Vec::new();
+    for hash in hashes {
+        if let Err(error) = decrement(hash) {
+            failures.push(CompensationFailure {
+                hash: hash.clone(),
+                error: error.to_string(),
+            });
+        }
+    }
+    failures
+}
+
+fn attach_compensation_failures(
+    mut primary: ApiError,
+    failures: &[CompensationFailure],
+) -> ApiError {
+    if failures.is_empty() {
+        return primary;
+    }
+    let mut detail = match primary.detail.take() {
+        Some(serde_json::Value::Object(detail)) => detail,
+        Some(existing) => {
+            let mut detail = serde_json::Map::new();
+            detail.insert("primary_detail".to_string(), existing);
+            detail
+        }
+        None => serde_json::Map::new(),
+    };
+    detail.insert(
+        "compensation_failures".to_string(),
+        serde_json::to_value(failures).expect("compensation failures serialize"),
+    );
+    primary.detail = Some(serde_json::Value::Object(detail));
+    primary
+}
+
+#[doc(hidden)]
+pub fn rollback_cas_with<E>(
+    primary: ApiError,
+    hashes: &[String],
+    decrement: impl FnMut(&str) -> Result<(), E>,
+) -> ApiError
+where
+    E: std::fmt::Display,
+{
+    let failures = compensate_hashes(hashes, decrement);
+    for failure in &failures {
+        tracing::error!(
+            hash = %failure.hash,
+            error = %failure.error,
+            primary_error = %primary.error,
+            "archive CAS compensation failed"
+        );
+    }
+    attach_compensation_failures(primary, &failures)
+}
+
+fn rollback_cas(primary: ApiError, state: &AppState, hashes: &[String]) -> ApiError {
+    let cas = state.cas.lock();
+    rollback_cas_with(primary, hashes, |hash| cas.decrement_ref(hash))
 }
 
 /// Build the archive router.
@@ -226,23 +303,33 @@ fn build_archive_meta(
     meta
 }
 
-/// Store decoded blobs in the CAS (locking per-iteration, matching the original),
-/// returning `(stored, deduped, ref_hashes)`. `ref_hashes` lists EVERY touched
-/// blob — both newly stored and deduplicated — because each had its ref-count
-/// incremented and so must be decremented if a later step fails (rollback).
-fn store_decoded_blobs(
-    cas: &parking_lot::Mutex<ContentStore>,
+#[derive(Debug)]
+struct StoreBlobsFailure {
+    primary: ApiError,
+    ref_hashes: Vec<String>,
+}
+
+fn store_decoded_blobs_with<E>(
     decoded: &[(String, Vec<u8>, String)],
-) -> Result<(u32, u32, Vec<String>), ApiError> {
-    let mut stored: u32 = 0;
-    let mut deduped: u32 = 0;
-    let mut ref_hashes: Vec<String> = Vec::new();
+    mut store: impl FnMut(&[u8], &str) -> Result<bool, E>,
+) -> Result<(u32, u32, Vec<String>), StoreBlobsFailure>
+where
+    E: std::fmt::Display,
+{
+    let mut stored = 0;
+    let mut deduped = 0;
+    let mut ref_hashes = Vec::new();
     for (hash, data, content_type) in decoded {
-        let cas = cas.lock();
-        let result = cas
-            .store(data, content_type)
-            .map_err(|e| ApiError::internal(format!("CAS store error: {e}")))?;
-        if result.already_existed {
+        let already_existed = match store(data, content_type) {
+            Ok(already_existed) => already_existed,
+            Err(error) => {
+                return Err(StoreBlobsFailure {
+                    primary: ApiError::internal(format!("CAS store error: {error}")),
+                    ref_hashes,
+                });
+            }
+        };
+        if already_existed {
             deduped += 1;
         } else {
             stored += 1;
@@ -252,50 +339,19 @@ fn store_decoded_blobs(
     Ok((stored, deduped, ref_hashes))
 }
 
-/// Atomically create + write a new page file. Removes the file it created ONLY
-/// when the write fails (never on AlreadyExists / other create errors, to avoid
-/// deleting a file owned by a concurrent writer). `vault_path_str` is used in the
-/// conflict message to match the original.
-fn write_new_page_file(
-    abs_path: &std::path::Path,
-    content: &str,
-    vault_path_str: &str,
-) -> Result<(), ApiError> {
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(abs_path)
-    {
-        Ok(mut file) => {
-            if let Err(e) = file.write_all(content.as_bytes()) {
-                let _ = fs::remove_file(abs_path);
-                return Err(ApiError::internal(format!("failed to write file: {e}")));
-            }
-            Ok(())
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(ApiError::conflict(
-            format!("path already exists (concurrent write): {vault_path_str}"),
-        )),
-        Err(e) => Err(ApiError::internal(format!("failed to create file: {e}"))),
-    }
-}
-
-/// Index a freshly written archive page and resolve its links (link-resolve
-/// failure is non-fatal). Returns Err on index failure (caller rolls back).
-async fn index_archive_page(state: &AppState, vault_path: &VaultPath) -> Result<(), ApiError> {
-    let vp = vault_path.clone();
-    let index_result = state
-        .index
-        .with_index(move |index, vault| {
-            index.index_page(vault, &vp)?;
-            let _ = index.resolve_links_for_page(&vp);
-            Ok::<_, crate::vault::index::IndexError>(())
-        })
-        .await;
-    match index_result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) | Err(e) => Err(ApiError::internal(e.to_string())),
-    }
+/// Store decoded blobs in the CAS (locking per-iteration, matching the original),
+/// returning `(stored, deduped, ref_hashes)`. `ref_hashes` lists EVERY touched
+/// blob — both newly stored and deduplicated — because each had its ref-count
+/// incremented and so must be decremented if a later step fails (rollback).
+fn store_decoded_blobs(
+    cas: &parking_lot::Mutex<ContentStore>,
+    decoded: &[(String, Vec<u8>, String)],
+) -> Result<(u32, u32, Vec<String>), StoreBlobsFailure> {
+    store_decoded_blobs_with(decoded, |data, content_type| {
+        cas.lock()
+            .store(data, content_type)
+            .map(|result| result.already_existed)
+    })
 }
 
 async fn serve_blob(
@@ -407,53 +463,69 @@ async fn ingest_archive(
     // 3. Decode and verify all blobs before storing anything (fail fast).
     let decoded_blobs = decode_and_verify_blobs(&req.blobs)?;
 
-    // 4. Store blobs in CAS (track stored hashes for rollback on downstream failure)
     let (blobs_stored, blobs_deduped, stored_hashes) =
-        store_decoded_blobs(&state.cas, &decoded_blobs)?;
+        match store_decoded_blobs(&state.cas, &decoded_blobs) {
+            Ok(stored) => stored,
+            Err(failure) => {
+                return Err(rollback_cas(failure.primary, &state, &failure.ref_hashes));
+            }
+        };
 
-    // Helper: rollback CAS ref_counts on downstream failure
-    let rollback_cas = |state: &AppState, hashes: &[String]| {
-        let cas = state.cas.lock();
-        for hash in hashes {
-            let _ = cas.decrement_ref(hash);
-        }
-    };
-
-    // 5. Create the vault page
-    let abs_path = state.vault.resolve(&vault_path);
-
-    if let Some(parent) = abs_path.parent()
-        && let Err(e) = fs::create_dir_all(parent)
-    {
-        rollback_cas(&state, &stored_hashes);
-        return Err(ApiError::internal(format!(
-            "failed to create directories: {e}"
-        )));
-    }
-
+    // 5. Create and index the page through the reviewed Created policy.
     let meta = build_archive_meta(&req, &decoded_blobs);
-    let content = write_page_content(&meta, &req.markdown_body);
     let page_id = meta.id.to_string();
-
-    if let Err(e) = write_new_page_file(&abs_path, &content, vault_path.as_str()) {
-        rollback_cas(&state, &stored_hashes);
-        return Err(e);
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    if let Err(error) = state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta,
+                body: req.markdown_body,
+            },
+            &notify,
+        )
+        .await
+    {
+        if matches!(
+            &error,
+            MutationError::Index {
+                filesystem_applied: true,
+                ..
+            }
+        ) {
+            let absolute = state.vault.resolve(&vault_path);
+            if let Err(cleanup_error) = fs::remove_file(&absolute) {
+                tracing::error!(
+                    path = %vault_path.as_str(),
+                    error = %cleanup_error,
+                    primary_error = %error,
+                    "archive page compensation failed"
+                );
+            }
+            if let Err(cleanup_error) = state
+                .index
+                .apply_mutation(vault_path.clone(), IndexMutation::Deleted)
+                .await
+            {
+                tracing::error!(
+                    path = %vault_path.as_str(),
+                    error = %cleanup_error,
+                    primary_error = %error,
+                    "archive index compensation failed"
+                );
+            }
+        }
+        let primary = crate::api::mutation_error(error);
+        return Err(rollback_cas(primary, &state, &stored_hashes));
     }
-
-    // 6. Index the page.
-    // create_new above guarantees we own this file, so remove_file on
-    // index failure is safe — no concurrent endpoint could have written it.
-    if let Err(e) = index_archive_page(&state, &vault_path).await {
-        let _ = fs::remove_file(&abs_path);
-        rollback_cas(&state, &stored_hashes);
-        return Err(e);
-    }
-
-    // 7. Broadcast change
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path.as_str().to_string()],
-        removed: vec![],
-    });
 
     // 8. Return response
     Ok((
@@ -785,37 +857,99 @@ mod tests {
         assert_eq!(deduped2, 1);
     }
 
-    // ---------------------------------------------------------------------------
-    // write_new_page_file tests (tempdir)
-    // ---------------------------------------------------------------------------
-
     #[test]
-    fn write_new_page_file_creates_and_returns_ok() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("test-page.md");
-        let content = "# Hello\n\nworld\n";
+    fn store_failure_returns_every_previously_incremented_hash() {
+        let decoded = vec![
+            (
+                "sha256:first".to_string(),
+                vec![1],
+                "first/type".to_string(),
+            ),
+            (
+                "sha256:second".to_string(),
+                vec![2],
+                "second/type".to_string(),
+            ),
+            (
+                "sha256:third".to_string(),
+                vec![3],
+                "third/type".to_string(),
+            ),
+        ];
+        let mut attempts = 0;
 
-        write_new_page_file(&path, content, "archive/test-page.md").unwrap();
+        let failure = store_decoded_blobs_with(&decoded, |_data, _content_type| {
+            attempts += 1;
+            if attempts == 2 {
+                Err("deterministic store failure")
+            } else {
+                Ok(false)
+            }
+        })
+        .unwrap_err();
 
-        let on_disk = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(on_disk, content);
+        assert_eq!(attempts, 2);
+        assert_eq!(
+            failure.primary.error,
+            "CAS store error: deterministic store failure"
+        );
+        assert_eq!(failure.ref_hashes, vec!["sha256:first"]);
     }
 
     #[test]
-    fn write_new_page_file_second_call_returns_conflict_error() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("existing-page.md");
-        let vault_path_str = "archive/existing-page.md";
+    fn rollback_attempts_every_hash_and_collects_failures_in_order() {
+        let hashes = vec![
+            "sha256:first".to_string(),
+            "sha256:second".to_string(),
+            "sha256:third".to_string(),
+        ];
+        let mut attempted = Vec::new();
 
-        // First write succeeds
-        write_new_page_file(&path, "content", vault_path_str).unwrap();
+        let failures = compensate_hashes(&hashes, |hash| {
+            attempted.push(hash.to_string());
+            if hash == "sha256:first" || hash == "sha256:third" {
+                Err(format!("cannot decrement {hash}"))
+            } else {
+                Ok(())
+            }
+        });
 
-        // Second write on same path should fail with AlreadyExists
-        let err = write_new_page_file(&path, "other content", vault_path_str).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(
-            msg.contains("already exists") || msg.contains("concurrent"),
-            "expected already-exists error, got: {msg}"
+        assert_eq!(attempted, hashes);
+        assert_eq!(
+            failures,
+            vec![
+                CompensationFailure {
+                    hash: "sha256:first".to_string(),
+                    error: "cannot decrement sha256:first".to_string(),
+                },
+                CompensationFailure {
+                    hash: "sha256:third".to_string(),
+                    error: "cannot decrement sha256:third".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rollback_error_context_preserves_primary_error() {
+        let primary = ApiError::internal("index creation failed");
+        let failures = vec![CompensationFailure {
+            hash: "sha256:cleanup".to_string(),
+            error: "CAS unavailable".to_string(),
+        }];
+
+        let error = attach_compensation_failures(primary, &failures);
+
+        assert_eq!(error.status, 500);
+        assert_eq!(error.error, "index creation failed");
+        assert_eq!(
+            error.detail,
+            Some(serde_json::json!({
+                "compensation_failures": [{
+                    "hash": "sha256:cleanup",
+                    "error": "CAS unavailable",
+                }]
+            }))
         );
     }
 }

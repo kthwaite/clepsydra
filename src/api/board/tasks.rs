@@ -1,7 +1,6 @@
 //! Task mutations: `POST /board/tasks` and `PATCH /board/tasks/{id}`.
 
 use std::fs;
-use std::io::Write;
 use std::sync::Arc;
 
 use axum::Json;
@@ -16,9 +15,9 @@ use crate::api::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{
-    MutationNotification, ProjectAssignment, UpdatePageCommand,
+    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
-use crate::vault::page::{Page, PageMeta, write_page_content};
+use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 use super::read::build_board_task_dto;
@@ -79,14 +78,6 @@ pub(crate) async fn create_task(
     let vault_path = VaultPath::new(&vault_path_str)
         .map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
 
-    let abs_path = state.vault.resolve(&vault_path);
-
-    // Create parent directories
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| ApiError::internal(format!("failed to create directories: {e}")))?;
-    }
-
     // 5. Build PageMeta
     let mut meta = PageMeta::new();
     meta.title = Some(body.title.clone());
@@ -142,46 +133,26 @@ pub(crate) async fn create_task(
         String::new()
     };
 
-    // 7. Atomic write with create_new=true
-    let content = write_page_content(&meta, &page_body);
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&abs_path)
-    {
-        Ok(mut file) => {
-            file.write_all(content.as_bytes())
-                .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(ApiError::conflict(format!(
-                "task file already exists: {vault_path_str}"
-            )));
-        }
-        Err(e) => {
-            return Err(ApiError::internal(format!("failed to create file: {e}")));
-        }
-    }
-
-    // 8. Re-index + resolve links + broadcast
-    {
-        let vp = vault_path.clone();
-        state
-            .index
-            .with_index(move |index, vault| {
-                index.index_page(vault, &vp)?;
-                index.resolve_links_for_page(&vp)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![vault_path_str.clone()],
-        removed: vec![],
-    });
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path.clone(),
+                meta,
+                body: page_body,
+            },
+            &notify,
+        )
+        .await
+        .map_err(crate::api::mutation_error)?;
 
     // 9. Build and return BoardTask DTO
     let task_dto = build_board_task_dto(&state, &vault_path, &code).await?;

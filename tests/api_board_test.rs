@@ -5,6 +5,7 @@ use axum::Router;
 use axum_test::TestServer;
 use tokio::sync::broadcast;
 
+use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
@@ -20,6 +21,11 @@ fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
 }
 
 fn setup_server_with(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
+    let (server, tmp, _) = setup_server_with_state(pre_index);
+    (server, tmp)
+}
+
+fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir, Arc<AppState>) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
@@ -55,10 +61,40 @@ fn setup_server_with(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
 
     let app: Router = Router::new()
         .nest("/api/vault", api_router())
-        .with_state(state);
+        .with_state(Arc::clone(&state));
 
     let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    (server, tmp, state)
+}
+
+#[tokio::test]
+async fn mutation_creates_emit_coordinator_notifications() {
+    let (server, _tmp, state) = setup_server_with_state(|_| {});
+    let mut changes = state.change_tx.subscribe();
+
+    server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "notified task" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    assert_eq!(upserted.len(), 1);
+    assert!(upserted[0].starts_with("tasks/TSK-"));
+    assert!(removed.is_empty());
+
+    server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "notified cycle",
+            "start": "2026-07-13",
+            "end": "2026-07-19"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    assert_eq!(upserted.len(), 1);
+    assert!(upserted[0].starts_with("cycles/S-"));
+    assert!(removed.is_empty());
 }
 
 // ---------------------------------------------------------------------------

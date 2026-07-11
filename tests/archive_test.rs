@@ -8,6 +8,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
+use clepsydra::api::archive::rollback_cas_with;
+use clepsydra::api::error::ApiError;
+use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
@@ -77,13 +80,124 @@ fn content_hash(body: &str) -> String {
     sha256_hash(body.as_bytes())
 }
 
+#[test]
+fn rollback_fault_injection_attempts_all_hashes_and_reports_each_failure() {
+    let hashes = vec![
+        "sha256:first".to_string(),
+        "sha256:second".to_string(),
+        "sha256:third".to_string(),
+    ];
+    let mut attempted = Vec::new();
+
+    let error = rollback_cas_with(
+        ApiError::internal("primary index failure"),
+        &hashes,
+        |hash| {
+            attempted.push(hash.to_string());
+            if hash == "sha256:first" || hash == "sha256:third" {
+                Err(format!("fault for {hash}"))
+            } else {
+                Ok(())
+            }
+        },
+    );
+
+    assert_eq!(attempted, hashes);
+    assert_eq!(error.status, 500);
+    assert_eq!(error.error, "primary index failure");
+    assert_eq!(
+        error.detail,
+        Some(serde_json::json!({
+            "compensation_failures": [
+                {
+                    "hash": "sha256:first",
+                    "error": "fault for sha256:first"
+                },
+                {
+                    "hash": "sha256:third",
+                    "error": "fault for sha256:third"
+                }
+            ]
+        }))
+    );
+}
+
+#[tokio::test]
+async fn rollback_on_index_failure_preserves_primary_and_compensates_every_blob() {
+    let (server, tmp, state) = setup_server();
+    state
+        .index
+        .with_index(|index, _vault| {
+            index.connection().execute_batch(
+                "CREATE TRIGGER fail_archive_insert
+                 BEFORE INSERT ON pages
+                 BEGIN
+                   SELECT RAISE(FAIL, 'deterministic archive index fault');
+                 END;",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let first = b"first rollback blob";
+    let second = b"second rollback blob";
+    let first_hash = sha256_hash(first);
+    let second_hash = sha256_hash(second);
+    let markdown = "# Rollback";
+    let response = server
+        .post("/api/vault/archive")
+        .json(&serde_json::json!({
+            "url": "https://example.com/rollback",
+            "domain": "example.com",
+            "title": "Rollback",
+            "captured_at": "2026-07-11T00:00:00Z",
+            "content_hash": content_hash(markdown),
+            "snapshot_hash": second_hash,
+            "markdown_body": markdown,
+            "tags": ["archive"],
+            "blobs": [
+                {
+                    "hash": first_hash,
+                    "content_type": "application/octet-stream",
+                    "data": BASE64.encode(first),
+                },
+                {
+                    "hash": second_hash,
+                    "content_type": "application/octet-stream",
+                    "data": BASE64.encode(second),
+                }
+            ]
+        }))
+        .await;
+
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("deterministic archive index fault"),
+        "primary index failure must remain the response error: {error}"
+    );
+    assert!(
+        !tmp.path()
+            .join("vault/archive/example.com/rollback.md")
+            .exists(),
+        "coordinator-created page must be removed after index failure"
+    );
+    let pruned = state.cas.lock().gc(std::time::Duration::ZERO).unwrap();
+    assert_eq!(pruned, 2, "every incremented blob must be compensated");
+}
+
 // ---------------------------------------------------------------------------
 // Archive ingest tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn archive_ingest_creates_page_and_stores_blobs() {
-    let (server, _tmp, _state) = setup_server();
+    let (server, _tmp, state) = setup_server();
+    let mut changes = state.change_tx.subscribe();
 
     let blob_data = b"fake image data for testing";
     let blob_hash = sha256_hash(blob_data);
@@ -118,6 +232,9 @@ async fn archive_ingest_creates_page_and_stores_blobs() {
         "expected vault_path to start with 'archive/', got: {}",
         body["vault_path"]
     );
+    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    assert_eq!(upserted, vec![body["vault_path"].as_str().unwrap()]);
+    assert!(removed.is_empty());
 
     // Verify blob is retrievable via CAS
     let blob_url = format!("/api/vault/cas/{}", blob_hash);

@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::atomic_file::atomic_replace;
+use super::events::SyncNotification;
 use crate::vault::block::parse_blocks;
 use crate::vault::block_id::BlockId;
+use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -219,11 +220,6 @@ async fn assign_block_id(
     let span_start = req.span_start;
     let page_path = req.page_path.clone();
 
-    let _guard = state
-        .mutation_coordinator
-        .lock_paths(std::slice::from_ref(&vault_path))
-        .await;
-
     let lookup_path = page_path.clone();
     let indexed_block = state
         .index
@@ -262,6 +258,7 @@ async fn assign_block_id(
     let abs_path = state.vault.resolve(&vault_path);
     let mut content = std::fs::read_to_string(&abs_path)
         .map_err(|e| ApiError::internal(format!("Failed to read file: {}", e)))?;
+    let expected_content = content.clone();
     let body_offset = find_body_offset(&content);
     let body = content
         .get(body_offset..)
@@ -308,20 +305,26 @@ async fn assign_block_id(
 
     let id_str = BlockId::generate().to_string();
     content.insert_str(insert_pos, &format!(" ^{}", id_str));
-    atomic_replace(&abs_path, content.as_bytes())
-        .map_err(|e| ApiError::internal(format!("Failed to write file: {}", e)))?;
-
-    let vp = vault_path.clone();
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
     state
-        .index
-        .with_index(move |index, vault| {
-            index.index_page(vault, &vp)?;
-            index.resolve_links_for_page(&vp)?;
-            Ok::<_, crate::vault::index::IndexError>(())
-        })
+        .mutation_coordinator
+        .replace_page_content(
+            &state.vault,
+            &state.index,
+            ReplacePageContentCommand {
+                path: vault_path,
+                expected_content,
+                content,
+            },
+            &notify,
+        )
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(crate::api::mutation_error)?;
 
     Ok(Json(AssignIdResponse { block_id: id_str }))
 }
