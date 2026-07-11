@@ -19,11 +19,10 @@ use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
 use crate::vault::page::{Page, PageMeta};
-use crate::vault::path::VaultPath;
 
 use super::read::build_board_cycle_dto;
 use super::{
-    BoardCycle, CreateCycleRequest, PatchCycleRequest, ensure_cycle_exists, extra_str,
+    BoardCycle, CreateCycleRequest, CycleState, PatchCycleRequest, ensure_cycle_exists, extra_str,
     fetch_cycle_codes, path_stem, reserve_next_code_number,
 };
 
@@ -48,20 +47,21 @@ pub(crate) async fn create_cycle(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateCycleRequest>,
 ) -> Result<Response, ApiError> {
-    // 1. Validate state (only PLANNED or ACTIVE allowed at creation)
-    let state_str = body.state.as_deref().unwrap_or("PLANNED");
-    match state_str {
-        "PLANNED" | "ACTIVE" => {}
-        "CLOSED" => {
-            return Err(ApiError::bad_request(
-                "state 'CLOSED' is not valid at cycle creation time",
-            ));
-        }
-        other => {
-            return Err(ApiError::bad_request(format!(
-                "unknown state: '{other}'; valid values at creation: PLANNED, ACTIVE"
-            )));
-        }
+    // 1. Parse the state independently from creation-time policy.
+    let cycle_state = body
+        .state
+        .as_deref()
+        .unwrap_or("PLANNED")
+        .parse::<CycleState>()
+        .map_err(|error| {
+            ApiError::bad_request(format!(
+                "{error}; valid values at creation: PLANNED, ACTIVE"
+            ))
+        })?;
+    if cycle_state == CycleState::Closed {
+        return Err(ApiError::bad_request(
+            "state 'CLOSED' is not valid at cycle creation time",
+        ));
     }
 
     // 2. Determine code: explicit (must not collide) or auto-generated
@@ -84,8 +84,7 @@ pub(crate) async fn create_cycle(
 
     // 3. Build vault path: cycles/<CODE>.md
     let vault_path_str = format!("cycles/{code}.md");
-    let vault_path = VaultPath::new(&vault_path_str)
-        .map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_internal_path(&vault_path_str, "invalid path")?;
 
     // 4. Build PageMeta
     let mut meta = PageMeta::new();
@@ -94,7 +93,7 @@ pub(crate) async fn create_cycle(
 
     meta.extra.insert(
         "state".to_string(),
-        serde_yaml::Value::String(state_str.to_string()),
+        serde_yaml::Value::String(cycle_state.as_str().to_string()),
     );
     meta.extra.insert(
         "start".to_string(),
@@ -159,22 +158,18 @@ pub(crate) async fn patch_cycle(
     Path(id): Path<String>,
     Json(body): Json<PatchCycleRequest>,
 ) -> Result<Json<BoardCycle>, ApiError> {
-    // 1. Validate state if present
-    let new_state = if let Some(ref s) = body.state {
-        match s.as_str() {
-            "PLANNED" | "ACTIVE" | "CLOSED" => {}
-            other => {
-                return Err(ApiError::bad_request(format!(
-                    "unknown state: '{other}'; valid values: PLANNED, ACTIVE, CLOSED"
-                )));
-            }
-        }
-        Some(s.as_str())
-    } else {
-        None
-    };
+    // 1. Parse state if present. Patching permits every valid lifecycle state.
+    let new_state = body
+        .state
+        .as_deref()
+        .map(|value| {
+            value.parse::<CycleState>().map_err(|error| {
+                ApiError::bad_request(format!("{error}; valid values: PLANNED, ACTIVE, CLOSED"))
+            })
+        })
+        .transpose()?;
 
-    let is_closing = new_state == Some("CLOSED");
+    let is_closing = new_state == Some(CycleState::Closed);
 
     // 2. Validate carry_to: only meaningful when closing; must be "BACKLOG"
     // or an existing CYCLE stem (self-reference is rejected below once this
@@ -207,8 +202,7 @@ pub(crate) async fn patch_cycle(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found(format!("cycle not found with id: {id}")))?;
 
-    let vault_path = VaultPath::new(&page_path)
-        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let vault_path = crate::api::error::parse_internal_path(&page_path, "invalid stored path")?;
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.exists() {
         return Err(ApiError::not_found(format!(
@@ -236,10 +230,10 @@ pub(crate) async fn patch_cycle(
     }
 
     // 5. Apply cycle field mutations
-    if let Some(s) = new_state {
+    if let Some(cycle_state) = new_state {
         meta.extra.insert(
             "state".to_string(),
-            serde_yaml::Value::String(s.to_string()),
+            serde_yaml::Value::String(cycle_state.as_str().to_string()),
         );
     }
     if let Some(ref g) = body.goal {
@@ -325,8 +319,7 @@ pub(crate) async fn patch_cycle(
 
         // Rewrite each matched task
         for task_path in task_paths {
-            let tvp = VaultPath::new(&task_path)
-                .map_err(|e| ApiError::internal(format!("invalid task path: {e}")))?;
+            let tvp = crate::api::error::parse_internal_path(&task_path, "invalid task path")?;
             let tabs_path = state.vault.resolve(&tvp);
             if !tabs_path.exists() {
                 continue; // stale index entry — skip

@@ -219,8 +219,7 @@ pub async fn backlinks(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<Vec<BacklinkEntry>>, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let backlinks = state
         .index
@@ -259,8 +258,7 @@ pub async fn similar(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<SimilarResponse>, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
     let items = state
         .index
         .similar_by_tags(vault_path, 12)
@@ -294,8 +292,7 @@ pub async fn outlinks(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<Vec<OutlinkEntry>>, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let vp_str = vault_path.as_str().to_string();
     let path_clone = path.clone();
@@ -796,8 +793,7 @@ pub async fn create_from_link(
             body.folder.trim_end_matches('/'),
             vault_path.as_str()
         );
-        vault_path = VaultPath::new(&combined)
-            .map_err(|e| ApiError::bad_request(format!("invalid folder path: {e}")))?;
+        vault_path = crate::api::error::parse_request_path(&combined, "invalid folder path")?;
     }
 
     let abs_path = state.vault.resolve(&vault_path);

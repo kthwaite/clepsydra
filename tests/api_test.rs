@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 use std::sync::Arc;
 
@@ -7,6 +9,7 @@ use axum::http::{Request, StatusCode};
 use axum_test::TestServer;
 use tokio::sync::{Barrier, broadcast, mpsc};
 
+use clepsydra::api::error::{parse_internal_path, parse_request_path};
 use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
@@ -14,7 +17,7 @@ use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
-use clepsydra::vault::init::init_vault;
+use support::ApiFixture;
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
@@ -22,52 +25,14 @@ use tower::ServiceExt;
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
     Arc::new(vec![Box::new(AcademicMoveHook)])
 }
-
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
-    let (app, tmp) = setup_app();
-    let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    ApiFixture::builder().build().into_server_and_temp()
 }
 
 fn setup_app() -> (Router, TempDir) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(state);
-
-    (app, tmp)
+    let fixture = ApiFixture::builder().build();
+    (fixture.app, fixture.temp_dir)
 }
 
 fn delayed_multipart_request(
@@ -243,24 +208,127 @@ async fn delete_page_no_backlinks() {
 }
 
 #[tokio::test]
-async fn path_traversal_rejected() {
+async fn fixture_keeps_configuration_pre_index_seed_and_post_index_mutation_order_explicit() {
+    let fixture = ApiFixture::builder()
+        .configure(|root| fs::write(root.join(".clepsydra/fixture-configured"), "yes").unwrap())
+        .pre_index_seed(|root| {
+            assert!(root.join(".clepsydra/fixture-configured").is_file());
+            fs::write(root.join("indexed.md"), "---\ntitle: Indexed\n---\n").unwrap();
+        })
+        .post_index_mutation(|state| {
+            fs::write(
+                state.vault.root().join("not-indexed.md"),
+                "---\ntitle: Not indexed\n---\n",
+            )
+            .unwrap();
+        })
+        .build();
+
+    let indexed_paths = fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            let mut statement = index
+                .connection()
+                .prepare("SELECT path FROM pages ORDER BY path")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert!(indexed_paths.iter().any(|path| path == "indexed.md"));
+    assert!(!indexed_paths.iter().any(|path| path == "not-indexed.md"));
+}
+
+#[test]
+fn invalid_path_helpers_keep_trust_boundaries_separate() {
+    let request_error = parse_request_path("../outside.md", "invalid path").unwrap_err();
+    assert_eq!(request_error.status, StatusCode::BAD_REQUEST.as_u16());
+    assert!(request_error.error.starts_with("invalid path: "));
+
+    let internal_error =
+        parse_internal_path("../stored-outside.md", "invalid stored path").unwrap_err();
+    assert_eq!(
+        internal_error.status,
+        StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+    );
+    assert!(internal_error.error.starts_with("invalid stored path: "));
+
+    let generated_error =
+        parse_internal_path("generated\\invalid.md", "invalid generated path").unwrap_err();
+    assert_eq!(
+        generated_error.status,
+        StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+    );
+    assert!(
+        generated_error
+            .error
+            .starts_with("invalid generated path: ")
+    );
+}
+
+#[tokio::test]
+async fn invalid_path_in_stored_index_returns_internal_error_from_page_by_id() {
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000099";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("stored.md"),
+                format!("---\nid: {PAGE_ID}\ntitle: Stored\n---\n"),
+            )
+            .unwrap();
+        })
+        .build();
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute(
+                "UPDATE pages SET path = '../invalid-stored.md' WHERE id = ?1",
+                [PAGE_ID],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{PAGE_ID}"))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid stored path: ")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn invalid_path_in_request_returns_bad_request() {
     let (server, _tmp) = setup_server();
 
-    // VaultPath rejects `..` components. HTTP normalizes `../` in URL paths,
-    // so we test with percent-encoded `..` (%2e%2e) in a path segment that
-    // Axum will decode for the wildcard parameter.
+    // Use an encoded backslash so the router preserves the wildcard route and
+    // request-boundary VaultPath validation is responsible for the rejection.
     let res = server
-        .post("/api/vault/pages/%2e%2e/%2e%2e/etc/passwd")
+        .post("/api/vault/pages/bad%5Cpath.md")
         .json(&serde_json::json!({ "title": "Evil" }))
         .await;
 
-    let status = res.status_code();
-    // Must not succeed — either 400 (VaultPath rejects `..`) or 404 (Axum
-    // normalizes it away) are acceptable security outcomes
-    assert_ne!(
-        status,
-        axum::http::StatusCode::CREATED,
-        "path traversal must not succeed"
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid path: ")),
+        "unexpected error payload: {body}"
     );
 }
 
@@ -916,52 +984,22 @@ async fn move_folder_rewrites_all_contained_pages() {
 /// Create a vault with pre-populated markdown files, build the index, and
 /// return a test server. Each entry is `(relative_path, content)`.
 fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-
-    for (path, content) in files {
-        let abs = root.join(path);
-        if let Some(parent) = abs.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(&abs, content).unwrap();
-    }
-
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(state);
-
-    let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    let files: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, content)| ((*path).to_string(), (*content).to_string()))
+        .collect();
+    ApiFixture::builder()
+        .pre_index_seed(move |root| {
+            for (path, content) in files {
+                let abs = root.join(path);
+                if let Some(parent) = abs.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(abs, content).unwrap();
+            }
+        })
+        .build()
+        .into_server_and_temp()
 }
 
 // ---------------------------------------------------------------------------
@@ -1168,39 +1206,13 @@ See [[Nonexistent]].
 
 /// Set up a test server with a custom config.toml written before Vault::open.
 fn setup_server_with_config(config_content: &str) -> (TestServer, TempDir) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-    fs::write(root.join(".clepsydra/config.toml"), config_content).unwrap();
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(state);
-    let server = TestServer::new(app).unwrap();
-    (server, tmp)
+    let config_content = config_content.to_string();
+    ApiFixture::builder()
+        .configure(move |root| {
+            fs::write(root.join(".clepsydra/config.toml"), config_content).unwrap();
+        })
+        .build()
+        .into_server_and_temp()
 }
 
 #[tokio::test]

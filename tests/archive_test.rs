@@ -1,75 +1,32 @@
+mod support;
+
 use std::sync::Arc;
 
-use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use sha2::{Digest, Sha256};
-use tokio::sync::broadcast;
 
+use clepsydra::api::AppState;
 use clepsydra::api::archive::rollback_cas_with;
 use clepsydra::api::error::ApiError;
 use clepsydra::api::events::SyncNotification;
-use clepsydra::api::{AppState, api_router};
-use clepsydra::vault::Vault;
-use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::archive_hook::ArchiveDeleteHook;
-use clepsydra::vault::cas::ContentStore;
-use clepsydra::vault::hooks::{PostDeleteHook, PostMoveHook};
-use clepsydra::vault::index::VaultIndex;
-use clepsydra::vault::index_handle::IndexHandle;
-use clepsydra::vault::init::init_vault;
+use clepsydra::vault::hooks::PostDeleteHook;
 use tempfile::TempDir;
 
-fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
-    Arc::new(vec![Box::new(AcademicMoveHook)])
-}
+use support::ApiFixture;
 
 fn setup_server() -> (TestServer, TempDir, Arc<AppState>) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-    let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
-
-    let delete_hooks: Vec<Box<dyn PostDeleteHook>> = vec![Box::new(ArchiveDeleteHook {
-        cas: Arc::clone(&cas_arc),
-    })];
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: cas_arc,
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(delete_hooks),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(Arc::clone(&state));
-
-    let server = TestServer::new(app).unwrap();
-    (server, tmp, state)
+    ApiFixture::builder()
+        .delete_hooks_with(|cas| {
+            vec![Box::new(ArchiveDeleteHook {
+                cas: Arc::clone(cas),
+            }) as Box<dyn PostDeleteHook>]
+        })
+        .build()
+        .into_parts()
 }
 
 fn sha256_hash(data: &[u8]) -> String {

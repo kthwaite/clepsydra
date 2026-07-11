@@ -1,71 +1,33 @@
+mod support;
+
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 
-use axum::Router;
 use axum_test::TestServer;
 use tokio::sync::broadcast;
 
+use clepsydra::api::AppState;
+use clepsydra::api::board::CycleState;
 use clepsydra::api::events::SyncNotification;
-use clepsydra::api::{AppState, api_router};
-use clepsydra::vault::Vault;
-use clepsydra::vault::academic_hook::AcademicMoveHook;
-use clepsydra::vault::cas::ContentStore;
-use clepsydra::vault::hooks::PostMoveHook;
-use clepsydra::vault::index::VaultIndex;
-use clepsydra::vault::index_handle::IndexHandle;
-use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
 
-fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
-    Arc::new(vec![Box::new(AcademicMoveHook)])
+use support::ApiFixture;
+
+fn setup_server_with(pre_index: impl FnOnce(&Path) + 'static) -> (TestServer, TempDir) {
+    ApiFixture::builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_server_and_temp()
 }
 
-fn setup_server_with(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
-    let (server, tmp, _) = setup_server_with_state(pre_index);
-    (server, tmp)
-}
-
-fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir, Arc<AppState>) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-
-    pre_index(&root);
-
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(Arc::clone(&state));
-
-    let server = TestServer::new(app).unwrap();
-    (server, tmp, state)
+fn setup_server_with_state(
+    pre_index: impl FnOnce(&Path) + 'static,
+) -> (TestServer, TempDir, Arc<AppState>) {
+    ApiFixture::builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_parts()
 }
 
 async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {
@@ -967,6 +929,107 @@ async fn patch_task_moves_column_and_clears_hold() {
     assert!(
         !content.contains("hold:"),
         "file should not have hold field, got:\n{content}"
+    );
+}
+
+#[test]
+fn cycle_state_parses_valid_values_without_applying_operation_policy() {
+    assert_eq!(
+        CycleState::from_str("PLANNED").unwrap(),
+        CycleState::Planned
+    );
+    assert_eq!(CycleState::from_str("ACTIVE").unwrap(), CycleState::Active);
+    assert_eq!(CycleState::from_str("CLOSED").unwrap(), CycleState::Closed);
+    assert_eq!(
+        CycleState::from_str("BOGUS").unwrap_err(),
+        "unknown state: 'BOGUS'"
+    );
+}
+
+#[tokio::test]
+async fn generated_cycle_path_violation_is_an_internal_error() {
+    let (server, _tmp) = setup_server_with(|_| {});
+    let response = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "../outside",
+            "label": "Invalid generated path",
+            "start": "2026-07-06",
+            "end": "2026-07-12"
+        }))
+        .await;
+    response.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid path: ")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn cycle_state_create_rejects_closed_but_patch_accepts_it() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/S-13.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000009\n\
+             title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
+        )
+        .unwrap();
+    });
+
+    let create = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-14",
+            "label": "CYCLE 14",
+            "start": "2026-07-06",
+            "end": "2026-07-12",
+            "state": "CLOSED"
+        }))
+        .await;
+    create.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let create_body: serde_json::Value = create.json();
+    assert_eq!(
+        create_body["error"],
+        "state 'CLOSED' is not valid at cycle creation time"
+    );
+    let unknown_create = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "code": "S-15",
+            "label": "CYCLE 15",
+            "start": "2026-07-13",
+            "end": "2026-07-19",
+            "state": "BOGUS"
+        }))
+        .await;
+    unknown_create.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let unknown_create_body: serde_json::Value = unknown_create.json();
+    assert_eq!(
+        unknown_create_body["error"],
+        "unknown state: 'BOGUS'; valid values at creation: PLANNED, ACTIVE"
+    );
+
+    let patch = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000009")
+        .json(&serde_json::json!({ "state": "CLOSED" }))
+        .await;
+    patch.assert_status(axum::http::StatusCode::OK);
+    let patch_body: serde_json::Value = patch.json();
+    assert_eq!(patch_body["state"], "CLOSED");
+
+    let unknown_patch = server
+        .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000009")
+        .json(&serde_json::json!({ "state": "BOGUS" }))
+        .await;
+    unknown_patch.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let unknown_patch_body: serde_json::Value = unknown_patch.json();
+    assert_eq!(
+        unknown_patch_body["error"],
+        "unknown state: 'BOGUS'; valid values: PLANNED, ACTIVE, CLOSED"
     );
 }
 

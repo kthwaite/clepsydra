@@ -191,8 +191,7 @@ pub async fn list_folder_contents(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<FolderListing>, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.is_dir() {
@@ -431,8 +430,7 @@ pub async fn create_folder(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Response, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
 
@@ -476,8 +474,7 @@ pub async fn delete_folder(
     Path(path): Path<String>,
     Query(query): Query<DeleteFolderQuery>,
 ) -> Result<Response, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.is_dir() {
@@ -621,16 +618,14 @@ pub async fn move_folder(
     Json(body): Json<MoveFolderRequest>,
 ) -> Result<Response, ApiError> {
     // Validate source folder exists
-    let source_vp =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let source_vp = crate::api::error::parse_request_path(&path, "invalid path")?;
     let source_abs = state.vault.resolve(&source_vp);
     if !source_abs.is_dir() {
         return Err(ApiError::not_found(format!("folder not found: {path}")));
     }
 
     // Validate destination doesn't exist
-    let dest_vp = VaultPath::new(&body.destination)
-        .map_err(|e| ApiError::bad_request(format!("invalid destination: {e}")))?;
+    let dest_vp = crate::api::error::parse_request_path(&body.destination, "invalid destination")?;
     let dest_abs = state.vault.resolve(&dest_vp);
     if dest_abs.exists() {
         return Err(ApiError::conflict(format!(

@@ -346,8 +346,7 @@ pub async fn get_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.exists() {
@@ -394,8 +393,7 @@ pub async fn get_page_by_id(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .ok_or_else(|| ApiError::not_found(format!("page not found with id: {uuid}")))?;
 
-    let vault_path = VaultPath::new(&page_path)
-        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let vault_path = crate::api::error::parse_internal_path(&page_path, "invalid stored path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.exists() {
@@ -429,8 +427,7 @@ pub async fn create_page(
     Path(path): Path<String>,
     Json(body): Json<CreatePageRequest>,
 ) -> Result<Response, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     // Build PageMeta
     let mut meta = PageMeta::new();
@@ -496,8 +493,7 @@ pub async fn update_page(
     Path(path): Path<String>,
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     let expected_content = fs::read_to_string(&abs_path).map_err(|error| {
@@ -581,8 +577,7 @@ pub async fn delete_page(
     Path(path): Path<String>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<Response, ApiError> {
-    let vault_path =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.exists() {
@@ -718,16 +713,14 @@ pub async fn move_page(
     Json(body): Json<MovePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
     // 1. Validate source path exists
-    let source_vp =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let source_vp = crate::api::error::parse_request_path(&path, "invalid path")?;
     let source_abs = state.vault.resolve(&source_vp);
     if !source_abs.exists() {
         return Err(ApiError::not_found(format!("page not found: {path}")));
     }
 
     // 2. Validate destination path
-    let dest_vp = VaultPath::new(&body.destination)
-        .map_err(|e| ApiError::bad_request(format!("invalid destination: {e}")))?;
+    let dest_vp = crate::api::error::parse_request_path(&body.destination, "invalid destination")?;
     let dest_abs = state.vault.resolve(&dest_vp);
     if dest_abs.exists() {
         return Err(ApiError::conflict(format!(
@@ -810,8 +803,7 @@ pub async fn assign_page(
     Path(path): Path<String>,
     Json(body): Json<AssignRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    let vp =
-        VaultPath::new(&path).map_err(|e| ApiError::bad_request(format!("invalid path: {e}")))?;
+    let vp = crate::api::error::parse_request_path(&path, "invalid path")?;
     let abs = state.vault.resolve(&vp);
     let expected_content = fs::read_to_string(&abs).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {

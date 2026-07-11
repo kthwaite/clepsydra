@@ -1,26 +1,18 @@
+mod support;
+
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 
 use clepsydra::api::events::SyncNotification;
-use clepsydra::api::{AppState, Clock, api_router};
-use clepsydra::vault::Vault;
-use clepsydra::vault::academic_hook::AcademicMoveHook;
-use clepsydra::vault::cas::ContentStore;
-use clepsydra::vault::hooks::PostMoveHook;
-use clepsydra::vault::index::VaultIndex;
-use clepsydra::vault::index_handle::IndexHandle;
-use clepsydra::vault::init::init_vault;
+use clepsydra::api::{AppState, Clock};
 use tempfile::TempDir;
 
-fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
-    Arc::new(vec![Box::new(AcademicMoveHook)])
-}
+use support::ApiFixture;
 
 const FIXED_NOW: &str = "2042-05-17T23:59:59Z";
 
@@ -37,60 +29,28 @@ fn fixed_now() -> DateTime<Utc> {
     FIXED_NOW.parse().unwrap()
 }
 
+fn fixture_builder() -> support::ApiFixtureBuilder {
+    ApiFixture::builder().clock(Arc::new(FixedClock(fixed_now())))
+}
+
 fn setup_server() -> (TestServer, TempDir) {
-    setup_server_with_files(|_| {})
+    fixture_builder().build().into_server_and_temp()
 }
 
-/// Like `setup_server`, but calls `pre_index` with the vault root path after
-/// `init_vault` and before the index build. Use this to seed the vault with
-/// files that must be indexed before the server starts.
-fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
-    let (server, tmp, _) = setup_server_with_state(pre_index);
-    (server, tmp)
+fn setup_server_with_files(pre_index: impl FnOnce(&Path) + 'static) -> (TestServer, TempDir) {
+    fixture_builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_server_and_temp()
 }
 
-fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir, Arc<AppState>) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-
-    // Allow the caller to write files into the vault before indexing.
-    pre_index(&root);
-
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(FixedClock(fixed_now())),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(Arc::clone(&state));
-
-    let server = TestServer::new(app).unwrap();
-    (server, tmp, state)
+fn setup_server_with_state(
+    pre_index: impl FnOnce(&Path) + 'static,
+) -> (TestServer, TempDir, Arc<AppState>) {
+    fixture_builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_parts()
 }
 
 async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {

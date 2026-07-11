@@ -1,73 +1,32 @@
+mod support;
+
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use tokio::sync::broadcast;
 
+use clepsydra::api::AppState;
 use clepsydra::api::events::SyncNotification;
-use clepsydra::api::{AppState, api_router};
-use clepsydra::vault::Vault;
-use clepsydra::vault::academic_hook::AcademicMoveHook;
-use clepsydra::vault::cas::ContentStore;
-use clepsydra::vault::hooks::PostMoveHook;
-use clepsydra::vault::index::VaultIndex;
-use clepsydra::vault::index_handle::IndexHandle;
-use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
 
-fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
-    Arc::new(vec![Box::new(AcademicMoveHook)])
+use support::ApiFixture;
+
+fn setup_server_with_files(pre_index: impl FnOnce(&Path) + 'static) -> (TestServer, TempDir) {
+    ApiFixture::builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_server_and_temp()
 }
 
-fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir) {
-    let (server, tmp, _) = setup_server_with_state(pre_index);
-    (server, tmp)
-}
-
-fn setup_server_with_state(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDir, Arc<AppState>) {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    init_vault(&root).unwrap();
-
-    // Allow the caller to write files into the vault before indexing.
-    pre_index(&root);
-
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(Arc::clone(&state));
-
-    let server = TestServer::new(app).unwrap();
-    (server, tmp, state)
+fn setup_server_with_state(
+    pre_index: impl FnOnce(&Path) + 'static,
+) -> (TestServer, TempDir, Arc<AppState>) {
+    ApiFixture::builder()
+        .pre_index_seed(pre_index)
+        .build()
+        .into_parts()
 }
 
 async fn recv_change(changes: &mut broadcast::Receiver<SyncNotification>) -> SyncNotification {

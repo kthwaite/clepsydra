@@ -25,7 +25,6 @@ use crate::vault::academic::{
 };
 use crate::vault::canonical::CanonicalName;
 use crate::vault::page::{Page, PageMeta, write_page_content};
-use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -320,8 +319,8 @@ pub(crate) async fn create_work_internal(
     } else {
         format!("{folder}/{slug}")
     };
-    let vault_path = VaultPath::new(&vault_path_str)
-        .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
+    let vault_path =
+        crate::api::error::parse_internal_path(&vault_path_str, "invalid generated path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if abs_path.exists() {
@@ -711,8 +710,7 @@ fn apply_source_wins(
     page_path: &str,
     entry: &crate::vault::import::BibImportEntry,
 ) -> Result<(), ApiError> {
-    let vp = VaultPath::new(page_path)
-        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+    let vp = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
     let abs_path = state.vault.resolve(&vp);
     let mut page = Page::from_file(&abs_path, vp.clone())
         .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
@@ -731,8 +729,7 @@ async fn patch_zotero_provenance(
     item: &crate::vault::import_zotero::ZoteroItem,
     zotero_data_dir: &std::path::Path,
 ) -> Result<(), ApiError> {
-    let vp = VaultPath::new(page_path)
-        .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+    let vp = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
     let abs_path = state.vault.resolve(&vp);
 
     let mut page = Page::from_file(&abs_path, vp.clone())
@@ -820,8 +817,7 @@ fn should_save_zotero_checkpoint(results: &[ImportResult]) -> bool {
 /// Re-index a single page by vault-relative path (used after writing changes
 /// during an import).
 async fn reindex_page(state: &AppState, path: &str) -> Result<(), ApiError> {
-    let vp =
-        VaultPath::new(path).map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+    let vp = crate::api::error::parse_internal_path(path, "Invalid vault path")?;
     state
         .index
         .with_index(move |index, vault| index.index_page(vault, &vp))
@@ -853,8 +849,7 @@ async fn handle_zk_existing(
     // Manual policy needs the diffs to distinguish conflict from skipped. Read
     // the page once and reuse the diffs for both `has_diffs` and conflict_detail.
     let diffs = if matches!(policy, crate::vault::import_zotero::ConflictPolicy::Manual) {
-        let vp = VaultPath::new(&path)
-            .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+        let vp = crate::api::error::parse_internal_path(&path, "Invalid vault path")?;
         let abs_path = state.vault.resolve(&vp);
         let page = Page::from_file(&abs_path, vp)
             .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
@@ -927,8 +922,7 @@ async fn handle_doi_existing(
     // Manual policy: read the page once, reuse the diffs for both the
     // has_diffs decision and the conflict_detail.
     let diffs = if matches!(policy, crate::vault::import_zotero::ConflictPolicy::Manual) {
-        let vp = VaultPath::new(&path)
-            .map_err(|e| ApiError::internal(format!("Invalid vault path: {e}")))?;
+        let vp = crate::api::error::parse_internal_path(&path, "Invalid vault path")?;
         let abs_path = state.vault.resolve(&vp);
         let page = Page::from_file(&abs_path, vp)
             .map_err(|e| ApiError::internal(format!("Failed to read page: {e}")))?;
@@ -1323,8 +1317,7 @@ pub async fn get_work(
     }
 
     // 3. Read the file
-    let vault_path = VaultPath::new(&page_path)
-        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let vault_path = crate::api::error::parse_internal_path(&page_path, "invalid stored path")?;
     let abs_path = state.vault.resolve(&vault_path);
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
@@ -1558,8 +1551,7 @@ pub async fn update_work(
     }
     let page_path = path;
 
-    let vault_path = VaultPath::new(&page_path)
-        .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+    let vault_path = crate::api::error::parse_internal_path(&page_path, "invalid stored path")?;
     let abs_path = state.vault.resolve(&vault_path);
 
     // 3. Read existing file
@@ -1735,8 +1727,8 @@ pub async fn create_annotation(
     } else {
         format!("{folder}/{filename}")
     };
-    let vault_path = VaultPath::new(&vault_path_str)
-        .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
+    let vault_path =
+        crate::api::error::parse_internal_path(&vault_path_str, "invalid generated path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
     if abs_path.exists() {
@@ -1880,8 +1872,7 @@ pub async fn list_annotations(
     // For each annotation, read the file to get the body
     let mut results = Vec::with_capacity(rows.len());
     for (id, path, mj) in &rows {
-        let vault_path = VaultPath::new(path)
-            .map_err(|e| ApiError::internal(format!("invalid stored path: {e}")))?;
+        let vault_path = crate::api::error::parse_internal_path(path, "invalid stored path")?;
         let abs_path = state.vault.resolve(&vault_path);
         let page = Page::from_file(&abs_path, vault_path)
             .map_err(|e| ApiError::internal(format!("failed to read annotation: {e}")))?;

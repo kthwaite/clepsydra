@@ -136,6 +136,40 @@ pub struct BoardResponse {
 // Request DTOs for mutations
 // ---------------------------------------------------------------------------
 
+/// A syntactically valid cycle lifecycle state.
+///
+/// Parsing deliberately does not decide whether an operation permits the
+/// state. Creation and patching apply their own policy after parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleState {
+    Planned,
+    Active,
+    Closed,
+}
+
+impl CycleState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Planned => "PLANNED",
+            Self::Active => "ACTIVE",
+            Self::Closed => "CLOSED",
+        }
+    }
+}
+
+impl std::str::FromStr for CycleState {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "PLANNED" => Ok(Self::Planned),
+            "ACTIVE" => Ok(Self::Active),
+            "CLOSED" => Ok(Self::Closed),
+            other => Err(format!("unknown state: '{other}'")),
+        }
+    }
+}
+
 /// POST /board/cycles request body.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateCycleRequest {
