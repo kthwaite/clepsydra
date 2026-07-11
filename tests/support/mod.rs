@@ -154,6 +154,7 @@ impl ApiFixtureBuilder {
 
         let app: Router = Router::new()
             .nest("/api/vault", api_router())
+            .merge(clepsydra::api::deeplink::root_router())
             .with_state(Arc::clone(&state));
         let server = TestServer::new(app.clone()).unwrap();
         ApiFixture {

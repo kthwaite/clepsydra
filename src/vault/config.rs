@@ -41,6 +41,10 @@ pub struct VaultSection {
     pub linkable_properties: Vec<String>,
     #[serde(default)]
     pub disambiguation_strategy: DisambiguationStrategy,
+    /// Obsidian vault names accepted by obsidian:// compat links, in addition
+    /// to the basename of the vault root.
+    #[serde(default)]
+    pub obsidian_vault_aliases: Vec<String>,
 }
 
 impl Default for VaultSection {
@@ -51,6 +55,7 @@ impl Default for VaultSection {
             default_page_folder: String::new(),
             linkable_properties: default_linkable_properties(),
             disambiguation_strategy: DisambiguationStrategy::default(),
+            obsidian_vault_aliases: Vec::new(),
         }
     }
 }

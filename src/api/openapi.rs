@@ -20,7 +20,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "BCL", description = "Brimley-Cocoon Line countdown"),
         (name = "Location", description = "Vault geographic location"),
         (name = "Uptime", description = "Server uptime"),
-        (name = "Board", description = "TASKING board: read model and task/cycle mutations")
+        (name = "Board", description = "TASKING board: read model and task/cycle mutations"),
+        (name = "Deeplink", description = "clepsydra:// / obsidian:// deep-link resolution")
     ),
     paths(
         // Pages
@@ -86,7 +87,9 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::board::tasks::create_task,
         crate::api::board::tasks::patch_task,
         crate::api::board::cycles::create_cycle,
-        crate::api::board::cycles::patch_cycle
+        crate::api::board::cycles::patch_cycle,
+        // Deeplink
+        crate::api::deeplink::resolve_url
     ),
     components(
         schemas(
@@ -169,7 +172,9 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::board::CreateTaskRequest,
             crate::api::board::PatchTaskRequest,
             crate::api::board::CreateCycleRequest,
-            crate::api::board::PatchCycleRequest
+            crate::api::board::PatchCycleRequest,
+            // Deeplink
+            crate::api::deeplink::ResolveResponse
         )
     )
 )]

@@ -351,7 +351,8 @@ pub(crate) fn build_router(
             "/api/vault",
             api::api_router_with_archive_limit(archive_body_limit),
         )
-        .merge(api::openapi::router());
+        .merge(api::openapi::router())
+        .merge(api::deeplink::root_router());
     if !dev_mode {
         app = app.merge(api::frontend::frontend_router());
     }

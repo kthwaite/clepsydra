@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod bcl;
 pub mod blocks;
 pub mod board;
+pub mod deeplink;
 pub mod error;
 pub mod events;
 pub mod folders;
@@ -132,4 +133,5 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         )
         .route("/geocode", axum::routing::get(location::geocode_search))
         .route("/uptime", axum::routing::get(uptime::get_uptime))
+        .merge(deeplink::router())
 }
