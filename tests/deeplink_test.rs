@@ -209,3 +209,35 @@ fn unknown_target_is_a_miss() {
     let hit = resolve_target(index.connection(), "no-such-page", "no-such-page").unwrap();
     assert_eq!(hit, None);
 }
+
+#[test]
+fn shortid_match_is_case_sensitive() {
+    // Two pages whose shortids differ only by case. SQLite's default LIKE is
+    // ASCII case-insensitive, so without an exact-case filter the query for
+    // either shortid would see both pages.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    std::fs::write(
+        root.join("20260531.alpha.aB3dE9xZ.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000b1\ntitle: Alpha\ncreated_at: 2026-05-31T12:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("20260531.alpha-twin.Ab3De9xZ.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000b2\ntitle: Alpha Twin\ncreated_at: 2026-05-31T13:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    let vault = Vault::open(&root).unwrap();
+    let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    // (a) The exact-case shortid resolves its own page only.
+    let hit = resolve_target(index.connection(), "aB3dE9xZ", "aB3dE9xZ").unwrap();
+    assert_eq!(hit.as_deref(), Some("20260531.alpha.aB3dE9xZ.md"));
+
+    // (b) A case variant that matches no page exactly is a miss.
+    let hit = resolve_target(index.connection(), "AB3DE9XZ", "AB3DE9XZ").unwrap();
+    assert_eq!(hit, None);
+}

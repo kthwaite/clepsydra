@@ -202,13 +202,17 @@ pub fn resolve_target(
 
     // 3. Shortid: the third dot-segment of the canonical filename scheme
     //    `<yyyymmdd>.<slug>.<shortid>.md`. Alphanumeric-only, so the LIKE
-    //    pattern needs no escaping.
+    //    pattern needs no escaping. SQLite's default LIKE is ASCII
+    //    case-insensitive, but base62 shortids are case-significant, so the
+    //    LIKE only narrows; the exact-case check happens in Rust.
     if decoded.len() == 8 && decoded.chars().all(|c| c.is_ascii_alphanumeric()) {
         let mut stmt =
             conn.prepare("SELECT path FROM pages WHERE path LIKE '%.' || ?1 || '.md'")?;
         let paths: Vec<String> = stmt
             .query_map(params![decoded], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
+        let suffix = format!(".{decoded}.md");
+        let paths: Vec<String> = paths.into_iter().filter(|p| p.ends_with(&suffix)).collect();
         if let [only] = paths.as_slice() {
             return Ok(Some(only.clone()));
         }
