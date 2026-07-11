@@ -241,3 +241,32 @@ fn shortid_match_is_case_sensitive() {
     let hit = resolve_target(index.connection(), "AB3DE9XZ", "AB3DE9XZ").unwrap();
     assert_eq!(hit, None);
 }
+
+#[test]
+fn shortid_ambiguity_is_a_miss() {
+    // Two pages whose filenames end in the identical shortid segment (distinct
+    // slugs/titles, same shortid — a real collision, not just a case variant).
+    // Final ambiguity is a miss (locked policy): silently picking one would be
+    // worse than a clean miss.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(
+        root.join("20260601.one.Qq7Ww6Ee.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000c1\ntitle: One\ncreated_at: 2026-06-01T12:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("sub/20260602.two.Qq7Ww6Ee.md"),
+        "---\nid: 0190f8a0-0000-7000-8000-0000000000c2\ntitle: Two\ncreated_at: 2026-06-02T12:00:00Z\n---\nbody\n",
+    )
+    .unwrap();
+    let vault = Vault::open(&root).unwrap();
+    let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let hit = resolve_target(index.connection(), "Qq7Ww6Ee", "Qq7Ww6Ee").unwrap();
+    assert_eq!(hit, None);
+}

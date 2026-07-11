@@ -201,7 +201,10 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             if print || !cfg!(target_os = "macos") {
                 println!("{target}");
             } else {
-                std::process::Command::new("open").arg(&target).status()?;
+                let status = std::process::Command::new("open").arg(&target).status()?;
+                if !status.success() {
+                    return Err(format!("open exited with {status}").into());
+                }
             }
             Ok(0)
         }

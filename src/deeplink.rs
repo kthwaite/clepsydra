@@ -9,10 +9,17 @@ use std::fmt;
 use std::path::Path;
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::vault::canonical::CanonicalName;
 
 /// Everything except RFC 3986 unreserved characters gets percent-encoded when
 /// a scheme URL is embedded as a query value.
-const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
+///
+/// This is the feature's canonical query-value encode set; shared with
+/// `src/api/deeplink.rs` for the `/deeplink` redirect's `target=` param so
+/// both sites stay byte-for-byte in agreement.
+pub const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
     .remove(b'.')
     .remove(b'_')
@@ -149,10 +156,6 @@ pub fn deeplink_http_url(base: &str, raw_url: &str) -> String {
     )
 }
 
-use rusqlite::{Connection, OptionalExtension, params};
-
-use crate::vault::canonical::CanonicalName;
-
 /// Layered lookup: exact path → unique canonical name → unique shortid.
 ///
 /// `raw` is tried alongside `decoded` for path matches because vault paths may
@@ -163,15 +166,24 @@ pub fn resolve_target(
     raw: &str,
     decoded: &str,
 ) -> Result<Option<String>, rusqlite::Error> {
-    // 1. Exact path, with and without a supplied `.md`.
+    // 1. Exact path, with and without a supplied `.md`. `raw == decoded`
+    //    whenever the target has no percent-encoded bytes, so a contains-check
+    //    before each push is required — `Vec::dedup` only removes *adjacent*
+    //    duplicates and the two `t`s aren't adjacent to each other's `.md`
+    //    variant.
     let mut candidates: Vec<String> = Vec::new();
     for t in [raw, decoded] {
-        candidates.push(t.to_string());
+        let owned = t.to_string();
+        if !candidates.contains(&owned) {
+            candidates.push(owned);
+        }
         if !t.ends_with(".md") {
-            candidates.push(format!("{t}.md"));
+            let with_ext = format!("{t}.md");
+            if !candidates.contains(&with_ext) {
+                candidates.push(with_ext);
+            }
         }
     }
-    candidates.dedup();
     for cand in &candidates {
         let hit: Option<String> = conn
             .query_row(

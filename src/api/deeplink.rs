@@ -14,16 +14,11 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use crate::deeplink;
+use crate::deeplink::QUERY_VALUE;
 
 /// Keep `/` so a vault path stays a path in the redirect location.
 const PATH_KEEP_SLASH: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'/')
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
-
-const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
     .remove(b'.')
     .remove(b'_')
@@ -40,12 +35,22 @@ pub struct ResolveResponse {
     pub path: String,
 }
 
-/// Parse + vault-check + resolve; `Ok(None)` is a miss, `Err` a parse error.
+/// Pipeline-level failure: a link that doesn't parse is distinct from an
+/// infrastructure failure while resolving it (index thread down, query
+/// error). Callers map each variant to a different HTTP status; a genuine
+/// miss is `Ok(None)`, never an `Err`.
+enum PipelineError {
+    Parse(deeplink::ParseError),
+    Internal(String),
+}
+
+/// Parse + vault-check + resolve; `Ok(None)` is a miss, `Err` distinguishes a
+/// parse error from an infrastructure failure.
 async fn resolve_pipeline(
     state: &Arc<AppState>,
     url: &str,
-) -> Result<Option<String>, deeplink::ParseError> {
-    let parsed = deeplink::parse(url)?;
+) -> Result<Option<String>, PipelineError> {
+    let parsed = deeplink::parse(url).map_err(PipelineError::Parse)?;
     let aliases = state.vault.config().vault.obsidian_vault_aliases.clone();
     if !deeplink::vault_matches(parsed.vault.as_deref(), state.vault.root(), &aliases) {
         return Ok(None);
@@ -55,10 +60,11 @@ async fn resolve_pipeline(
     let found = state
         .index
         .with_index(move |index, _vault| {
-            deeplink::resolve_target(index.connection(), &raw, &decoded).unwrap_or(None)
+            deeplink::resolve_target(index.connection(), &raw, &decoded)
         })
         .await
-        .unwrap_or(None);
+        .map_err(|e| PipelineError::Internal(e.to_string()))?
+        .map_err(|e: rusqlite::Error| PipelineError::Internal(e.to_string()))?;
     Ok(found)
 }
 
@@ -80,7 +86,10 @@ pub async fn resolve_url(
 ) -> Result<Json<ResolveResponse>, ApiError> {
     let found = resolve_pipeline(&state, &params.url)
         .await
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+        .map_err(|e| match e {
+            PipelineError::Parse(e) => ApiError::bad_request(e.to_string()),
+            PipelineError::Internal(msg) => ApiError::internal(msg),
+        })?;
     found
         .map(|path| Json(ResolveResponse { path }))
         .ok_or_else(|| ApiError::not_found(format!("no page matches: {}", params.url)))
