@@ -78,6 +78,20 @@ enum Commands {
         #[arg(long)]
         lsp: bool,
     },
+    #[command(
+        about = "Open a clepsydra:// or obsidian:// URL in the running server's UI",
+        long_about = "Translate a deep-link URL into a local HTTP hit on the server's /deeplink endpoint and open it in the default browser.\n\nThis is the entry point the macOS URL-handler applet (see `register-url`) invokes; it can also be called directly.",
+        after_help = "Examples:\n  clepsydra open-url \"clepsydra://page/Alpha%20Project\"\n  clepsydra open-url \"obsidian://open?vault=brain&file=Note\" --print"
+    )]
+    OpenUrl {
+        #[arg(value_name = "URL", help = "The scheme URL to open")]
+        url: String,
+        #[arg(
+            long,
+            help = "Print the translated HTTP URL instead of opening the browser"
+        )]
+        print: bool,
+    },
     /// Rename authored pages to the canonical `yyyymmdd.slug.shortid.md` scheme.
     #[command(about = "Relabel page filenames to the canonical identity scheme")]
     Relabel {
@@ -160,6 +174,26 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Serve { lsp } => {
             run_server(lsp).await?;
+            Ok(0)
+        }
+        Commands::OpenUrl { url, print } => {
+            let cwd = std::env::current_dir()?;
+            let (settings, _config_path) = clepsydra::Settings::load(&cwd)?;
+            let scheme = if settings.server.tls.enabled {
+                "https"
+            } else {
+                "http"
+            };
+            let base = format!(
+                "{scheme}://{}:{}",
+                settings.server.host, settings.server.port
+            );
+            let target = clepsydra::deeplink::deeplink_http_url(&base, &url);
+            if print || !cfg!(target_os = "macos") {
+                println!("{target}");
+            } else {
+                std::process::Command::new("open").arg(&target).status()?;
+            }
             Ok(0)
         }
         Commands::Relabel { dry_run } => {
@@ -394,5 +428,25 @@ mod cli_tests {
         let cli = Cli::try_parse_from(["clepsydra", "tree", "--json"]).unwrap();
         let result = run_cli_in(&root, cli).await;
         assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn open_url_print_returns_zero() {
+        let (_dir, root) = vault_in_tempdir();
+        let cli = Cli::try_parse_from([
+            "clepsydra",
+            "open-url",
+            "clepsydra://page/whatever",
+            "--print",
+        ])
+        .unwrap();
+        let result = run_cli_in(&root, cli).await;
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn open_url_requires_a_url_argument() {
+        assert!(Cli::try_parse_from(["clepsydra", "open-url"]).is_err());
     }
 }

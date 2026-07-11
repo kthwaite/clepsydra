@@ -109,7 +109,7 @@ impl Settings {
     /// Load settings from the config file discovered at `base_dir` (or its parents), layering
     /// defaults and environment variables on top. Returns the loaded settings and the path to the
     /// config file.
-    fn load(base_dir: &Path) -> Result<(Self, PathBuf), Box<dyn std::error::Error>> {
+    pub fn load(base_dir: &Path) -> Result<(Self, PathBuf), Box<dyn std::error::Error>> {
         let candidates = config_candidates(base_dir);
         let checked = candidates
             .iter()
