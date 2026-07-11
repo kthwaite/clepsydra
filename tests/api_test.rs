@@ -7,14 +7,10 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum_test::TestServer;
-use tokio::sync::{Barrier, broadcast, mpsc};
+use tokio::sync::{Barrier, mpsc};
 
 use clepsydra::api::error::{parse_internal_path, parse_request_path};
-use clepsydra::api::{AppState, api_router};
 use clepsydra::vault::Vault;
-use clepsydra::vault::academic_hook::AcademicMoveHook;
-use clepsydra::vault::cas::ContentStore;
-use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use support::ApiFixture;
@@ -22,9 +18,6 @@ use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
 
-fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
-    Arc::new(vec![Box::new(AcademicMoveHook)])
-}
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
     ApiFixture::builder().build().into_server_and_temp()
@@ -301,6 +294,43 @@ async fn invalid_path_in_stored_index_returns_internal_error_from_page_by_id() {
         .server
         .get(&format!("/api/vault/pages/by-id/{PAGE_ID}"))
         .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("invalid stored path: ")),
+        "unexpected error payload: {body}"
+    );
+}
+
+#[tokio::test]
+async fn invalid_path_in_stored_index_returns_internal_error_from_content_index() {
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000098";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("stored-content.md"),
+                format!("---\nid: {PAGE_ID}\ntitle: Stored content\n---\n"),
+            )
+            .unwrap();
+        })
+        .build();
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute(
+                "UPDATE pages SET path = '../invalid-stored.md' WHERE id = ?1",
+                [PAGE_ID],
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let response = fixture.server.get("/api/vault/index/content-index").await;
     response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
     let body: serde_json::Value = response.json();
     assert!(
@@ -1687,57 +1717,22 @@ async fn list_pages_pagination() {
 
 #[tokio::test]
 async fn sse_events_endpoint_returns_stream() {
-    use axum::body::Body;
-    use axum::http::Request;
     use std::time::Duration;
-    use tower::ServiceExt;
 
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    clepsydra::vault::init::init_vault(&root).unwrap();
-
-    let vault = clepsydra::vault::Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(state);
-
+    let fixture = ApiFixture::builder().build();
     let request = Request::builder()
         .uri("/api/vault/events")
         .body(Body::empty())
         .unwrap();
 
-    // SSE streams never complete, so use a timeout for the initial response
-    let response = tokio::time::timeout(Duration::from_secs(2), app.oneshot(request))
-        .await
-        .expect("SSE response timed out")
-        .unwrap();
+    // SSE streams never complete, so use a timeout for the initial response.
+    // Keep the fixture alive while the response is inspected so its temporary
+    // vault and shared state outlive the stream setup.
+    let response =
+        tokio::time::timeout(Duration::from_secs(2), fixture.app.clone().oneshot(request))
+            .await
+            .expect("SSE response timed out")
+            .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let content_type = response
@@ -1835,46 +1830,11 @@ async fn sync_notification_serializes_to_json() {
 
 #[tokio::test]
 async fn create_page_emits_sync_notification() {
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().join("vault");
-    clepsydra::vault::init::init_vault(&root).unwrap();
+    let fixture = ApiFixture::builder().build();
+    let mut rx = fixture.state.change_tx.subscribe();
 
-    let vault = clepsydra::vault::Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
-
-    let cas_path = tmp.path().join("cas");
-    let cas = ContentStore::open(&cas_path).unwrap();
-
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-
-    let (change_tx, _) = broadcast::channel(64);
-    let mut rx = change_tx.subscribe();
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(clepsydra::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: production_hooks(),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let app: Router = Router::new()
-        .nest("/api/vault", api_router())
-        .with_state(state);
-
-    let test_server = TestServer::new(app).unwrap();
-
-    test_server
+    fixture
+        .server
         .post("/api/vault/pages/test-notify.md")
         .json(&serde_json::json!({
             "title": "Notify Test",

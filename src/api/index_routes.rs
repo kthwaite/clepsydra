@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
-use super::error::ApiError;
+use super::error::{ApiError, parse_internal_path};
 use super::pages::page_detail_from_meta;
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
@@ -893,8 +893,9 @@ pub async fn content_index(
         .with_index(move |index, vault| {
             let conn = index.connection();
 
-            let mut page_stmt =
-                conn.prepare("SELECT id, path, title, kind, kind_inferred, project FROM pages")?;
+            let mut page_stmt = conn
+                .prepare("SELECT id, path, title, kind, kind_inferred, project FROM pages")
+                .map_err(|error| ApiError::internal(error.to_string()))?;
 
             type PageRow = (String, String, Option<String>, String, i64, Option<String>);
             let pages: Vec<PageRow> = page_stmt
@@ -907,7 +908,8 @@ pub async fn content_index(
                         row.get(4)?,
                         row.get(5)?,
                     ))
-                })?
+                })
+                .map_err(|error| ApiError::internal(error.to_string()))?
                 .filter_map(|r| r.ok())
                 .collect();
 
@@ -915,10 +917,14 @@ pub async fn content_index(
             let mut tags_by_page: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::with_capacity(pages.len());
             {
-                let mut stmt = conn.prepare("SELECT page_id, tag FROM tags")?;
-                let rows = stmt.query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?;
+                let mut stmt = conn
+                    .prepare("SELECT page_id, tag FROM tags")
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
                 for (pid, tag) in rows.flatten() {
                     tags_by_page.entry(pid).or_default().push(tag);
                 }
@@ -928,13 +934,17 @@ pub async fn content_index(
             let mut links_by_page: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::with_capacity(pages.len());
             {
-                let mut stmt = conn.prepare(
-                    "SELECT DISTINCT source_id, target_path FROM links \
-                     WHERE target_path IS NOT NULL",
-                )?;
-                let rows = stmt.query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?;
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT DISTINCT source_id, target_path FROM links \
+                         WHERE target_path IS NOT NULL",
+                    )
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
                 for (sid, target) in rows.flatten() {
                     links_by_page.entry(sid).or_default().push(target);
                 }
@@ -946,10 +956,7 @@ pub async fn content_index(
                 let tags = tags_by_page.remove(page_id).unwrap_or_default();
                 let links = links_by_page.remove(page_id).unwrap_or_default();
 
-                let vault_path = match VaultPath::new(path) {
-                    Ok(vp) => vp,
-                    Err(_) => continue,
-                };
+                let vault_path = parse_internal_path(path, "invalid stored path")?;
                 let abs_path = vault.resolve(&vault_path);
                 let (created_at, updated_at, description, word_count) = if abs_path.exists() {
                     match Page::from_file(&abs_path, vault_path) {
@@ -981,11 +988,10 @@ pub async fn content_index(
                 });
             }
 
-            Ok::<_, rusqlite::Error>(entries)
+            Ok::<_, ApiError>(entries)
         })
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|e| ApiError::internal(e.to_string()))??;
 
     Ok(Json(PaginatedResponse::from_vec(entries, &pagination)))
 }
