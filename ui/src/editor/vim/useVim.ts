@@ -1,6 +1,6 @@
 import { parseKeyboardEvent } from "@tanstack/hotkeys";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Editor } from "slate";
+import { type Editor, Transforms } from "slate";
 import type { VimMode } from "./core/ast";
 import { tokenize } from "./core/keys";
 import { createVimParser } from "./core/parser";
@@ -35,12 +35,21 @@ interface VimHandle {
  * for canonical modifier state; the raw `event.key` supplies the produced
  * character since vim distinguishes `a`/`A`/`$`.
  */
+/**
+ * Insert-mode escape sequence: typing "jk" quickly leaves insert mode.
+ * The j types normally (blocking it would make ordinary typing laggy);
+ * a k within the window deletes that j and escapes instead of typing.
+ */
+const ESCAPE_SEQUENCE = ["j", "k"] as const;
+const ESCAPE_SEQUENCE_MS = 500;
+
 export function useVim(editor: Editor, enabled: boolean): VimHandle {
   const parserRef = useRef(createVimParser());
   const [state, setState] = useState<VimState>(INITIAL_VIM_STATE);
   const [pending, setPending] = useState("");
   const stateRef = useRef(state);
   stateRef.current = state;
+  const escapePrefixAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Entering or leaving vim mode starts from a clean normal-mode slate.
@@ -69,11 +78,35 @@ export function useVim(editor: Editor, enabled: boolean): VimHandle {
       if (current.mode === "insert") {
         if (event.key === "Escape") {
           event.preventDefault();
+          escapePrefixAtRef.current = null;
           parser.reset();
           setPending("");
           runCommand({ t: "escape" });
           return true;
         }
+        const bare = !event.ctrlKey && !event.metaKey && !event.altKey;
+        const prefixAt = escapePrefixAtRef.current;
+        if (
+          bare &&
+          event.key === ESCAPE_SEQUENCE[1] &&
+          prefixAt !== null &&
+          performance.now() - prefixAt <= ESCAPE_SEQUENCE_MS
+        ) {
+          // Complete the jk escape: remove the j that already typed.
+          event.preventDefault();
+          escapePrefixAtRef.current = null;
+          Transforms.delete(editor, {
+            distance: 1,
+            unit: "character",
+            reverse: true,
+          });
+          parser.reset();
+          setPending("");
+          runCommand({ t: "escape" });
+          return true;
+        }
+        escapePrefixAtRef.current =
+          bare && event.key === ESCAPE_SEQUENCE[0] ? performance.now() : null;
         return false;
       }
 
@@ -113,6 +146,7 @@ export function useVim(editor: Editor, enabled: boolean): VimHandle {
 
   const handleMouseDown = useCallback(() => {
     if (!enabled) return;
+    escapePrefixAtRef.current = null;
     parserRef.current.reset();
     setPending("");
     setState((prev) =>
