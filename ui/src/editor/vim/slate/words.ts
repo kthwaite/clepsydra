@@ -111,5 +111,4 @@ export function wordEnd(lines: Line[], from: LinePos): LinePos {
   }
 }
 
-export { classify, next as nextPos, prev as prevPos };
-export type { CharClass };
+export { classify };

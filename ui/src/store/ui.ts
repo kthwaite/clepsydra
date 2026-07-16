@@ -14,6 +14,7 @@ interface UiState {
   isInscribeOpen: boolean;
   isShortcutHelpOpen: boolean;
   isBooting: boolean;
+  isVimEnabled: boolean;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
@@ -27,6 +28,7 @@ interface UiState {
   closeShortcutHelp: () => void;
   runBoot: () => void;
   endBoot: () => void;
+  toggleVim: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -36,6 +38,7 @@ export const useUiStore = create<UiState>((set) => ({
   isInscribeOpen: false,
   isShortcutHelpOpen: false,
   isBooting: false,
+  isVimEnabled: false,
   openSettings: (section = "general") =>
     set({ isSettingsOpen: true, activeSettingsSection: section }),
   closeSettings: () => set({ isSettingsOpen: false }),
@@ -51,4 +54,5 @@ export const useUiStore = create<UiState>((set) => ({
   closeShortcutHelp: () => set({ isShortcutHelpOpen: false }),
   runBoot: () => set({ isBooting: true }),
   endBoot: () => set({ isBooting: false }),
+  toggleVim: () => set((state) => ({ isVimEnabled: !state.isVimEnabled })),
 }));

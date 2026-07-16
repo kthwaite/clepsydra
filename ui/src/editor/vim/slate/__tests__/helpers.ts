@@ -4,7 +4,7 @@ import { executeCommand } from "../execute";
 import { INITIAL_VIM_STATE, type VimState } from "../types";
 
 /** Split "2dd<Esc>x" into vim keys: single chars plus <...> tokens. */
-export function splitKeys(input: string): string[] {
+function splitKeys(input: string): string[] {
   return input.match(/<[^>]+>|./gs) ?? [];
 }
 

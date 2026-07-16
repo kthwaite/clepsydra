@@ -21,11 +21,7 @@ import {
 import { withHistory } from "slate-history";
 import { withAutoformat } from "#/editor/plugins/autoformat/withAutoformat";
 import { withOutliner } from "#/editor/plugins/withOutliner";
-import type {
-  CustomText,
-  HeadingElement,
-  ListItemElement,
-} from "#/editor/schema/types";
+import type { CustomText, ListItemElement } from "#/editor/schema/types";
 import { withSchema } from "#/editor/schema/withSchema";
 
 const CURSOR = "|";
@@ -48,11 +44,6 @@ export const p = (...parts: Inline[]): Descendant => ({
   type: "paragraph",
   children: toTexts(parts),
 });
-
-export const h = (
-  level: HeadingElement["level"],
-  ...parts: Inline[]
-): Descendant => ({ type: "heading", level, children: toTexts(parts) });
 
 export const code = (text: string): Descendant => ({
   type: "code-block",
@@ -78,16 +69,6 @@ export const li = (...content: (Inline | Descendant)[]): ListItemElement => {
 export const ul = (...items: ListItemElement[]): Descendant => ({
   type: "bulleted-list",
   children: items,
-});
-
-export const ol = (...items: ListItemElement[]): Descendant => ({
-  type: "numbered-list",
-  children: items,
-});
-
-export const bq = (...blocks: Descendant[]): Descendant => ({
-  type: "blockquote",
-  children: blocks,
 });
 
 export const hr = (): Descendant => ({

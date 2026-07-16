@@ -7,7 +7,7 @@
  */
 export type VimKey = string;
 
-export interface KeyEventLike {
+interface KeyEventLike {
   key: string;
   ctrlKey: boolean;
   metaKey: boolean;
