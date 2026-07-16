@@ -178,14 +178,22 @@ export function escapeToNormal(
   editor: Editor,
   state: VimState,
 ): Partial<VimState> {
-  const lines = getLines(editor);
-  const from = cursorPos(editor, lines);
-  if (state.mode === "insert") {
-    selectPos(editor, "normal", { li: from.li, off: from.off - 1 });
+  if (state.mode === "visual" && state.visualHead) {
+    selectPos(editor, "normal", state.visualHead);
   } else {
-    selectPos(editor, "normal", from);
+    const lines = getLines(editor);
+    const from = cursorPos(editor, lines);
+    selectPos(editor, "normal", {
+      li: from.li,
+      off: state.mode === "insert" ? from.off - 1 : from.off,
+    });
   }
-  return { mode: "normal", visualAnchor: null, visualKind: "char" };
+  return {
+    mode: "normal",
+    visualAnchor: null,
+    visualHead: null,
+    visualKind: "char",
+  };
 }
 
 export function undoRedo(

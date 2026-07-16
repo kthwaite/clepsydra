@@ -24,6 +24,8 @@ export interface VimState {
   goalColumn: number | null;
   /** Anchor of the current visual selection, as a (line, offset) position. */
   visualAnchor: LinePos | null;
+  /** Moving end of the visual selection (the vim cursor within it). */
+  visualHead: LinePos | null;
   visualKind: "char" | "line";
 }
 
@@ -33,6 +35,7 @@ export const INITIAL_VIM_STATE: VimState = {
   lastFind: null,
   goalColumn: null,
   visualAnchor: null,
+  visualHead: null,
   visualKind: "char",
 };
 
