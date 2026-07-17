@@ -1,5 +1,14 @@
-import { Editor, type Point, Element as SlateElement, Transforms } from "slate";
+import {
+  Editor,
+  type Point,
+  Path,
+  Element as SlateElement,
+  Transforms,
+} from "slate";
 import { HistoryEditor } from "slate-history";
+import { makeFootnoteDef } from "#/editor/schema/elements/footnoteDef";
+import { makeFootnoteRef } from "#/editor/schema/elements/footnoteRef";
+import type { CustomElement } from "#/editor/types";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
 
@@ -15,8 +24,7 @@ export function tryInlineTransform(
   typed: string,
   closerConsumed = false,
 ): boolean {
-  // Context guard: no transforms inside code-block
-  if (isInCodeBlock(editor)) return false;
+  if (isInCodeContext(editor)) return false;
 
   // Link transforms: ] continues [text, ) closes [text](url)
   if (typed === "]") return tryBracketTransform(editor);
@@ -43,6 +51,10 @@ function isInCodeBlock(editor: Editor): boolean {
       (n as any).type === "code-block",
   });
   return !!match;
+}
+function isInCodeContext(editor: Editor): boolean {
+  if (isInCodeBlock(editor)) return true;
+  return Editor.marks(editor)?.code === true;
 }
 
 function getTextBefore(
@@ -170,14 +182,62 @@ function tryBracketTransform(editor: Editor): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
-  const { text: textBefore } = info;
+  const { text: textBefore, path } = info;
   const openBracketIdx = textBefore.lastIndexOf("[");
   if (openBracketIdx === -1) return false;
   if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
     return false;
 
   const label = textBefore.slice(openBracketIdx + 1);
-  if (label.length === 0 || label.startsWith("^")) return false;
+  if (label.length === 0) return false;
+
+  if (label.startsWith("^")) {
+    const identifier = label.slice(1);
+    if (identifier.trim().length === 0) return false;
+
+    const hasDefinition = editor.children.some((node) => {
+      if (!SlateElement.isElement(node)) return false;
+      const element = node as CustomElement;
+      return (
+        element.type === "footnote-def" && element.identifier === identifier
+      );
+    });
+
+    const rangeStart: Point = {
+      path,
+      offset: openBracketIdx,
+    };
+    const rangeEnd: Point = {
+      path,
+      offset: textBefore.length,
+    };
+
+    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+      Editor.withoutNormalizing(editor, () => {
+        Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
+        Transforms.delete(editor);
+        Transforms.insertNodes(editor, makeFootnoteRef({ identifier }));
+        const referencePath = editor.selection?.anchor.path.slice(0, -1);
+        const afterPath = referencePath
+          ? Path.next(referencePath)
+          : undefined;
+        if (afterPath && !Editor.hasPath(editor, afterPath)) {
+          Transforms.insertNodes(editor, { text: "" }, { at: afterPath });
+        }
+        const afterReference: Point | undefined = afterPath
+          ? { path: afterPath, offset: 0 }
+          : undefined;
+
+        if (!hasDefinition) {
+          Transforms.insertNodes(editor, makeFootnoteDef({ identifier }), {
+            at: [editor.children.length],
+          });
+        }
+        if (afterReference) Transforms.select(editor, afterReference);
+      });
+    });
+    return true;
+  }
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Transforms.insertText(editor, "]()");

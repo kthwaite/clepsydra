@@ -4,6 +4,7 @@ import {
   Path,
   Range,
   Element as SlateElement,
+  Text,
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
@@ -17,12 +18,22 @@ import {
 import { tryInlineTransform } from "./inlineTransforms";
 import { tryListContinuation } from "./listContinuation";
 
+const INLINE_CLOSERS: Record<string, true> = {
+  "`": true,
+  "~": true,
+  "*": true,
+  _: true,
+  ")": true,
+  "]": true,
+};
+
 export function withAutoformat(editor: Editor): Editor {
   const { insertText, insertBreak } = editor;
 
   editor.insertText = (text: string) => {
     if (text.length !== 1) {
       insertText(text);
+      resolveComposedInline(editor);
       return;
     }
     const ch = text;
@@ -64,6 +75,43 @@ export function withAutoformat(editor: Editor): Editor {
   };
 
   return editor;
+}
+
+function resolveComposedInline(editor: Editor): void {
+  let transformed = true;
+
+  while (transformed) {
+    transformed = false;
+    const { selection } = editor;
+    if (!selection || !Range.isCollapsed(selection)) return;
+
+    const { anchor } = selection;
+    const [node] = Editor.node(editor, anchor.path);
+    if (!Text.isText(node)) return;
+
+    const textBefore = node.text.slice(0, anchor.offset);
+    for (let offset = textBefore.length; offset > 0; offset--) {
+      const ch = textBefore[offset - 1];
+      if (!(ch in INLINE_CLOSERS)) continue;
+
+      const beforeCloser = { path: anchor.path, offset: offset - 1 };
+      const afterCloser = { path: anchor.path, offset };
+      Transforms.select(editor, {
+        anchor: beforeCloser,
+        focus: afterCloser,
+      });
+      Transforms.delete(editor);
+
+      if (tryInlineTransform(editor, ch)) {
+        if (ch === "]") return;
+        transformed = true;
+        break;
+      }
+
+      Transforms.insertText(editor, ch);
+    }
+    if (!transformed) Transforms.select(editor, selection);
+  }
 }
 
 function tryBlockquoteContinuation(editor: Editor): boolean {
