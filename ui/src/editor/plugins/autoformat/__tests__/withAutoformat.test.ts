@@ -208,6 +208,21 @@ describe("withAutoformat integration", () => {
       });
     });
 
+    it("[^id]( delivered as one composed string still creates a footnote", () => {
+      const editor = makeSchemaEditor();
+      editor.insertText("[^id](");
+
+      expect(elementChildren(editor.children[0])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "footnote-ref", identifier: "id" }),
+        ]),
+      );
+      expect(editor.children.at(-1)).toMatchObject({
+        type: "footnote-def",
+        identifier: "id",
+      });
+    });
+
     it("[label] delivered as one composed string adds exactly one destination pair", () => {
       const editor = makeSchemaEditor();
       editor.insertText("[label]");

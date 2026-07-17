@@ -93,7 +93,10 @@ function resolveComposedInline(editor: Editor): void {
     for (let offset = textBefore.length; offset > 0; offset--) {
       const ch = textBefore[offset - 1];
       if (!(ch in INLINE_CLOSERS)) continue;
-      if (ch === "]" && textBefore[offset] === "(") continue;
+      if (ch === "]" && textBefore[offset] === "(") {
+        const openBracket = textBefore.lastIndexOf("[", offset - 2);
+        if (openBracket === -1 || textBefore[openBracket + 1] !== "^") continue;
+      }
 
       const beforeCloser = { path: anchor.path, offset: offset - 1 };
       const afterCloser = { path: anchor.path, offset };
