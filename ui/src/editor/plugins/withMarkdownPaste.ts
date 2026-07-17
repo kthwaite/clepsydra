@@ -5,21 +5,32 @@ import type { CustomElement } from "#/editor/types";
 /**
  * Parse pasted markdown into Slate elements.
  *
- * Overrides insertData: internal Slate fragments, code-block pastes, and
- * non-text pastes defer to the base (withReact) insertData; plain-text pastes
- * are converted via markdownToSlate and inserted as a fragment.
+ * Overrides insertData: pastes inside a code-block insert their text/plain
+ * literally as one run; internal Slate fragments and non-text pastes defer to
+ * the base (withReact) insertData; plain-text pastes are converted via
+ * markdownToSlate and inserted as a fragment.
  */
 export function withMarkdownPaste(editor: Editor): Editor {
   const { insertData } = editor;
 
   editor.insertData = (data: DataTransfer) => {
-    // 1. Internal copy/paste — never markdown-reparse our own fragments.
-    if (data.getData("application/x-slate-fragment")) {
+    // 1. Inside a code-block — paste literally (it's code, not markdown).
+    // Checked before the internal-fragment case: both base insertData paths
+    // would fragment the code-block (insertTextData splits on newlines via
+    // Transforms.splitNodes; insertFragmentData splices block nodes into it).
+    // A code-block is canonically a single text node with embedded `\n`, so
+    // the raw text (CRLF-normalized), inserted as one run, is the right edit.
+    if (isInCodeBlock(editor)) {
+      const text = data.getData("text/plain");
+      if (text) {
+        Transforms.insertText(editor, text.replace(/\r\n?/g, "\n"));
+        return;
+      }
       insertData(data);
       return;
     }
-    // 2. Inside a code-block — paste literally (it's code, not markdown).
-    if (isInCodeBlock(editor)) {
+    // 2. Internal copy/paste — never markdown-reparse our own fragments.
+    if (data.getData("application/x-slate-fragment")) {
       insertData(data);
       return;
     }

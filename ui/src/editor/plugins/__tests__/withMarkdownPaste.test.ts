@@ -81,21 +81,88 @@ describe("withMarkdownPaste", () => {
     expect((editor.children[0] as any).type).toBe("paragraph");
   });
 
-  it("MP-05: pasting inside a code-block defers to base (literal paste)", () => {
+  it("MP-05: pasting inside a code-block inserts the text literally", () => {
     const { editor, base } = makeEditor();
     editor.children = [{ type: "code-block", children: [{ text: "" }] }];
     editor.selection = {
       anchor: { path: [0, 0], offset: 0 },
       focus: { path: [0, 0], offset: 0 },
     };
-    const data = fakeData({ "text/plain": "## Title" });
+    editor.insertData(fakeData({ "text/plain": "## Title" }));
+    // Markdown path never ran (no heading) and base never ran (base would
+    // line-split): the raw text landed inside the code-block. documentRules
+    // appends a trailing paragraph after a document-final code block, so
+    // assert on code-block count rather than total children.
+    expect(base).not.toHaveBeenCalled();
+    const blocks = editor.children as any[];
+    expect(blocks.filter((n) => n.type === "code-block")).toHaveLength(1);
+    expect(blocks[0].type).toBe("code-block");
+    expect(blocks[0].children[0].text).toBe("## Title");
+  });
+
+  it("MP-05b: multiline paste inside a code-block stays one block", () => {
+    const { editor, base } = makeEditor();
+    editor.children = [{ type: "code-block", children: [{ text: "" }] }];
+    editor.selection = {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    };
+    editor.insertData(
+      fakeData({ "text/plain": "const a = 1;\nconst b = 2;\nconst c = 3;" }),
+    );
+    expect(base).not.toHaveBeenCalled();
+    const blocks = editor.children as any[];
+    expect(blocks.filter((n) => n.type === "code-block")).toHaveLength(1);
+    expect(blocks[0].type).toBe("code-block");
+    expect(blocks[0].children[0].text).toBe(
+      "const a = 1;\nconst b = 2;\nconst c = 3;",
+    );
+  });
+
+  it("MP-05c: CRLF line endings are normalized to LF inside a code-block", () => {
+    const { editor } = makeEditor();
+    editor.children = [{ type: "code-block", children: [{ text: "" }] }];
+    editor.selection = {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    };
+    editor.insertData(fakeData({ "text/plain": "a\r\nb\rc" }));
+    expect((editor.children[0] as any).children[0].text).toBe("a\nb\nc");
+  });
+
+  it("MP-05e: an internal fragment pasted inside a code-block inserts its plain text", () => {
+    const { editor, base } = makeEditor();
+    editor.children = [{ type: "code-block", children: [{ text: "" }] }];
+    editor.selection = {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    };
+    // Internal copies carry both a slate fragment and its text/plain
+    // rendering; inside a code-block the plain text wins (fragment paste
+    // would splice block nodes into the code-block).
+    editor.insertData(
+      fakeData({
+        "application/x-slate-fragment": "encoded-fragment",
+        "text/plain": "line1\nline2",
+      }),
+    );
+    expect(base).not.toHaveBeenCalled();
+    const blocks = editor.children as any[];
+    expect(blocks.filter((n) => n.type === "code-block")).toHaveLength(1);
+    expect(blocks[0].children[0].text).toBe("line1\nline2");
+  });
+
+  it("MP-05d: a non-text paste inside a code-block still defers to base", () => {
+    const { editor, base } = makeEditor();
+    editor.children = [{ type: "code-block", children: [{ text: "" }] }];
+    editor.selection = {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    };
+    const data = fakeData({});
     editor.insertData(data);
-    // The guard took the code-block branch: base received the original
-    // DataTransfer and the markdown path never ran (code-block untouched).
     expect(base).toHaveBeenCalledTimes(1);
     expect(base).toHaveBeenCalledWith(data);
-    expect((editor.children[0] as any).type).toBe("code-block");
-    expect((editor.children[0] as any).children[0].text).toBe("");
   });
 
   it("MP-06: a paste with no text/plain defers to base", () => {
