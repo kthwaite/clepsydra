@@ -47,10 +47,10 @@ For a footnote match, one `HistoryEditor.withNewBatch` transaction:
 1. removes the literal `[^identifier` range (the typed `]` has not yet been inserted);
 2. inserts the existing `footnote-ref` element shape with `children: [{ text: "" }]`;
 3. scans top-level document nodes for a `footnote-def` with the same identifier;
-4. appends a new definition only when no match exists, using an empty paragraph child so it is a valid editable block;
+4. appends `makeFootnoteDef({ identifier })` only when no match exists, preserving the schema factory's canonical empty child;
 5. restores the caret immediately after the inline void reference.
 
-The implementation should use the existing schema element factories if importing them does not create a dependency cycle; otherwise it should construct the same registered node shapes locally.
+Use the existing `makeFootnoteRef` and `makeFootnoteDef` schema factories so autoformat cannot drift from the registered node shapes.
 
 ### Link-label continuation and final conversion
 
