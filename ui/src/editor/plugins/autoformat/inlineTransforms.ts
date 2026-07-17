@@ -276,7 +276,13 @@ function tryLinkTransform(
   const linkText = textBefore.slice(openBracketIdx + 1, bracketParenIdx);
   const url = textBefore.slice(bracketParenIdx + 2, contentEnd);
 
-  if (linkText.length === 0 || url.length === 0) return false;
+  if (
+    linkText.length === 0 ||
+    linkText.startsWith("^") ||
+    url.length === 0
+  ) {
+    return false;
+  }
 
   const rangeStart: Point = { path: path as any, offset: openBracketIdx };
   const rangeEnd: Point = { path: path as any, offset: textBefore.length };

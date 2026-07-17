@@ -223,6 +223,28 @@ describe("withAutoformat integration", () => {
       });
     });
 
+    it("[^id](url) delivered as one composed string stays a footnote", () => {
+      const editor = makeSchemaEditor();
+      editor.insertText("[^id](url)");
+
+      const children = elementChildren(editor.children[0]);
+      expect(children).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "footnote-ref", identifier: "id" }),
+        ]),
+      );
+      expect(
+        children.some(
+          (child) => SlateElement.isElement(child) && child.type === "link",
+        ),
+      ).toBe(false);
+      expect(Node.string(editor.children[0])).toBe("(url)");
+      expect(editor.children.at(-1)).toMatchObject({
+        type: "footnote-def",
+        identifier: "id",
+      });
+    });
+
     it("[label] delivered as one composed string adds exactly one destination pair", () => {
       const editor = makeSchemaEditor();
       editor.insertText("[label]");
