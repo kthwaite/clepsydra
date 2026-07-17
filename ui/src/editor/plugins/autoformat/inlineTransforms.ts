@@ -3,6 +3,7 @@ import {
   type Point,
   Path,
   Element as SlateElement,
+  Text,
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
@@ -27,7 +28,7 @@ export function tryInlineTransform(
   if (isInCodeContext(editor)) return false;
 
   // Link transforms: ] continues [text, ) closes [text](url)
-  if (typed === "]") return tryBracketTransform(editor);
+  if (typed === "]") return tryBracketTransform(editor, closerConsumed);
   if (typed === ")") return tryLinkTransform(editor, closerConsumed);
 
   // Mark transforms: *, _, ~, `
@@ -70,6 +71,34 @@ function getTextBefore(
   const text = (node as any).text as string;
   const textBefore = text.slice(0, anchor.offset);
   return { text: textBefore, path: anchor.path as unknown as number[] };
+}
+
+function selectTextAfterInline(editor: Editor, inlinePath: Path): void {
+  const textPath = Path.next(inlinePath);
+  const nextNode = Editor.hasPath(editor, textPath)
+    ? Editor.node(editor, textPath)[0]
+    : undefined;
+
+  if (!nextNode || !Text.isText(nextNode)) {
+    Transforms.insertNodes(editor, { text: "" }, { at: textPath });
+  }
+  Transforms.select(editor, { path: textPath, offset: 0 });
+}
+
+function hasInvalidBracketSyntax(
+  text: string,
+  openBracketIdx: number,
+  contentEnd: number,
+): boolean {
+  const label = text.slice(openBracketIdx + 1, contentEnd);
+  if (label.includes("[") || label.includes("]")) return true;
+
+  let unmatchedOpeners = 0;
+  for (let i = 0; i < openBracketIdx; i++) {
+    if (text[i] === "[") unmatchedOpeners++;
+    if (text[i] === "]" && unmatchedOpeners > 0) unmatchedOpeners--;
+  }
+  return unmatchedOpeners > 0;
 }
 
 function tryMarkTransform(
@@ -178,17 +207,24 @@ function tryMarkTransform(
   return true;
 }
 
-function tryBracketTransform(editor: Editor): boolean {
+function tryBracketTransform(
+  editor: Editor,
+  closerConsumed = false,
+): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
   const { text: textBefore, path } = info;
-  const openBracketIdx = textBefore.lastIndexOf("[");
+  if (closerConsumed && !textBefore.endsWith("]")) return false;
+  const contentEnd = textBefore.length - (closerConsumed ? 1 : 0);
+  const openBracketIdx = textBefore.lastIndexOf("[", contentEnd - 1);
   if (openBracketIdx === -1) return false;
   if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
     return false;
+  if (hasInvalidBracketSyntax(textBefore, openBracketIdx, contentEnd))
+    return false;
 
-  const label = textBefore.slice(openBracketIdx + 1);
+  const label = textBefore.slice(openBracketIdx + 1, contentEnd);
   if (label.length === 0) return false;
 
   if (label.startsWith("^")) {
@@ -218,29 +254,20 @@ function tryBracketTransform(editor: Editor): boolean {
         Transforms.delete(editor);
         Transforms.insertNodes(editor, makeFootnoteRef({ identifier }));
         const referencePath = editor.selection?.anchor.path.slice(0, -1);
-        const afterPath = referencePath
-          ? Path.next(referencePath)
-          : undefined;
-        if (afterPath && !Editor.hasPath(editor, afterPath)) {
-          Transforms.insertNodes(editor, { text: "" }, { at: afterPath });
-        }
-        const afterReference: Point | undefined = afterPath
-          ? { path: afterPath, offset: 0 }
-          : undefined;
 
         if (!hasDefinition) {
           Transforms.insertNodes(editor, makeFootnoteDef({ identifier }), {
             at: [editor.children.length],
           });
         }
-        if (afterReference) Transforms.select(editor, afterReference);
+        if (referencePath) selectTextAfterInline(editor, referencePath);
       });
     });
     return true;
   }
 
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
-    Transforms.insertText(editor, "]()");
+    Transforms.insertText(editor, closerConsumed ? "()" : "]()");
     Transforms.move(editor, {
       distance: 1,
       unit: "character",
@@ -272,6 +299,8 @@ function tryLinkTransform(
   // Opener validity: at text start or preceded by whitespace
   if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
     return false;
+  if (hasInvalidBracketSyntax(textBefore, openBracketIdx, bracketParenIdx))
+    return false;
 
   const linkText = textBefore.slice(openBracketIdx + 1, bracketParenIdx);
   const url = textBefore.slice(bracketParenIdx + 2, contentEnd);
@@ -284,32 +313,24 @@ function tryLinkTransform(
     return false;
   }
 
-  const rangeStart: Point = { path: path as any, offset: openBracketIdx };
-  const rangeEnd: Point = { path: path as any, offset: textBefore.length };
+  const rangeStart: Point = { path, offset: openBracketIdx };
+  const rangeEnd: Point = { path, offset: textBefore.length };
 
-  HistoryEditor.withNewBatch(editor as any, () => {
+  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
       // Delete the markdown link syntax
       Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
       Transforms.delete(editor);
 
       // Insert link element. withSchema marks link elements as inline.
-      const linkNode = {
+      const linkNode: CustomElement = {
         type: "link",
         url,
         children: [{ text: linkText }],
       };
-      Transforms.insertNodes(editor, linkNode as any);
+      Transforms.insertNodes(editor, linkNode);
       const insertedLinkPath = editor.selection?.anchor.path.slice(0, -1);
-      const trailingTextPath = insertedLinkPath
-        ? Path.next(insertedLinkPath)
-        : undefined;
-      if (trailingTextPath && !Editor.hasPath(editor, trailingTextPath)) {
-        Transforms.insertNodes(editor, { text: "" }, { at: trailingTextPath });
-      }
-      if (trailingTextPath) {
-        Transforms.select(editor, { path: trailingTextPath, offset: 0 });
-      }
+      if (insertedLinkPath) selectTextAfterInline(editor, insertedLinkPath);
     });
   });
 

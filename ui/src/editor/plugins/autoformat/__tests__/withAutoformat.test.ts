@@ -312,6 +312,177 @@ describe("withAutoformat integration", () => {
         focus: { path: [0, 0], offset: "*literal composed".length },
       });
     });
+    it("continues typing in a text spacer when a new link precedes an inline", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "paragraph",
+          children: [
+            { text: "" },
+            {
+              type: "link",
+              url: "existing",
+              children: [{ text: "existing" }],
+            },
+            { text: "" },
+          ],
+        },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: 0 });
+
+      type(editor, "[new]");
+      type(editor, "url)");
+      editor.insertText("x");
+
+      const children = elementChildren(editor.children[0]);
+      const newLinkIndex = children.findIndex(
+        (child) =>
+          SlateElement.isElement(child) &&
+          child.type === "link" &&
+          child.url === "url",
+      );
+      const existingLinkIndex = children.findIndex(
+        (child) =>
+          SlateElement.isElement(child) &&
+          child.type === "link" &&
+          child.url === "existing",
+      );
+      expect(children[newLinkIndex + 1]).toEqual({ text: "x" });
+      expect(existingLinkIndex).toBe(newLinkIndex + 2);
+    });
+
+    it("continues typing in a text spacer when a new footnote precedes an inline", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "paragraph",
+          children: [
+            { text: "" },
+            {
+              type: "link",
+              url: "existing",
+              children: [{ text: "existing" }],
+            },
+            { text: "" },
+          ],
+        },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: 0 });
+
+      type(editor, "[^new]");
+      editor.insertText("x");
+
+      const children = elementChildren(editor.children[0]);
+      const referenceIndex = children.findIndex(
+        (child) =>
+          SlateElement.isElement(child) && child.type === "footnote-ref",
+      );
+      const existingLinkIndex = children.findIndex(
+        (child) =>
+          SlateElement.isElement(child) &&
+          child.type === "link" &&
+          child.url === "existing",
+      );
+      expect(children[referenceIndex + 1]).toEqual({ text: "x" });
+      expect(existingLinkIndex).toBe(referenceIndex + 2);
+    });
+
+    it("keeps typing after the suffix of a composed footnote", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText("[^id] after");
+      editor.insertText("!");
+
+      const children = elementChildren(editor.children[0]);
+      const referenceIndex = children.findIndex(
+        (child) =>
+          SlateElement.isElement(child) && child.type === "footnote-ref",
+      );
+      expect(children[referenceIndex + 1]).toEqual({ text: " after!" });
+    });
+
+    it("keeps typing after the suffix of a composed link", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText("[label](url) after");
+      editor.insertText("!");
+
+      const children = elementChildren(editor.children[0]);
+      const linkIndex = children.findIndex(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
+      expect(children[linkIndex + 1]).toEqual({ text: " after!" });
+    });
+
+    it("overtype-closing a link label reuses the existing bracket", () => {
+      const editor = makeSchemaEditor([
+        { type: "paragraph", children: [{ text: "[Example]" }] },
+      ]);
+      Transforms.select(editor, {
+        path: [0, 0],
+        offset: "[Example".length,
+      });
+
+      editor.insertText("]");
+
+      expect(Node.string(editor.children[0])).toBe("[Example]()");
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 0], offset: "[Example](".length },
+        focus: { path: [0, 0], offset: "[Example](".length },
+      });
+    });
+
+    it("overtype-closing a footnote excludes the existing bracket from its identifier", () => {
+      const editor = makeSchemaEditor([
+        { type: "paragraph", children: [{ text: "[^id]" }] },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: "[^id".length });
+
+      editor.insertText("]");
+
+      expect(elementChildren(editor.children[0])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "footnote-ref", identifier: "id" }),
+        ]),
+      );
+      expect(editor.children.at(-1)).toMatchObject({
+        type: "footnote-def",
+        identifier: "id",
+      });
+    });
+
+    it("keeps composed labels and identifiers with an extra bracket literal", () => {
+      for (const markdown of ["[a] b]", "[^a] b]"]) {
+        const editor = makeSchemaEditor();
+
+        editor.insertText(markdown);
+
+        expect(Node.string(editor.children[0])).toBe(markdown);
+        expect(
+          elementChildren(editor.children[0]).some((child) =>
+            SlateElement.isElement(child),
+          ),
+        ).toBe(false);
+        expect(editor.children).toHaveLength(1);
+      }
+    });
+
+    it("keeps typed labels and identifiers with a nested opener literal", () => {
+      for (const prefix of ["[a [b", "[^a [b"]) {
+        const editor = makeSchemaEditor([
+          { type: "paragraph", children: [{ text: prefix }] },
+        ]);
+
+        editor.insertText("]");
+
+        expect(Node.string(editor.children[0])).toBe(`${prefix}]`);
+        expect(
+          elementChildren(editor.children[0]).some((child) =>
+            SlateElement.isElement(child),
+          ),
+        ).toBe(false);
+        expect(editor.children).toHaveLength(1);
+      }
+    });
+
   });
 
   describe("footnote shortcut", () => {
