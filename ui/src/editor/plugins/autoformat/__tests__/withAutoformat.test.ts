@@ -147,6 +147,25 @@ describe("withAutoformat integration", () => {
       expect(Node.string(editor.children[0])).toBe("Example");
     });
 
+    it("continues typing after a completed link in sibling plain text", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "[Example]");
+      type(editor, "https://example.com)");
+      type(editor, " after");
+
+      const children = elementChildren(editor.children[0]);
+      const linkIndex = children.findIndex(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
+      expect(linkIndex).toBeGreaterThanOrEqual(0);
+      expect(children[linkIndex]).toMatchObject({
+        type: "link",
+        url: "https://example.com",
+        children: [{ text: "Example" }],
+      });
+      expect(children[linkIndex + 1]).toEqual({ text: " after" });
+    });
+
     it("leaves an empty link destination as literal markdown", () => {
       const editor = makeSchemaEditor();
       type(editor, "[Example]");

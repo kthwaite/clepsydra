@@ -300,6 +300,16 @@ function tryLinkTransform(
         children: [{ text: linkText }],
       };
       Transforms.insertNodes(editor, linkNode as any);
+      const insertedLinkPath = editor.selection?.anchor.path.slice(0, -1);
+      const trailingTextPath = insertedLinkPath
+        ? Path.next(insertedLinkPath)
+        : undefined;
+      if (trailingTextPath && !Editor.hasPath(editor, trailingTextPath)) {
+        Transforms.insertNodes(editor, { text: "" }, { at: trailingTextPath });
+      }
+      if (trailingTextPath) {
+        Transforms.select(editor, { path: trailingTextPath, offset: 0 });
+      }
     });
   });
 
