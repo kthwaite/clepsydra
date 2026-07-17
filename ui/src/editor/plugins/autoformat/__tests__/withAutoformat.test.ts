@@ -183,7 +183,6 @@ describe("withAutoformat integration", () => {
       const editor = makeSchemaEditor([
         {
           type: "code-block",
-          language: null,
           children: [{ text: "[^code" }],
         },
       ]);
