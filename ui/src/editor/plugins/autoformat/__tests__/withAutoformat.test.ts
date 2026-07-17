@@ -231,6 +231,20 @@ describe("withAutoformat integration", () => {
       expect(Node.string(editor.children[0])).toBe("label");
     });
 
+    it("[label]() delivered as one composed string remains unchanged", () => {
+      const editor = makeSchemaEditor();
+      editor.insertText("[label]()");
+
+      expect(Node.string(editor.children[0])).toBe("[label]()");
+    });
+
+    it("[label](unfinished delivered as one composed string remains unchanged", () => {
+      const editor = makeSchemaEditor();
+      editor.insertText("[label](unfinished");
+
+      expect(Node.string(editor.children[0])).toBe("[label](unfinished");
+    });
+
     it("composed text without a shortcut keeps the caret at the end", () => {
       const editor = makeSchemaEditor([
         { type: "paragraph", children: [{ text: "*literal " }] },
