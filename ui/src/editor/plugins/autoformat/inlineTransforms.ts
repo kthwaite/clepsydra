@@ -18,8 +18,9 @@ export function tryInlineTransform(
   // Context guard: no transforms inside code-block
   if (isInCodeBlock(editor)) return false;
 
-  // Link transform: ) closes [text](url)
-  if (typed === ")") return tryLinkTransform(editor);
+  // Link transforms: ] continues [text, ) closes [text](url)
+  if (typed === "]") return tryBracketTransform(editor);
+  if (typed === ")") return tryLinkTransform(editor, closerConsumed);
 
   // Mark transforms: *, _, ~, `
   if (typed === "*" || typed === "_")
@@ -165,14 +166,43 @@ function tryMarkTransform(
   return true;
 }
 
-function tryLinkTransform(editor: Editor): boolean {
+function tryBracketTransform(editor: Editor): boolean {
+  const info = getTextBefore(editor);
+  if (!info) return false;
+
+  const { text: textBefore } = info;
+  const openBracketIdx = textBefore.lastIndexOf("[");
+  if (openBracketIdx === -1) return false;
+  if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
+    return false;
+
+  const label = textBefore.slice(openBracketIdx + 1);
+  if (label.length === 0 || label.startsWith("^")) return false;
+
+  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+    Transforms.insertText(editor, "]()");
+    Transforms.move(editor, {
+      distance: 1,
+      unit: "character",
+      reverse: true,
+    });
+  });
+  return true;
+}
+
+function tryLinkTransform(
+  editor: Editor,
+  closerConsumed = false,
+): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
   const { text: textBefore, path } = info;
+  if (closerConsumed && !textBefore.endsWith(")")) return false;
+  const contentEnd = textBefore.length - (closerConsumed ? 1 : 0);
 
   // Find ]( pattern
-  const bracketParenIdx = textBefore.lastIndexOf("](");
+  const bracketParenIdx = textBefore.lastIndexOf("](", contentEnd);
   if (bracketParenIdx === -1) return false;
 
   // Find [ before ](
@@ -184,7 +214,7 @@ function tryLinkTransform(editor: Editor): boolean {
     return false;
 
   const linkText = textBefore.slice(openBracketIdx + 1, bracketParenIdx);
-  const url = textBefore.slice(bracketParenIdx + 2);
+  const url = textBefore.slice(bracketParenIdx + 2, contentEnd);
 
   if (linkText.length === 0 || url.length === 0) return false;
 

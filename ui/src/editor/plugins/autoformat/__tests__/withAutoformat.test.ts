@@ -3,10 +3,23 @@ import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
+import { withSchema } from "../../../schema/withSchema";
 
 function makeEditor(value?: any[]) {
   const editor = withAutoformat(withOutliner(withHistory(createEditor())));
   editor.children = value ?? [{ type: "paragraph", children: [{ text: "" }] }];
+  Transforms.select(editor, {
+    anchor: { path: [0, 0], offset: 0 },
+    focus: { path: [0, 0], offset: 0 },
+  });
+  return editor;
+}
+
+function makeSchemaEditor() {
+  const editor = withHistory(
+    withAutoformat(withOutliner(withSchema(createEditor()))),
+  );
+  editor.children = [{ type: "paragraph", children: [{ text: "" }] }];
   Transforms.select(editor, {
     anchor: { path: [0, 0], offset: 0 },
     focus: { path: [0, 0], offset: 0 },
@@ -82,6 +95,55 @@ describe("withAutoformat integration", () => {
       const para = editor.children[0] as any;
       const leaves = para.children;
       expect(leaves.some((l: any) => l.code && l.text === "code")).toBe(true);
+    });
+
+    it("] after [label inserts () and places the caret inside", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "[Example]");
+
+      expect(Node.string(editor.children[0])).toBe("[Example]()");
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 0], offset: "[Example](".length },
+        focus: { path: [0, 0], offset: "[Example](".length },
+      });
+    });
+
+    it("overtype-closing the inserted ) creates a link without storing the closer", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "[Example]");
+      type(editor, "https://example.com)");
+
+      const children = (editor.children[0] as any).children;
+      const link = children.find((child: any) => child.type === "link");
+      expect(link).toMatchObject({
+        type: "link",
+        url: "https://example.com",
+        children: [{ text: "Example" }],
+      });
+      expect(Node.string(editor.children[0])).toBe("Example");
+    });
+
+    it("leaves an empty link destination as literal markdown", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "[Example]");
+      editor.insertText(")");
+
+      expect(Node.string(editor.children[0])).toBe("[Example]()");
+      expect(
+        (editor.children[0] as any).children.some(
+          (child: any) => child.type === "link",
+        ),
+      ).toBe(false);
+    });
+
+    it("one undo reverses link-label continuation", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "[Example");
+      editor.insertText("]");
+
+      editor.undo();
+
+      expect(Node.string(editor.children[0])).toBe("[Example");
     });
   });
 
