@@ -16,3 +16,5 @@ lcov.info
 
 # Project-local pi skills copied/installed for this workstation
 .pi/skills/
+.superpowers/
+.agents/skills/
