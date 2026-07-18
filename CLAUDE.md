@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Clepsydra is a personal knowledge management system ("digital garden") with a Rust backend and React frontend. The vision includes a Notion-style document editor, markdown-oxide style LSP for Neovim, and features inspired by Obsidian, Quartz, and Neorg.
 
+## Verification Gates
+
+After implementing any change, always run typecheck, lint, and the test suite before declaring work complete. Report results explicitly.
+
 ## Build & Development Commands
 
 ### Frontend (ui/)
@@ -37,6 +41,10 @@ cargo fmt                # Format
 
 The CLI binary (`clepsydra`) uses subcommands: `serve`, `init`, `env`, `doctor`, `version`. Only `serve` is implemented so far.
 
+## Feature Workflow
+
+For any feature implementation: (1) grill/clarify scope and design first, (2) write a TDD task plan, (3) execute via subagents, (4) review each task, (5) verify gates, (6) commit and merge to develop.
+
 ## Architecture
 
 ### Frontend Stack (ui/)
@@ -66,7 +74,7 @@ The UI follows the **"Vessel" classified-technical-modernism** language (a dark,
 - Hard-edged offset shadows (bottom-right, no blur)
 - Warm-grey achromatic palette with **barbican orange** (`#ee7733`) primary accent; high contrast
 - **Dark is the default** (base `:root`); the light "paper" mode is opt-in via a `.paper` class on `<html>`, toggled by `ThemeProvider`
-- Typography: **JetBrains Mono** for all chrome/UI/telemetry, **Satoshi** for prose + display/headings
+- Typography: **JetBrains Mono** for all chrome/UI/telemetry, **Inter** (variable, optical-sizing) for prose + display/headings
 - Operator prefs applied as `<html>` attributes: `data-accent` (6 presets), `data-density` (compact/default/spacious), `data-diegetic` (off hides telemetry chrome)
 
 All semantic color tokens (background, foreground, primary, muted, border, etc.) are defined in `ui/src/main.css`. Respect these tokens when building UI.
@@ -81,7 +89,12 @@ All semantic color tokens (background, foreground, primary, muted, border, etc.)
 ### Rust
 - Standard `rustfmt` and `clippy` conventions
 
+## Tooling / Conventions
+
+- Use ruff and ty for Python tooling (not black); respect NO_COLOR conventions in CLI output.
+
 ## Git Workflow
 
 - `main` is the primary branch; `develop` is the integration branch
 - Feature branches off `develop`
+- Merge completed feature branches into `develop` and clean up worktrees afterward

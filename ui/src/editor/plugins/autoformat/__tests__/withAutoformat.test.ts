@@ -8,9 +8,9 @@ import {
 } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
+import { withSchema } from "../../../schema/withSchema";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
-import { withSchema } from "../../../schema/withSchema";
 
 function makeEditor(value?: any[]) {
   const editor = withAutoformat(withOutliner(withHistory(createEditor())));
@@ -22,6 +22,8 @@ function makeEditor(value?: any[]) {
   return editor;
 }
 
+// Schema-aware editor mirrors the real SlateEditor composition so that inline
+// elements (links) get isInline. Used for the IME/dead-key composition tests.
 function makeSchemaEditor(value?: Descendant[]) {
   const editor = withHistory(
     withAutoformat(withOutliner(withSchema(createEditor()))),
@@ -208,7 +210,9 @@ describe("withAutoformat integration", () => {
       editor.insertText("]");
 
       expect(Node.string(editor.children[0])).toBe("[^code]");
-      expect(editor.children).toHaveLength(1);
+      expect(editor.children.some((node) => isFootnoteDefinition(node))).toBe(
+        false,
+      );
     });
 
     it("[^id] delivered as one composed string creates a reference and definition", () => {
@@ -597,6 +601,163 @@ describe("withAutoformat integration", () => {
       const list = editor.children[0] as any;
       expect(list.type).toBe("bulleted-list");
       expect(list.children.length).toBe(2);
+    });
+  });
+
+  describe("heading exit on Enter", () => {
+    it("Enter at end of a heading creates a paragraph below (reverts style)", () => {
+      const editor = makeEditor([
+        { type: "heading", level: 2, children: [{ text: "Title" }] },
+      ]);
+      Transforms.select(editor, {
+        anchor: { path: [0, 0], offset: 5 },
+        focus: { path: [0, 0], offset: 5 },
+      });
+      editor.insertBreak();
+      expect((editor.children[0] as any).type).toBe("heading");
+      expect((editor.children[1] as any).type).toBe("paragraph");
+      // Cursor lands in the new paragraph.
+      expect(editor.selection?.anchor.path).toEqual([1, 0]);
+    });
+
+    it("Enter on an empty heading creates a paragraph", () => {
+      const editor = makeEditor([
+        { type: "heading", level: 1, children: [{ text: "" }] },
+      ]);
+      Transforms.select(editor, {
+        anchor: { path: [0, 0], offset: 0 },
+        focus: { path: [0, 0], offset: 0 },
+      });
+      editor.insertBreak();
+      expect((editor.children[1] as any).type).toBe("paragraph");
+    });
+
+    it("Enter in the middle of a heading splits into two headings", () => {
+      const editor = makeEditor([
+        { type: "heading", level: 2, children: [{ text: "Title" }] },
+      ]);
+      Transforms.select(editor, {
+        anchor: { path: [0, 0], offset: 2 },
+        focus: { path: [0, 0], offset: 2 },
+      });
+      editor.insertBreak();
+      expect((editor.children[0] as any).type).toBe("heading");
+      expect((editor.children[1] as any).type).toBe("heading");
+    });
+  });
+
+  describe("code block Enter (insertBreak)", () => {
+    it("Enter inside a code block inserts a newline, not a new block", () => {
+      const editor = makeEditor([
+        {
+          type: "code-block",
+          language: "ts",
+          children: [{ text: "const x = 1" }],
+        },
+      ]);
+      Transforms.select(editor, {
+        anchor: { path: [0, 0], offset: 11 },
+        focus: { path: [0, 0], offset: 11 },
+      });
+      editor.insertBreak();
+      // Still a single code-block, now containing a trailing newline.
+      expect(editor.children.length).toBe(1);
+      expect((editor.children[0] as any).type).toBe("code-block");
+      expect(Node.string(editor.children[0])).toBe("const x = 1\n");
+    });
+
+    it("Enter mid-code inserts the newline at the cursor", () => {
+      const editor = makeEditor([
+        { type: "code-block", children: [{ text: "ab" }] },
+      ]);
+      Transforms.select(editor, {
+        anchor: { path: [0, 0], offset: 1 },
+        focus: { path: [0, 0], offset: 1 },
+      });
+      editor.insertBreak();
+      expect(editor.children.length).toBe(1);
+      expect((editor.children[0] as any).type).toBe("code-block");
+      expect(Node.string(editor.children[0])).toBe("a\nb");
+    });
+  });
+
+  // Regression: IME / dead-key composition commits text through a single
+  // multi-character insertText call (slate-react onCompositionEnd ->
+  // Editor.insertText(editor, event.data)). The autoformat override used to
+  // bail on any text.length !== 1, so composed markdown delimiters (a dead-key
+  // backtick is the canonical case) were stored as literal text and escaped on
+  // save. These assert that complete delimiter pairs in a multi-char insert are
+  // resolved into Slate marks/elements, matching char-by-char typing.
+  describe("composition / multi-char insertText (IME & dead-key)", () => {
+    function leaves(editor: Editor) {
+      return (editor.children[0] as any).children;
+    }
+
+    it("`code` delivered as one composed string applies the code mark", () => {
+      const editor = makeEditor();
+      editor.insertText("`code`");
+      expect(leaves(editor).some((l: any) => l.code && l.text === "code")).toBe(
+        true,
+      );
+      expect(Node.string(editor.children[0])).toBe("code");
+    });
+
+    it("closing backtick fused with the next char (dead-key) still resolves", () => {
+      const editor = makeEditor();
+      type(editor, "`code"); // opener + content typed normally
+      editor.insertText("`x"); // dead-key closer commits fused with following char
+      expect(leaves(editor).some((l: any) => l.code && l.text === "code")).toBe(
+        true,
+      );
+      // the fused trailing character survives as plain text after the span
+      expect(Node.string(editor.children[0])).toBe("codex");
+    });
+
+    it("~struck~ composed string applies strikethrough", () => {
+      const editor = makeEditor();
+      editor.insertText("~struck~");
+      expect(
+        leaves(editor).some((l: any) => l.strikethrough && l.text === "struck"),
+      ).toBe(true);
+    });
+
+    it("*it* composed string applies italic", () => {
+      const editor = makeEditor();
+      editor.insertText("*it*");
+      expect(leaves(editor).some((l: any) => l.italic && l.text === "it")).toBe(
+        true,
+      );
+    });
+
+    it("**bo** composed string applies bold", () => {
+      const editor = makeEditor();
+      editor.insertText("**bo**");
+      expect(leaves(editor).some((l: any) => l.bold && l.text === "bo")).toBe(
+        true,
+      );
+    });
+
+    it("[t](https://a.b) composed string applies a link element", () => {
+      const editor = makeSchemaEditor();
+      editor.insertText("[t](https://a.b)");
+      const link = leaves(editor).find((c: any) => c.type === "link");
+      expect(link).toBeDefined();
+      expect(link.url).toBe("https://a.b");
+      expect(link.children[0].text).toBe("t");
+    });
+
+    it("plain composed text with no delimiters is left untouched", () => {
+      const editor = makeEditor();
+      editor.insertText("hello world");
+      expect(Node.string(editor.children[0])).toBe("hello world");
+      expect(leaves(editor).every((l: any) => !l.code && !l.bold)).toBe(true);
+    });
+
+    it("composed text with an unpaired delimiter is left untouched", () => {
+      const editor = makeEditor();
+      editor.insertText("a ) b");
+      expect(Node.string(editor.children[0])).toBe("a ) b");
+      expect(leaves(editor).some((c: any) => c.type === "link")).toBe(false);
     });
   });
 });
