@@ -1,3 +1,4 @@
+import { nextBoundary, prevBoundary } from "./graphemes";
 import type { Line } from "./lines";
 import type { LinePos } from "./types";
 
@@ -21,18 +22,21 @@ function classAt(lines: Line[], pos: LinePos): CharClass {
   return ch === undefined ? "space" : classify(ch);
 }
 
-/** Step one character forward, crossing line boundaries. Null at doc end. */
+/** Step one grapheme forward, crossing line boundaries. Null at doc end. */
 function next(lines: Line[], pos: LinePos): LinePos | null {
-  if (pos.off < lines[pos.li].text.length) {
-    return { li: pos.li, off: pos.off + 1 };
+  const text = lines[pos.li].text;
+  if (pos.off < text.length) {
+    return { li: pos.li, off: nextBoundary(text, pos.off) };
   }
   if (pos.li < lines.length - 1) return { li: pos.li + 1, off: 0 };
   return null;
 }
 
-/** Step one character backward, crossing line boundaries. Null at doc start. */
+/** Step one grapheme backward, crossing line boundaries. Null at doc start. */
 function prev(lines: Line[], pos: LinePos): LinePos | null {
-  if (pos.off > 0) return { li: pos.li, off: pos.off - 1 };
+  if (pos.off > 0) {
+    return { li: pos.li, off: prevBoundary(lines[pos.li].text, pos.off) };
+  }
   if (pos.li > 0) {
     const line = lines[pos.li - 1];
     return { li: pos.li - 1, off: line.text.length };

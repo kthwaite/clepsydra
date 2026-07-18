@@ -9,6 +9,7 @@ import {
   toggleCase,
   undoRedo,
 } from "./actions";
+import { nextBoundary, prevBoundary } from "./graphemes";
 import {
   clampCol,
   firstNonBlank,
@@ -70,11 +71,13 @@ function opMotion(
     if (ch !== undefined && !/\s/.test(ch)) {
       const cls = classify(ch);
       let target = { li: from.li, off: from.off };
-      while (
-        target.off + 1 < text.length &&
-        classify(text[target.off + 1]) === cls
+      // Walk grapheme-wise to the end of the same-class run.
+      for (
+        let n = nextBoundary(text, target.off);
+        n < text.length && classify(text[n]) === cls;
+        n = nextBoundary(text, n)
       ) {
-        target = { li: target.li, off: target.off + 1 };
+        target = { li: target.li, off: n };
       }
       for (let n = 1; n < (count ?? 1); n++) {
         const next = wordEnd(lines, target);
@@ -83,7 +86,10 @@ function opMotion(
       }
       return applyCharwise(editor, lines, op, {
         start: from,
-        end: { li: target.li, off: target.off + 1 },
+        end: {
+          li: target.li,
+          off: nextBoundary(lines[target.li].text, target.off),
+        },
       });
     }
   }
@@ -98,7 +104,7 @@ function opMotion(
     return { ...patch, ...opLines(editor, lines, op, a, b) };
   }
 
-  let span = charwiseSpan(from, res.target.pos, res.target.inclusive);
+  let span = charwiseSpan(lines, from, res.target.pos, res.target.inclusive);
   // Vim special case: a forward w used as an operator target never crosses
   // into the next line's leading word when the current line still had
   // non-blank content to operate on (dw at the last word clips at EOL).
@@ -171,12 +177,15 @@ function applyVisualSelection(editor: Editor, spec: VisualSpec): void {
   const range = forward
     ? {
         anchor: pointOfPos(editor, lines, anchor),
-        focus: pointOfPos(editor, lines, { li: head.li, off: head.off + 1 }),
+        focus: pointOfPos(editor, lines, {
+          li: head.li,
+          off: nextBoundary(lines[head.li].text, head.off),
+        }),
       }
     : {
         anchor: pointOfPos(editor, lines, {
           li: anchor.li,
-          off: anchor.off + 1,
+          off: nextBoundary(lines[anchor.li].text, anchor.off),
         }),
         focus: pointOfPos(editor, lines, head),
       };
@@ -184,10 +193,10 @@ function applyVisualSelection(editor: Editor, spec: VisualSpec): void {
 }
 
 /** The inclusive charwise span covered by a visual anchor/head pair. */
-function visualCharSpan(anchor: LinePos, head: LinePos) {
+function visualCharSpan(lines: Line[], anchor: LinePos, head: LinePos) {
   return comparePos(anchor, head) <= 0
-    ? charwiseSpan(anchor, head, true)
-    : charwiseSpan(head, anchor, true);
+    ? charwiseSpan(lines, anchor, head, true)
+    : charwiseSpan(lines, head, anchor, true);
 }
 
 function run(
@@ -318,7 +327,7 @@ function run(
         }
         return { ...done, ...patch };
       }
-      const span = visualCharSpan(state.visualAnchor, state.visualHead);
+      const span = visualCharSpan(lines, state.visualAnchor, state.visualHead);
       const patch = applyCharwise(editor, lines, command.op, span);
       return { ...done, ...patch };
     }
@@ -331,7 +340,10 @@ function run(
       // Reselect the object (end is exclusive; the head sits on its last char).
       const head =
         span.end.off > 0
-          ? { li: span.end.li, off: span.end.off - 1 }
+          ? {
+              li: span.end.li,
+              off: prevBoundary(lines[span.end.li].text, span.end.off),
+            }
           : { li: span.end.li - 1, off: lines[span.end.li - 1].text.length };
       applyVisualSelection(editor, {
         anchor: span.start,

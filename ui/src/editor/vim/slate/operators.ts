@@ -1,6 +1,7 @@
 import { Editor, Element, Node, Path, Transforms } from "slate";
 import type { Descendant, Range } from "slate";
 import type { Operator } from "../core/ast";
+import { nextBoundary } from "./graphemes";
 import {
   clampCol,
   firstNonBlank,
@@ -244,8 +245,9 @@ export interface CharwiseSpan {
   end: LinePos;
 }
 
-/** Sort cursor/target and widen inclusive motions by one character. */
+/** Sort cursor/target and widen inclusive motions by one grapheme. */
 export function charwiseSpan(
+  lines: Line[],
   from: LinePos,
   to: LinePos,
   inclusive: boolean,
@@ -255,7 +257,9 @@ export function charwiseSpan(
   if (comparePos(start, end) > 0) {
     [start, end] = [end, start];
   }
-  if (inclusive) end = { li: end.li, off: end.off + 1 };
+  if (inclusive) {
+    end = { li: end.li, off: nextBoundary(lines[end.li].text, end.off) };
+  }
   return { start, end };
 }
 
@@ -381,7 +385,7 @@ export function pasteCharwise(
   const line = lines[from.li];
   const at =
     after && line.text.length > 0
-      ? { li: from.li, off: from.off + 1 }
+      ? { li: from.li, off: nextBoundary(line.text, from.off) }
       : from;
   Transforms.select(editor, pointOfPos(editor, lines, at));
   const n = Math.min(count, MAX_PASTE_COUNT);

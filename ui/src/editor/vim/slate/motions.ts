@@ -1,4 +1,10 @@
 import type { FindKind, Motion } from "../core/ast";
+import {
+  advanceGraphemes,
+  graphemeAt,
+  nextBoundary,
+  prevBoundary,
+} from "./graphemes";
 import { firstNonBlank, type Line } from "./lines";
 import type { LinePos, VimState } from "./types";
 import { wordBack, wordEnd, wordForward } from "./words";
@@ -20,9 +26,31 @@ function clampLine(lines: Line[], li: number): number {
   return Math.max(0, Math.min(li, lines.length - 1));
 }
 
+/** The next grapheme strictly after `from` that IS `char`, else -1. */
+function nextMatch(text: string, char: string, from: number): number {
+  let i = nextBoundary(text, Math.max(0, from));
+  while (i < text.length) {
+    if (graphemeAt(text, i) === char) return i;
+    i = nextBoundary(text, i);
+  }
+  return -1;
+}
+
+/** The last grapheme strictly before `from` that IS `char`, else -1. */
+function prevMatch(text: string, char: string, from: number): number {
+  let i = Math.min(from, text.length);
+  while (i > 0) {
+    i = prevBoundary(text, i);
+    if (graphemeAt(text, i) === char) return i;
+  }
+  return -1;
+}
+
 /**
  * Find the `count`-th occurrence of `char` on `text` for f/t/F/T semantics,
- * scanning from `fromOff`. Returns the resulting column or null.
+ * scanning from `fromOff`. Matches whole graphemes ("e" never matches the
+ * base letter inside an "e" + combining-mark cluster). Returns the
+ * resulting column or null.
  */
 function findInLine(
   text: string,
@@ -34,15 +62,11 @@ function findInLine(
   const forward = kind === "f" || kind === "t";
   let i = fromOff;
   for (let n = 0; n < count; n++) {
-    i = forward
-      ? text.indexOf(char, i + 1)
-      : i <= 0
-        ? -1
-        : text.lastIndexOf(char, i - 1);
+    i = forward ? nextMatch(text, char, i) : prevMatch(text, char, i);
     if (i === -1) return null;
   }
-  if (kind === "t") return i - 1;
-  if (kind === "T") return i + 1;
+  if (kind === "t") return prevBoundary(text, i);
+  if (kind === "T") return nextBoundary(text, i);
   return i;
 }
 
@@ -58,8 +82,20 @@ function resolveFind(
   const forward = kind === "f" || kind === "t";
   let base = from.off;
   // `;` repeat of t/T skips a target the cursor is already touching.
-  if (skipAdjacent && kind === "t" && text[from.off + 1] === char) base += 1;
-  if (skipAdjacent && kind === "T" && text[from.off - 1] === char) base -= 1;
+  if (
+    skipAdjacent &&
+    kind === "t" &&
+    graphemeAt(text, nextBoundary(text, from.off)) === char
+  ) {
+    base = nextBoundary(text, base);
+  }
+  if (
+    skipAdjacent &&
+    kind === "T" &&
+    graphemeAt(text, prevBoundary(text, from.off)) === char
+  ) {
+    base = prevBoundary(text, base);
+  }
   const off = findInLine(text, char, kind, count, base);
   if (off === null) return null;
   // A find that doesn't move the cursor fails (vim beeps).
@@ -94,10 +130,7 @@ export function resolveMotion(
 
   switch (motion.t) {
     case "char": {
-      const off = Math.max(
-        0,
-        Math.min(from.off + motion.dir * n, line.text.length),
-      );
+      const off = advanceGraphemes(line.text, from.off, motion.dir * n);
       return {
         target: { kind: "char", pos: { li: from.li, off }, inclusive: false },
       };
@@ -140,10 +173,11 @@ export function resolveMotion(
     case "line-end": {
       // With a count, $ goes to the end of the (count-1)-th line down.
       const li = clampLine(lines, from.li + (n - 1));
+      const text = lines[li].text;
       return {
         target: {
           kind: "char",
-          pos: { li, off: Math.max(0, lines[li].text.length - 1) },
+          pos: { li, off: prevBoundary(text, text.length) },
           inclusive: true,
         },
       };

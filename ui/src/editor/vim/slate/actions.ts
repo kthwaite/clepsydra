@@ -1,6 +1,7 @@
 import { Editor, Element, Node, Transforms } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { InsertWhere } from "../core/ast";
+import { advanceGraphemes, nextBoundary, prevBoundary } from "./graphemes";
 import {
   firstNonBlank,
   getLines,
@@ -10,20 +11,20 @@ import {
 import { applyCharwise, cursorPos, selectPos } from "./operators";
 import type { VimState } from "./types";
 
-/** `x`: delete `count` chars, clamped to the line end. Writes the register. */
+/** `x`: delete `count` graphemes, clamped to the line end. Writes the register. */
 export function deleteChar(editor: Editor, count: number): Partial<VimState> {
   const lines = getLines(editor);
   const from = cursorPos(editor, lines);
   const line = lines[from.li];
   if (line.text.length === 0) return {};
-  const end = Math.min(from.off + count, line.text.length);
+  const end = advanceGraphemes(line.text, from.off, count);
   return applyCharwise(editor, lines, "d", {
     start: from,
     end: { li: from.li, off: end },
   });
 }
 
-/** `r`: replace `count` chars; aborts (like vim) when the line is too short. */
+/** `r`: replace `count` graphemes; aborts (like vim) when the line is too short. */
 export function replaceChar(
   editor: Editor,
   char: string,
@@ -32,24 +33,29 @@ export function replaceChar(
   const lines = getLines(editor);
   const from = cursorPos(editor, lines);
   const line = lines[from.li];
-  if (from.off + count > line.text.length) return {};
+  let end = from.off;
+  for (let i = 0; i < count; i++) {
+    if (end >= line.text.length) return {};
+    end = nextBoundary(line.text, end);
+  }
   Transforms.insertText(editor, char.repeat(count), {
     at: {
       anchor: pointOfPos(editor, lines, from),
-      focus: pointOfPos(editor, lines, { li: from.li, off: from.off + count }),
+      focus: pointOfPos(editor, lines, { li: from.li, off: end }),
     },
   });
+  // The replacement chars are single code units; land on the last one.
   selectPos(editor, "normal", { li: from.li, off: from.off + count - 1 });
   return {};
 }
 
-/** `~`: toggle case of `count` chars and advance past them. */
+/** `~`: toggle case of `count` graphemes and advance past them. */
 export function toggleCase(editor: Editor, count: number): Partial<VimState> {
   const lines = getLines(editor);
   const from = cursorPos(editor, lines);
   const line = lines[from.li];
   if (line.text.length === 0) return {};
-  const end = Math.min(from.off + count, line.text.length);
+  const end = advanceGraphemes(line.text, from.off, count);
   const swapped = [...line.text.slice(from.off, end)]
     .map((ch) => {
       const lower = ch.toLowerCase();
@@ -165,7 +171,7 @@ export function enterInsert(
     where === "here"
       ? from.off
       : where === "after"
-        ? Math.min(from.off + 1, line.text.length)
+        ? nextBoundary(line.text, from.off)
         : where === "first-nonblank"
           ? firstNonBlank(line)
           : line.text.length;
@@ -185,7 +191,10 @@ export function escapeToNormal(
     const from = cursorPos(editor, lines);
     selectPos(editor, "normal", {
       li: from.li,
-      off: state.mode === "insert" ? from.off - 1 : from.off,
+      off:
+        state.mode === "insert"
+          ? prevBoundary(lines[from.li].text, from.off)
+          : from.off,
     });
   }
   return {

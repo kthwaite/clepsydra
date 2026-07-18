@@ -1,4 +1,5 @@
 import { Editor, Element, Node, Path, type Point } from "slate";
+import { floorBoundary, prevBoundary } from "./graphemes";
 import type { LinePos } from "./types";
 
 /**
@@ -111,13 +112,16 @@ export function pointOfPos(
 
 /**
  * Clamp a column to the normal-mode invariant: the caret sits ON a
- * character, so `off <= len - 1` (0 on an empty line). Insert mode may sit
- * after the last character.
+ * grapheme, so `off <=` the last grapheme's start (0 on an empty line).
+ * Insert mode may sit after the last grapheme. Either way the result
+ * snaps down to a grapheme boundary.
  */
 export function clampCol(line: Line, off: number, mode: "normal" | "insert") {
   const max =
-    mode === "insert" ? line.text.length : Math.max(0, line.text.length - 1);
-  return Math.max(0, Math.min(off, max));
+    mode === "insert"
+      ? line.text.length
+      : prevBoundary(line.text, line.text.length);
+  return floorBoundary(line.text, Math.max(0, Math.min(off, max)));
 }
 
 /** First non-whitespace column of a line (0 for blank lines). */

@@ -1,4 +1,5 @@
 import type { TextObject, TextObjectKind } from "../core/ast";
+import { floorBoundary, nextBoundary, prevBoundary } from "./graphemes";
 import type { Line } from "./lines";
 import type { CharwiseSpan } from "./operators";
 import type { LinePos } from "./types";
@@ -19,27 +20,40 @@ function wordObject(
 ): CharwiseSpan | null {
   const text = lines[from.li].text;
   if (text.length === 0) return null;
-  const off = Math.min(from.off, text.length - 1);
+  // Grapheme-wise: a cluster is classified by its leading code unit and
+  // never split, so a combining mark stays inside its word.
+  const off = floorBoundary(text, Math.min(from.off, text.length - 1));
   const cls = classify(text[off]);
   let start = off;
-  let end = off + 1;
-  while (start > 0 && classify(text[start - 1]) === cls) start--;
-  while (end < text.length && classify(text[end]) === cls) end++;
+  let end = nextBoundary(text, off);
+  while (start > 0 && classify(text[prevBoundary(text, start)]) === cls) {
+    start = prevBoundary(text, start);
+  }
+  while (end < text.length && classify(text[end]) === cls) {
+    end = nextBoundary(text, end);
+  }
   if (around && cls !== "space") {
     // aw takes trailing whitespace, or leading when there is none trailing.
     let extended = end;
     while (extended < text.length && classify(text[extended]) === "space") {
-      extended++;
+      extended = nextBoundary(text, extended);
     }
     if (extended > end) {
       end = extended;
     } else {
-      while (start > 0 && classify(text[start - 1]) === "space") start--;
+      while (
+        start > 0 &&
+        classify(text[prevBoundary(text, start)]) === "space"
+      ) {
+        start = prevBoundary(text, start);
+      }
     }
   } else if (around) {
     // Cursor on whitespace: aw is the whitespace plus the following word.
     const cls2 = end < text.length ? classify(text[end]) : null;
-    while (end < text.length && classify(text[end]) === cls2) end++;
+    while (end < text.length && classify(text[end]) === cls2) {
+      end = nextBoundary(text, end);
+    }
   }
   return {
     start: { li: from.li, off: start },
