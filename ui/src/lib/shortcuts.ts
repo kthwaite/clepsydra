@@ -199,6 +199,12 @@ export const SHORTCUTS = {
     group: "Editor",
     scope: "editor",
   },
+  "editor.vimMode": {
+    chord: { key: "v", mod: true, shift: true },
+    label: "Toggle vim mode",
+    group: "Editor",
+    scope: "editor",
+  },
 } as const satisfies Record<string, ShortcutDef>;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

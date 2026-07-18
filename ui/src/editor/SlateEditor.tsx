@@ -39,6 +39,7 @@ import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBlockRef } from "./schema/elements/blockRef";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
+import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 
 export function slashCommandToConversion(id: string): BlockConversion | null {
@@ -99,6 +100,10 @@ export function SlateEditor({
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
   const assignBlockId = useAssignBlockId();
+
+  // Per-editor, non-persistent: each editor instance starts with vim off.
+  const [isVimEnabled, setIsVimEnabled] = useState(false);
+  const vim = useVim(editor, isVimEnabled);
 
   const [wikilinkTrigger, setWikilinkTrigger] =
     useState<ComboboxTrigger | null>(null);
@@ -317,6 +322,16 @@ export function SlateEditor({
       }
     }
 
+    // --- Vim mode (after popovers, before app chords) ---
+    if (matchesChord(event, SHORTCUTS["editor.vimMode"].chord)) {
+      event.preventDefault();
+      setIsVimEnabled((enabled) => !enabled);
+      return;
+    }
+    if (vim.handleKeyDown(event)) {
+      return;
+    }
+
     // --- Outliner keybindings ---
     if (matchesChord(event, SHORTCUTS["editor.indent"].chord)) {
       event.preventDefault();
@@ -438,10 +453,17 @@ export function SlateEditor({
           renderLeaf={renderLeaf}
           decorate={decorateCode}
           onKeyDown={handleKeyDown}
+          onDOMBeforeInput={(event) => {
+            vim.handleDOMBeforeInput(event);
+          }}
+          onMouseDown={() => {
+            vim.handleMouseDown();
+          }}
           placeholder="Start writing..."
           className="min-h-[200px] outline-none"
           spellCheck
         />
+        {isVimEnabled && <VimStatusBar mode={vim.mode} pending={vim.pending} />}
       </Slate>
 
       {wikilinkTrigger && (

@@ -22,6 +22,7 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@tailwindcss/vite": "^4.3.0",
+    "@tanstack/hotkeys": "0.8.0",
     "@tanstack/react-query": "^5.100.10",
     "@tanstack/react-router": "^1.169.2",
     "@tanstack/router-plugin": "^1.167.35",
