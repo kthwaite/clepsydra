@@ -41,7 +41,6 @@ import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
-import { useUiStore } from "#/store/ui";
 
 export function slashCommandToConversion(id: string): BlockConversion | null {
   switch (id) {
@@ -102,8 +101,8 @@ export function SlateEditor({
   const pages = pagesData?.items ?? [];
   const assignBlockId = useAssignBlockId();
 
-  const isVimEnabled = useUiStore((state) => state.isVimEnabled);
-  const toggleVim = useUiStore((state) => state.toggleVim);
+  // Per-editor, non-persistent: each editor instance starts with vim off.
+  const [isVimEnabled, setIsVimEnabled] = useState(false);
   const vim = useVim(editor, isVimEnabled);
 
   const [wikilinkTrigger, setWikilinkTrigger] =
@@ -326,7 +325,7 @@ export function SlateEditor({
     // --- Vim mode (after popovers, before app chords) ---
     if (matchesChord(event, SHORTCUTS["editor.vimMode"].chord)) {
       event.preventDefault();
-      toggleVim();
+      setIsVimEnabled((enabled) => !enabled);
       return;
     }
     if (vim.handleKeyDown(event)) {
