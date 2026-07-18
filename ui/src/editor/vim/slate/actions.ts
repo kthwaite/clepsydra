@@ -204,7 +204,12 @@ export function undoRedo(
   const history = editor as Editor & Partial<HistoryEditor>;
   const step = kind === "undo" ? history.undo : history.redo;
   if (!step) return {};
-  for (let i = 0; i < count; i++) step.call(history);
+  for (let i = 0; i < count; i++) {
+    const stack =
+      kind === "undo" ? history.history?.undos : history.history?.redos;
+    if (!stack || stack.length === 0) break;
+    step.call(history);
+  }
   const lines = getLines(editor);
   selectPos(editor, "normal", cursorPos(editor, lines));
   return {};

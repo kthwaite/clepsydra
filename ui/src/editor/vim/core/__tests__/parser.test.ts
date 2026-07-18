@@ -306,3 +306,32 @@ describe("parser state", () => {
     expect(parser.feed("<Esc>", "normal")).toEqual({ kind: "invalid" });
   });
 });
+
+describe("count saturation", () => {
+  it("saturates a count instead of growing without bound", () => {
+    const parser = createVimParser();
+    const result = feedAll(parser, [..."9999999999", "j"]);
+    expect(result).toEqual({
+      kind: "command",
+      command: {
+        t: "move",
+        motion: { t: "line-vert", dir: 1 },
+        count: 999_999_999,
+      },
+    });
+  });
+
+  it("saturates the count1 x count2 product", () => {
+    const parser = createVimParser();
+    const result = feedAll(parser, [..."999999999", "d", ..."999999999", "w"]);
+    expect(result).toEqual({
+      kind: "command",
+      command: {
+        t: "op-motion",
+        op: "d",
+        motion: { t: "word", kind: "w" },
+        count: 999_999_999,
+      },
+    });
+  });
+});

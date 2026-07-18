@@ -37,6 +37,14 @@ export interface VimParser {
  * (e.g. `2d3w`, `ci(`, `dfx`) completes. Operator-pending is a parser state,
  * not an editor mode. Deliberately timeout-free: vim waits forever after `d`.
  */
+/**
+ * Counts saturate here (vim clamps large counts too) so no downstream
+ * consumer ever sees a value that can overflow or size an allocation.
+ * Execution still clamps to document bounds; content-producing commands
+ * (paste) apply their own, much smaller cap.
+ */
+const MAX_COUNT = 999_999_999;
+
 export function createVimParser(): VimParser {
   let count1: number | null = null;
   let op: Operator | null = null;
@@ -56,7 +64,7 @@ export function createVimParser(): VimParser {
   const product = (): number | null =>
     count1 === null && count2 === null
       ? null
-      : (count1 ?? 1) * (count2 ?? 1);
+      : Math.min((count1 ?? 1) * (count2 ?? 1), MAX_COUNT);
 
   const emit = (command: Command): ParseResult => {
     reset();
@@ -114,11 +122,11 @@ export function createVimParser(): VimParser {
       const digit = Number(key);
       if (op !== null) {
         if (key !== "0" || count2 !== null) {
-          count2 = (count2 ?? 0) * 10 + digit;
+          count2 = Math.min((count2 ?? 0) * 10 + digit, MAX_COUNT);
           return pending();
         }
       } else if (key !== "0" || count1 !== null) {
-        count1 = (count1 ?? 0) * 10 + digit;
+        count1 = Math.min((count1 ?? 0) * 10 + digit, MAX_COUNT);
         return pending();
       }
       // Bare "0": fall through as a motion.

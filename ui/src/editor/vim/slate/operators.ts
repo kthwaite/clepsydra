@@ -277,6 +277,12 @@ export function applyCharwise(
 
 // --- Paste ---
 
+/**
+ * Paste multiplies register content into the document, so its count gets a
+ * far tighter cap than motions (which clamp at document bounds anyway).
+ */
+const MAX_PASTE_COUNT = 1000;
+
 function isCodeBlock(editor: Editor, blockPath: Path): boolean {
   const node = Node.get(editor, blockPath);
   return Element.isElement(node) && node.type === "code-block";
@@ -301,15 +307,17 @@ export function pasteLinewise(
   after: boolean,
   count: number,
 ): void {
+  const n = Math.min(count, MAX_PASTE_COUNT);
   const lines = getLines(editor);
   const from = cursorPos(editor, lines);
   const line = lines[from.li];
 
   if (isCodeBlock(editor, line.blockPath)) {
     // Paste as text lines inside the code block.
-    const text = Array.from({ length: count }, () =>
-      register.fragment.map((n) => Node.string(n)).join("\n"),
-    ).join("\n");
+    const once = register.fragment.map((node) => Node.string(node)).join("\n");
+    const parts: string[] = [];
+    for (let i = 0; i < n; i++) parts.push(once);
+    const text = parts.join("\n");
     const at = after
       ? pointAtBlockOffset(editor, line.blockPath, line.start + line.text.length)
       : pointAtBlockOffset(editor, line.blockPath, line.start);
@@ -329,7 +337,7 @@ export function pasteLinewise(
   const unit = intoList ? parentPath : line.blockPath;
   const at = after ? Path.next(unit) : unit;
   const nodes: Descendant[] = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < n; i++) {
     nodes.push(...adaptNodes(register.fragment, intoList));
   }
   Transforms.insertNodes(editor, nodes, { at });
@@ -356,7 +364,8 @@ export function pasteCharwise(
       ? { li: from.li, off: from.off + 1 }
       : from;
   Transforms.select(editor, pointOfPos(editor, lines, at));
-  for (let i = 0; i < count; i++) {
+  const n = Math.min(count, MAX_PASTE_COUNT);
+  for (let i = 0; i < n; i++) {
     Transforms.insertFragment(editor, structuredClone(register.fragment));
   }
   // Vim leaves the caret on the last pasted character.

@@ -77,7 +77,9 @@ function opMotion(
         target = { li: target.li, off: target.off + 1 };
       }
       for (let n = 1; n < (count ?? 1); n++) {
-        target = wordEnd(lines, target);
+        const next = wordEnd(lines, target);
+        if (next.li === target.li && next.off === target.off) break;
+        target = next;
       }
       return applyCharwise(editor, lines, op, {
         start: from,

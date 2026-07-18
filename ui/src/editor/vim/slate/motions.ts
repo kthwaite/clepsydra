@@ -114,12 +114,16 @@ export function resolveMotion(
     case "word": {
       let pos = from;
       for (let i = 0; i < n; i++) {
-        pos =
+        const next =
           motion.kind === "w"
             ? wordForward(lines, pos)
             : motion.kind === "b"
               ? wordBack(lines, pos)
               : wordEnd(lines, pos);
+        // Word helpers clamp at the document edge; stop instead of
+        // spinning the remaining (possibly enormous) count there.
+        if (next.li === pos.li && next.off === pos.off) break;
+        pos = next;
       }
       return {
         target: { kind: "char", pos, inclusive: motion.kind === "e" },
