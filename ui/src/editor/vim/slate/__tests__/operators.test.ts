@@ -263,3 +263,79 @@ describe("undo and redo", () => {
     ]);
   });
 });
+
+describe("linewise units on items owning nested lists", () => {
+  const nestedDoc = () =>
+    makeEditor(ul(li("par|ent", ul(li("child"))), li("sibling")));
+
+  it("dd removes the item including its nested list", () => {
+    const editor = nestedDoc();
+    keys(editor, "dd");
+    expect(snapshot(editor)).toEqual(["li:|sibling"]);
+  });
+
+  it("dd on the nested child leaves the parent intact", () => {
+    const editor = makeEditor(
+      ul(li("parent", ul(li("chi|ld"))), li("sibling")),
+    );
+    keys(editor, "dd");
+    expect(snapshot(editor)).toEqual(["li:parent", "li:|sibling"]);
+  });
+
+  it("yyp duplicates the item including its nested list", () => {
+    const editor = nestedDoc();
+    keys(editor, "yyp");
+    expect(snapshot(editor)).toEqual([
+      "li:parent",
+      "li2:child",
+      "li:|parent",
+      "li2:child",
+      "li:sibling",
+    ]);
+  });
+
+  it("yyP pastes the item and its nested list above", () => {
+    const editor = nestedDoc();
+    keys(editor, "yyP");
+    expect(snapshot(editor)).toEqual([
+      "li:|parent",
+      "li2:child",
+      "li:parent",
+      "li2:child",
+      "li:sibling",
+    ]);
+  });
+
+  it("2dd spanning parent and child captures the item once", () => {
+    const editor = nestedDoc();
+    keys(editor, "2ddp");
+    expect(snapshot(editor)).toEqual([
+      "li:sibling",
+      "li:|parent",
+      "li2:child",
+    ]);
+  });
+
+  it("cc clears the parent line but keeps the nested list", () => {
+    const editor = nestedDoc();
+    const state = keys(editor, "cc");
+    expect(snapshot(editor)).toEqual(["li:|", "li2:child", "li:sibling"]);
+    expect(state.mode).toBe("insert");
+  });
+
+  it("unwraps an item with a nested list when pasting into paragraphs", () => {
+    const editor = makeEditor(
+      ul(li("par|ent", ul(li("child")))),
+      p("after"),
+    );
+    const state = keys(editor, "yy");
+    keys(editor, "Gp", state);
+    expect(snapshot(editor)).toEqual([
+      "li:parent",
+      "li2:child",
+      "after",
+      "|parent",
+      "li:child",
+    ]);
+  });
+});

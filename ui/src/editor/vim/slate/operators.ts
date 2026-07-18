@@ -60,24 +60,35 @@ function isListItem(node: Node): node is Element {
 }
 
 /**
- * The node cloned into a linewise register for a given line: the enclosing
- * list-item when the line is an item's only content, otherwise the block.
+ * A line on a list-item's primary paragraph stands for the whole item,
+ * nested lists included. (Canonical shape puts the paragraph at index 0.)
  */
-function registerUnitPath(editor: Editor, blockPath: Path): Path {
-  const parentPath = Path.parent(blockPath);
-  if (parentPath.length > 0) {
-    const parent = Node.get(editor, parentPath);
-    if (isListItem(parent) && parent.children.length === 1) return parentPath;
+function listItemOf(editor: Editor, blockPath: Path): Path | null {
+  if (blockPath.length === 0 || blockPath[blockPath.length - 1] !== 0) {
+    return null;
   }
-  return blockPath;
+  const parentPath = Path.parent(blockPath);
+  if (parentPath.length === 0) return null;
+  const parent = Node.get(editor, parentPath);
+  return isListItem(parent) ? parentPath : null;
 }
 
 /**
- * The path removed when deleting a whole line: walks up through wrappers
- * (list-item, list, blockquote) that would be left empty.
+ * The node cloned into a linewise register for a given line: the enclosing
+ * list-item (with any nested lists) when the line is the item's primary
+ * paragraph, otherwise the block.
+ */
+function registerUnitPath(editor: Editor, blockPath: Path): Path {
+  return listItemOf(editor, blockPath) ?? blockPath;
+}
+
+/**
+ * The path removed when deleting a whole line: the owning list-item when
+ * the line is its primary paragraph, then up through wrappers (list-item,
+ * list, blockquote) that would be left empty.
  */
 function deleteUnitPath(editor: Editor, blockPath: Path): Path {
-  let path = blockPath;
+  let path = listItemOf(editor, blockPath) ?? blockPath;
   while (path.length > 1) {
     const parentPath = Path.parent(path);
     const parent = Node.get(editor, parentPath);
@@ -136,9 +147,18 @@ export function captureLinewise(
   b: number,
 ): Register {
   const fragment: Descendant[] = [];
+  const captured: Path[] = [];
   for (const group of groupSpan(lines, a, b)) {
     if (group.whole) {
       const unit = registerUnitPath(editor, group.blockPath);
+      // Groups run in document order, so a unit that subsumed later lines
+      // (an item with nested lists) is captured once, not per line.
+      if (
+        captured.some((c) => Path.equals(c, unit) || Path.isAncestor(c, unit))
+      ) {
+        continue;
+      }
+      captured.push(unit);
       fragment.push(structuredClone(Node.get(editor, unit)) as Descendant);
     } else {
       // Partial code block: synthesize a code block from the covered lines.
