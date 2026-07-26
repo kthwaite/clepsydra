@@ -2,7 +2,11 @@ import { createEditor, Transforms } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { withOutliner } from "../../withOutliner";
-import { tryBlockTransform, tryThematicBreak } from "../blockTransforms";
+import {
+  tryBlockTransform,
+  tryCodeFence,
+  tryThematicBreak,
+} from "../blockTransforms";
 
 function editorWithParagraph(text: string, cursorOffset: number) {
   const editor = withOutliner(withHistory(createEditor()));
@@ -197,6 +201,68 @@ describe("tryBlockTransform (paragraph -> task list)", () => {
     expect(list.type).toBe("bulleted-list");
     expect(list.children.length).toBe(2);
     expect(list.children[1].checked).toBe(false);
+  });
+});
+
+describe("tryBlockTransform (trigger before existing text)", () => {
+  it("## + space at the start of a non-empty line -> heading, text preserved", () => {
+    const editor = editorWithParagraph("##hello world", 2);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const heading = editor.children[0] as any;
+    expect(heading.type).toBe("heading");
+    expect(heading.level).toBe(2);
+    expect(heading.children[0].text).toBe("hello world");
+  });
+
+  it("leaves the cursor before the preserved text", () => {
+    const editor = editorWithParagraph("#hello", 1);
+    tryBlockTransform(editor);
+    expect(editor.selection?.anchor).toEqual({ path: [0, 0], offset: 0 });
+  });
+
+  it("- + space at the start of a non-empty line -> bulleted list, text preserved", () => {
+    const editor = editorWithParagraph("-milk", 1);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const list = editor.children[0] as any;
+    expect(list.type).toBe("bulleted-list");
+    expect(list.children[0].children[0].children[0].text).toBe("milk");
+  });
+
+  it("> + space at the start of a non-empty line -> blockquote, text preserved", () => {
+    const editor = editorWithParagraph(">quoted", 1);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const quote = editor.children[0] as any;
+    expect(quote.type).toBe("blockquote");
+    expect(quote.children[0].children[0].text).toBe("quoted");
+  });
+
+  it("[ ] + space at the start of a non-empty list item -> task, text preserved", () => {
+    const editor = editorWithListItem("[ ]buy milk", 3);
+    const result = tryBlockTransform(editor);
+    expect(result).toBe(true);
+    const li = (editor.children[0] as any).children[0];
+    expect(li.checked).toBe(false);
+    expect(li.children[0].children[0].text).toBe("buy milk");
+  });
+
+  it("does not transform when text precedes the trigger", () => {
+    const editor = editorWithParagraph("a#hello", 2);
+    expect(tryBlockTransform(editor)).toBe(false);
+  });
+});
+
+describe("destructive conversions still require an empty remainder", () => {
+  it("-- + `-` with trailing text does not become a thematic break", () => {
+    const editor = editorWithParagraph("--rest", 2);
+    expect(tryThematicBreak(editor)).toBe(false);
+  });
+
+  it("``` + Enter with trailing text does not become a code block", () => {
+    const editor = editorWithParagraph("```rest", 3);
+    expect(tryCodeFence(editor)).toBe(false);
   });
 });
 

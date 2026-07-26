@@ -46,11 +46,16 @@ function getCurrentBlock(editor: Editor): [SlateElement, Path] | undefined {
 }
 
 /**
- * Get the text content of a block's first text node and verify cursor is at end.
+ * Get the trigger text: everything before the cursor in the block's first
+ * text node. Text after the cursor is allowed — it becomes the converted
+ * block's content — except when `requireLineEnd` is set, for conversions
+ * that would discard or swallow a trailing remainder (thematic break,
+ * code fence).
  */
 function getBlockTriggerText(
   editor: Editor,
   blockEntry: [SlateElement, Path],
+  opts: { requireLineEnd?: boolean } = {},
 ): string | undefined {
   const [block, blockPath] = blockEntry;
   const { selection } = editor;
@@ -63,15 +68,12 @@ function getBlockTriggerText(
   const textPath = [...blockPath, 0];
   const offset = selection.anchor.offset;
 
-  // Cursor must be at the end of the text
-  if (
-    selection.anchor.path.join(",") !== textPath.join(",") ||
-    offset !== firstChild.text.length
-  ) {
+  if (selection.anchor.path.join(",") !== textPath.join(",")) return undefined;
+  if (opts.requireLineEnd && offset !== firstChild.text.length) {
     return undefined;
   }
 
-  return firstChild.text;
+  return firstChild.text.slice(0, offset);
 }
 
 /** Range spanning the leading trigger text in a block's first text node. */
@@ -227,7 +229,9 @@ export function tryThematicBreak(editor: Editor): boolean {
   const [block, blockPath] = blockEntry;
   if ((block as any).type !== "paragraph") return false;
 
-  const text = getBlockTriggerText(editor, blockEntry);
+  const text = getBlockTriggerText(editor, blockEntry, {
+    requireLineEnd: true,
+  });
   if (text !== "--") return false;
 
   applyBlockConversion(editor, {
@@ -255,7 +259,9 @@ export function tryCodeFence(editor: Editor): boolean {
   const [block, blockPath] = blockEntry;
   if ((block as any).type !== "paragraph") return false;
 
-  const text = getBlockTriggerText(editor, blockEntry);
+  const text = getBlockTriggerText(editor, blockEntry, {
+    requireLineEnd: true,
+  });
   if (text === undefined) return false;
 
   const match = text.match(CODE_FENCE_RE);
