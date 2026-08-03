@@ -87,6 +87,34 @@ pub struct TlsSettings {
     pub key_path: Option<PathBuf>,
 }
 
+/// Command-line overrides for `serve`, applied on top of loaded [`Settings`].
+///
+/// These sit above both the config file and the `CLEPSYDRA__*` environment
+/// variables in precedence, so a flag always wins over what is on disk. The
+/// point is to make a throwaway server — an HTTPS one on a spare port, for
+/// testing a client against — a single command rather than an edit to the
+/// config the everyday server shares.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ServeOverrides {
+    /// Force HTTPS on. Deliberately one-way: there is no flag to force it
+    /// *off*, so `serve` can never silently downgrade a TLS config to cleartext.
+    pub tls: bool,
+    /// Listen on this port instead of the configured one.
+    pub port: Option<u16>,
+}
+
+impl ServeOverrides {
+    /// Apply the overrides in place; unset ones leave `settings` untouched.
+    pub fn apply(self, settings: &mut Settings) {
+        if self.tls {
+            settings.server.tls.enabled = true;
+        }
+        if let Some(port) = self.port {
+            settings.server.port = port;
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct VaultSettings {
     /// The vault root directory. Can be absolute or relative to the config file location. (Default: "./vault")
@@ -132,7 +160,8 @@ impl Settings {
     /// Load settings from a known `config.toml` path, layering defaults and
     /// environment variables on top.
     pub fn load_from(config_path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        // Precedence (later wins): defaults < config file < env vars
+        // Precedence (later wins): defaults < config file < env vars.
+        // `serve` flags layer on top of this — see [`ServeOverrides`].
         let settings = Config::builder()
             .set_default("server.host", "localhost")?
             .set_default("server.port", 3000)?
@@ -510,9 +539,12 @@ pub fn open_vault_and_index() -> Result<(Vault, VaultIndex), Box<dyn std::error:
 
 /// Build the application state + settings for the server (cwd, config load,
 /// vault-root resolution, app-state build).
-async fn build_server_state() -> Result<(Arc<AppState>, Settings), Box<dyn std::error::Error>> {
+async fn build_server_state(
+    overrides: ServeOverrides,
+) -> Result<(Arc<AppState>, Settings), Box<dyn std::error::Error>> {
     let cwd = std::env::current_dir()?;
-    let (settings, config_path) = Settings::load(&cwd)?;
+    let (mut settings, config_path) = Settings::load(&cwd)?;
+    overrides.apply(&mut settings);
     let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
     info!(
         config = %config_path.display(),
@@ -624,9 +656,12 @@ pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
     }
 }
 
-pub async fn run_server(enable_lsp: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_server(
+    enable_lsp: bool,
+    overrides: ServeOverrides,
+) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
-    let (state, settings) = build_server_state().await?;
+    let (state, settings) = build_server_state(overrides).await?;
     run_startup_reconcile(&state).await;
     maybe_spawn_lsp(enable_lsp, &state);
     let _watcher = spawn_sync_watcher(&state)?;
@@ -871,6 +906,81 @@ mod settings_tests {
         std::fs::write(&cfg, "[server]\nport = 9999\n").unwrap();
         let settings = Settings::load_from(&cfg).unwrap();
         assert_eq!(settings.server.port, 9999);
+    }
+
+    fn settings_with(tls_enabled: bool, port: u16) -> Settings {
+        Settings {
+            server: ServerSettings {
+                tls: TlsSettings {
+                    enabled: tls_enabled,
+                    ..TlsSettings::default()
+                },
+                port,
+                ..ServerSettings::default()
+            },
+            vault: VaultSettings::default(),
+        }
+    }
+
+    #[test]
+    fn no_overrides_leave_settings_untouched() {
+        let mut settings = settings_with(false, 3000);
+
+        ServeOverrides::default().apply(&mut settings);
+
+        assert!(!settings.server.tls.enabled);
+        assert_eq!(settings.server.port, 3000);
+    }
+
+    #[test]
+    fn overrides_beat_the_config_file() {
+        let mut settings = settings_with(false, 3000);
+
+        ServeOverrides {
+            tls: true,
+            port: Some(3443),
+        }
+        .apply(&mut settings);
+
+        assert!(settings.server.tls.enabled);
+        assert_eq!(settings.server.port, 3443);
+    }
+
+    #[test]
+    fn omitting_tls_never_disables_it() {
+        // `--tls` is one-way by design: a config that opts into HTTPS keeps it
+        // when the flag is absent, so plain `serve` cannot silently downgrade
+        // a deployment to cleartext.
+        let mut settings = settings_with(true, 3000);
+
+        ServeOverrides {
+            tls: false,
+            port: None,
+        }
+        .apply(&mut settings);
+
+        assert!(settings.server.tls.enabled);
+    }
+
+    #[test]
+    fn explicit_cert_paths_survive_the_tls_flag() {
+        // The flag only flips `enabled`; a configured cert pair must still be
+        // the pair that gets loaded rather than being replaced by mkcert's.
+        let mut settings = settings_with(false, 3000);
+        settings.server.tls.cert_path = Some(PathBuf::from("/etc/certs/vault.pem"));
+        settings.server.tls.key_path = Some(PathBuf::from("/etc/certs/vault-key.pem"));
+
+        ServeOverrides {
+            tls: true,
+            port: None,
+        }
+        .apply(&mut settings);
+
+        assert!(settings.server.tls.enabled);
+        assert_eq!(
+            settings.server.tls.cert_path,
+            Some(PathBuf::from("/etc/certs/vault.pem"))
+        );
     }
 }
 

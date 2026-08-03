@@ -65,6 +65,17 @@ Auto-generated certs are stored in your platform app-data dir under `clepsydra/`
 
 If `mkcert` is unavailable, startup fails with an installation hint.
 
+To start an HTTPS server without changing this file — the usual case when
+testing an HTTPS-only client against a machine that already runs a plain server
+— use the `serve` flags instead:
+
+```bash
+clepsydra serve --tls --port 3443
+```
+
+See [cli.md](cli.md#running-an-https-server-for-client-testing), including the
+one-off step to make the iOS Simulator trust the mkcert CA.
+
 ### Environment overrides
 
 Application config supports env overrides via `CLEPSYDRA__...`:
@@ -84,6 +95,9 @@ export CLEPSYDRA__SERVER__DEV_MODE=true
 export CLEPSYDRA__SERVER__PORT=4000
 cargo run -- serve
 ```
+
+Full precedence, later wins: defaults → config file → environment →
+`serve --tls` / `serve --port`.
 
 ### Relative path resolution
 
