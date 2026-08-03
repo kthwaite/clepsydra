@@ -185,6 +185,7 @@ export function deleteLineSpan(
   b: number,
 ): void {
   const groups = groupSpan(lines, a, b);
+  let survivors = 0;
   Editor.withoutNormalizing(editor, () => {
     for (const group of [...groups].reverse()) {
       if (group.whole) {
@@ -216,9 +217,14 @@ export function deleteLineSpan(
         { at: [0] },
       );
     }
+    survivors = getLines(editor).length;
   });
+  // The cursor must land on a line that survived the delete. Normalization
+  // (which flushes above) can append blocks the delete did not leave behind
+  // — e.g. the trailing paragraph after a document-final code block — and
+  // those must not count as the line that moved up into the deleted slot.
   const after = getLines(editor);
-  const li = Math.min(a, after.length - 1);
+  const li = Math.min(a, survivors - 1, after.length - 1);
   selectPos(editor, "normal", { li, off: firstNonBlank(after[li]) });
 }
 

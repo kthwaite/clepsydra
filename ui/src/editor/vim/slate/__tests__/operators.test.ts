@@ -127,13 +127,13 @@ describe("dd", () => {
   it("deletes a virtual line inside a code block", () => {
     const editor = makeEditor(code("aa\nb|b\ncc"));
     keys(editor, "dd");
-    expect(snapshot(editor)).toEqual(["code:aa\n|cc"]);
+    expect(snapshot(editor)).toEqual(["code:aa\n|cc", ""]);
   });
 
   it("deletes the last virtual line of a code block", () => {
     const editor = makeEditor(code("aa\nb|b"));
     keys(editor, "dd");
-    expect(snapshot(editor)).toEqual(["code:|aa"]);
+    expect(snapshot(editor)).toEqual(["code:|aa", ""]);
   });
 
   it("removes a whole list item", () => {
@@ -209,13 +209,13 @@ describe("yank and paste", () => {
     const editor = makeEditor(p("hell|o"), code("aa\nbb"));
     const state = keys(editor, "yy");
     keys(editor, "jp", state);
-    expect(snapshot(editor)).toEqual(["hello", "code:aa\n|hello\nbb"]);
+    expect(snapshot(editor)).toEqual(["hello", "code:aa\n|hello\nbb", ""]);
   });
 
   it("yanks a code-block virtual line and pastes it in the block", () => {
     const editor = makeEditor(code("a|a\nbb"));
     keys(editor, "yyp");
-    expect(snapshot(editor)).toEqual(["code:aa\n|aa\nbb"]);
+    expect(snapshot(editor)).toEqual(["code:aa\n|aa\nbb", ""]);
   });
 
   it("yw + p pastes charwise after the cursor", () => {

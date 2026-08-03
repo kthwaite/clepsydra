@@ -120,6 +120,6 @@ describe("visual linewise", () => {
   it("works across code-block virtual lines", () => {
     const editor = makeEditor(code("a|a\nbb\ncc"));
     keys(editor, "Vjd");
-    expect(snapshot(editor)).toEqual(["code:|cc"]);
+    expect(snapshot(editor)).toEqual(["code:|cc", ""]);
   });
 });

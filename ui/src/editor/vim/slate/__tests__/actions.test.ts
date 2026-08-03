@@ -85,7 +85,7 @@ describe("J", () => {
   it("joins virtual lines inside a code block", () => {
     const editor = makeEditor(code("a|a\n  bb"));
     keys(editor, "J");
-    expect(snapshot(editor)).toEqual(["code:aa| bb"]);
+    expect(snapshot(editor)).toEqual(["code:aa| bb", ""]);
   });
 });
 
@@ -140,13 +140,13 @@ describe("insert entry", () => {
   it("o inside a code block opens a line within the block", () => {
     const editor = makeEditor(code("a|a\nbb"));
     keys(editor, "o");
-    expect(snapshot(editor)).toEqual(["code:aa\n|\nbb"]);
+    expect(snapshot(editor)).toEqual(["code:aa\n|\nbb", ""]);
   });
 
   it("O inside a code block opens a line above within the block", () => {
     const editor = makeEditor(code("aa\nb|b"));
     keys(editor, "O");
-    expect(snapshot(editor)).toEqual(["code:aa\n|\nbb"]);
+    expect(snapshot(editor)).toEqual(["code:aa\n|\nbb", ""]);
   });
 });
 
