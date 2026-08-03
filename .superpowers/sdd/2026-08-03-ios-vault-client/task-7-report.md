@@ -128,3 +128,21 @@ Ineligible destinations ... error:iOS 26.2 is not installed.
 
 - The generic iOS Simulator build is environment-blocked because this workstation has no installed iOS 26.2 simulator runtime. Swift package tests/build and Xcode project generation/list checks passed; simulator UI behavior was not exercised.
 - The New Note action intentionally routes to the requested placeholder because reader/editor scope is excluded from Task 7.
+
+## Review follow-up
+
+### RED: navigation destination placement
+
+Review identified that `navigationDestination(item:)` was attached outside the `NavigationStack` content. That placement can prevent selected search results from pushing the reader destination.
+
+### GREEN: focused UI regression/build coverage
+
+The destination modifier now lives on the `Group` inside `NavigationStack`, while the destination still receives the same `VaultSession` and selected page ID. The focused UI package tests passed:
+
+```text
+swift test --package-path ios/Packages/ClepsydraMobileKit --filter ClepsydraUITests
+Test Suite 'ClepsydraMobileKitPackageTests.xctest' passed
+Executed 12 tests, with 0 failures (0 unexpected)
+```
+
+`AppRootViewTests.testRootViewAcceptsOneInjectedSessionForSetupAndConnectedStates` continues to compile and construct the connected route with one injected session, providing compile-level coverage for the corrected navigation composition.
