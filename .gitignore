@@ -21,3 +21,6 @@ lcov.info
 ios/ClepsydraMobile.xcodeproj/
 ios/Packages/ClepsydraMobileKit/.build/
 ios/Packages/ClepsydraMobileKit/.swiftpm/
+
+# macOS Finder metadata (unanchored: these appear at any depth)
+.DS_Store
