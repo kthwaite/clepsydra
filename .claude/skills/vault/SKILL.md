@@ -1,0 +1,96 @@
+---
+name: vault
+description: Work with the clepsydra vault (the personal knowledge base) through the clepsydra-vault MCP tools — capturing notes, creating and editing pages, searching, and filing/organising the digital garden. Use when asked to add something to the vault, capture a thought, find or read notes, tag or file pages, or reorganise vault content.
+---
+
+# Working the clepsydra vault
+
+The vault is a folder of markdown pages with YAML frontmatter, served by
+`clep serve` and operated on through the `clepsydra-vault` MCP tools
+(`vault_*`). The server must be running; if tools report it unreachable,
+tell the user to start `clep serve` — don't fall back to editing vault
+files directly, which bypasses locking, link rewriting, and the index.
+
+## Vocabulary
+
+- **Kinds** — every page has exactly one kind, declared in frontmatter
+  (`type:`) or inferred from its top-level folder. Tokens and canonical
+  folders: NOTE→`notes/`, PROJECT→`projects/`, JOURNAL→`journals/`,
+  TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`, CAPTURE→`captures/`,
+  CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`.
+- **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
+  `aliases`, `project`, `created_at`/`updated_at`.
+- **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or
+  alias. The server rewrites inbound links on moves/renames/deletes.
+- **Filenames** — authored pages use `yyyymmdd.slug.shortid.md`
+  (docs/adr/0002). Never construct these by hand; `vault_create_page`
+  derives them.
+- **Projects** — a declared `project` files the page under
+  `<kind-folder>/<project>/` (docs/adr/0001).
+
+## Choosing the right tool
+
+| Intent | Tool |
+| --- | --- |
+| Fleeting thought, log entry | `vault_journal_capture` |
+| New standalone page | `vault_create_page` |
+| Targeted body change | `vault_edit_page` |
+| Add to a page or a section | `vault_append_page` |
+| Retitle / retag / rewrite wholesale | `vault_update_page` |
+| File pages (kind/project) | `vault_assign` — not move |
+| Explicit rename/relocate | `vault_move_page` |
+| Folder create/delete/move | `vault_folder` |
+| Remove a page | `vault_delete_page` |
+| See what a move/delete would rewrite | `vault_preview_mutation` |
+| Find / read / orient | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` |
+
+## Workflows
+
+**Capture.** Fleeting input goes to today's journal via
+`vault_journal_capture` (markdown bullet, e.g. `- idea: ...`). Substantial
+input becomes a page: `vault_create_page` with `kind: CAPTURE` if it still
+needs processing, or its real kind if it's already formed.
+
+**Create.** Always `vault_search` first — the note may exist; extend it
+instead of duplicating. Check `vault_tags` and reuse existing tag spellings.
+Wikilink related pages in the body (`[[Title]]`), including one link back to
+the relevant project or hub page when there is one. Let the tool derive the
+path; pass `folder` only when the user names a specific location.
+
+**Edit.** Read with `vault_get_page`, then `vault_edit_page` with an exact
+unique `old_string` (or `vault_append_page` to add). If the body came back
+`body_truncated: true`, don't edit blind — narrow the target first. On a
+conflict error, re-read and re-apply; never blindly retry the same payload.
+
+**Organise.** Filing means declaring metadata: `vault_assign` with `kind`
+and/or `project` (bulk-capable via `paths`) — the vault relocates files
+itself and rewrites links. Use `vault_move_page` only for destinations
+assignment can't express, and run `vault_preview_mutation` first when the
+page has backlinks or you're moving folders.
+
+**Delete.** `vault_delete_page` without `force` first. If it refuses with a
+backlink list, show the user what links there and confirm before re-running
+with `force: true` (default rewrite `plain_text` turns inbound links into
+plain text). For folders, inspect with `vault_tree` before any
+`recursive: true` delete.
+
+## Don'ts
+
+- Don't edit vault files with filesystem tools while the server is running.
+- Don't invent filenames, ids, or kind tokens (valid kinds are listed above).
+- Don't create near-duplicate pages — search, then extend or link instead.
+- Don't force-delete or recursively delete without surfacing what will be
+  affected to the user first.
+
+## Setup (once)
+
+Register the MCP server in the project's `.mcp.json` (already present in
+this repo):
+
+```json
+{ "mcpServers": { "clepsydra": { "command": "clep", "args": ["mcp"] } } }
+```
+
+`clep mcp` finds the server via the usual config lookup (`./config.toml`,
+then `~/.config/clepsydra/config.toml`) and refuses non-loopback hosts
+unless passed `--allow-remote`. See docs/mcp.md for details.

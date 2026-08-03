@@ -177,6 +177,62 @@ mod tests {
         assert!(cert.is_none());
     }
 
+    /// The eval fixture (tests/mcp_evals/vault) must stay drift-free: its
+    /// declared metadata already matches folder placement, so the serve-time
+    /// reconcile sweep moves nothing and the checked-in answers in
+    /// evaluation.xml stay valid. Runs over a copy — building the index
+    /// writes a cache the checked-in tree must not accumulate.
+    #[tokio::test]
+    async fn eval_fixture_vault_is_drift_free() {
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/mcp_evals/vault");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        copy_tree(&fixture, &root);
+
+        let paths_before = markdown_paths(&root);
+        assert_eq!(paths_before.len(), 10, "fixture should hold 10 pages");
+
+        let state = crate::build_app_state(&root).await.unwrap();
+        crate::run_startup_reconcile(&state).await;
+
+        assert_eq!(
+            markdown_paths(&root),
+            paths_before,
+            "reconcile moved fixture pages — evaluation.xml answers may now be stale"
+        );
+    }
+
+    fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in walkdir::WalkDir::new(from) {
+            let entry = entry.unwrap();
+            let dest = to.join(entry.path().strip_prefix(from).unwrap());
+            if entry.file_type().is_dir() {
+                std::fs::create_dir_all(&dest).unwrap();
+            } else {
+                std::fs::copy(entry.path(), &dest).unwrap();
+            }
+        }
+    }
+
+    fn markdown_paths(root: &std::path::Path) -> Vec<String> {
+        let mut paths: Vec<String> = walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+            .map(|e| {
+                e.path()
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        paths.sort();
+        paths
+    }
+
     #[test]
     fn tls_enabled_with_missing_cert_file_hints_at_serve() {
         let tmp = tempfile::TempDir::new().unwrap();

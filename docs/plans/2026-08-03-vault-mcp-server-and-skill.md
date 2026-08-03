@@ -221,15 +221,21 @@ Contents (single file, ~150 lines, referencing — not duplicating — ADRs):
 
 ## Milestones
 
-1. **M1 — skeleton + read tools**: `clep mcp` subcommand, rmcp wiring,
-   config/base-URL resolution, `search`/`get_page`/`list_pages`/`tree`/
-   `links`/`tags`. Integration harness in place.
-2. **M2 — create/edit**: `create_page` (path derivation), `update_page`,
-   `edit_page`, `append_page`, `journal_capture`, conflict handling.
-3. **M3 — organise**: `assign`, `move_page`, `folder`, `delete_page`
-   (force two-step), `preview_mutation`.
-4. **M4 — skill + evals**: `.claude/skills/vault/SKILL.md`, `.mcp.json`,
-   eval set, `docs/` page documenting setup for both Claude Code and Cowork.
+1. **M1 — skeleton + read tools** (shipped): `clep mcp` subcommand, rmcp
+   wiring, config/base-URL resolution, `search`/`get_page`/`list_pages`/
+   `tree`/`links`/`tags`. Integration harness in place.
+2. **M2 — create/edit** (shipped): `create_page` (path derivation),
+   `update_page`, `edit_page`, `append_page`, `journal_capture`, conflict
+   handling. Path derivation stayed client-side: the MCP layer links the
+   same crate, so it reuses `page_filename` + `generate_short_id` directly
+   (open question 1 resolved — no new server endpoint needed).
+3. **M3 — organise** (shipped): `assign`, `move_page`, `folder`,
+   `delete_page` (force two-step surfacing the backlink detail),
+   `preview_mutation`.
+4. **M4 — skill + evals** (shipped): `.claude/skills/vault/SKILL.md`,
+   `.mcp.json`, eval set (`tests/mcp_evals/` — fixture vault + 10 verified
+   Q&A pairs), and `docs/mcp.md` documenting setup for Claude Code and
+   Cowork.
 
 ## Open questions
 

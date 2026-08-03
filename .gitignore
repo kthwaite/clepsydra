@@ -2,8 +2,9 @@
 .worktrees/
 node_modules/
 
-# Local agent/tooling state
-.claude/
+# Local agent/tooling state (but track shareable project skills)
+.claude/*
+!.claude/skills/
 .pi-old/
 .playwright-mcp/
 

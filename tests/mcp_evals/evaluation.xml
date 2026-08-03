@@ -1,0 +1,48 @@
+<!--
+  Read-only evaluation set for the clepsydra-vault MCP server, answered
+  against the fixture vault in tests/mcp_evals/vault/. Every answer below was
+  verified against a live `clep serve` over that fixture. See README.md for
+  how to run.
+-->
+<evaluation>
+  <qa_pair>
+    <question>How many pages in the vault link to the page about the Alexandrian engineer who invented the inflow water clock's float regulator?</question>
+    <answer>3</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which tag is used by the most pages in the vault?</question>
+    <answer>horology</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What project is declared in the frontmatter of the note that specifies a conical float valve?</question>
+    <answer>water-clock-replica</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What alias does the book surveying the history of clocks carry?</question>
+    <answer>HoC</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>One page contains a wikilink to a page that does not exist yet. What is the target of that unresolved wikilink?</question>
+    <answer>Verge Escapement</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What kind does the vault resolve for the page titled "Seneca Epigraph Idea"?</question>
+    <answer>CAPTURE</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>On what date does the journal record researching siphons? Answer in YYYY-MM-DD form.</question>
+    <answer>2026-01-07</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many pages carry the "engineering" tag?</question>
+    <answer>3</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>A capture page proposes using a quote as an epigraph. What is the title of the quote page it links to?</question>
+    <answer>Seneca on Time</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Starting from the Water Clock Replica project and following wikilinks through exactly one intermediate page, which person's page do you reach?</question>
+    <answer>Ctesibius</answer>
+  </qa_pair>
+</evaluation>

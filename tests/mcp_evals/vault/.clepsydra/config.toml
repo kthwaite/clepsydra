@@ -1,0 +1,13 @@
+[vault]
+attachment_folder = "_attachments"
+
+excluded_patterns = [
+    ".clepsydra/**",
+    "_attachments/**",
+    ".git/**",
+    "node_modules/**",
+]
+
+default_page_folder = "notes"
+
+linkable_properties = ["tags", "aliases", "link"]
