@@ -52,7 +52,7 @@ It is blocked by the environment: `Unable to find a destination ... iOS 26.2 is 
 
 ## Commit
 
-Commit hash: `308086e`
+Implementation commit hash: `1d504eb` (the evidence report is committed in the follow-up report commit)
 
 ## Concerns
 
