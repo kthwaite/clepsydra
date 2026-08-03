@@ -53,6 +53,14 @@ pub enum ApiCallError {
     Protocol { url: String, message: String },
 }
 
+impl ApiCallError {
+    /// True for a 409 response — the optimistic-concurrency signal callers
+    /// may choose to retry after re-reading.
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, ApiCallError::Api { status: 409, .. })
+    }
+}
+
 /// Build the agent-facing message for a non-success API response, unpacking
 /// the server's uniform `ApiError` payload when present and appending a
 /// next-step hint keyed on the status code.
@@ -126,10 +134,34 @@ impl ApiClient {
         query: &[(&str, String)],
     ) -> Result<Value, ApiCallError> {
         let url = format!("{}{}", self.base, path);
-        let response = self
-            .http
-            .get(&url)
-            .query(query)
+        let request = self.http.get(&url).query(query);
+        self.send(url, request).await
+    }
+
+    /// POST a JSON `body` to `path`, returning the parsed JSON response.
+    pub async fn post_json(&self, path: &str, body: &Value) -> Result<Value, ApiCallError> {
+        let url = format!("{}{}", self.base, path);
+        let request = self.http.post(&url).json(body);
+        self.send(url, request).await
+    }
+
+    /// PUT a JSON `body` to `path`, returning the parsed JSON response.
+    pub async fn put_json(&self, path: &str, body: &Value) -> Result<Value, ApiCallError> {
+        let url = format!("{}{}", self.base, path);
+        let request = self.http.put(&url).json(body);
+        self.send(url, request).await
+    }
+
+    /// Send a prepared request and translate the outcome: transport failures
+    /// become [`ApiCallError::Unreachable`], non-2xx responses become
+    /// agent-facing [`ApiCallError::Api`] messages, and success bodies parse
+    /// as JSON.
+    async fn send(
+        &self,
+        url: String,
+        request: reqwest::RequestBuilder,
+    ) -> Result<Value, ApiCallError> {
+        let response = request
             .send()
             .await
             .map_err(|source| ApiCallError::Unreachable {

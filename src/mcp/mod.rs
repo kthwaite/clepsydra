@@ -6,6 +6,7 @@
 //! for the design and milestones.
 
 pub mod client;
+mod edit;
 pub mod server;
 
 use std::net::IpAddr;
