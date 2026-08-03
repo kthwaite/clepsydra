@@ -2,6 +2,7 @@ mod support;
 
 use std::fs;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -26,6 +27,36 @@ fn setup_server() -> (TestServer, TempDir) {
 fn setup_app() -> (Router, TempDir) {
     let fixture = ApiFixture::builder().build();
     (fixture.app, fixture.temp_dir)
+}
+
+struct CountingFixedClock {
+    now: chrono::DateTime<chrono::Utc>,
+    calls: AtomicUsize,
+}
+
+impl clepsydra::api::Clock for CountingFixedClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.now
+    }
+}
+
+fn markdown_file_count(root: &std::path::Path) -> usize {
+    fs::read_dir(root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        markdown_file_count(&path)
+                    } else {
+                        usize::from(path.extension().and_then(|value| value.to_str()) == Some("md"))
+                    }
+                })
+                .sum()
+        })
+        .unwrap_or(0)
 }
 
 fn delayed_multipart_request(
@@ -207,6 +238,166 @@ async fn page_update_requires_expected_revision() {
         .json(&serde_json::json!({ "body": "two" }))
         .await
         .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn page_update_by_id_follows_indexed_identity_after_move() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/by-id.md")
+        .json(&serde_json::json!({ "title": "By ID", "body": "before move" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let revision = created["revision"].as_str().unwrap();
+
+    server
+        .post("/api/vault/pages-move/by-id.md")
+        .json(&serde_json::json!({ "destination": "moved/by-id.md" }))
+        .await
+        .assert_status_ok();
+
+    let response = server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "updated after move",
+            "expected_revision": revision
+        }))
+        .await;
+    response.assert_status_ok();
+    let updated: serde_json::Value = response.json();
+    assert_eq!(updated["path"], "moved/by-id.md");
+    assert_eq!(updated["body"], "updated after move");
+
+    let fetched: serde_json::Value = server
+        .get("/api/vault/pages/moved/by-id.md")
+        .await
+        .json();
+    assert_eq!(updated, fetched);
+}
+
+#[tokio::test]
+async fn page_update_by_id_returns_not_found_for_missing_uuid() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .put("/api/vault/pages/by-id/01951234-0000-7000-8000-000000000404")
+        .json(&serde_json::json!({
+            "body": "missing",
+            "expected_revision": "0".repeat(64)
+        }))
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn page_update_by_id_rejects_stale_revision_without_changing_file() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/by-id-conflict.md")
+        .json(&serde_json::json!({ "title": "By ID Conflict", "body": "one" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let first_revision = created["revision"].as_str().unwrap();
+
+    let updated = server
+        .put("/api/vault/pages/by-id-conflict.md")
+        .json(&serde_json::json!({
+            "body": "two",
+            "expected_revision": first_revision
+        }))
+        .await;
+    updated.assert_status_ok();
+    let updated: serde_json::Value = updated.json();
+
+    let stale = server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": first_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+
+    let current: serde_json::Value = server
+        .get("/api/vault/pages/by-id-conflict.md")
+        .await
+        .json();
+    assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn create_default_page_uses_server_path_trimmed_title_and_one_clock_read() {
+    let clock = Arc::new(CountingFixedClock {
+        now: chrono::DateTime::parse_from_rfc3339("2025-02-16T10:30:45Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+        calls: AtomicUsize::new(0),
+    });
+    let fixture = ApiFixture::builder()
+        .configure(|root| {
+            fs::write(
+                root.join(".clepsydra/config.toml"),
+                "[vault]\ndefault_page_folder = \"notes\"\n",
+            )
+            .unwrap();
+        })
+        .clock(clock.clone())
+        .build();
+    let root = fixture.temp_dir.path().join("vault");
+
+    let response = fixture
+        .server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({
+            "title": "  Mobile Note  ",
+            "body": "Created on iPhone"
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    assert_eq!(created["meta"]["title"], "Mobile Note");
+    assert_eq!(created["meta"]["created_at"], "2025-02-16T10:30:45Z");
+    assert_eq!(created["meta"]["updated_at"], "2025-02-16T10:30:45Z");
+    assert_eq!(created["body"], "Created on iPhone");
+    assert_eq!(created["revision"].as_str().unwrap().len(), 64);
+    let path = created["path"].as_str().unwrap();
+    assert!(path.starts_with("notes/20250216.mobile-note."));
+    assert!(clepsydra::vault::path::is_canonical_page_filename(
+        path.rsplit('/').next().unwrap()
+    ));
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/{path}"))
+        .await
+        .json();
+    assert_eq!(created, fetched);
+    assert!(root.join(path).is_file());
+}
+
+#[tokio::test]
+async fn create_default_page_rejects_blank_titles_without_creating_markdown() {
+    let fixture = ApiFixture::builder().build();
+    let root = fixture.temp_dir.path().join("vault");
+    let initial_markdown_count = markdown_file_count(&root);
+
+    for title in ["", " \t\n "] {
+        fixture
+            .server
+            .post("/api/vault/pages")
+            .json(&serde_json::json!({ "title": title }))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(markdown_file_count(&root), initial_markdown_count);
+    }
 }
 
 #[tokio::test]

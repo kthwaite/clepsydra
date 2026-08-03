@@ -21,7 +21,9 @@ use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
+use crate::vault::new_note::build_note_path;
 use crate::vault::page::{Page, PageMeta, page_revision};
+use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
 // Response / request types
@@ -103,6 +105,12 @@ pub struct CreatePageRequest {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateDefaultPageRequest {
+    pub title: String,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdatePageRequest {
     pub expected_revision: String,
     pub title: Option<String>,
@@ -174,8 +182,11 @@ pub struct BulkAssignResponse {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/", get(list_pages))
-        .route("/by-id/{uuid}", get(get_page_by_id))
+        .route("/", get(list_pages).post(create_default_page))
+        .route(
+            "/by-id/{uuid}",
+            get(get_page_by_id).put(update_page_by_id),
+        )
         .route(
             "/{*path}",
             get(get_page)
@@ -300,6 +311,64 @@ pub async fn list_pages(
 }
 
 #[utoipa::path(
+    post,
+    path = "/pages",
+    context_path = "/api/vault",
+    tag = "Pages",
+    request_body = CreateDefaultPageRequest,
+    responses(
+        (status = 201, description = "Page created", body = PageDetailResponse),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 409, description = "Page already exists", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn create_default_page(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateDefaultPageRequest>,
+) -> Result<Response, ApiError> {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Err(ApiError::bad_request("title must not be blank"));
+    }
+
+    let created = state.clock.now();
+    let vault_path = build_note_path(&state.vault, title, created)
+        .map_err(|error| ApiError::internal(format!("failed to build note path: {error}")))?;
+    let mut meta = PageMeta::new();
+    meta.title = Some(title.to_string());
+    meta.created_at = Some(created);
+    meta.updated_at = Some(created);
+
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = state
+        .mutation_coordinator
+        .create_page(
+            &state.vault,
+            &state.index,
+            CreatePageCommand {
+                path: vault_path,
+                meta,
+                body: body.body.unwrap_or_default(),
+            },
+            &notify,
+        )
+        .await
+        .map_err(super::mutation_error)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(page_detail(result)),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
     get,
     path = "/pages/{path}",
     context_path = "/api/vault",
@@ -329,6 +398,29 @@ pub async fn get_page(
     Ok(Json(page_detail(page)))
 }
 
+async fn indexed_page_path_by_id(
+    state: &AppState,
+    uuid: &str,
+) -> Result<VaultPath, ApiError> {
+    let indexed_uuid = uuid.to_string();
+    let page_path = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT path FROM pages WHERE id = ?1",
+                    params![indexed_uuid],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("page not found with id: {uuid}")))?;
+
+    crate::api::error::parse_internal_path(&page_path, "invalid stored path")
+}
 #[utoipa::path(
     get,
     path = "/pages/by-id/{uuid}",
@@ -345,25 +437,8 @@ pub async fn get_page_by_id(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    // Look up the path from the index
-    let uuid_clone = uuid.clone();
-    let page_path = state
-        .index
-        .with_index(move |index, _vault| {
-            index
-                .connection()
-                .query_row(
-                    "SELECT path FROM pages WHERE id = ?1",
-                    params![uuid_clone],
-                    |row| row.get::<_, String>(0),
-                )
-                .ok()
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .ok_or_else(|| ApiError::not_found(format!("page not found with id: {uuid}")))?;
-
-    let vault_path = crate::api::error::parse_internal_path(&page_path, "invalid stored path")?;
+    let vault_path = indexed_page_path_by_id(&state, &uuid).await?;
+    let page_path = vault_path.as_str();
 
     let abs_path = state.vault.resolve(&vault_path);
     if !abs_path.exists() {
@@ -461,13 +536,45 @@ pub async fn update_page(
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
     let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
+    update_page_at_path(state, vault_path, body).await
+}
 
+#[utoipa::path(
+    put,
+    path = "/pages/by-id/{uuid}",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("uuid" = String, Path, description = "Page UUID")),
+    request_body = UpdatePageRequest,
+    responses(
+        (status = 200, description = "Updated page", body = PageDetailResponse),
+        (status = 400, description = "Invalid input", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Page changed since it was loaded", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn update_page_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+    Json(body): Json<UpdatePageRequest>,
+) -> Result<Json<PageDetail>, ApiError> {
+    let vault_path = indexed_page_path_by_id(&state, &uuid).await?;
+    update_page_at_path(state, vault_path, body).await
+}
+
+async fn update_page_at_path(
+    state: Arc<AppState>,
+    vault_path: VaultPath,
+    body: UpdatePageRequest,
+) -> Result<Json<PageDetail>, ApiError> {
+    let page_path = vault_path.as_str().to_string();
     let abs_path = state.vault.resolve(&vault_path);
     let page = Page::from_file(&abs_path, vault_path.clone()).map_err(|error| match error {
         crate::vault::page::FrontmatterError::Io(error)
             if error.kind() == std::io::ErrorKind::NotFound =>
         {
-            ApiError::not_found(format!("page not found: {path}"))
+            ApiError::not_found(format!("page not found: {page_path}"))
         }
         error => ApiError::internal(format!("failed to read page: {error}")),
     })?;
@@ -521,7 +628,7 @@ pub async fn update_page(
             MutationError::Stale(_) => match fs::read_to_string(&abs_path) {
                 Ok(content) => ApiError::revision_conflict(page_revision(&content)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    ApiError::not_found(format!("page not found: {path}"))
+                    ApiError::not_found(format!("page not found: {page_path}"))
                 }
                 Err(error) => ApiError::internal(format!("failed to read page: {error}")),
             },

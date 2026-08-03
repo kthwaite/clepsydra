@@ -26,8 +26,10 @@ use utoipa_swagger_ui::SwaggerUi;
     paths(
         // Pages
         crate::api::pages::list_pages,
+        crate::api::pages::create_default_page,
         crate::api::pages::get_page,
         crate::api::pages::get_page_by_id,
+        crate::api::pages::update_page_by_id,
         crate::api::pages::create_page,
         crate::api::pages::update_page,
         crate::api::pages::delete_page,
@@ -102,6 +104,7 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::pages::PageDetailResponse,
             crate::api::pages::PageSummaryListResponse,
             crate::api::pages::CreatePageRequest,
+            crate::api::pages::CreateDefaultPageRequest,
             crate::api::pages::UpdatePageRequest,
             crate::api::pages::MovePageRequest,
             crate::api::pages::AssignRequest,
@@ -254,6 +257,26 @@ mod tests {
         assert!(
             responses.get("409").is_some(),
             "page update should document revision conflicts"
+        );
+    }
+
+    #[test]
+    fn openapi_documents_mobile_page_operations() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+
+        let collection = &json["paths"]["/api/vault/pages"];
+        assert!(collection.get("get").is_some());
+        assert!(collection.get("post").is_some());
+
+        let by_id = &json["paths"]["/api/vault/pages/by-id/{uuid}"];
+        assert!(by_id.get("get").is_some());
+        assert!(by_id.get("put").is_some());
+
+        assert!(
+            json["components"]["schemas"]
+                .get("CreateDefaultPageRequest")
+                .is_some()
         );
     }
 

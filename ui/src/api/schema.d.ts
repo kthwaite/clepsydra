@@ -614,7 +614,7 @@ export interface paths {
         };
         get: operations["list_pages"];
         put?: never;
-        post?: never;
+        post: operations["create_default_page"];
         delete?: never;
         options?: never;
         head?: never;
@@ -677,7 +677,7 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_page_by_id"];
-        put?: never;
+        put: operations["update_page_by_id"];
         post?: never;
         delete?: never;
         options?: never;
@@ -951,6 +951,10 @@ export interface components {
              *     CLOSED is rejected at creation time.
              */
             state?: string | null;
+        };
+        CreateDefaultPageRequest: {
+            body?: string | null;
+            title: string;
         };
         CreateFromLinkRequest: {
             body?: string | null;
@@ -3255,6 +3259,57 @@ export interface operations {
             };
         };
     };
+    create_default_page: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDefaultPageRequest"];
+            };
+        };
+        responses: {
+            /** @description Page created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     assign_bulk: {
         parameters: {
             query?: never;
@@ -3437,6 +3492,69 @@ export interface operations {
             };
             /** @description Page not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    update_page_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Page UUID */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePageRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page changed since it was loaded */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

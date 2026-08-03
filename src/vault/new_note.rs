@@ -166,7 +166,7 @@ fn create_new_note_in_vault(
     })
 }
 
-fn build_note_path(
+pub(crate) fn build_note_path(
     vault: &Vault,
     title: &str,
     created: chrono::DateTime<chrono::Utc>,
