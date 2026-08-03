@@ -56,7 +56,6 @@ interface PageEditorState {
   onSlateChange: (value: Descendant[], editor: Editor) => void;
   saveNow: () => void;
   revisionConflict: RevisionConflict | null;
-  retryAfterConflict: () => void;
   reloadAfterConflict: () => Promise<void>;
   createdAt: string | null;
   updatedAt: string | null;
@@ -114,7 +113,6 @@ export function usePageEditor(path: string): PageEditorState {
   const revisionRef = useRef("");
   const savingRef = useRef(false);
   const saveRequestedRef = useRef(false);
-  const forceSaveRef = useRef(false);
   const conflictRef = useRef<RevisionConflict | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -177,7 +175,6 @@ export function usePageEditor(path: string): PageEditorState {
       return;
     }
 
-    const forceSave = forceSaveRef.current;
 
     // Snapshot generation counters at save start. A successful save advances
     // only these watermarks, so edits made while the request is in flight stay
@@ -192,21 +189,16 @@ export function usePageEditor(path: string): PageEditorState {
 
     // Only serialize the Slate tree when the user actually edited body content.
     // This prevents metadata-only edits from losing unsupported markdown nodes.
-    const body =
-      bodyDirty || forceSave
-        ? slateToMarkdown(editorValueRef.current)
-        : savedRef.current.body;
-    const bodyChanged =
-      forceSave || (bodyDirty && body !== savedRef.current.body);
-    const titleChanged =
-      forceSave || currentTitle !== savedRef.current.title;
+    const body = bodyDirty
+      ? slateToMarkdown(editorValueRef.current)
+      : savedRef.current.body;
+    const bodyChanged = bodyDirty && body !== savedRef.current.body;
+    const titleChanged = currentTitle !== savedRef.current.title;
     const tagsChanged =
-      forceSave ||
       JSON.stringify(currentTags) !== JSON.stringify(savedRef.current.tags);
     const aliasesChanged =
-      forceSave ||
       JSON.stringify(currentAliases) !==
-        JSON.stringify(savedRef.current.aliases);
+      JSON.stringify(savedRef.current.aliases);
 
     if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
       savedBodyGenRef.current = saveBodyGen;
@@ -215,7 +207,6 @@ export function usePageEditor(path: string): PageEditorState {
       return;
     }
 
-    forceSaveRef.current = false;
     savingRef.current = true;
     setSaveStatus("saving");
 
@@ -281,17 +272,6 @@ export function usePageEditor(path: string): PageEditorState {
 
   doSaveRef.current = doSave;
 
-  const retryAfterConflict = useCallback(() => {
-    const conflict = conflictRef.current;
-    if (!conflict) return;
-
-    revisionRef.current = conflict.currentRevision;
-    conflictRef.current = null;
-    setRevisionConflict(null);
-    setSaveError(null);
-    forceSaveRef.current = true;
-    doSaveRef.current();
-  }, []);
 
   const reloadAfterConflict = useCallback(async () => {
     if (!conflictRef.current) return;
@@ -330,7 +310,6 @@ export function usePageEditor(path: string): PageEditorState {
       savedMetaGenRef.current = metaEditGenRef.current;
       revisionRef.current = latest.revision;
       saveRequestedRef.current = false;
-      forceSaveRef.current = false;
       conflictRef.current = null;
       setRevisionConflict(null);
       setSaveError(null);
@@ -435,7 +414,6 @@ export function usePageEditor(path: string): PageEditorState {
     saveStatus,
     saveError,
     revisionConflict,
-    retryAfterConflict,
     reloadAfterConflict,
     onSlateChange,
     saveNow: doSave,

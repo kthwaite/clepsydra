@@ -152,34 +152,6 @@ describe("usePageEditor save sequencing", () => {
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries against the conflict revision only after explicit recovery", async () => {
-    mutateAsyncMock
-      .mockRejectedValueOnce(revisionConflict())
-      .mockResolvedValueOnce({ ...makePage("B"), revision: "rev-c" });
-    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
-
-    const { result } = renderHook(() => usePageEditor("notes/page.md"));
-    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
-    await act(async () => {
-      vi.advanceTimersByTime(1500);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      result.current.retryAfterConflict();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(mutateAsyncMock).toHaveBeenCalledTimes(2);
-    expect(mutateAsyncMock.mock.calls[1][0].body.expected_revision).toBe(
-      "rev-b",
-    );
-    expect(result.current.revisionConflict).toBeNull();
-    expect(result.current.saveStatus).toBe("saved");
-  });
 
   it("keeps a conflict unresolved when local content reverts", async () => {
     mutateAsyncMock.mockRejectedValue(revisionConflict());
