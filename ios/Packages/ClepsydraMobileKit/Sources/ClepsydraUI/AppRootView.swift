@@ -31,25 +31,27 @@ private struct ConnectedVaultView: View {
 
     var body: some View {
         NavigationStack {
-            if let api = session.api {
-                SearchView(
-                    query: $query,
-                    api: api,
-                    openPage: { selectedPageID = $0 },
-                    createPage: { showingNewNote = true }
-                )
-            } else {
-                ContentUnavailableView(
-                    "Vault disconnected",
-                    systemImage: "wifi.slash",
-                    description: Text("Reconnect to search your vault.")
-                )
+            Group {
+                if let api = session.api {
+                    SearchView(
+                        query: $query,
+                        api: api,
+                        openPage: { selectedPageID = $0 },
+                        createPage: { showingNewNote = true }
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "Vault disconnected",
+                        systemImage: "wifi.slash",
+                        description: Text("Reconnect to search your vault.")
+                    )
+                }
+            }
+            .navigationDestination(item: $selectedPageID) { pageID in
+                ReaderPlaceholderView(session: session, pageID: pageID)
             }
         }
         .navigationTitle("Clepsydra")
-        .navigationDestination(item: $selectedPageID) { pageID in
-            ReaderPlaceholderView(session: session, pageID: pageID)
-        }
         .sheet(isPresented: $showingNewNote) {
             NewNotePlaceholder()
         }
