@@ -16,7 +16,7 @@ Examples in this doc use `clepsydra ...`; replace with `cargo run -- ...` if nee
 |---|---|---|
 | `clepsydra init [PATH]` | Initialize a vault directory | ✅ implemented |
 | `clepsydra new <TITLE> [--body TEXT]` | Create a note in configured vault | ✅ implemented |
-| `clepsydra serve` | Start HTTP API server | ✅ implemented |
+| `clepsydra serve` | Start the API server (HTTP, or HTTPS with `--tls`) | ✅ implemented |
 | `clepsydra version` | Print version | ✅ implemented |
 | `clepsydra env` | Environment/config diagnostics | ⚠️ placeholder |
 | `clepsydra doctor` | Health checks | ⚠️ placeholder |
@@ -82,6 +82,41 @@ Useful endpoints once running:
 - `GET /` → `ok`
 - `GET /docs` → Swagger UI
 - `GET /api/openapi.json` → OpenAPI schema
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--lsp` | Also start the LSP server on stdio |
+| `--tls` | Serve over HTTPS |
+| `--port PORT` | Listen on `PORT` instead of the configured port |
+
+`--tls` and `--port` override both the config file and the `CLEPSYDRA__*`
+environment variables. `--tls` only ever turns HTTPS *on*: there is no flag to
+force cleartext, so `serve` cannot silently downgrade a TLS config.
+
+### Running an HTTPS server for client testing
+
+Clients that require HTTPS (the iOS app, which has no ATS exception) need a TLS
+server. Rather than flipping `[server.tls].enabled` in the config your everyday
+plain server shares, start a second one on a spare port:
+
+```bash
+clepsydra serve --tls --port 3443
+```
+
+Certificates come from `[server.tls]` when `cert_path` and `key_path` are both
+set; otherwise Clepsydra generates localhost certs with `mkcert` and caches them
+in the app data dir. See [configuration.md](configuration.md) for details.
+
+For the iOS Simulator, install the mkcert CA into its keychain once per
+simulator — without this the app reports an untrusted certificate:
+
+```bash
+scripts/trust-simulator-ca.sh
+```
+
+Run `clepsydra doctor` to check cert state and `mkcert` availability.
 
 ---
 
