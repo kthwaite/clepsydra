@@ -15,16 +15,22 @@ public final class VaultSession {
 
     public private(set) var state: State = .disconnected
     public var addressInput: String
+    /// Servers that answered the most recent sweep, in candidate order.
+    public private(set) var discoveredServers: [ServerURL] = []
+    public private(set) var isDiscovering = false
 
     private let apiFactory: VaultAPIFactory
     private let addressStore: any ServerAddressStoring
+    private let discovery: ServerDiscovery
 
     public init(
         addressStore: any ServerAddressStoring = ServerAddressStore(),
-        apiFactory: @escaping VaultAPIFactory = { server in APIClient(server: server) }
+        apiFactory: @escaping VaultAPIFactory = { server in APIClient(server: server) },
+        discovery: ServerDiscovery = ServerDiscovery()
     ) {
         self.addressStore = addressStore
         self.apiFactory = apiFactory
+        self.discovery = discovery
         self.addressInput = addressStore.serverAddress ?? ""
     }
 
@@ -78,10 +84,29 @@ public final class VaultSession {
         do {
             try await api.uptime()
             addressStore.serverAddress = server.url.absoluteString
+            addressStore.remember(server.url.absoluteString)
             state = .connected(api)
         } catch {
             state = .failed(Self.message(for: error))
         }
+    }
+
+    /// Connects to a server chosen from the discovered list, keeping the text
+    /// field in step so a failure leaves the address visible for retry.
+    public func connect(to server: ServerURL) async {
+        addressInput = server.url.absoluteString
+        await connect()
+    }
+
+    /// Sweeps remembered and built-in addresses for a reachable server.
+    ///
+    /// Failure is intentionally silent: a sweep finding nothing is the normal
+    /// case on a physical device, and surfacing it as an error would bury the
+    /// manual entry field the user still needs.
+    public func discover() async {
+        isDiscovering = true
+        discoveredServers = await discovery.discover(recents: addressStore.recentAddresses)
+        isDiscovering = false
     }
 
     public func disconnect() {

@@ -19,6 +19,7 @@ final class AppRootViewTests: XCTestCase {
 @MainActor
 private final class TestAddressStore: ServerAddressStoring {
     var serverAddress: String?
+    var recentAddresses: [String] = []
 }
 
 private final class TestAPI: VaultAPI, @unchecked Sendable {
