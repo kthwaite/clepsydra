@@ -183,10 +183,7 @@ pub struct BulkAssignResponse {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_pages).post(create_default_page))
-        .route(
-            "/by-id/{uuid}",
-            get(get_page_by_id).put(update_page_by_id),
-        )
+        .route("/by-id/{uuid}", get(get_page_by_id).put(update_page_by_id))
         .route(
             "/{*path}",
             get(get_page)
@@ -361,11 +358,7 @@ pub async fn create_default_page(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(page_detail(result)),
-    )
-        .into_response())
+    Ok((StatusCode::CREATED, Json(page_detail(result))).into_response())
 }
 
 #[utoipa::path(
@@ -400,10 +393,7 @@ pub async fn get_page(
 
 const BY_ID_PATH_ATTEMPTS: usize = 8;
 
-async fn indexed_page_path_by_id(
-    state: &AppState,
-    uuid: &str,
-) -> Result<VaultPath, ApiError> {
+async fn indexed_page_path_by_id(state: &AppState, uuid: &str) -> Result<VaultPath, ApiError> {
     let indexed_uuid = uuid.to_string();
     let page_path = state
         .index
@@ -550,11 +540,7 @@ pub async fn create_page(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(page_detail(result)),
-    )
-        .into_response())
+    Ok((StatusCode::CREATED, Json(page_detail(result))).into_response())
 }
 
 #[utoipa::path(
@@ -607,14 +593,7 @@ pub async fn update_page_by_id(
             .mutation_coordinator
             .observe_page_id_lookup(&candidate);
         let attempted = candidate.clone();
-        match update_page_at_path(
-            Arc::clone(&state),
-            candidate,
-            body.clone(),
-            Some(&uuid),
-        )
-        .await
-        {
+        match update_page_at_path(Arc::clone(&state), candidate, body.clone(), Some(&uuid)).await {
             Ok(updated) => return Ok(updated),
             Err(error) if error.status == StatusCode::NOT_FOUND.as_u16() => {
                 let current = indexed_page_path_by_id(&state, &uuid).await?;
@@ -707,8 +686,7 @@ async fn update_page_at_path(
         Err(MutationError::Stale(_)) => match fs::read_to_string(&abs_path) {
             Ok(content) => {
                 if let Some(uuid) = expected_uuid
-                    && let Ok((current_meta, _)) =
-                        crate::vault::page::parse_frontmatter(&content)
+                    && let Ok((current_meta, _)) = crate::vault::page::parse_frontmatter(&content)
                     && current_meta.id.to_string() != uuid
                 {
                     return Err(ApiError::not_found(format!(
@@ -718,14 +696,10 @@ async fn update_page_at_path(
                 return Err(ApiError::revision_conflict(page_revision(&content)));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ApiError::not_found(format!(
-                    "page not found: {page_path}"
-                )));
+                return Err(ApiError::not_found(format!("page not found: {page_path}")));
             }
             Err(error) => {
-                return Err(ApiError::internal(format!(
-                    "failed to read page: {error}"
-                )));
+                return Err(ApiError::internal(format!("failed to read page: {error}")));
             }
         },
         Err(error) => return Err(super::mutation_error(error)),

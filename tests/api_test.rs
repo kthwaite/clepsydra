@@ -1,8 +1,8 @@
 mod support;
 
+use std::fs;
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
-use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
@@ -62,14 +62,11 @@ fn markdown_file_count(root: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
-async fn advance_request_to_held_path_lock<F>(
-    mut request: Pin<&mut F>,
-    index: &IndexHandle,
-) where
+async fn advance_request_to_held_path_lock<F>(mut request: Pin<&mut F>, index: &IndexHandle)
+where
     F: Future,
 {
-    let first_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
     assert!(
         first_poll.is_pending(),
         "request completed before its indexed path lookup"
@@ -77,8 +74,7 @@ async fn advance_request_to_held_path_lock<F>(
 
     index.with_index(|_, _| ()).await.unwrap();
 
-    let path_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    let path_poll = poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
     assert!(
         path_poll.is_pending(),
         "request completed instead of waiting for the held candidate-path lock"
@@ -248,10 +244,7 @@ async fn page_update_rejects_stale_revision_without_changing_file() {
     stale.assert_status(StatusCode::CONFLICT);
     let error: serde_json::Value = stale.json();
     assert_eq!(error["detail"]["code"], "revision_conflict");
-    assert_eq!(
-        error["detail"]["current_revision"],
-        updated["revision"],
-    );
+    assert_eq!(error["detail"]["current_revision"], updated["revision"],);
 
     let current: serde_json::Value = server.get("/api/vault/pages/conflict.md").await.json();
     assert_eq!(current["body"], "two");
@@ -303,10 +296,7 @@ async fn page_update_by_id_follows_indexed_identity_after_move() {
     assert_eq!(updated["path"], "moved/by-id.md");
     assert_eq!(updated["body"], "updated after move");
 
-    let fetched: serde_json::Value = server
-        .get("/api/vault/pages/moved/by-id.md")
-        .await
-        .json();
+    let fetched: serde_json::Value = server.get("/api/vault/pages/moved/by-id.md").await.json();
     assert_eq!(updated, fetched);
 }
 
@@ -392,14 +382,15 @@ async fn page_by_id_get_waits_for_move_lock_before_access() {
     let move_request = Request::post("/api/vault/pages-move/get-race.md")
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-race.md" }))
-                .unwrap(),
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-race.md" })).unwrap(),
         ))
         .unwrap();
     let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
-    let first_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
-    assert!(first_poll.is_pending(), "move completed while candidate lock was held");
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed while candidate lock was held"
+    );
     drop(guard);
     let response = in_flight.await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -445,14 +436,15 @@ async fn page_update_by_id_waits_for_move_lock_before_update() {
     let move_request = Request::post("/api/vault/pages-move/put-race.md")
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-race.md" }))
-                .unwrap(),
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-race.md" })).unwrap(),
         ))
         .unwrap();
     let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
-    let first_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
-    assert!(first_poll.is_pending(), "move completed while candidate lock was held");
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed while candidate lock was held"
+    );
     drop(guard);
     let response = in_flight.await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -528,15 +520,12 @@ async fn page_by_id_get_retries_relocation_between_lookup_and_access() {
     let move_request = Request::post("/api/vault/pages-move/get-relocation.md")
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_vec(
-                &serde_json::json!({ "destination": "moved/get-relocation.md" }),
-            )
-            .unwrap(),
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-relocation.md" }))
+                .unwrap(),
         ))
         .unwrap();
     let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
-    let first_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
     let move_response = match first_poll {
         Poll::Ready(response) => response.unwrap(),
         Poll::Pending => {
@@ -607,15 +596,12 @@ async fn page_update_by_id_retries_relocation_between_lookup_and_update() {
     let move_request = Request::post("/api/vault/pages-move/put-relocation.md")
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_vec(
-                &serde_json::json!({ "destination": "moved/put-relocation.md" }),
-            )
-            .unwrap(),
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-relocation.md" }))
+                .unwrap(),
         ))
         .unwrap();
     let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
-    let first_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
     let move_response = match first_poll {
         Poll::Ready(response) => response.unwrap(),
         Poll::Pending => {
@@ -705,17 +691,14 @@ async fn page_move_waits_for_uuid_update_publish_and_preserves_single_identity()
         "publish-race.md"
     );
 
-    let move_payload = serde_json::to_vec(
-        &serde_json::json!({ "destination": "moved/publish-race.md" }),
-    )
-    .unwrap();
+    let move_payload =
+        serde_json::to_vec(&serde_json::json!({ "destination": "moved/publish-race.md" })).unwrap();
     let move_request = Request::post("/api/vault/pages-move/publish-race.md")
         .header("content-type", "application/json")
         .body(Body::from(move_payload))
         .unwrap();
     let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
-    let first_poll =
-        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
     assert!(
         first_poll.is_pending(),
         "move completed in its initial router poll"

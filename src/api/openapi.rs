@@ -228,8 +228,7 @@ mod tests {
             "PageDetailResponse should require revision"
         );
         assert_eq!(
-            page_detail["properties"]["revision"]["type"],
-            "string",
+            page_detail["properties"]["revision"]["type"], "string",
             "PageDetailResponse.revision should be a string"
         );
     }
@@ -247,13 +246,11 @@ mod tests {
             "UpdatePageRequest should require expected_revision"
         );
         assert_eq!(
-            update_request["properties"]["expected_revision"]["type"],
-            "string",
+            update_request["properties"]["expected_revision"]["type"], "string",
             "UpdatePageRequest.expected_revision should be a string"
         );
 
-        let responses =
-            &json["paths"]["/api/vault/pages/{path}"]["put"]["responses"];
+        let responses = &json["paths"]["/api/vault/pages/{path}"]["put"]["responses"];
         assert!(
             responses.get("409").is_some(),
             "page update should document revision conflicts"

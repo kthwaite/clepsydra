@@ -152,7 +152,6 @@ describe("usePageEditor save sequencing", () => {
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
   });
 
-
   it("keeps a conflict unresolved when local content reverts", async () => {
     mutateAsyncMock.mockRejectedValue(revisionConflict());
     useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });

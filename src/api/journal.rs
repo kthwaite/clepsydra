@@ -413,9 +413,5 @@ async fn capture_today(
         .await
         .map_err(crate::api::mutation_error)?;
 
-    Ok((
-        StatusCode::OK,
-        Json(page_detail(result)),
-    )
-        .into_response())
+    Ok((StatusCode::OK, Json(page_detail(result))).into_response())
 }

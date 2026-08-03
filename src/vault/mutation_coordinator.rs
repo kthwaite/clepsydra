@@ -76,7 +76,6 @@ pub struct ReplacePageContentCommand {
     pub content: String,
 }
 
-
 #[derive(Debug)]
 pub struct DeleteFolderResult {
     pub removed: Vec<String>,
@@ -190,20 +189,14 @@ impl MutationCoordinator {
     /// Install a synchronization observer immediately after an update's
     /// compare-and-swap read and before filesystem publication.
     #[doc(hidden)]
-    pub fn set_before_update_publish_hook(
-        &self,
-        hook: Option<Arc<BeforeUpdatePublishHook>>,
-    ) {
+    pub fn set_before_update_publish_hook(&self, hook: Option<Arc<BeforeUpdatePublishHook>>) {
         *self.before_update_publish_hook.lock() = hook;
     }
 
     /// Install a synchronization observer after an indexed UUID lookup and
     /// before its candidate path is acquired or used.
     #[doc(hidden)]
-    pub fn set_after_page_id_lookup_hook(
-        &self,
-        hook: Option<Arc<AfterPageIdLookupHook>>,
-    ) {
+    pub fn set_after_page_id_lookup_hook(&self, hook: Option<Arc<AfterPageIdLookupHook>>) {
         *self.after_page_id_lookup_hook.lock() = hook;
     }
 

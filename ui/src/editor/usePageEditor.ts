@@ -39,7 +39,6 @@ function decodeRevisionConflict(value: unknown): RevisionConflict | null {
   return { currentRevision: apiError.detail.current_revision };
 }
 
-
 interface PageEditorState {
   isLoading: boolean;
   error: unknown;
@@ -175,7 +174,6 @@ export function usePageEditor(path: string): PageEditorState {
       return;
     }
 
-
     // Snapshot generation counters at save start. A successful save advances
     // only these watermarks, so edits made while the request is in flight stay
     // dirty and are serialized by the next queued request.
@@ -271,7 +269,6 @@ export function usePageEditor(path: string): PageEditorState {
   }, [path, updatePageMutateAsync]);
 
   doSaveRef.current = doSave;
-
 
   const reloadAfterConflict = useCallback(async () => {
     if (!conflictRef.current) return;

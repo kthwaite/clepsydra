@@ -824,11 +824,7 @@ pub async fn create_from_link(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(page_detail(result)),
-    )
-        .into_response())
+    Ok((StatusCode::CREATED, Json(page_detail(result))).into_response())
 }
 
 // ---------------------------------------------------------------------------
