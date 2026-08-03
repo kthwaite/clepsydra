@@ -8,6 +8,7 @@ public struct NoteEditorView: View {
     private let onSaved: ((PageDetail) -> Void)?
 
     @State private var showingDiscardConfirmation = false
+    @State private var showingDeletionAlert = false
 
     public init(
         mode: EditorViewModel.Mode,
@@ -97,13 +98,15 @@ public struct NoteEditorView: View {
         } message: {
             Text("The server has a newer version. Reload it before saving again, or keep this draft without sending it.")
         }
-        .alert("Page deleted", isPresented: Binding(
-            get: { model.phase == .deleted },
-            set: { _ in }
-        )) {
-            Button("OK", role: .cancel) {}
+        .alert("Page deleted", isPresented: $showingDeletionAlert) {
+            Button("OK", role: .cancel) {
+                showingDeletionAlert = false
+            }
         } message: {
             Text(model.errorMessage ?? "This page was deleted on the server.")
+        }
+        .onChange(of: model.phase) { _, phase in
+            showingDeletionAlert = phase == .deleted
         }
         .onChange(of: model.lastSavedPage) { _, page in
             guard let page else { return }
