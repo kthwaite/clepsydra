@@ -3,11 +3,13 @@ import type { Descendant, Editor } from "slate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePageEditor } from "../usePageEditor";
 
-const { usePageMock, useUpdatePageMock, mutateAsyncMock } = vi.hoisted(() => ({
-  usePageMock: vi.fn(),
-  useUpdatePageMock: vi.fn(),
-  mutateAsyncMock: vi.fn(),
-}));
+const { usePageMock, useUpdatePageMock, mutateAsyncMock, refetchPageMock } =
+  vi.hoisted(() => ({
+    usePageMock: vi.fn(),
+    useUpdatePageMock: vi.fn(),
+    mutateAsyncMock: vi.fn(),
+    refetchPageMock: vi.fn(),
+  }));
 
 vi.mock("#/api/pages", () => ({
   usePage: usePageMock,
@@ -34,7 +36,7 @@ interface MockPage {
   project: null;
   meta: {
     id: string;
-    title: null;
+    title: string | null;
     tags: string[];
     aliases: string[];
   };
@@ -58,6 +60,18 @@ function makePage(body: string) {
   };
 }
 
+function revisionConflict(currentRevision = "rev-b") {
+  return {
+    status: 409,
+    error: "page changed since it was loaded",
+    detail: {
+      code: "revision_conflict",
+      current_revision: currentRevision,
+    },
+    hint: null,
+  };
+}
+
 describe("usePageEditor save sequencing", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -66,7 +80,9 @@ describe("usePageEditor save sequencing", () => {
       data: makePage("A"),
       isLoading: false,
       error: null,
+      refetch: refetchPageMock,
     });
+    refetchPageMock.mockResolvedValue({ data: makePage("A") });
   });
 
   afterEach(() => {
@@ -110,17 +126,8 @@ describe("usePageEditor save sequencing", () => {
     unmount();
   });
 
-  it("does not retry revision conflicts automatically", async () => {
-    const conflict = Object.assign(new Error("page changed since it was loaded"), {
-      response: { status: 409 },
-      data: {
-        detail: {
-          code: "revision_conflict",
-          current_revision: "rev-b",
-        },
-      },
-    });
-    mutateAsyncMock.mockRejectedValue(conflict);
+  it("decodes plain API conflicts without retrying automatically", async () => {
+    mutateAsyncMock.mockRejectedValue(revisionConflict());
     useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
 
     const { result } = renderHook(() => usePageEditor("notes/page.md"));
@@ -134,12 +141,96 @@ describe("usePageEditor save sequencing", () => {
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
     expect(result.current.saveStatus).toBe("error");
     expect(result.current.saveError).toBe("page changed since it was loaded");
+    expect(result.current.revisionConflict).toEqual({
+      currentRevision: "rev-b",
+    });
 
     await act(async () => {
       vi.advanceTimersByTime(10_000);
       await Promise.resolve();
     });
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries against the conflict revision only after explicit recovery", async () => {
+    mutateAsyncMock
+      .mockRejectedValueOnce(revisionConflict())
+      .mockResolvedValueOnce({ ...makePage("B"), revision: "rev-c" });
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      result.current.retryAfterConflict();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(2);
+    expect(mutateAsyncMock.mock.calls[1][0].body.expected_revision).toBe(
+      "rev-b",
+    );
+    expect(result.current.revisionConflict).toBeNull();
+    expect(result.current.saveStatus).toBe("saved");
+  });
+
+  it("keeps a conflict unresolved when local content reverts", async () => {
+    mutateAsyncMock.mockRejectedValue(revisionConflict());
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => result.current.onSlateChange(paragraph("A"), astChangeEditor()));
+    act(() => result.current.saveNow());
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(result.current.saveStatus).toBe("error");
+    expect(result.current.revisionConflict).toEqual({
+      currentRevision: "rev-b",
+    });
+  });
+
+  it("reloads server content only after explicit conflict recovery", async () => {
+    mutateAsyncMock.mockRejectedValue(revisionConflict());
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+    const latest = {
+      ...makePage("External"),
+      revision: "rev-b",
+      meta: { ...makePage("External").meta, title: "External title" },
+    };
+    refetchPageMock.mockResolvedValue({ data: latest });
+
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+    const editorRevision = result.current.editorRevision;
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.reloadAfterConflict();
+    });
+
+    expect(refetchPageMock).toHaveBeenCalledTimes(1);
+    expect(result.current.title).toBe("External title");
+    expect(result.current.editorRevision).toBeGreaterThan(editorRevision);
+    expect(result.current.revisionConflict).toBeNull();
+    expect(result.current.saveStatus).toBe("saved");
   });
 });
 
@@ -151,6 +242,7 @@ describe("usePageEditor debounce survival", () => {
       data: makePage("A"),
       isLoading: false,
       error: null,
+      refetch: refetchPageMock,
     });
     mutateAsyncMock.mockResolvedValue(makePage("B"));
     // The real useMutation returns a fresh result object on every render
