@@ -48,7 +48,15 @@ private struct ConnectedVaultView: View {
                 }
             }
             .navigationDestination(item: $selectedPageID) { pageID in
-                ReaderPlaceholderView(session: session, pageID: pageID)
+                if let api = session.api {
+                    NoteReaderView(pageID: pageID, api: api)
+                } else {
+                    ContentUnavailableView(
+                        "Vault disconnected",
+                        systemImage: "wifi.slash",
+                        description: Text("Reconnect to search your vault.")
+                    )
+                }
             }
         }
         .navigationTitle("Clepsydra")
@@ -60,43 +68,6 @@ private struct ConnectedVaultView: View {
                 Button("Disconnect", role: .destructive) {
                     session.disconnect()
                 }
-            }
-        }
-    }
-}
-
-private struct ReaderPlaceholderView: View {
-    let session: VaultSession
-    let pageID: UUID
-    @State private var loaded = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        Group {
-            if let errorMessage {
-                ContentUnavailableView(
-                    "Unable to open page",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(errorMessage)
-                )
-            } else if loaded {
-                ContentUnavailableView(
-                    "Reader placeholder",
-                    systemImage: "doc.text",
-                    description: Text("Page \(pageID.uuidString)")
-                )
-            } else {
-                ProgressView("Opening page…")
-            }
-        }
-        .navigationTitle("Reader")
-        .task {
-            do {
-                guard let api = session.api else { return }
-                _ = try await api.page(id: pageID)
-                loaded = true
-            } catch {
-                errorMessage = error.localizedDescription
             }
         }
     }
