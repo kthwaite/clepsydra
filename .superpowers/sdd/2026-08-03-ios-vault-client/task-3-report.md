@@ -265,3 +265,76 @@ The page-by-ID tests now explicitly cover move-lock serialization (`page_by_id_w
 ### Concerns
 
 None.
+
+## Review fix round 2 follow-up: preserve relocation retries
+
+### Finding addressed
+
+The first move-serialization revision replaced the true move-between-lookup-and-use regressions with tests that serialized the move behind an already-held candidate lock and asserted the old path. Separate deterministic tests now preserve both contracts:
+
+1. move waits while an update is between CAS read and publication; and
+2. when a move wins after UUID lookup but before GET access or PUT update begins, bounded UUID resolution retries the moved path.
+
+### RED evidence
+
+The restored relocation tests were written against a post-index-lookup synchronization seam:
+
+```text
+cargo test --test api_test page_by_id_get_retries_relocation_between_lookup_and_access
+error[E0599]: no method named `set_after_page_id_lookup_hook` found for struct `MutationCoordinator`
+error: could not compile `clepsydra` (test "api_test") due to 4 previous errors
+```
+
+The initial observer implementation then exposed a lock-lifetime deadlock: the callback waited while still retaining the hook mutex. The focused GET test deterministically hung at:
+
+```text
+test page_by_id_get_retries_relocation_between_lookup_and_access has been running for over 60 seconds
+```
+
+The observer now clones the callback into a local before invoking it, releasing the configuration mutex before the synchronization callback blocks.
+
+### Fix and self-review
+
+- Added a per-coordinator post-UUID-lookup observer used only as a deterministic synchronization seam.
+- GET and PUT invoke the observer immediately after each indexed UUID lookup and before candidate locking/use.
+- New multi-threaded tests pause at that exact point, execute the source/destination-locked move through the in-process router and serialized index actor, clear the observer, then release the request.
+- GET must return the moved path and same UUID/body.
+- PUT must update the moved path, return its exact revision, match a subsequent GET-by-ID, and continue returning the structured revision conflict for the stale pre-move revision.
+- The existing candidate-lock serialization tests and the pre-publication move-wait/single-identity regression remain separate and green.
+- No sleeps or unbounded waits control the interleavings; channel events and one explicit router poll plus an index-actor sentinel establish ordering. Two-second channel timeouts are failure bounds only.
+
+### GREEN evidence
+
+```text
+cargo test --test api_test page_by_id_get_retries_relocation_between_lookup_and_access
+cargo test: 1 passed (1 suite, 109 filtered, 0.07s)
+
+cargo test --test api_test page_update_by_id_retries_relocation_between_lookup_and_update
+cargo test: 1 passed (1 suite, 109 filtered, 0.05s)
+
+cargo test --test api_test page_by_id_get_waits_for_move_lock_before_access
+cargo test: 1 passed (1 suite, 109 filtered, 0.03s)
+
+cargo test --test api_test page_update_by_id_waits_for_move_lock_before_update
+cargo test: 1 passed (1 suite, 109 filtered, 0.04s)
+
+cargo test --test api_test page_move_waits_for_uuid_update_publish_and_preserves_single_identity
+cargo test: 1 passed (1 suite, 109 filtered, 0.04s)
+
+cargo test --test api_test page_update_by_id
+cargo test: 5 passed (1 suite, 105 filtered, 0.09s)
+
+cargo test --test api_test page_by_id
+cargo test: 3 passed (1 suite, 107 filtered, 0.04s)
+
+cargo test vault::mutation_coordinator::tests
+cargo test: 3 passed (37 suites, 844 filtered, 0.00s)
+```
+
+### Fix commit
+
+`40ff4e0` contains the backend relocation seam and tests. Because another worker committed its concurrently staged iOS completion in the shared worktree after the backend files were staged, the backend changes landed in that existing `fix(ios): complete connected vault shell` commit. The iOS commit was not rewritten or amended.
+
+### Concerns
+
+No behavioral concerns. Commit `40ff4e0` contains both the concurrent iOS completion and this backend follow-up due shared-index staging.
