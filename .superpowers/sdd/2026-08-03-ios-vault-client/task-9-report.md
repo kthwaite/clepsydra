@@ -58,3 +58,22 @@ Implementation commit hash: `1d504eb` (the evidence report is committed in the f
 
 - Full package tests cannot be reported as passing because the existing test invocation timed out after linking; focused editor tests and package build pass.
 - iOS simulator build cannot run until an iOS 26.2 simulator platform is installed.
+
+## Review fix — deletion alert dismissal
+
+Root cause: the deletion alert's `isPresented` binding read `model.phase == .deleted` and discarded writes, so pressing OK could not reset presentation state.
+
+Fix: `NoteEditorView` now owns `showingDeletionAlert`, synchronizes it when the model enters/leaves `.deleted`, and explicitly clears it from the OK action.
+
+Focused verification after the fix:
+
+```text
+swift test --package-path ios/Packages/ClepsydraMobileKit --filter EditorModelTests
+Build complete!
+Test Suite 'EditorModelTests' passed ... Executed 13 tests, with 0 failures
+
+swift build --package-path ios/Packages/ClepsydraMobileKit
+ok (build complete)
+```
+
+Review-fix commit: `6abe6bb`.
