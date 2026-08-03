@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use clepsydra::doctor::{self, DoctorOpts};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::new_note::create_new_note;
-use clepsydra::{open_vault_and_index, run_server};
+use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -71,12 +71,19 @@ enum Commands {
     },
     #[command(
         about = "Start the API server",
-        long_about = "Start the Clepsydra HTTP API server.\n\nRequires a config file discovered via:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\nVault root is read from [vault].root."
+        long_about = "Start the Clepsydra HTTP API server.\n\nRequires a config file discovered via:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\nVault root is read from [vault].root.\n\n--tls and --port override the config file and the CLEPSYDRA__* environment variables, so a second server (HTTPS, spare port) can be started for testing without editing shared config. --tls only ever turns HTTPS on; to serve cleartext, leave it off.",
+        after_help = "Examples:\n  clepsydra serve\n  clepsydra serve --tls                 # HTTPS on the configured port\n  clepsydra serve --tls --port 3443     # HTTPS alongside a plain server\n\nHTTPS uses certs from [server.tls], or generates localhost ones with mkcert.\nTo let the iOS Simulator trust those: scripts/trust-simulator-ca.sh"
     )]
     Serve {
         /// Start the LSP server on stdio alongside the HTTP server
         #[arg(long)]
         lsp: bool,
+        /// Serve over HTTPS, generating localhost certs with mkcert if needed
+        #[arg(long)]
+        tls: bool,
+        /// Listen on PORT instead of the configured port
+        #[arg(long, value_name = "PORT")]
+        port: Option<u16>,
     },
     #[command(
         about = "Open a clepsydra:// or obsidian:// URL in the running server's UI",
@@ -181,8 +188,8 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             }
             Ok(report.exit_code(strict))
         }
-        Commands::Serve { lsp } => {
-            run_server(lsp).await?;
+        Commands::Serve { lsp, tls, port } => {
+            run_server(lsp, ServeOverrides { tls, port }).await?;
             Ok(0)
         }
         Commands::OpenUrl { url, print } => {
@@ -481,5 +488,31 @@ mod cli_tests {
     fn register_url_parses_with_and_without_obsidian_flag() {
         assert!(Cli::try_parse_from(["clepsydra", "register-url"]).is_ok());
         assert!(Cli::try_parse_from(["clepsydra", "register-url", "--obsidian"]).is_ok());
+    }
+
+    fn serve_flags(args: &[&str]) -> (bool, Option<u16>) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Serve { tls, port, .. } => (tls, port),
+            other => panic!("expected serve, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_serve_requests_no_overrides() {
+        assert_eq!(serve_flags(&["clepsydra", "serve"]), (false, None));
+    }
+
+    #[test]
+    fn serve_accepts_tls_and_port_together() {
+        assert_eq!(
+            serve_flags(&["clepsydra", "serve", "--tls", "--port", "3443"]),
+            (true, Some(3443))
+        );
+    }
+
+    #[test]
+    fn serve_rejects_a_port_outside_the_u16_range() {
+        assert!(Cli::try_parse_from(["clepsydra", "serve", "--port", "70000"]).is_err());
     }
 }
