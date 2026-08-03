@@ -3,10 +3,14 @@ import SwiftUI
 
 @MainActor
 public struct NoteReaderView: View {
+    private let pageID: UUID
+    private let api: any VaultAPI
     @State private var model: ReaderViewModel
     @State private var showingEditPlaceholder = false
 
     public init(pageID: UUID, api: any VaultAPI) {
+        self.pageID = pageID
+        self.api = api
         _model = State(initialValue: ReaderViewModel(pageID: pageID, api: api))
     }
 
@@ -28,7 +32,10 @@ public struct NoteReaderView: View {
             } message: {
                 Text("Editing is not available yet.")
             }
-            .task {
+            .task(id: pageID) {
+                if model.pageID != pageID {
+                    model = ReaderViewModel(pageID: pageID, api: api)
+                }
                 model.load()
             }
     }

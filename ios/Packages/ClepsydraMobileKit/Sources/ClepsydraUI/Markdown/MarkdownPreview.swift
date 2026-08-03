@@ -76,7 +76,7 @@ public struct MarkdownPreview: View {
               let scheme = url.scheme?.lowercased() else {
             return false
         }
-        return scheme == "http" || scheme == "https"
+        return scheme == "https"
     }
 }
 

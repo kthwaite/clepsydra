@@ -64,12 +64,13 @@ final class MarkdownPreviewTests: XCTestCase {
 
     func testRetainsHTTPSLinksButRemovesUnsafeLinkDestinations() throws {
         let normalized = MarkdownPreview.normalizedMarkdown(
-            "[safe](https://example.com) [unsafe](javascript:alert(1))"
+            "[safe](https://example.com) [http](http://example.com) [unsafe](javascript:alert(1))"
         )
         let rendered = try AttributedString(markdown: normalized)
         let links = rendered.runs.compactMap(\.link)
 
         XCTAssertEqual(links, [URL(string: "https://example.com")!])
+        XCTAssertFalse(normalized.contains("http://"))
         XCTAssertFalse(normalized.contains("javascript:"))
     }
 }
