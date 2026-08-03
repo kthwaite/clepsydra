@@ -116,3 +116,50 @@ describe("usePageEditor save sequencing", () => {
     expect("body" in secondRequest.body).toBe(false);
   });
 });
+
+describe("usePageEditor debounce survival", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    usePageMock.mockReturnValue({
+      data: makePage("A"),
+      isLoading: false,
+      error: null,
+    });
+    // The real useMutation returns a fresh result object on every render
+    // (only .mutate is referentially stable). A stable mock here would hide
+    // any code path that keys effects on the mutation object's identity.
+    useUpdatePageMock.mockImplementation(() => ({ mutate: mutateMock }));
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("fires the debounced save for a lone edit despite status re-renders", () => {
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+
+    act(() => {
+      result.current.onSlateChange(paragraph("B"), astChangeEditor());
+    });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes a pending save on unmount instead of dropping it", () => {
+    const { result, unmount } = renderHook(() =>
+      usePageEditor("notes/page.md"),
+    );
+
+    act(() => {
+      result.current.onSlateChange(paragraph("B"), astChangeEditor());
+    });
+    unmount();
+
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+  });
+});

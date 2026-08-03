@@ -33,6 +33,11 @@ interface PageEditorState {
 export function usePageEditor(path: string): PageEditorState {
   const { data: page, isLoading, error } = usePage(path);
   const updatePage = useUpdatePage();
+  // The mutation result object is recreated on every render; only .mutate is
+  // referentially stable. doSave must depend on the stable function, or the
+  // [doSave]-keyed effect below re-runs each render and its cleanup would
+  // flush the pending debounce timer prematurely.
+  const updatePageMutate = updatePage.mutate;
 
   const editorValueRef = useRef<Descendant[]>([]);
 
@@ -166,7 +171,7 @@ export function usePageEditor(path: string): PageEditorState {
 
     setSaveStatus("saving");
 
-    updatePage.mutate(
+    updatePageMutate(
       {
         params: { path: { path } },
         body: {
@@ -203,7 +208,7 @@ export function usePageEditor(path: string): PageEditorState {
         },
       },
     );
-  }, [path, updatePage]);
+  }, [path, updatePageMutate]);
 
   const scheduleSave = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -270,7 +275,9 @@ export function usePageEditor(path: string): PageEditorState {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      // Flush rather than drop: a cleared timer would silently lose the last
+      // unsaved edit when the editor unmounts (navigation, page switch).
+      if (timerRef.current) doSave();
     };
   }, [doSave]);
 
