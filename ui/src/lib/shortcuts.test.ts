@@ -26,41 +26,53 @@ function ev(key: string, mods: Mods = {}) {
 }
 
 describe("matchesChord", () => {
-  it("matches mod chords with either metaKey or ctrlKey", () => {
+  it("mod chords on Mac require ⌘ — Ctrl-E stays the system end-of-line jump", () => {
+    const chord = { key: "e", mod: true };
+    expect(matchesChord(ev("e", { metaKey: true }), chord, true)).toBe(true);
+    expect(matchesChord(ev("e", { ctrlKey: true }), chord, true)).toBe(false);
+    expect(
+      matchesChord(ev("e", { metaKey: true, ctrlKey: true }), chord, true),
+    ).toBe(false);
+    expect(matchesChord(ev("e"), chord, true)).toBe(false);
+  });
+
+  it("mod chords on non-Mac require Ctrl — the Windows key does not match", () => {
     const chord = { key: "k", mod: true };
-    expect(matchesChord(ev("k", { metaKey: true }), chord)).toBe(true);
-    expect(matchesChord(ev("k", { ctrlKey: true }), chord)).toBe(true);
-    expect(matchesChord(ev("k"), chord)).toBe(false);
+    expect(matchesChord(ev("k", { ctrlKey: true }), chord, false)).toBe(true);
+    expect(matchesChord(ev("k", { metaKey: true }), chord, false)).toBe(false);
+    expect(matchesChord(ev("k"), chord, false)).toBe(false);
   });
 
   it("rejects extra alt on a mod chord", () => {
     expect(
-      matchesChord(ev("k", { metaKey: true, altKey: true }), {
-        key: "k",
-        mod: true,
-      }),
+      matchesChord(
+        ev("k", { metaKey: true, altKey: true }),
+        { key: "k", mod: true },
+        true,
+      ),
     ).toBe(false);
   });
 
   it("matches letters case-insensitively and ignores shift on letters", () => {
     const chord = { key: "b", mod: true };
     expect(
-      matchesChord(ev("B", { metaKey: true, shiftKey: true }), chord),
+      matchesChord(ev("B", { metaKey: true, shiftKey: true }), chord, true),
     ).toBe(true);
   });
 
   it("enforces shift on non-letter keys", () => {
     const chord = { key: "/", mod: true };
-    expect(matchesChord(ev("/", { metaKey: true }), chord)).toBe(true);
+    expect(matchesChord(ev("/", { metaKey: true }), chord, true)).toBe(true);
     expect(
-      matchesChord(ev("/", { metaKey: true, shiftKey: true }), chord),
+      matchesChord(ev("/", { metaKey: true, shiftKey: true }), chord, true),
     ).toBe(false);
   });
 
-  it("ctrl chords require ctrl specifically, not meta", () => {
+  it("ctrl chords require ctrl specifically on both platforms", () => {
     const next = { key: "Tab", ctrl: true };
     const prev = { key: "Tab", ctrl: true, shift: true };
     expect(matchesChord(ev("Tab", { ctrlKey: true }), next)).toBe(true);
+    expect(matchesChord(ev("Tab", { ctrlKey: true }), next, true)).toBe(true);
     expect(matchesChord(ev("Tab", { metaKey: true }), next)).toBe(false);
     // shifted variant matches prev, not next
     const shifted = ev("Tab", { ctrlKey: true, shiftKey: true });

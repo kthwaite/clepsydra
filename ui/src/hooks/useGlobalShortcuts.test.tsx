@@ -7,6 +7,15 @@ const { navigateMock, openTabMock, toggleThemeMock } = vi.hoisted(() => ({
   toggleThemeMock: vi.fn(),
 }));
 
+// IS_MAC is computed when #/lib/shortcuts first loads, so the platform must
+// be stubbed before any import. This file exercises the Mac chords (⌘K etc.).
+vi.hoisted(() => {
+  Object.defineProperty(navigator, "platform", {
+    value: "MacIntel",
+    configurable: true,
+  });
+});
+
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
 }));
@@ -55,11 +64,13 @@ describe("useGlobalShortcuts", () => {
     window.history.pushState({}, "", "/");
   });
 
-  it("⌘K toggles the command palette", () => {
+  it("⌘K toggles the command palette; Ctrl+K is left to the system", () => {
     renderHook(() => useGlobalShortcuts());
     press("k", { metaKey: true });
     expect(useUiStore.getState().isSearchOpen).toBe(true);
     press("k", { ctrlKey: true });
+    expect(useUiStore.getState().isSearchOpen).toBe(true);
+    press("k", { metaKey: true });
     expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
 
