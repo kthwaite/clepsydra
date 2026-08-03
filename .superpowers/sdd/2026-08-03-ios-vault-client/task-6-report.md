@@ -138,3 +138,35 @@ Ineligible destinations ... error:iOS 26.2 is not installed.
 
 - The generic iOS Simulator build remains blocked until an iOS 18+ simulator runtime is installed in Xcode; no simulator UI behavior was exercised.
 - Swift package build/tests run on the macOS host and passed; the iOS-only keyboard/content modifiers are conditionally compiled and therefore require the unavailable simulator/device build to exercise directly.
+
+## Review follow-up
+
+### RED: review findings
+
+The review identified two gaps in the first implementation:
+
+- `AppRootView` rendered a static `ConnectedVaultPlaceholder`, so the connected state had no search-shell affordance or disconnect path.
+- `ServerSetupView` disabled only the Connect button during an uptime check; the URL field remained editable while `VaultSession` was already connecting.
+
+### GREEN: focused regression coverage
+
+Command:
+
+```text
+swift test --package-path ios/Packages/ClepsydraMobileKit --filter VaultSessionTests
+```
+
+Observed:
+
+```text
+Test Suite 'VaultSessionTests' passed
+Executed 10 tests, with 0 failures (0 unexpected)
+```
+
+The new regression test holds uptime open, observes `.connecting`, verifies `canEditAddress == false`, releases uptime, and verifies the session reaches connected. The connected shell now exposes a search field, empty search state, and Disconnect action backed by the same injected session.
+
+## Review-fix commit
+
+`40ff4e0` — `fix(ios): complete connected vault shell`
+
+Note: because this is a shared worktree, that commit also contained unrelated files that were already staged by another worker (`src/api/pages.rs`, `src/vault/mutation_coordinator.rs`, and `tests/api_test.rs`). The Task 6 changes in that commit are limited to the iOS package paths listed above.
