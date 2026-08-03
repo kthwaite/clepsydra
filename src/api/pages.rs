@@ -48,6 +48,7 @@ pub struct PageDetail {
     pub canonical_name: String,
     pub meta: PageMeta,
     pub body: String,
+    pub revision: String,
     pub kind: String,
     pub inferred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,6 +78,7 @@ pub struct PageDetailResponse {
     pub canonical_name: String,
     pub meta: PageMetaResponse,
     pub body: String,
+    pub revision: String,
     #[schema(value_type = crate::vault::kind::Kind)]
     pub kind: String,
     pub inferred: bool,
@@ -201,25 +203,25 @@ pub fn assign_router() -> Router<Arc<AppState>> {
 // Canonical PageDetail mapping
 // ---------------------------------------------------------------------------
 
-/// Map the owned page fields returned by reads and mutations into the public
-/// detail response. Taking the path, metadata, and body together keeps every
-/// page-detail endpoint on one output mapping without cloning page contents.
-pub(crate) fn page_detail(vault_path: VaultPath, meta: PageMeta, body: String) -> PageDetail {
-    let canonical = if let Some(title) = &meta.title {
-        CanonicalName::from_title(title)
-    } else {
-        CanonicalName::from_filename(vault_path.filename())
-    };
-
-    let (resolved_kind, inferred) = crate::vault::kind::resolve(vault_path.as_str(), meta.kind);
-    let project = meta.project.clone();
-
+/// Map a complete page returned by reads and mutations into the public detail
+/// response without cloning page contents.
+pub(crate) fn page_detail(page: Page) -> PageDetail {
+    let revision = crate::vault::page::page_revision(&page.raw_content);
+    let canonical = page
+        .meta
+        .title
+        .as_deref()
+        .map(CanonicalName::from_title)
+        .unwrap_or_else(|| CanonicalName::from_filename(page.path.filename()));
+    let (kind, inferred) = crate::vault::kind::resolve(page.path.as_str(), page.meta.kind);
+    let project = page.meta.project.clone();
     PageDetail {
-        path: vault_path.as_str().to_string(),
+        path: page.path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
-        meta,
-        body,
-        kind: resolved_kind.as_str().to_string(),
+        meta: page.meta,
+        body: page.body,
+        revision,
+        kind: kind.as_str().to_string(),
         inferred,
         project,
     }
@@ -321,10 +323,10 @@ pub async fn get_page(
         return Err(ApiError::not_found(format!("page not found: {path}")));
     }
 
-    let page = Page::from_file(&abs_path, vault_path.clone())
+    let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail(page.path, page.meta, page.body)))
+    Ok(Json(page_detail(page)))
 }
 
 #[utoipa::path(
@@ -370,10 +372,10 @@ pub async fn get_page_by_id(
         )));
     }
 
-    let page = Page::from_file(&abs_path, vault_path.clone())
+    let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail(page.path, page.meta, page.body)))
+    Ok(Json(page_detail(page)))
 }
 
 #[utoipa::path(
@@ -433,7 +435,7 @@ pub async fn create_page(
 
     Ok((
         StatusCode::CREATED,
-        Json(page_detail(result.path, result.meta, result.body)),
+        Json(page_detail(result)),
     )
         .into_response())
 }
@@ -511,7 +513,7 @@ pub async fn update_page(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok(Json(page_detail(result.path, result.meta, result.body)))
+    Ok(Json(page_detail(result)))
 }
 
 #[utoipa::path(
@@ -716,10 +718,10 @@ pub async fn move_page(
 
     // 4. Return the updated PageDetail
     let dest_abs = state.vault.resolve(&dest_vp);
-    let page = Page::from_file(&dest_abs, dest_vp.clone())
+    let page = Page::from_file(&dest_abs, dest_vp)
         .map_err(|e| ApiError::internal(format!("failed to read moved page: {e}")))?;
 
-    Ok(Json(page_detail(page.path, page.meta, page.body)))
+    Ok(Json(page_detail(page)))
 }
 
 /// Validate a `project` slug before it is persisted to frontmatter and used to
@@ -776,7 +778,7 @@ pub async fn assign_page(
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
     if body.kind.is_none() && body.project.is_none() && !body.clear_project {
-        return Ok(Json(page_detail(page.path, page.meta, page.body)));
+        return Ok(Json(page_detail(page)));
     }
 
     if let Some(token) = &body.kind {
@@ -821,7 +823,7 @@ pub async fn assign_page(
         .await
         .map_err(super::mutation_error)?;
 
-    Ok(Json(page_detail(result.path, result.meta, result.body)))
+    Ok(Json(page_detail(result)))
 }
 
 #[utoipa::path(

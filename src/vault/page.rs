@@ -239,6 +239,28 @@ pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
     format!("---\n{yaml}---\n{body}")
 }
 
+/// Return the lowercase BLAKE3 digest of the exact serialized page bytes.
+pub fn page_revision(serialized: &str) -> String {
+    blake3::hash(serialized.as_bytes()).to_hex().to_string()
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::page_revision;
+
+    #[test]
+    fn revision_is_stable_for_identical_serialized_content() {
+        let content = "---\nid: 01900000-0000-7000-8000-000000000001\n---\nBody";
+        assert_eq!(page_revision(content), page_revision(content));
+        assert_eq!(page_revision(content).len(), 64);
+    }
+
+    #[test]
+    fn revision_changes_when_any_serialized_byte_changes() {
+        assert_ne!(page_revision("body\n"), page_revision("body"));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------

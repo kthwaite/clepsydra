@@ -172,6 +172,9 @@ async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
     let response = server.get("/api/vault/pages/detail.md").await;
     response.assert_status_ok();
     let fetched: serde_json::Value = response.json();
+    let revision = fetched["revision"].as_str().expect("page detail revision");
+    assert_eq!(revision.len(), 64);
+    assert_eq!(created["revision"], fetched["revision"]);
     assert_eq!(
         created, fetched,
         "create and path GET detail mappings differ"

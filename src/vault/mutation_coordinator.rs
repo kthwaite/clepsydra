@@ -71,12 +71,6 @@ pub struct ReplacePageContentCommand {
     pub content: String,
 }
 
-#[derive(Debug)]
-pub struct PageMutationResult {
-    pub path: VaultPath,
-    pub meta: PageMeta,
-    pub body: String,
-}
 
 #[derive(Debug)]
 pub struct DeleteFolderResult {
@@ -249,7 +243,7 @@ impl MutationCoordinator {
         index: &IndexHandle,
         command: CreatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
-    ) -> Result<PageMutationResult, MutationError> {
+    ) -> Result<Page, MutationError> {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
@@ -258,7 +252,7 @@ impl MutationCoordinator {
                 let blocking_path = absolute.clone();
                 let page_path = command.path.clone();
                 let content = write_page_content(&command.meta, &command.body);
-                let (guard, durability_error) =
+                let (guard, (durability_error, content)) =
                     run_blocking_fs(absolute.clone(), guard, move || {
                         if let Some(parent) = blocking_path.parent() {
                             fs::create_dir_all(parent).map_err(|source| {
@@ -270,7 +264,7 @@ impl MutationCoordinator {
                             })?;
                         }
                         match atomic_create(&blocking_path, content.as_bytes()) {
-                            Ok(()) => Ok(None),
+                            Ok(()) => Ok((None, content)),
                             Err(AtomicPublicationError::NotPublished(source))
                                 if source.kind() == io::ErrorKind::AlreadyExists =>
                             {
@@ -287,7 +281,7 @@ impl MutationCoordinator {
                                 })
                             }
                             Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                Ok(Some(source))
+                                Ok((Some(source), content))
                             }
                         }
                     })
@@ -308,10 +302,11 @@ impl MutationCoordinator {
                         source,
                     });
                 }
-                Ok(PageMutationResult {
+                Ok(Page {
                     path: command.path,
                     meta: command.meta,
                     body: command.body,
+                    raw_content: content,
                 })
             })
             .await?;
@@ -399,7 +394,7 @@ impl MutationCoordinator {
         hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
         command: UpdatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
-    ) -> Result<PageMutationResult, MutationError> {
+    ) -> Result<Page, MutationError> {
         match &command.project {
             ProjectAssignment::Set(project)
                 if command.meta.project.as_deref() != Some(project.as_str()) =>
@@ -453,7 +448,7 @@ impl MutationCoordinator {
                 let page_path = command.path.clone();
                 let expected_content = command.expected_content.clone();
                 let content = write_page_content(&command.meta, &command.body);
-                let (guard, durability_error) =
+                let (guard, (durability_error, content)) =
                     run_blocking_fs(absolute.clone(), guard, move || {
                         let current = match fs::read_to_string(&blocking_path) {
                             Ok(current) => current,
@@ -480,7 +475,7 @@ impl MutationCoordinator {
                             )));
                         }
                         match atomic_replace(&blocking_path, content.as_bytes()) {
-                            Ok(()) => Ok(None),
+                            Ok(()) => Ok((None, content)),
                             Err(AtomicPublicationError::NotPublished(source)) => {
                                 Err(MutationError::Filesystem {
                                     filesystem_applied: false,
@@ -489,7 +484,7 @@ impl MutationCoordinator {
                                 })
                             }
                             Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                Ok(Some(source))
+                                Ok((Some(source), content))
                             }
                         }
                     })
@@ -551,10 +546,11 @@ impl MutationCoordinator {
                         source,
                     });
                 }
-                Ok(PageMutationResult {
+                Ok(Page {
                     path: final_path,
                     meta: command.meta,
                     body: command.body,
+                    raw_content: content,
                 })
             })
             .await?;

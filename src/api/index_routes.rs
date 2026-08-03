@@ -809,15 +809,15 @@ pub async fn create_from_link(
             removed: notification.removed,
         });
     };
-    state
+    let result = state
         .mutation_coordinator
         .create_page(
             &state.vault,
             &state.index,
             CreatePageCommand {
-                path: vault_path.clone(),
-                meta: meta.clone(),
-                body: page_body.clone(),
+                path: vault_path,
+                meta,
+                body: page_body,
             },
             &notify,
         )
@@ -826,7 +826,7 @@ pub async fn create_from_link(
 
     Ok((
         StatusCode::CREATED,
-        Json(page_detail(vault_path, meta, page_body)),
+        Json(page_detail(result)),
     )
         .into_response())
 }

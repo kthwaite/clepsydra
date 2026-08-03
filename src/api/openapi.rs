@@ -213,6 +213,25 @@ mod tests {
     }
 
     #[test]
+    fn page_detail_revision_is_a_required_string() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let page_detail = &json["components"]["schemas"]["PageDetailResponse"];
+        let required = page_detail["required"]
+            .as_array()
+            .expect("PageDetailResponse.required should be an array");
+        assert!(
+            required.iter().any(|field| field == "revision"),
+            "PageDetailResponse should require revision"
+        );
+        assert_eq!(
+            page_detail["properties"]["revision"]["type"],
+            "string",
+            "PageDetailResponse.revision should be a string"
+        );
+    }
+
+    #[test]
     fn openapi_includes_core_paths() {
         let spec = ApiDoc::openapi();
         assert!(spec.paths.paths.contains_key("/api/vault/pages"));
