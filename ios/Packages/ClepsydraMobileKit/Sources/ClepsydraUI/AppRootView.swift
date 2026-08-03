@@ -61,7 +61,13 @@ private struct ConnectedVaultView: View {
         }
         .navigationTitle("Clepsydra")
         .sheet(isPresented: $showingNewNote) {
-            NewNotePlaceholder()
+            if let api = session.api {
+                NavigationStack {
+                    NoteEditorView(mode: .create, api: api) { createdPage in
+                        selectedPageID = createdPage.id
+                    }
+                }
+            }
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -70,16 +76,5 @@ private struct ConnectedVaultView: View {
                 }
             }
         }
-    }
-}
-
-private struct NewNotePlaceholder: View {
-    var body: some View {
-        ContentUnavailableView(
-            "New note",
-            systemImage: "square.and.pencil",
-            description: Text("Note creation will be available here.")
-        )
-        .presentationDetents([.medium])
     }
 }

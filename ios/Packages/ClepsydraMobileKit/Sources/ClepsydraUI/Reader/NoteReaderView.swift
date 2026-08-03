@@ -6,7 +6,7 @@ public struct NoteReaderView: View {
     private let pageID: UUID
     private let api: any VaultAPI
     @State private var model: ReaderViewModel
-    @State private var showingEditPlaceholder = false
+    @State private var showingEditor = false
 
     public init(pageID: UUID, api: any VaultAPI) {
         self.pageID = pageID
@@ -23,14 +23,19 @@ public struct NoteReaderView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Edit") {
-                        showingEditPlaceholder = true
+                        showingEditor = true
                     }
+                    .disabled(model.page == nil)
                 }
             }
-            .alert("Edit note", isPresented: $showingEditPlaceholder) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Editing is not available yet.")
+            .sheet(isPresented: $showingEditor) {
+                if let page = model.page {
+                    NavigationStack {
+                        NoteEditorView(page: page, api: api) { savedPage in
+                            model.accept(savedPage)
+                        }
+                    }
+                }
             }
             .task(id: pageID) {
                 if model.pageID != pageID {
