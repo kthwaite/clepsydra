@@ -19,10 +19,9 @@ use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::mutation_coordinator::{
-    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
+    CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
-use crate::vault::page::{Page, PageMeta};
-use crate::vault::path::VaultPath;
+use crate::vault::page::{Page, PageMeta, page_revision};
 
 // ---------------------------------------------------------------------------
 // Response / request types
@@ -105,6 +104,7 @@ pub struct CreatePageRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdatePageRequest {
+    pub expected_revision: String,
     pub title: Option<String>,
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
@@ -451,6 +451,7 @@ pub async fn create_page(
         (status = 200, description = "Updated page", body = PageDetailResponse),
         (status = 400, description = "Invalid input", body = ApiError),
         (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Page changed since it was loaded", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
@@ -462,15 +463,20 @@ pub async fn update_page(
     let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
 
     let abs_path = state.vault.resolve(&vault_path);
-    let expected_content = fs::read_to_string(&abs_path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
+    let page = Page::from_file(&abs_path, vault_path.clone()).map_err(|error| match error {
+        crate::vault::page::FrontmatterError::Io(error)
+            if error.kind() == std::io::ErrorKind::NotFound =>
+        {
             ApiError::not_found(format!("page not found: {path}"))
-        } else {
-            ApiError::internal(format!("failed to read page: {error}"))
         }
+        error => ApiError::internal(format!("failed to read page: {error}")),
     })?;
-    let page = Page::from_file(&abs_path, vault_path.clone())
-        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+    let current_revision = page_revision(&page.raw_content);
+    if current_revision != body.expected_revision {
+        return Err(ApiError::revision_conflict(current_revision));
+    }
+
+    let expected_content = page.raw_content;
     let mut meta = page.meta;
     let mut page_body = page.body;
 
@@ -511,7 +517,16 @@ pub async fn update_page(
             &notify,
         )
         .await
-        .map_err(super::mutation_error)?;
+        .map_err(|error| match error {
+            MutationError::Stale(_) => match fs::read_to_string(&abs_path) {
+                Ok(content) => ApiError::revision_conflict(page_revision(&content)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    ApiError::not_found(format!("page not found: {path}"))
+                }
+                Err(error) => ApiError::internal(format!("failed to read page: {error}")),
+            },
+            error => super::mutation_error(error),
+        })?;
 
     Ok(Json(page_detail(result)))
 }
@@ -876,6 +891,7 @@ pub async fn assign_bulk(
 mod tests {
     use super::*;
     use crate::state_test_support::make_state;
+    use crate::vault::path::VaultPath;
 
     #[tokio::test]
     async fn list_returns_kind_inferred_project_and_tags() {

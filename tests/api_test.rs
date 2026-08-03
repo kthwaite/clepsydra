@@ -154,6 +154,62 @@ async fn page_mutation_create_preserves_response_dto() {
 }
 
 #[tokio::test]
+async fn page_update_rejects_stale_revision_without_changing_file() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({ "title": "Conflict", "body": "one" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let first: serde_json::Value = created.json();
+    let revision = first["revision"].as_str().unwrap();
+
+    let updated = server
+        .put("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({
+            "body": "two",
+            "expected_revision": revision
+        }))
+        .await;
+    updated.assert_status_ok();
+    let updated: serde_json::Value = updated.json();
+
+    let stale = server
+        .put("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(
+        error["detail"]["current_revision"],
+        updated["revision"],
+    );
+
+    let current: serde_json::Value = server.get("/api/vault/pages/conflict.md").await.json();
+    assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn page_update_requires_expected_revision() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/revision-required.md")
+        .json(&serde_json::json!({ "title": "Revision", "body": "one" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .put("/api/vault/pages/revision-required.md")
+        .json(&serde_json::json!({ "body": "two" }))
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
     let (server, _tmp) = setup_server();
 
@@ -192,6 +248,7 @@ async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
     let response = server
         .put("/api/vault/pages/detail.md")
         .json(&serde_json::json!({
+            "expected_revision": revision,
             "title": "Updated detail",
             "tags": ["mapping", "updated"],
             "aliases": ["Updated alias"],
@@ -1658,14 +1715,15 @@ async fn page_mutation_update_resolves_links_bidirectionally() {
     let (server, _tmp) = setup_server();
 
     // Create source with no links
-    server
+    let source = server
         .post("/api/vault/pages/source.md")
         .json(&serde_json::json!({
             "title": "Source",
             "body": "No links yet."
         }))
-        .await
-        .assert_status(StatusCode::CREATED);
+        .await;
+    source.assert_status(StatusCode::CREATED);
+    let source: serde_json::Value = source.json();
 
     // Create target
     server
@@ -1681,6 +1739,7 @@ async fn page_mutation_update_resolves_links_bidirectionally() {
     let res = server
         .put("/api/vault/pages/source.md")
         .json(&serde_json::json!({
+            "expected_revision": source["revision"],
             "body": "Now linking to [[Target]]."
         }))
         .await;

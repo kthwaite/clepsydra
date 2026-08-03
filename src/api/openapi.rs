@@ -232,6 +232,32 @@ mod tests {
     }
 
     #[test]
+    fn page_update_requires_expected_revision_and_documents_conflicts() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let update_request = &json["components"]["schemas"]["UpdatePageRequest"];
+        let required = update_request["required"]
+            .as_array()
+            .expect("UpdatePageRequest.required should be an array");
+        assert!(
+            required.iter().any(|field| field == "expected_revision"),
+            "UpdatePageRequest should require expected_revision"
+        );
+        assert_eq!(
+            update_request["properties"]["expected_revision"]["type"],
+            "string",
+            "UpdatePageRequest.expected_revision should be a string"
+        );
+
+        let responses =
+            &json["paths"]["/api/vault/pages/{path}"]["put"]["responses"];
+        assert!(
+            responses.get("409").is_some(),
+            "page update should document revision conflicts"
+        );
+    }
+
+    #[test]
     fn openapi_includes_core_paths() {
         let spec = ApiDoc::openapi();
         assert!(spec.paths.paths.contains_key("/api/vault/pages"));
