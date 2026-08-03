@@ -886,15 +886,18 @@ pub async fn move_page(
     Path(path): Path<String>,
     Json(body): Json<MovePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    // 1. Validate source path exists
     let source_vp = crate::api::error::parse_request_path(&path, "invalid path")?;
+    let dest_vp = crate::api::error::parse_request_path(&body.destination, "invalid destination")?;
+    let _guard = state
+        .mutation_coordinator
+        .lock_paths(&[source_vp.clone(), dest_vp.clone()])
+        .await;
+
     let source_abs = state.vault.resolve(&source_vp);
     if !source_abs.exists() {
         return Err(ApiError::not_found(format!("page not found: {path}")));
     }
 
-    // 2. Validate destination path
-    let dest_vp = crate::api::error::parse_request_path(&body.destination, "invalid destination")?;
     let dest_abs = state.vault.resolve(&dest_vp);
     if dest_abs.exists() {
         return Err(ApiError::conflict(format!(
@@ -903,35 +906,30 @@ pub async fn move_page(
         )));
     }
 
-    // 3. Plan and execute
-    {
-        let op = MutationOp::MovePage {
-            source: path.clone(),
-            destination: body.destination.clone(),
-        };
-        let hooks = Arc::clone(&state.hooks);
-        state
-            .index
-            .with_index(move |index, vault| {
-                let planner = MutationPlanner::new(vault, index);
-                let plan = planner.plan(&op)?;
-                plan.execute(vault, index, &hooks)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?
-            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?;
-    }
+    let op = MutationOp::MovePage {
+        source: path.clone(),
+        destination: body.destination.clone(),
+    };
+    let hooks = Arc::clone(&state.hooks);
+    state
+        .index
+        .with_index(move |index, vault| {
+            let planner = MutationPlanner::new(vault, index);
+            let plan = planner.plan(&op)?;
+            plan.execute(vault, index, &hooks)?;
+            Ok::<_, crate::vault::index::IndexError>(())
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?
+        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?;
 
     let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![body.destination.clone()],
-        removed: vec![path.clone()],
+        upserted: vec![body.destination],
+        removed: vec![path],
     });
 
-    // 4. Return the updated PageDetail
-    let dest_abs = state.vault.resolve(&dest_vp);
     let page = Page::from_file(&dest_abs, dest_vp)
-        .map_err(|e| ApiError::internal(format!("failed to read moved page: {e}")))?;
+        .map_err(|error| ApiError::internal(format!("failed to read moved page: {error}")))?;
 
     Ok(Json(page_detail(page)))
 }

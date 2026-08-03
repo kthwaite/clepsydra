@@ -18,9 +18,12 @@ use super::page::{Page, PageMeta, write_page_content};
 use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
 
+type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
+
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
     locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
+    before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -177,7 +180,18 @@ impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
             locks: parking_lot::Mutex::new(HashMap::new()),
+            before_update_publish_hook: parking_lot::Mutex::new(None),
         }
+    }
+
+    /// Install a synchronization observer immediately after an update's
+    /// compare-and-swap read and before filesystem publication.
+    #[doc(hidden)]
+    pub fn set_before_update_publish_hook(
+        &self,
+        hook: Option<Arc<BeforeUpdatePublishHook>>,
+    ) {
+        *self.before_update_publish_hook.lock() = hook;
     }
 
     /// Lock the requested paths for mutation and every ancestor for subtree
@@ -442,6 +456,7 @@ impl MutationCoordinator {
         let original_path = command.path.clone();
         let notification_source = original_path.clone();
         let index = index.clone();
+        let before_update_publish_hook = self.before_update_publish_hook.lock().clone();
         let result =
             run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
                 let blocking_path = absolute.clone();
@@ -465,6 +480,9 @@ impl MutationCoordinator {
                         };
                         if current != expected_content {
                             return Err(MutationError::Stale(page_path));
+                        }
+                        if let Some(hook) = before_update_publish_hook {
+                            hook(&page_path);
                         }
                         if let Some((destination, destination_absolute)) = destination_check
                             && destination_absolute.exists()
