@@ -2,6 +2,8 @@
 //!
 //! Read tools (M1): search, page reads, listing, tree, link graph, tags.
 //! Write tools (M2): create, update, surgical edit, append, journal capture.
+//! Organise tools (M3): assign, move, folders, delete (force two-step), and
+//! mutation preview.
 //! Every tool proxies the running HTTP server via [`ApiClient`] and returns
 //! the API's JSON as text content; failures come back as tool errors carrying
 //! the actionable messages built in `client.rs`.
@@ -157,6 +159,119 @@ pub struct AppendPageParams {
 pub struct JournalCaptureParams {
     /// Markdown to append to today's journal page (created if absent).
     pub content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AssignParams {
+    /// Page paths to assign. One path returns the updated page; several paths
+    /// use the bulk endpoint and report per-path successes and failures.
+    pub paths: Vec<String>,
+    /// Kind token to declare in frontmatter (NOTE, PROJECT, JOURNAL, TODO,
+    /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE).
+    pub kind: Option<String>,
+    /// Project to declare in frontmatter.
+    pub project: Option<String>,
+    /// Clear the project instead (takes precedence over 'project').
+    pub clear_project: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MovePageParams {
+    /// Current vault-relative page path.
+    pub path: String,
+    /// Full destination path including the filename
+    /// (e.g. `archive/20260803.old-note.a1b2c3d4.md`).
+    pub destination: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FolderAction {
+    /// Create the folder (and any missing parents).
+    Create,
+    /// Delete the folder; non-empty folders need `recursive: true`.
+    Delete,
+    /// Move/rename the folder to `destination`, rewriting inbound links.
+    Move,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FolderParams {
+    /// What to do: create, delete, or move.
+    pub action: FolderAction,
+    /// Vault-relative folder path.
+    pub path: String,
+    /// Destination folder path (required for 'move').
+    pub destination: Option<String>,
+    /// For 'delete': also delete contained pages and subfolders.
+    pub recursive: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RewriteMode {
+    /// Replace inbound wikilinks with the page's plain-text name.
+    PlainText,
+    /// Keep the link text but strip the wikilink brackets.
+    Unlink,
+    /// Leave inbound wikilinks untouched (they become unresolved).
+    None,
+}
+
+impl RewriteMode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            RewriteMode::PlainText => "plain_text",
+            RewriteMode::Unlink => "unlink",
+            RewriteMode::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DeletePageParams {
+    /// Vault-relative page path.
+    pub path: String,
+    /// Delete even when other pages link here, rewriting those links per
+    /// 'rewrite'. Without it, a page with backlinks refuses to delete and
+    /// returns the backlink list for review.
+    pub force: Option<bool>,
+    /// How inbound wikilinks are rewritten on a forced delete
+    /// (default plain_text).
+    pub rewrite: Option<RewriteMode>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewOperation {
+    /// Preview moving a page to 'destination'.
+    MovePage,
+    /// Preview deleting a page (honors 'rewrite').
+    DeletePage,
+    /// Preview moving a folder to 'destination'.
+    MoveFolder,
+}
+
+impl PreviewOperation {
+    fn as_str(&self) -> &'static str {
+        match self {
+            PreviewOperation::MovePage => "move_page",
+            PreviewOperation::DeletePage => "delete_page",
+            PreviewOperation::MoveFolder => "move_folder",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PreviewMutationParams {
+    /// The mutation to preview.
+    pub operation: PreviewOperation,
+    /// Source page or folder path.
+    pub source: String,
+    /// Destination path (moves only).
+    pub destination: Option<String>,
+    /// Link rewrite mode (delete_page only; default plain_text).
+    pub rewrite: Option<RewriteMode>,
 }
 
 /// If `value` carries an oversized `body` string, truncate it in place (on a
@@ -561,6 +676,219 @@ impl VaultMcpServer {
         render(&value)
     }
 
+    #[tool(
+        name = "vault_assign",
+        description = "File pages by declaring kind and/or project in frontmatter — the vault then relocates each file to its canonical folder automatically. THE preferred way to organise pages (use vault_move_page only for destinations assignment can't express). Accepts one path or many; bulk runs report per-path failures without aborting.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_assign(
+        &self,
+        Parameters(params): Parameters<AssignParams>,
+    ) -> Result<String, String> {
+        if params.paths.is_empty() {
+            return Err("provide at least one page path in 'paths'".to_string());
+        }
+        let clear_project = params.clear_project.unwrap_or(false);
+        if params.kind.is_none() && params.project.is_none() && !clear_project {
+            return Err(
+                "nothing to assign — provide 'kind', 'project', and/or clear_project: true"
+                    .to_string(),
+            );
+        }
+        // Validate the kind token locally for a message that lists the
+        // vocabulary; the server would reject it with less context.
+        let kind = match &params.kind {
+            Some(token) => Some(
+                Kind::from_token(token)
+                    .ok_or_else(|| {
+                        format!("unknown kind \"{token}\" — valid kinds: {KIND_TOKENS}")
+                    })?
+                    .as_str(),
+            ),
+            None => None,
+        };
+        let assign_body = serde_json::json!({
+            "kind": kind,
+            "project": params.project,
+            "clear_project": clear_project,
+        });
+
+        if let [path] = params.paths.as_slice() {
+            let mut value = self
+                .client
+                .post_json(
+                    &format!("/api/vault/pages-assign/{}", encode_vault_path(path)),
+                    &assign_body,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            truncate_body(&mut value, MAX_BODY_BYTES);
+            render(&value)
+        } else {
+            let mut bulk_body = assign_body;
+            bulk_body["paths"] = serde_json::json!(params.paths);
+            let value = self
+                .client
+                .post_json("/api/vault/pages-assign-bulk", &bulk_body)
+                .await
+                .map_err(|e| e.to_string())?;
+            render(&value)
+        }
+    }
+
+    #[tool(
+        name = "vault_move_page",
+        description = "Move/rename a page to an explicit destination path (including filename). Inbound wikilinks keep resolving. Prefer vault_assign for kind/project filing — it computes the destination for you. Preview link impact first with vault_preview_mutation.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_move_page(
+        &self,
+        Parameters(params): Parameters<MovePageParams>,
+    ) -> Result<String, String> {
+        let mut value = self
+            .client
+            .post_json(
+                &format!("/api/vault/pages-move/{}", encode_vault_path(&params.path)),
+                &serde_json::json!({ "destination": params.destination }),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        truncate_body(&mut value, MAX_BODY_BYTES);
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_folder",
+        description = "Create, delete, or move a folder. Deleting a non-empty folder requires recursive: true and deletes its pages — preview with vault_tree first. Moving a folder relocates its pages and rewrites inbound links.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_folder(
+        &self,
+        Parameters(params): Parameters<FolderParams>,
+    ) -> Result<String, String> {
+        let encoded = encode_vault_path(&params.path);
+        match params.action {
+            FolderAction::Create => {
+                let value = self
+                    .client
+                    .post_json(
+                        &format!("/api/vault/folders/{encoded}"),
+                        &serde_json::json!({}),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                render(&value)
+            }
+            FolderAction::Delete => {
+                let recursive = params.recursive.unwrap_or(false);
+                self.client
+                    .delete_json(
+                        &format!("/api/vault/folders/{encoded}"),
+                        &[("recursive", recursive.to_string())],
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                render(&serde_json::json!({
+                    "deleted": params.path,
+                    "recursive": recursive,
+                }))
+            }
+            FolderAction::Move => {
+                let destination = params.destination.as_deref().ok_or(
+                    "folder move needs a 'destination' — the new vault-relative folder path",
+                )?;
+                self.client
+                    .post_json(
+                        &format!("/api/vault/folders-move/{encoded}"),
+                        &serde_json::json!({ "destination": destination }),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                render(&serde_json::json!({
+                    "moved": params.path,
+                    "destination": destination,
+                }))
+            }
+        }
+    }
+
+    #[tool(
+        name = "vault_delete_page",
+        description = "Delete a page. Without force, a page that other pages link to refuses to delete and returns its backlinks — review them (with the user for anything load-bearing) before re-running with force: true, which rewrites those links per 'rewrite'. vault_preview_mutation shows the exact impact first.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_delete_page(
+        &self,
+        Parameters(params): Parameters<DeletePageParams>,
+    ) -> Result<String, String> {
+        let rewrite = params.rewrite.unwrap_or(RewriteMode::PlainText);
+        self.client
+            .delete_json(
+                &pages_url(&params.path),
+                &[
+                    ("force", params.force.unwrap_or(false).to_string()),
+                    ("rewrite", rewrite.as_str().to_string()),
+                ],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&serde_json::json!({
+            "deleted": params.path,
+            "rewrite": rewrite.as_str(),
+        }))
+    }
+
+    #[tool(
+        name = "vault_preview_mutation",
+        description = "Dry-run a move or delete: returns the mutation plan — file operations and every wikilink rewrite it would perform — without changing anything. Use before bulk reorganisation, deletes of linked pages, or folder moves.",
+        annotations(read_only_hint = true, idempotent_hint = true)
+    )]
+    pub async fn vault_preview_mutation(
+        &self,
+        Parameters(params): Parameters<PreviewMutationParams>,
+    ) -> Result<String, String> {
+        if matches!(
+            params.operation,
+            PreviewOperation::MovePage | PreviewOperation::MoveFolder
+        ) && params.destination.is_none()
+        {
+            return Err("this operation needs a 'destination'".to_string());
+        }
+        let value = self
+            .client
+            .post_json(
+                "/api/vault/index/preview-mutation",
+                &serde_json::json!({
+                    "operation": params.operation.as_str(),
+                    "source": params.source,
+                    "destination": params.destination.unwrap_or_default(),
+                    "rewrite": params
+                        .rewrite
+                        .unwrap_or(RewriteMode::PlainText)
+                        .as_str(),
+                }),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
     /// Fetch the current full (untruncated) body of a page for read-modify-
     /// write tools.
     async fn fetch_body(&self, path: &str) -> Result<String, String> {
@@ -594,9 +922,11 @@ impl ServerHandler for VaultMcpServer {
              relationships with vault_links. Create pages with vault_create_page (search \
              first to avoid duplicates), make targeted edits with vault_edit_page or \
              vault_append_page, and quick-capture into today's journal with \
-             vault_journal_capture. Page paths are vault-relative; page kinds (NOTE, \
-             PROJECT, JOURNAL, ...) map to canonical top-level folders. On a conflict \
-             error, re-read the page and re-apply the change."
+             vault_journal_capture. Organise by declaring kind/project with vault_assign \
+             (the vault relocates files itself); vault_preview_mutation dry-runs moves \
+             and deletes before they touch linked pages. Page paths are vault-relative; \
+             page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
+             folders. On a conflict error, re-read the page and re-apply the change."
                 .to_string(),
         );
         info
@@ -649,12 +979,17 @@ mod tests {
             names,
             [
                 "vault_append_page",
+                "vault_assign",
                 "vault_create_page",
+                "vault_delete_page",
                 "vault_edit_page",
+                "vault_folder",
                 "vault_get_page",
                 "vault_journal_capture",
                 "vault_links",
                 "vault_list_pages",
+                "vault_move_page",
+                "vault_preview_mutation",
                 "vault_search",
                 "vault_tags",
                 "vault_tree",
@@ -1105,6 +1440,258 @@ mod tests {
         let body = value["body"].as_str().unwrap();
         assert!(body.contains("captured thought"), "{body:?}");
         assert!(body.contains("another thought"), "{body:?}");
+    }
+
+    #[tokio::test]
+    async fn assign_single_page_declares_kind_and_relocates() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_assign(Parameters(AssignParams {
+                    paths: vec!["notes/alpha.md".to_string()],
+                    kind: Some("quote".to_string()),
+                    project: None,
+                    clear_project: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["kind"], "QUOTE");
+        assert_eq!(value["inferred"], false);
+        assert!(
+            value["path"].as_str().unwrap().starts_with("quotes/"),
+            "assign should relocate to the canonical folder: {}",
+            value["path"]
+        );
+    }
+
+    #[tokio::test]
+    async fn assign_bulk_reports_moves_per_path() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_assign(Parameters(AssignParams {
+                    paths: vec!["notes/alpha.md".to_string(), "notes/beta.md".to_string()],
+                    kind: Some("TODO".to_string()),
+                    project: None,
+                    clear_project: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["moved"].as_array().unwrap().len(), 2);
+        assert_eq!(value["failed"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn assign_requires_something_to_assign() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_assign(Parameters(AssignParams {
+                paths: vec!["notes/alpha.md".to_string()],
+                kind: None,
+                project: None,
+                clear_project: None,
+            }))
+            .await
+            .expect_err("no-op assign should be rejected");
+        assert!(err.contains("nothing to assign"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn assign_rejects_unknown_kind() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_assign(Parameters(AssignParams {
+                paths: vec!["notes/alpha.md".to_string()],
+                kind: Some("recipe".to_string()),
+                project: None,
+                clear_project: None,
+            }))
+            .await
+            .expect_err("unknown kind should be rejected");
+        assert!(err.contains("QUOTE"), "should list valid kinds: {err}");
+    }
+
+    #[tokio::test]
+    async fn move_page_relocates_to_the_destination() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_move_page(Parameters(MovePageParams {
+                    path: "notes/beta.md".to_string(),
+                    destination: "notes/renamed-beta.md".to_string(),
+                }))
+                .await,
+        );
+        assert_eq!(value["path"], "notes/renamed-beta.md");
+
+        let err = server
+            .vault_get_page(Parameters(GetPageParams {
+                path: Some("notes/beta.md".to_string()),
+                id: None,
+            }))
+            .await
+            .expect_err("old path should be gone");
+        assert!(err.contains("404"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn folder_create_then_move_then_delete() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_folder(Parameters(FolderParams {
+                    action: FolderAction::Create,
+                    path: "scratch".to_string(),
+                    destination: None,
+                    recursive: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["path"], "scratch");
+
+        let value = parse(
+            server
+                .vault_folder(Parameters(FolderParams {
+                    action: FolderAction::Move,
+                    path: "scratch".to_string(),
+                    destination: Some("scratch2".to_string()),
+                    recursive: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["destination"], "scratch2");
+
+        let value = parse(
+            server
+                .vault_folder(Parameters(FolderParams {
+                    action: FolderAction::Delete,
+                    path: "scratch2".to_string(),
+                    destination: None,
+                    recursive: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["deleted"], "scratch2");
+    }
+
+    #[tokio::test]
+    async fn folder_move_requires_a_destination() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_folder(Parameters(FolderParams {
+                action: FolderAction::Move,
+                path: "notes".to_string(),
+                destination: None,
+                recursive: None,
+            }))
+            .await
+            .expect_err("move without destination should be rejected");
+        assert!(err.contains("destination"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn folder_delete_of_nonempty_folder_needs_recursive() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_folder(Parameters(FolderParams {
+                action: FolderAction::Delete,
+                path: "notes".to_string(),
+                destination: None,
+                recursive: None,
+            }))
+            .await
+            .expect_err("non-empty folder delete without recursive should fail");
+        assert!(err.contains("409"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn delete_page_with_backlinks_returns_them_and_asks_for_force() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        // alpha links to Beta, so beta has a backlink.
+        let err = server
+            .vault_delete_page(Parameters(DeletePageParams {
+                path: "notes/beta.md".to_string(),
+                force: None,
+                rewrite: None,
+            }))
+            .await
+            .expect_err("backlinked page should refuse deletion");
+        assert!(err.contains("backlink"), "{err}");
+        assert!(err.contains("notes/alpha.md"), "should list sources: {err}");
+        assert!(err.contains("force: true"), "{err}");
+
+        // Forced delete succeeds and the page is gone.
+        let value = parse(
+            server
+                .vault_delete_page(Parameters(DeletePageParams {
+                    path: "notes/beta.md".to_string(),
+                    force: Some(true),
+                    rewrite: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["deleted"], "notes/beta.md");
+        let err = server
+            .vault_get_page(Parameters(GetPageParams {
+                path: Some("notes/beta.md".to_string()),
+                id: None,
+            }))
+            .await
+            .expect_err("deleted page should 404");
+        assert!(err.contains("404"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn delete_page_without_backlinks_needs_no_force() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_delete_page(Parameters(DeletePageParams {
+                    path: "notes/alpha.md".to_string(),
+                    force: None,
+                    rewrite: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["deleted"], "notes/alpha.md");
+    }
+
+    #[tokio::test]
+    async fn preview_mutation_reports_a_plan_without_mutating() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let result = server
+            .vault_preview_mutation(Parameters(PreviewMutationParams {
+                operation: PreviewOperation::DeletePage,
+                source: "notes/beta.md".to_string(),
+                destination: None,
+                rewrite: None,
+            }))
+            .await;
+        assert!(result.is_ok(), "preview failed: {result:?}");
+
+        // The preview must not have deleted anything.
+        let read = server
+            .vault_get_page(Parameters(GetPageParams {
+                path: Some("notes/beta.md".to_string()),
+                id: None,
+            }))
+            .await;
+        assert!(read.is_ok(), "preview mutated the vault: {read:?}");
+    }
+
+    #[tokio::test]
+    async fn preview_move_requires_a_destination() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_preview_mutation(Parameters(PreviewMutationParams {
+                operation: PreviewOperation::MovePage,
+                source: "notes/beta.md".to_string(),
+                destination: None,
+                rewrite: None,
+            }))
+            .await
+            .expect_err("move preview without destination should be rejected");
+        assert!(err.contains("destination"), "{err}");
     }
 
     #[tokio::test]

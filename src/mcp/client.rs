@@ -65,7 +65,7 @@ impl ApiCallError {
 /// the server's uniform `ApiError` payload when present and appending a
 /// next-step hint keyed on the status code.
 pub(crate) fn api_error_message(status: u16, body: &str) -> String {
-    let (error, server_hint) = match serde_json::from_str::<Value>(body) {
+    let (error, server_hint, detail) = match serde_json::from_str::<Value>(body) {
         Ok(parsed) => {
             let error = parsed
                 .get("error")
@@ -76,19 +76,30 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
                 .get("hint")
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            (error, hint)
+            let detail = parsed.get("detail").filter(|d| !d.is_null()).cloned();
+            (error, hint, detail)
         }
-        Err(_) => (body.to_string(), None),
+        Err(_) => (body.to_string(), None, None),
     };
 
     let mut message = format!("API error {status}: {error}");
     if let Some(hint) = server_hint {
         message.push_str(&format!(" (hint: {hint})"));
     }
+    if let Some(detail) = detail {
+        message.push_str(&format!(" — detail: {detail}"));
+    }
     match status {
         404 => message.push_str(
             " — the page may have been moved by a kind/project assignment; \
              locate it with vault_search",
+        ),
+        // A backlink conflict is a deliberate guard, not a lost race: the
+        // caller must confirm before forcing. Everything else on 409 is
+        // optimistic concurrency.
+        409 if message.contains("backlink") => message.push_str(
+            " — review the listed backlinks with the user, then re-run with force: true \
+             to delete and rewrite them",
         ),
         409 => message
             .push_str(" — the page changed concurrently; re-read it with vault_get_page and retry"),
@@ -152,6 +163,18 @@ impl ApiClient {
         self.send(url, request).await
     }
 
+    /// DELETE `path` with query parameters. Success responses are typically
+    /// 204 with no body, which parses to `Value::Null`.
+    pub async fn delete_json(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, ApiCallError> {
+        let url = format!("{}{}", self.base, path);
+        let request = self.http.delete(&url).query(query);
+        self.send(url, request).await
+    }
+
     /// Send a prepared request and translate the outcome: transport failures
     /// become [`ApiCallError::Unreachable`], non-2xx responses become
     /// agent-facing [`ApiCallError::Api`] messages, and success bodies parse
@@ -180,6 +203,12 @@ impl ApiClient {
                 status: status.as_u16(),
                 message: api_error_message(status.as_u16(), &body),
             });
+        }
+
+        // Some mutation endpoints succeed with an empty body (204 deletes,
+        // the folder move's bare 200).
+        if body.trim().is_empty() {
+            return Ok(Value::Null);
         }
 
         serde_json::from_str(&body).map_err(|e| ApiCallError::Protocol {
@@ -237,6 +266,26 @@ mod tests {
     fn api_error_message_adds_retry_hint_on_409() {
         let msg = api_error_message(409, r#"{"status":409,"error":"page changed"}"#);
         assert!(msg.contains("re-read"), "missing retry hint: {msg}");
+    }
+
+    #[test]
+    fn api_error_message_backlink_conflict_guides_toward_force() {
+        let msg = api_error_message(
+            409,
+            r#"{"status":409,"error":"page has 2 backlink(s); use force=true to delete","detail":{"backlinks":["notes/a.md","notes/b.md"]}}"#,
+        );
+        assert!(msg.contains("notes/a.md"), "detail missing: {msg}");
+        assert!(msg.contains("force: true"), "{msg}");
+        assert!(!msg.contains("re-read"), "wrong 409 hint: {msg}");
+    }
+
+    #[test]
+    fn api_error_message_includes_detail_payload() {
+        let msg = api_error_message(
+            400,
+            r#"{"status":400,"error":"bad","detail":{"field":"x"}}"#,
+        );
+        assert!(msg.contains(r#""field":"x""#), "{msg}");
     }
 
     #[test]
