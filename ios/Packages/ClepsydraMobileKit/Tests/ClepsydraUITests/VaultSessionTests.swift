@@ -128,6 +128,76 @@ final class VaultSessionTests: XCTestCase {
         XCTAssertTrue(session.isConnected)
     }
 
+    func testSuccessfulConnectRemembersTheAddressForLaterDiscovery() async {
+        let store = InMemoryServerAddressStore()
+        let session = VaultSession(addressStore: store, apiFactory: { _ in StubVaultAPI() })
+        session.addressInput = "  HTTPS://vault.example/  "
+
+        await session.connect()
+
+        // The normalized form is remembered, so a later sweep probes one
+        // canonical address rather than each spelling the user typed.
+        XCTAssertEqual(store.recentAddresses, ["https://vault.example"])
+    }
+
+    func testFailedConnectDoesNotRememberTheAddress() async {
+        let store = InMemoryServerAddressStore()
+        let session = VaultSession(
+            addressStore: store,
+            apiFactory: { _ in StubVaultAPI(error: .unreachable) }
+        )
+        session.addressInput = "https://down.example"
+
+        await session.connect()
+
+        XCTAssertTrue(store.recentAddresses.isEmpty)
+    }
+
+    func testDiscoverPublishesRespondingServersAndClearsBusyState() async {
+        let store = InMemoryServerAddressStore(recents: ["https://awake.example"])
+        let session = VaultSession(
+            addressStore: store,
+            apiFactory: { _ in StubVaultAPI() },
+            discovery: ServerDiscovery { server in
+                server.url.absoluteString == "https://awake.example"
+            }
+        )
+
+        await session.discover()
+
+        XCTAssertEqual(session.discoveredServers.map(\.url.absoluteString), ["https://awake.example"])
+        XCTAssertFalse(session.isDiscovering)
+    }
+
+    func testDiscoverReplacesRatherThanAccumulatingResults() async {
+        let store = InMemoryServerAddressStore(recents: ["https://awake.example"])
+        let session = VaultSession(
+            addressStore: store,
+            apiFactory: { _ in StubVaultAPI() },
+            discovery: ServerDiscovery { server in
+                server.url.absoluteString == "https://awake.example"
+            }
+        )
+
+        await session.discover()
+        await session.discover()
+
+        XCTAssertEqual(session.discoveredServers.count, 1)
+    }
+
+    func testSelectingADiscoveredServerFillsTheAddressField() async {
+        let session = VaultSession(
+            addressStore: InMemoryServerAddressStore(),
+            apiFactory: { _ in StubVaultAPI() }
+        )
+        let server = try! ServerURL("https://picked.example")
+
+        await session.connect(to: server)
+
+        XCTAssertEqual(session.addressInput, "https://picked.example")
+        XCTAssertTrue(session.isConnected)
+    }
+
     func testUserDefaultsStoreReadsAndRemovesOneKey() {
         let suiteName = "VaultSessionTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -141,14 +211,65 @@ final class VaultSessionTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "server"))
         defaults.removePersistentDomain(forName: suiteName)
     }
+
+    func testRememberPutsTheNewestFirstAndDropsDuplicates() {
+        let store = InMemoryServerAddressStore()
+
+        store.remember("https://a.example")
+        store.remember("https://b.example")
+        store.remember("https://a.example")
+
+        XCTAssertEqual(store.recentAddresses, ["https://a.example", "https://b.example"])
+    }
+
+    func testRememberCapsTheRecentList() {
+        let store = InMemoryServerAddressStore()
+
+        for index in 0..<(ServerAddressStore.maxRecents + 3) {
+            store.remember("https://host\(index).example")
+        }
+
+        XCTAssertEqual(store.recentAddresses.count, ServerAddressStore.maxRecents)
+        // The oldest entries are the ones discarded.
+        XCTAssertFalse(store.recentAddresses.contains("https://host0.example"))
+    }
+
+    func testUserDefaultsStorePersistsRecentAddresses() {
+        let suiteName = "VaultSessionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = ServerAddressStore(defaults: defaults, key: "server", recentsKey: "recents")
+
+        store.remember("https://vault.example")
+
+        XCTAssertEqual(defaults.stringArray(forKey: "recents"), ["https://vault.example"])
+        XCTAssertEqual(
+            ServerAddressStore(defaults: defaults, key: "server", recentsKey: "recents").recentAddresses,
+            ["https://vault.example"]
+        )
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testAnExistingInstallKeepsItsServerAsTheFirstRecent() {
+        let suiteName = "VaultSessionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        // Simulates an install predating the recents list: one saved address
+        // and no recents key at all.
+        defaults.set("https://legacy.example", forKey: "server")
+        let store = ServerAddressStore(defaults: defaults, key: "server", recentsKey: "recents")
+
+        XCTAssertEqual(store.recentAddresses, ["https://legacy.example"])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
 }
 
 @MainActor
 private final class InMemoryServerAddressStore: ServerAddressStoring {
     var serverAddress: String?
+    var recentAddresses: [String] = []
 
-    init(address: String? = nil) {
+    init(address: String? = nil, recents: [String] = []) {
         self.serverAddress = address
+        self.recentAddresses = recents
     }
 }
 
