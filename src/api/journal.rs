@@ -153,10 +153,10 @@ async fn get_today(
     let (vault_path, _created) = ensure_journal(&state, &date).await?;
 
     let abs_path = state.vault.resolve(&vault_path);
-    let page = Page::from_file(&abs_path, vault_path.clone())
+    let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    let detail = page_detail(page.path, page.meta, page.body);
+    let detail = page_detail(page);
 
     // Query for carried-forward tasks: incomplete tasks from recent journals
     // (past 7 days, excluding today).
@@ -271,10 +271,10 @@ async fn get_by_date(
         return Err(ApiError::not_found(format!("journal not found: {date}")));
     }
 
-    let page = Page::from_file(&abs_path, vault_path.clone())
+    let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    Ok(Json(page_detail(page.path, page.meta, page.body)))
+    Ok(Json(page_detail(page)))
 }
 
 /// GET /journal/range?from=YYYY-MM-DD&to=YYYY-MM-DD — list journals in range.
@@ -415,7 +415,7 @@ async fn capture_today(
 
     Ok((
         StatusCode::OK,
-        Json(page_detail(result.path, result.meta, result.body)),
+        Json(page_detail(result)),
     )
         .into_response())
 }

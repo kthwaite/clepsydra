@@ -288,6 +288,8 @@ export function Folio({ tabId, path }: FolioProps) {
                 <SaveIndicator
                   status={editor.saveStatus}
                   error={editor.saveError}
+                  revisionConflict={editor.revisionConflict}
+                  onReloadAfterConflict={editor.reloadAfterConflict}
                 />
               </div>
             </div>

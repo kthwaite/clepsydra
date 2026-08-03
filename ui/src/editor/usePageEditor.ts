@@ -1,11 +1,44 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Descendant, Editor } from "slate";
 import { usePage, useUpdatePage } from "#/api/pages";
+import type { ApiError } from "#/api/types";
 import { markdownToSlate, slateToMarkdown } from "./convert";
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "error";
 
 const DEBOUNCE_MS = 1500;
+
+export interface RevisionConflict {
+  currentRevision: string;
+}
+
+function isApiError(value: unknown): value is ApiError {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "status" in value &&
+    typeof value.status === "number" &&
+    "error" in value &&
+    typeof value.error === "string"
+  );
+}
+
+function decodeRevisionConflict(value: unknown): RevisionConflict | null {
+  const apiError = isApiError(value) ? value : null;
+  if (
+    apiError?.status !== 409 ||
+    typeof apiError.detail !== "object" ||
+    apiError.detail === null ||
+    !("code" in apiError.detail) ||
+    apiError.detail.code !== "revision_conflict" ||
+    !("current_revision" in apiError.detail) ||
+    typeof apiError.detail.current_revision !== "string"
+  ) {
+    return null;
+  }
+  return { currentRevision: apiError.detail.current_revision };
+}
+
 
 interface PageEditorState {
   isLoading: boolean;
@@ -22,6 +55,8 @@ interface PageEditorState {
   saveError: string | null;
   onSlateChange: (value: Descendant[], editor: Editor) => void;
   saveNow: () => void;
+  revisionConflict: RevisionConflict | null;
+  reloadAfterConflict: () => Promise<void>;
   createdAt: string | null;
   updatedAt: string | null;
   bodyMarkdown: string;
@@ -31,13 +66,11 @@ interface PageEditorState {
 }
 
 export function usePageEditor(path: string): PageEditorState {
-  const { data: page, isLoading, error } = usePage(path);
+  const { data: page, isLoading, error, refetch: refetchPage } = usePage(path);
   const updatePage = useUpdatePage();
-  // The mutation result object is recreated on every render; only .mutate is
-  // referentially stable. doSave must depend on the stable function, or the
-  // [doSave]-keyed effect below re-runs each render and its cleanup would
-  // flush the pending debounce timer prematurely.
-  const updatePageMutate = updatePage.mutate;
+  // The mutation result object is recreated on every render; mutateAsync is
+  // referentially stable and keeps doSave/effect cleanup stable as well.
+  const updatePageMutateAsync = updatePage.mutateAsync;
 
   const editorValueRef = useRef<Descendant[]>([]);
 
@@ -77,17 +110,19 @@ export function usePageEditor(path: string): PageEditorState {
   const savedBodyGenRef = useRef(0);
   const savedMetaGenRef = useRef(0);
 
-  // Monotonic counter incremented on every doSave attempt (including no-op
-  // reconciliations that don't send a mutation). onSuccess/onError callbacks
-  // capture the value at fire time and no-op if a newer save attempt has been
-  // initiated, preventing stale responses from regressing savedRef or status.
-  const saveSeqRef = useRef(0);
+  const revisionRef = useRef("");
+  const savingRef = useRef(false);
+  const saveRequestedRef = useRef(false);
+  const conflictRef = useRef<RevisionConflict | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [revisionConflict, setRevisionConflict] =
+    useState<RevisionConflict | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const doSaveRef = useRef<() => void>(() => undefined);
 
   const initialValue = useMemo(() => {
     if (!page)
@@ -100,6 +135,7 @@ export function usePageEditor(path: string): PageEditorState {
   // triggered by our own saves from overwriting in-flight user work.
   useEffect(() => {
     if (!page) return;
+    if (conflictRef.current) return;
     const bodyDirty = bodyEditGenRef.current > savedBodyGenRef.current;
     const metaDirty = metaEditGenRef.current > savedMetaGenRef.current;
     if (bodyDirty || metaDirty) return;
@@ -115,6 +151,7 @@ export function usePageEditor(path: string): PageEditorState {
       savedRef.current.body !== page.body;
     const nextValue = markdownToSlate(page.body);
     savedRef.current = { title: t, tags: tg, aliases: al, body: page.body };
+    revisionRef.current = page.revision;
     editorValueRef.current = nextValue;
     if (shouldResetEditor) {
       setEditorRevision((revision) => revision + 1);
@@ -128,14 +165,20 @@ export function usePageEditor(path: string): PageEditorState {
       timerRef.current = null;
     }
 
-    // Invalidate callbacks from older in-flight saves on every save attempt,
-    // including no-op reconciliation paths that don't send a mutation.
-    saveSeqRef.current += 1;
-    const thisSaveSeq = saveSeqRef.current;
+    if (conflictRef.current) {
+      setSaveStatus("error");
+      return;
+    }
 
-    // Snapshot generation counters at save start. onSuccess advances the
-    // saved watermark to these values — edits that arrive during the save
-    // flight will have incremented past them and stay dirty.
+    if (savingRef.current) {
+      saveRequestedRef.current = true;
+      return;
+    }
+
+
+    // Snapshot generation counters at save start. A successful save advances
+    // only these watermarks, so edits made while the request is in flight stay
+    // dirty and are serialized by the next queued request.
     const saveBodyGen = bodyEditGenRef.current;
     const saveMetaGen = metaEditGenRef.current;
     const bodyDirty = saveBodyGen > savedBodyGenRef.current;
@@ -145,14 +188,11 @@ export function usePageEditor(path: string): PageEditorState {
     const currentAliases = aliasesRef.current;
 
     // Only serialize the Slate tree when the user actually edited body content.
-    // This prevents the lossy mdast→slate→mdast round-trip from silently
-    // dropping unsupported markdown nodes (tables, HTML blocks, footnotes, etc.)
-    // when only metadata was changed.
+    // This prevents metadata-only edits from losing unsupported markdown nodes.
     const body = bodyDirty
       ? slateToMarkdown(editorValueRef.current)
       : savedRef.current.body;
     const bodyChanged = bodyDirty && body !== savedRef.current.body;
-
     const titleChanged = currentTitle !== savedRef.current.title;
     const tagsChanged =
       JSON.stringify(currentTags) !== JSON.stringify(savedRef.current.tags);
@@ -161,57 +201,138 @@ export function usePageEditor(path: string): PageEditorState {
       JSON.stringify(savedRef.current.aliases);
 
     if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
-      // User reverted to saved state — clear the dirty gap so the sync
-      // effect can accept future refetches again.
       savedBodyGenRef.current = saveBodyGen;
       savedMetaGenRef.current = saveMetaGen;
       setSaveStatus("saved");
       return;
     }
 
+    savingRef.current = true;
     setSaveStatus("saving");
 
-    updatePageMutate(
-      {
-        params: { path: { path } },
-        body: {
-          ...(titleChanged ? { title: currentTitle || null } : {}),
-          ...(tagsChanged ? { tags: currentTags } : {}),
-          ...(aliasesChanged ? { aliases: currentAliases } : {}),
-          ...(bodyChanged ? { body } : {}),
-        },
-      },
-      {
-        onSuccess: () => {
-          // Stale response guard: if a newer save was initiated, this
-          // response is outdated — skip to avoid regressing savedRef.
-          if (thisSaveSeq !== saveSeqRef.current) return;
+    void (async () => {
+      try {
+        const response = await updatePageMutateAsync({
+          params: { path: { path } },
+          body: {
+            expected_revision: revisionRef.current,
+            ...(titleChanged ? { title: currentTitle || null } : {}),
+            ...(tagsChanged ? { tags: currentTags } : {}),
+            ...(aliasesChanged ? { aliases: currentAliases } : {}),
+            ...(bodyChanged ? { body } : {}),
+          },
+        });
 
-          savedRef.current = {
-            title: currentTitle,
-            tags: currentTags,
-            aliases: currentAliases,
-            body,
-          };
-          // Advance saved watermarks to the generation captured at save start.
-          // If user edited during flight, edit gens will be higher and dirty
-          // state is preserved; if not, gens match and dirty clears.
-          savedBodyGenRef.current = saveBodyGen;
-          savedMetaGenRef.current = saveMetaGen;
-          setSaveStatus("saved");
-          setSaveError(null);
-        },
-        onError: (err) => {
-          if (thisSaveSeq !== saveSeqRef.current) return;
-          setSaveStatus("error");
-          setSaveError(err instanceof Error ? err.message : "Save failed");
-        },
-      },
-    );
-  }, [path, updatePageMutate]);
+        revisionRef.current = response.revision;
+        savedRef.current = {
+          title: response.meta.title ?? "",
+          tags: response.meta.tags ?? [],
+          aliases: response.meta.aliases ?? [],
+          body: response.body,
+        };
+        savedBodyGenRef.current = saveBodyGen;
+        savedMetaGenRef.current = saveMetaGen;
+        savingRef.current = false;
+        setSaveError(null);
+
+        const shouldDrain = saveRequestedRef.current;
+        saveRequestedRef.current = false;
+        if (shouldDrain) {
+          doSaveRef.current();
+          return;
+        }
+
+        const stillDirty =
+          bodyEditGenRef.current > savedBodyGenRef.current ||
+          metaEditGenRef.current > savedMetaGenRef.current;
+        setSaveStatus(stillDirty ? "unsaved" : "saved");
+      } catch (err) {
+        savingRef.current = false;
+        saveRequestedRef.current = false;
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        const conflict = decodeRevisionConflict(err);
+        if (conflict) {
+          conflictRef.current = conflict;
+          setRevisionConflict(conflict);
+        }
+        setSaveStatus("error");
+        setSaveError(
+          isApiError(err)
+            ? err.error
+            : err instanceof Error
+              ? err.message
+              : "Save failed",
+        );
+      }
+    })();
+  }, [path, updatePageMutateAsync]);
+
+  doSaveRef.current = doSave;
+
+
+  const reloadAfterConflict = useCallback(async () => {
+    if (!conflictRef.current) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    try {
+      const result = await refetchPage();
+      const latest = result.data;
+      if (!latest) {
+        setSaveStatus("error");
+        setSaveError("Failed to reload page");
+        return;
+      }
+
+      const nextTitle = latest.meta.title ?? "";
+      const nextTags = latest.meta.tags ?? [];
+      const nextAliases = latest.meta.aliases ?? [];
+      const nextValue = markdownToSlate(latest.body);
+      titleRef.current = nextTitle;
+      tagsRef.current = nextTags;
+      aliasesRef.current = nextAliases;
+      setTitleState(nextTitle);
+      setTagsState(nextTags);
+      setAliasesState(nextAliases);
+      editorValueRef.current = nextValue;
+      savedRef.current = {
+        title: nextTitle,
+        tags: nextTags,
+        aliases: nextAliases,
+        body: latest.body,
+      };
+      savedBodyGenRef.current = bodyEditGenRef.current;
+      savedMetaGenRef.current = metaEditGenRef.current;
+      revisionRef.current = latest.revision;
+      saveRequestedRef.current = false;
+      conflictRef.current = null;
+      setRevisionConflict(null);
+      setSaveError(null);
+      setSaveStatus("saved");
+      setEditorRevision((revision) => revision + 1);
+    } catch (err) {
+      setSaveStatus("error");
+      setSaveError(
+        isApiError(err)
+          ? err.error
+          : err instanceof Error
+            ? err.message
+            : "Save failed",
+      );
+    }
+  }, [refetchPage]);
 
   const scheduleSave = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    clearTimeout(timerRef.current ?? undefined);
+    if (conflictRef.current) {
+      setSaveStatus("error");
+      return;
+    }
     setSaveStatus("unsaved");
     timerRef.current = setTimeout(doSave, DEBOUNCE_MS);
   }, [doSave]);
@@ -294,6 +415,8 @@ export function usePageEditor(path: string): PageEditorState {
     setAliases,
     saveStatus,
     saveError,
+    revisionConflict,
+    reloadAfterConflict,
     onSlateChange,
     saveNow: doSave,
     createdAt: page?.meta?.created_at ?? null,

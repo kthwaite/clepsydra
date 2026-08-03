@@ -18,3 +18,6 @@ lcov.info
 .pi/skills/
 .superpowers/
 .agents/skills/
+ios/ClepsydraMobile.xcodeproj/
+ios/Packages/ClepsydraMobileKit/.build/
+ios/Packages/ClepsydraMobileKit/.swiftpm/
