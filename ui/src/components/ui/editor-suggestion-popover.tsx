@@ -34,11 +34,18 @@ export function EditorSuggestionPopover<T>({
 }: EditorSuggestionPopoverProps<T>) {
   const listboxId = useId();
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const { refs, floatingStyles, update } = useFloating({
+  const { refs, floatingStyles, update, isPositioned } = useFloating({
     placement: "bottom-start",
     strategy: "fixed",
     middleware: [offset(6), flip(), shift({ padding: 8 })],
   });
+  // The popover mounts before floating-ui has measured the reference; keep it
+  // invisible and click-through until positioned so it doesn't flash at the
+  // viewport origin. (Not visibility:hidden — that would drop it from the
+  // accessibility tree while unpositioned.)
+  const positionedStyles = isPositioned
+    ? floatingStyles
+    : { ...floatingStyles, opacity: 0, pointerEvents: "none" as const };
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -90,7 +97,7 @@ export function EditorSuggestionPopover<T>({
       <div
         ref={refs.setFloating}
         className="fixed z-50 border border-border bg-popover p-2 text-xs text-muted-foreground shadow-md"
-        style={floatingStyles}
+        style={positionedStyles}
       >
         Searching...
       </div>
@@ -103,7 +110,7 @@ export function EditorSuggestionPopover<T>({
       <div
         ref={refs.setFloating}
         className="fixed z-50 border border-border bg-popover p-2 text-xs text-muted-foreground shadow-md"
-        style={floatingStyles}
+        style={positionedStyles}
       >
         {emptyMessage}
       </div>
@@ -119,7 +126,7 @@ export function EditorSuggestionPopover<T>({
       id={listboxId}
       aria-activedescendant={activeOptionId}
       className="fixed z-50 max-h-64 overflow-y-auto border border-border bg-popover shadow-md"
-      style={floatingStyles}
+      style={positionedStyles}
     >
       {items.map((item, index) => {
         const optionId = `${listboxId}-option-${index}`;

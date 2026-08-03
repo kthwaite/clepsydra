@@ -19,21 +19,33 @@ function getDomRangeRect(domRange: globalThis.Range): DOMRect {
 export function createSelectionReference(
   editor: Editor,
 ): VirtualElement | null {
-  if (!editor.selection || !Range.isCollapsed(editor.selection)) {
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) {
     return null;
   }
 
-  try {
-    const domRange = ReactEditor.toDOMRange(
-      editor as Editor & ReactEditor,
-      editor.selection,
-    );
+  // This is called during render, where the DOM may not yet contain the text
+  // the selection points at (React commits it afterwards) — resolving the DOM
+  // range eagerly would fail there. Floating UI measures after commit, so the
+  // resolution must happen per-measurement, not at creation.
+  const resolveDomRange = (): globalThis.Range | null => {
+    try {
+      return ReactEditor.toDOMRange(editor as Editor & ReactEditor, selection);
+    } catch {
+      return null;
+    }
+  };
 
-    return {
-      getBoundingClientRect: () => getDomRangeRect(domRange),
-      getClientRects: () => domRange.getClientRects(),
-    };
-  } catch {
-    return null;
-  }
+  return {
+    getBoundingClientRect: () => {
+      const domRange = resolveDomRange();
+      return domRange ? getDomRangeRect(domRange) : new DOMRect();
+    },
+    getClientRects: () => {
+      const domRange = resolveDomRange();
+      return domRange
+        ? domRange.getClientRects()
+        : ([] as unknown as DOMRectList);
+    },
+  };
 }
