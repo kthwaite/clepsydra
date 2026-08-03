@@ -441,6 +441,9 @@ pub async fn get_page_by_id(
 ) -> Result<Json<PageDetail>, ApiError> {
     for _ in 0..BY_ID_PATH_ATTEMPTS {
         let candidate = indexed_page_path_by_id(&state, &uuid).await?;
+        state
+            .mutation_coordinator
+            .observe_page_id_lookup(&candidate);
         let guard = state
             .mutation_coordinator
             .lock_paths(std::slice::from_ref(&candidate))
@@ -600,6 +603,9 @@ pub async fn update_page_by_id(
 ) -> Result<Json<PageDetail>, ApiError> {
     for _ in 0..BY_ID_PATH_ATTEMPTS {
         let candidate = indexed_page_path_by_id(&state, &uuid).await?;
+        state
+            .mutation_coordinator
+            .observe_page_id_lookup(&candidate);
         let attempted = candidate.clone();
         match update_page_at_path(
             Arc::clone(&state),

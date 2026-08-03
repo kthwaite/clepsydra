@@ -11,7 +11,7 @@ public struct AppRootView: View {
     public var body: some View {
         Group {
             if session.isConnected {
-                ConnectedVaultPlaceholder()
+                ConnectedVaultView(session: session)
             } else {
                 ServerSetupView(session: session)
             }
@@ -23,8 +23,27 @@ public struct AppRootView: View {
     }
 }
 
-private struct ConnectedVaultPlaceholder: View {
+private struct ConnectedVaultView: View {
+    let session: VaultSession
+    @State private var query = ""
+
     var body: some View {
-        Text("Connected to Clepsydra")
+        VStack(spacing: 24) {
+            TextField("Search your vault", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("vault-search-field")
+
+            ContentUnavailableView(
+                "Search your vault",
+                systemImage: "magnifyingglass",
+                description: Text("Enter a search term to find pages.")
+            )
+
+            Button("Disconnect", role: .destructive) {
+                session.disconnect()
+            }
+        }
+        .padding()
+        .navigationTitle("Clepsydra")
     }
 }

@@ -19,11 +19,13 @@ use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
 
 type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
+type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
     locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
+    after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -181,6 +183,7 @@ impl MutationCoordinator {
         Self {
             locks: parking_lot::Mutex::new(HashMap::new()),
             before_update_publish_hook: parking_lot::Mutex::new(None),
+            after_page_id_lookup_hook: parking_lot::Mutex::new(None),
         }
     }
 
@@ -192,6 +195,23 @@ impl MutationCoordinator {
         hook: Option<Arc<BeforeUpdatePublishHook>>,
     ) {
         *self.before_update_publish_hook.lock() = hook;
+    }
+
+    /// Install a synchronization observer after an indexed UUID lookup and
+    /// before its candidate path is acquired or used.
+    #[doc(hidden)]
+    pub fn set_after_page_id_lookup_hook(
+        &self,
+        hook: Option<Arc<AfterPageIdLookupHook>>,
+    ) {
+        *self.after_page_id_lookup_hook.lock() = hook;
+    }
+
+    pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
+        let hook = self.after_page_id_lookup_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook(path);
+        }
     }
 
     /// Lock the requested paths for mutation and every ancestor for subtree

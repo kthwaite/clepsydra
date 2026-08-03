@@ -13,6 +13,7 @@ public struct ServerSetupView: View {
         Form {
             Section {
                 TextField("Server URL", text: $session.addressInput)
+                    .disabled(!session.canEditAddress)
 #if os(iOS)
                     .keyboardType(.URL)
 #endif
@@ -35,7 +36,7 @@ public struct ServerSetupView: View {
                         }
                     }
                 }
-                .disabled(session.isConnecting)
+                .disabled(!session.canEditAddress)
             } footer: {
                 if let errorMessage = session.errorMessage {
                     Text(errorMessage)

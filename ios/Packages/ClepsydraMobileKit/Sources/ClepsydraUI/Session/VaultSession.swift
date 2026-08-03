@@ -43,6 +43,10 @@ public final class VaultSession {
         return false
     }
 
+    public var canEditAddress: Bool {
+        !isConnecting
+    }
+
     public var isConnected: Bool {
         if case .connected = state { return true }
         return false

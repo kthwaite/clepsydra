@@ -111,6 +111,23 @@ final class VaultSessionTests: XCTestCase {
         XCTAssertEqual(store.serverAddress, "https://vault.example")
     }
 
+    func testAddressInputCannotChangeDuringConnection() async {
+        let api = BlockingVaultAPI()
+        let session = VaultSession(addressStore: InMemoryServerAddressStore(), apiFactory: { _ in api })
+        session.addressInput = "https://vault.example"
+
+        let connection = Task { await session.connect() }
+        while !api.isWaiting {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(session.isConnecting)
+        XCTAssertFalse(session.canEditAddress)
+        api.resume()
+        await connection.value
+        XCTAssertTrue(session.isConnected)
+    }
+
     func testUserDefaultsStoreReadsAndRemovesOneKey() {
         let suiteName = "VaultSessionTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -176,6 +193,28 @@ private final class StubVaultAPI: VaultAPI, @unchecked Sendable {
     func uptime() async throws {
         uptimeCallCount += 1
         if let error { throw error }
+    }
+
+    func search(query: String, limit: Int) async throws -> [SearchResult] { [] }
+    func page(id: UUID) async throws -> PageDetail { fatalError("unused") }
+    func createPage(_ request: CreatePageRequest) async throws -> PageDetail { fatalError("unused") }
+    func updatePage(id: UUID, request: UpdatePageRequest) async throws -> PageDetail { fatalError("unused") }
+}
+private final class BlockingVaultAPI: VaultAPI, @unchecked Sendable {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var isWaiting = false
+
+    func uptime() async throws {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            self.continuation = continuation
+            self.isWaiting = true
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+        isWaiting = false
     }
 
     func search(query: String, limit: Int) async throws -> [SearchResult] { [] }
