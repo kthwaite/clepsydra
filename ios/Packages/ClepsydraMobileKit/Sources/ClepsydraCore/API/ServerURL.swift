@@ -27,8 +27,9 @@ public struct ServerURL: Equatable, Hashable, Sendable {
             throw ServerURLError.pathNotAllowed
         }
 
+        components.scheme = "https"
         components.path = ""
-        guard let normalizedURL = components.url, normalizedURL.scheme?.lowercased() == "https" else {
+        guard let normalizedURL = components.url, normalizedURL.scheme == "https" else {
             throw ServerURLError.invalidURL
         }
         self.url = normalizedURL
