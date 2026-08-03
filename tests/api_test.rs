@@ -1,8 +1,11 @@
 mod support;
 
+use std::future::{Future, poll_fn};
+use std::pin::Pin;
 use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::Poll;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -57,6 +60,36 @@ fn markdown_file_count(root: &std::path::Path) -> usize {
                 .sum()
         })
         .unwrap_or(0)
+}
+
+async fn advance_request_to_held_path_lock<F>(
+    mut request: Pin<&mut F>,
+    index: &IndexHandle,
+) where
+    F: Future,
+{
+    let first_poll =
+        poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "request completed before its indexed path lookup"
+    );
+
+    index.with_index(|_, _| ()).await.unwrap();
+
+    let path_poll =
+        poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    assert!(
+        path_poll.is_pending(),
+        "request completed instead of waiting for the held candidate-path lock"
+    );
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 fn delayed_multipart_request(
@@ -330,6 +363,114 @@ async fn page_update_by_id_rejects_stale_revision_without_changing_file() {
         .await
         .json();
     assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn page_by_id_get_retries_relocation_between_lookup_and_access() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/get-race.md")
+        .json(&serde_json::json!({ "title": "GET Race", "body": "identity body" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+
+    let candidate = clepsydra::vault::path::VaultPath::new("get-race.md").unwrap();
+    let guard = fixture
+        .state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&candidate))
+        .await;
+    let request = Request::get(format!("/api/vault/pages/by-id/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let mut in_flight = Box::pin(fixture.app.clone().oneshot(request));
+    advance_request_to_held_path_lock(in_flight.as_mut(), &fixture.state.index).await;
+
+    fixture
+        .server
+        .post("/api/vault/pages-move/get-race.md")
+        .json(&serde_json::json!({ "destination": "moved/get-race.md" }))
+        .await
+        .assert_status_ok();
+    drop(guard);
+
+    let response = in_flight.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let fetched = response_json(response).await;
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "moved/get-race.md");
+    assert_eq!(fetched["body"], "identity body");
+}
+
+#[tokio::test]
+async fn page_update_by_id_retries_relocation_between_lookup_and_update() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/put-race.md")
+        .json(&serde_json::json!({ "title": "PUT Race", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let candidate = clepsydra::vault::path::VaultPath::new("put-race.md").unwrap();
+    let guard = fixture
+        .state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&candidate))
+        .await;
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "body": "updated after concurrent move",
+        "expected_revision": original_revision
+    }))
+    .unwrap();
+    let request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+    let mut in_flight = Box::pin(fixture.app.clone().oneshot(request));
+    advance_request_to_held_path_lock(in_flight.as_mut(), &fixture.state.index).await;
+
+    fixture
+        .server
+        .post("/api/vault/pages-move/put-race.md")
+        .json(&serde_json::json!({ "destination": "moved/put-race.md" }))
+        .await
+        .assert_status_ok();
+    drop(guard);
+
+    let response = in_flight.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["meta"]["id"], id);
+    assert_eq!(updated["path"], "moved/put-race.md");
+    assert_eq!(updated["body"], "updated after concurrent move");
+    assert_ne!(updated["revision"], original_revision);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await
+        .json();
+    assert_eq!(fetched, updated);
+
+    let stale = fixture
+        .server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": original_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
 }
 
 #[tokio::test]

@@ -110,7 +110,7 @@ pub struct CreateDefaultPageRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct UpdatePageRequest {
     pub expected_revision: String,
     pub title: Option<String>,
@@ -398,6 +398,8 @@ pub async fn get_page(
     Ok(Json(page_detail(page)))
 }
 
+const BY_ID_PATH_ATTEMPTS: usize = 8;
+
 async fn indexed_page_path_by_id(
     state: &AppState,
     uuid: &str,
@@ -437,20 +439,57 @@ pub async fn get_page_by_id(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    let vault_path = indexed_page_path_by_id(&state, &uuid).await?;
-    let page_path = vault_path.as_str();
+    for _ in 0..BY_ID_PATH_ATTEMPTS {
+        let candidate = indexed_page_path_by_id(&state, &uuid).await?;
+        let guard = state
+            .mutation_coordinator
+            .lock_paths(std::slice::from_ref(&candidate))
+            .await;
+        let confirmed = indexed_page_path_by_id(&state, &uuid).await?;
+        if confirmed != candidate {
+            drop(guard);
+            continue;
+        }
 
-    let abs_path = state.vault.resolve(&vault_path);
-    if !abs_path.exists() {
-        return Err(ApiError::not_found(format!(
-            "page file missing: {page_path}"
-        )));
+        let abs_path = state.vault.resolve(&candidate);
+        let page = match Page::from_file(&abs_path, candidate.clone()) {
+            Ok(page) => page,
+            Err(crate::vault::page::FrontmatterError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                drop(guard);
+                let current = indexed_page_path_by_id(&state, &uuid).await?;
+                if current != candidate {
+                    continue;
+                }
+                return Err(ApiError::not_found(format!(
+                    "page file missing: {}",
+                    candidate.as_str()
+                )));
+            }
+            Err(error) => {
+                return Err(ApiError::internal(format!("failed to read page: {error}")));
+            }
+        };
+
+        if page.meta.id.to_string() != uuid {
+            drop(guard);
+            let current = indexed_page_path_by_id(&state, &uuid).await?;
+            if current != candidate {
+                continue;
+            }
+            return Err(ApiError::internal(format!(
+                "indexed page identity mismatch for id: {uuid}"
+            )));
+        }
+
+        let _guard = guard;
+        return Ok(Json(page_detail(page)));
     }
 
-    let page = Page::from_file(&abs_path, vault_path)
-        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
-
-    Ok(Json(page_detail(page)))
+    Err(ApiError::internal(format!(
+        "page path did not stabilize for id: {uuid}"
+    )))
 }
 
 #[utoipa::path(
@@ -536,7 +575,7 @@ pub async fn update_page(
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
     let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
-    update_page_at_path(state, vault_path, body).await
+    update_page_at_path(state, vault_path, body, None).await
 }
 
 #[utoipa::path(
@@ -559,14 +598,39 @@ pub async fn update_page_by_id(
     Path(uuid): Path<String>,
     Json(body): Json<UpdatePageRequest>,
 ) -> Result<Json<PageDetail>, ApiError> {
-    let vault_path = indexed_page_path_by_id(&state, &uuid).await?;
-    update_page_at_path(state, vault_path, body).await
+    for _ in 0..BY_ID_PATH_ATTEMPTS {
+        let candidate = indexed_page_path_by_id(&state, &uuid).await?;
+        let attempted = candidate.clone();
+        match update_page_at_path(
+            Arc::clone(&state),
+            candidate,
+            body.clone(),
+            Some(&uuid),
+        )
+        .await
+        {
+            Ok(updated) => return Ok(updated),
+            Err(error) if error.status == StatusCode::NOT_FOUND.as_u16() => {
+                let current = indexed_page_path_by_id(&state, &uuid).await?;
+                if current != attempted {
+                    continue;
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(ApiError::internal(format!(
+        "page path did not stabilize for id: {uuid}"
+    )))
 }
 
 async fn update_page_at_path(
     state: Arc<AppState>,
     vault_path: VaultPath,
     body: UpdatePageRequest,
+    expected_uuid: Option<&str>,
 ) -> Result<Json<PageDetail>, ApiError> {
     let page_path = vault_path.as_str().to_string();
     let abs_path = state.vault.resolve(&vault_path);
@@ -578,6 +642,14 @@ async fn update_page_at_path(
         }
         error => ApiError::internal(format!("failed to read page: {error}")),
     })?;
+    if let Some(uuid) = expected_uuid
+        && page.meta.id.to_string() != uuid
+    {
+        return Err(ApiError::not_found(format!(
+            "page moved while resolving id: {uuid}"
+        )));
+    }
+
     let current_revision = page_revision(&page.raw_content);
     if current_revision != body.expected_revision {
         return Err(ApiError::revision_conflict(current_revision));
@@ -607,7 +679,7 @@ async fn update_page_at_path(
             removed: notification.removed,
         });
     };
-    let result = state
+    let result = match state
         .mutation_coordinator
         .update_page(
             &state.vault,
@@ -624,16 +696,34 @@ async fn update_page_at_path(
             &notify,
         )
         .await
-        .map_err(|error| match error {
-            MutationError::Stale(_) => match fs::read_to_string(&abs_path) {
-                Ok(content) => ApiError::revision_conflict(page_revision(&content)),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    ApiError::not_found(format!("page not found: {page_path}"))
+    {
+        Ok(result) => result,
+        Err(MutationError::Stale(_)) => match fs::read_to_string(&abs_path) {
+            Ok(content) => {
+                if let Some(uuid) = expected_uuid
+                    && let Ok((current_meta, _)) =
+                        crate::vault::page::parse_frontmatter(&content)
+                    && current_meta.id.to_string() != uuid
+                {
+                    return Err(ApiError::not_found(format!(
+                        "page moved while resolving id: {uuid}"
+                    )));
                 }
-                Err(error) => ApiError::internal(format!("failed to read page: {error}")),
-            },
-            error => super::mutation_error(error),
-        })?;
+                return Err(ApiError::revision_conflict(page_revision(&content)));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ApiError::not_found(format!(
+                    "page not found: {page_path}"
+                )));
+            }
+            Err(error) => {
+                return Err(ApiError::internal(format!(
+                    "failed to read page: {error}"
+                )));
+            }
+        },
+        Err(error) => return Err(super::mutation_error(error)),
+    };
 
     Ok(Json(page_detail(result)))
 }
