@@ -9,6 +9,7 @@ public struct NoteEditorView: View {
 
     @State private var showingDiscardConfirmation = false
     @State private var showingDeletionAlert = false
+    @State private var editingController = MarkdownEditingController()
 
     public init(
         mode: EditorViewModel.Mode,
@@ -129,32 +130,70 @@ public struct NoteEditorView: View {
     }
 
     private var editContent: some View {
-        Form {
-            Section("Title") {
-                TextField("Note title", text: $model.title)
-#if os(iOS)
-                    .textInputAutocapitalization(.sentences)
-#endif
-            }
+        @Bindable var model = model
 
-            Section("Markdown") {
-                TextEditor(text: $model.body)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 260)
-            }
+        // Deliberately not a Form: a Markdown body needs the whole screen and
+        // its own scrolling, which a form row cannot give it.
+        return VStack(spacing: 0) {
+            TextField("Note title", text: $model.title)
+                .font(.title3.weight(.semibold))
+#if os(iOS)
+                .textInputAutocapitalization(.sentences)
+#endif
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+            Divider()
 
             if let errorMessage = model.errorMessage, !model.isInConflict, model.phase != .deleted {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
-                    Button("Retry") {
-                        model.retry()
-                    }
-                    .disabled(!model.canSave)
-                }
+                errorBanner(errorMessage)
+                Divider()
+            }
+
+            MarkdownTextView(text: $model.body, controller: editingController)
+        }
+#if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                formatBar
             }
         }
+#endif
     }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 12) {
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .font(.footnote)
+            Spacer(minLength: 0)
+            Button("Retry") {
+                model.retry()
+            }
+            .font(.footnote)
+            .disabled(!model.canSave)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+#if os(iOS)
+    @ViewBuilder
+    private var formatBar: some View {
+        ForEach(MarkdownEditingCommand.allCases, id: \.self) { command in
+            Button {
+                editingController.apply(command)
+            } label: {
+                Image(systemName: command.symbolName)
+            }
+            .accessibilityLabel(command.accessibilityName)
+        }
+        Spacer()
+        Button("Done") {
+            editingController.endEditing()
+        }
+    }
+#endif
 
     private func requestCancel() {
         if model.isDirty {
