@@ -418,31 +418,40 @@ function Heatmap({
 }) {
   return (
     <div>
-      <div className="mb-1.5 ml-[26px] flex">
-        {monthLabels.map((m, i) => (
-          <span
-            key={`m${i}`}
-            className="cl-mono min-w-0 flex-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute"
-          >
-            {m}
-          </span>
-        ))}
+      <div className="mb-1.5 grid grid-cols-[22px_1fr] gap-2">
+        <span />
+        <div className="flex gap-[3px]">
+          {monthLabels.map((m, i) => (
+            <span
+              key={`m${i}`}
+              className="cl-mono min-w-0 flex-1 whitespace-nowrap text-[9px] uppercase tracking-[0.16em] text-ink-mute"
+            >
+              {m}
+            </span>
+          ))}
+        </div>
       </div>
       <div className="grid grid-cols-[22px_1fr] gap-2">
-        <div className="cl-noscroll grid grid-rows-7 gap-[3px] pr-1 text-right text-[9px] text-ink-mute">
+        <div className="grid grid-rows-7 gap-[3px] pr-1 text-right text-[9px] text-ink-mute">
           {DOW_LABELS.map((d, i) => (
-            <span key={`dow${i}`} className="h-[12px] leading-[12px]">
+            <span
+              key={`dow${i}`}
+              className="flex items-center justify-end leading-none"
+            >
               {d}
             </span>
           ))}
         </div>
-        <div className="cl-noscroll flex gap-[3px] overflow-x-auto">
+        <div className="flex gap-[3px]">
           {weeks.map((week, wi) => (
-            <div key={`w${wi}`} className="flex flex-col gap-[3px]">
+            <div
+              key={`w${wi}`}
+              className="flex min-w-0 flex-1 flex-col gap-[3px]"
+            >
               {week.map((lvl, di) => (
                 <span
                   key={`d${di}`}
-                  className={cn("h-[12px] w-[12px]", HEAT_LEVEL[lvl])}
+                  className={cn("aspect-square w-full", HEAT_LEVEL[lvl])}
                 />
               ))}
             </div>
