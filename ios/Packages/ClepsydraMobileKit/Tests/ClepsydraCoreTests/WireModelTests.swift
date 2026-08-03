@@ -44,11 +44,31 @@ final class WireModelTests: XCTestCase {
         XCTAssertEqual(page.project, "clepsydra")
     }
 
+    func testDecodesMissingOrNullTagAndAliasArraysAsEmpty() throws {
+        let payloads = [
+            """
+            {"path":"note.md","canonical_name":"note","meta":{"id":"01900000-0000-7000-8000-000000000003"},"body":"","revision":"\(String(repeating: "d", count: 64))","kind":"NOTE","inferred":true}
+            """,
+            """
+            {"path":"note.md","canonical_name":"note","meta":{"id":"01900000-0000-7000-8000-000000000003","tags":null,"aliases":null},"body":"","revision":"\(String(repeating: "d", count: 64))","kind":"NOTE","inferred":true}
+            """
+        ]
+
+        for payload in payloads {
+            let page = try VaultAPIJSON.decoder().decode(PageDetail.self, from: Data(payload.utf8))
+
+            XCTAssertEqual(page.meta.tags, [])
+            XCTAssertEqual(page.meta.aliases, [])
+        }
+    }
+
     func testEncodesRequestsWithOpenAPIWireNames() throws {
         let create = CreatePageRequest(title: "A page", body: "Body")
         let update = UpdatePageRequest(
             expectedRevision: String(repeating: "b", count: 64),
             title: nil,
+            tags: ["swift", "ios"],
+            aliases: ["mobile"],
             body: "New body"
         )
 
@@ -61,6 +81,8 @@ final class WireModelTests: XCTestCase {
 
         XCTAssertEqual(createJSON["title"] as? String, "A page")
         XCTAssertEqual(createJSON["body"] as? String, "Body")
+        XCTAssertEqual(updateJSON["tags"] as? [String], ["swift", "ios"])
+        XCTAssertEqual(updateJSON["aliases"] as? [String], ["mobile"])
         XCTAssertEqual(updateJSON["expected_revision"] as? String, String(repeating: "b", count: 64))
         XCTAssertEqual(updateJSON["body"] as? String, "New body")
         XCTAssertNil(updateJSON["title"] as? String)

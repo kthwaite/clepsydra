@@ -39,6 +39,25 @@ public struct PageMeta: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case tags
+        case aliases
+        case createdAt
+        case updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        aliases = try container.decodeIfPresent([String].self, forKey: .aliases) ?? []
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+    }
 }
 
 public struct PageDetail: Codable, Equatable, Sendable, Identifiable {
@@ -86,11 +105,21 @@ public struct CreatePageRequest: Codable, Equatable, Sendable {
 public struct UpdatePageRequest: Codable, Equatable, Sendable {
     public let expectedRevision: String
     public let title: String?
+    public let tags: [String]?
+    public let aliases: [String]?
     public let body: String?
 
-    public init(expectedRevision: String, title: String?, body: String?) {
+    public init(
+        expectedRevision: String,
+        title: String?,
+        tags: [String]? = nil,
+        aliases: [String]? = nil,
+        body: String?
+    ) {
         self.expectedRevision = expectedRevision
         self.title = title
+        self.tags = tags
+        self.aliases = aliases
         self.body = body
     }
 }

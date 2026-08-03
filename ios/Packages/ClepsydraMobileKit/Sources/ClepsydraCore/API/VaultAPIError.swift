@@ -10,7 +10,7 @@ public struct RevisionConflictDetail: Codable, Equatable, Sendable {
     }
 }
 
-public enum VaultAPIError: Error, Equatable, Sendable {
+public enum VaultAPIError: Error, Equatable, Sendable, LocalizedError {
     case unreachable
     case tls
     case timedOut

@@ -9,6 +9,7 @@ final class VaultAPIErrorTests: XCTestCase {
         XCTAssertEqual(error, .revisionConflict(currentRevision: revision))
         XCTAssertEqual(error.currentRevision, revision)
         XCTAssertEqual(error.userMessage, "This page changed on the server. Reload it before saving again.")
+        XCTAssertEqual(error.localizedDescription, error.userMessage)
     }
 
     func testTransportCategoriesRemainDistinctAndUserPresentable() {
