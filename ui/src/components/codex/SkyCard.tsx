@@ -9,6 +9,7 @@ import type { MoonInfo, SunArc } from "./sky";
 export interface SkyData {
   moon: MoonInfo;
   sunrise: string;
+  sunriseIsTomorrow: boolean;
   sunset: string;
   lightLeft: string;
   arc: SunArc;
@@ -56,7 +57,10 @@ export function SkyCard({
               <div className="border-b border-rule pb-1.5 font-medium uppercase tracking-[0.2em] text-ink">
                 {sky.moon.phaseName} · {sky.moon.illumPct}%
               </div>
-              <KVLine k="Sunrise" v={sky.sunrise} />
+              <KVLine
+                k="Sunrise"
+                v={`${sky.sunrise}${sky.sunriseIsTomorrow ? " (tomorrow)" : ""}`}
+              />
               <KVLine k="Sunset" v={sky.sunset} />
               <KVLine k="Light left" v={sky.lightLeft} />
               {sky.place && <KVLine k="At" v={sky.place} />}

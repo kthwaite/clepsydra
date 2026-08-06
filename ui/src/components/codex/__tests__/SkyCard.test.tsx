@@ -13,6 +13,7 @@ function makeSky(overrides: Partial<SkyData> = {}): SkyData {
       terminatorScaleX: 0.44,
     },
     sunrise: "06:12",
+    sunriseIsTomorrow: false,
     sunset: "20:41",
     lightLeft: "3h 05m",
     arc: { t: 0.5, x: 300, y: 8 },
@@ -34,6 +35,20 @@ describe("SkyCard", () => {
 
     await user.click(screen.getByRole("button", { name: /edit location/i }));
     expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks only the Sunrise row as tomorrow", () => {
+    render(
+      <SkyCard
+        sky={makeSky({ sunriseIsTomorrow: true })}
+        hasLocation={true}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("06:12 (tomorrow)")).toBeInTheDocument();
+    expect(screen.getAllByText(/tomorrow/i)).toHaveLength(1);
+    expect(screen.getByText("↑ 06:12")).toBeInTheDocument();
   });
 
   it("renders a CTA and greys the body when unlocated", async () => {
