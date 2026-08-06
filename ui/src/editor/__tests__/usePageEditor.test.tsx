@@ -419,4 +419,57 @@ describe("usePageEditor draft mode", () => {
       currentRevision: "rev-e",
     });
   });
+
+  it("resets the baseline when the path changes into a draft", async () => {
+    const loadedPage = {
+      ...makePage("Old body"),
+      path: "journals/2026-08-05.md",
+      revision: "rev-old",
+      meta: { ...makePage("Old body").meta, title: "2026-08-05" },
+    };
+    usePageMock.mockReturnValue({
+      data: loadedPage,
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    const ensure = vi
+      .fn()
+      .mockResolvedValue({ page: ensuredPage(), created: true });
+    mutateAsyncMock.mockResolvedValue({
+      ...makePage("New"),
+      revision: "rev-f",
+    });
+
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => usePageEditor(path, { ensure }),
+      { initialProps: { path: "journals/2026-08-05.md" } },
+    );
+
+    expect(result.current.title).toBe("2026-08-05");
+
+    usePageMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: notFoundError(),
+      refetch: refetchPageMock,
+    });
+    rerender({ path: "journals/2026-08-06.md" });
+
+    expect(result.current.isDraft).toBe(true);
+    expect(result.current.title).toBe("");
+    expect(result.current.error).toBeNull();
+
+    act(() =>
+      result.current.onSlateChange(paragraph("New"), astChangeEditor()),
+    );
+    await flushDraftSave();
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    const request = mutateAsyncMock.mock.calls[0][0];
+    expect(request.body.body).toBe("New\n");
+    expect(request.body.expected_revision).toBe("rev-e");
+    expect(request.body.title).toBeUndefined();
+    expect(result.current.title).toBe("2026-08-06");
+  });
 });
