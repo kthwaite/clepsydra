@@ -100,12 +100,9 @@ mod tests {
         fs::write(&xdg_file, b"xdg = true\n").unwrap();
         fs::write(dir.path().join("config.toml"), b"\xff\xfe\x00local").unwrap();
 
-        let bytes = read_existing_with_env(
-            dir.path(),
-            Some(xdg.path().as_os_str().to_owned()),
-            None,
-        )
-        .unwrap();
+        let bytes =
+            read_existing_with_env(dir.path(), Some(xdg.path().as_os_str().to_owned()), None)
+                .unwrap();
 
         assert_eq!(bytes, b"\xff\xfe\x00local");
     }
@@ -171,21 +168,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let xdg = tempfile::tempdir().unwrap();
 
-        let error = read_existing_with_env(
-            dir.path(),
-            Some(xdg.path().as_os_str().to_owned()),
-            None,
-        )
-        .unwrap_err();
+        let error =
+            read_existing_with_env(dir.path(), Some(xdg.path().as_os_str().to_owned()), None)
+                .unwrap_err();
         let message = error.to_string();
 
         assert!(message.contains(&dir.path().join("config.toml").display().to_string()));
-        assert!(message.contains(
-            &xdg.path()
-                .join("clepsydra/config.toml")
-                .display()
-                .to_string()
-        ));
+        assert!(
+            message.contains(
+                &xdg.path()
+                    .join("clepsydra/config.toml")
+                    .display()
+                    .to_string()
+            )
+        );
     }
 
     #[test]
