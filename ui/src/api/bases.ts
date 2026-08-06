@@ -1,4 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import { $api } from "./client";
 import { invalidateByPath, queryKeys } from "./keys";
@@ -62,4 +64,45 @@ export function usePatchProperties() {
       invalidateByPath(qc, queryKeys.query.pathPrefix);
     },
   });
+}
+
+/**
+ * Revision-guarded single-key commit: fetch the page's current revision,
+ * PATCH only the changed key (with an optional type hint), and on conflict
+ * or failure toast and refetch so the caller shows the winning state.
+ */
+export function usePropertyCommit() {
+  const qc = useQueryClient();
+  const patch = usePatchProperties();
+
+  return useCallback(
+    async (
+      page: { id: string; path: string },
+      key: string,
+      value: unknown,
+      hint?: PropertyType,
+    ) => {
+      try {
+        const pageRes = await fetch(`/api/vault/pages/${page.path}`);
+        if (!pageRes.ok)
+          throw new Error(`page fetch failed: ${pageRes.status}`);
+        const { revision } = (await pageRes.json()) as { revision: string };
+
+        await patch.mutateAsync({
+          params: { path: { uuid: page.id } },
+          body: {
+            set: value === null ? {} : { [key]: value },
+            clear: value === null ? [key] : [],
+            types: hint ? { [key]: hint } : {},
+            expected_revision: revision,
+          },
+        });
+      } catch {
+        toast.error(`Could not update ${key} — refreshed to current state`);
+        invalidateByPath(qc, queryKeys.bases.pathPrefix);
+        invalidateByPath(qc, queryKeys.query.pathPrefix);
+      }
+    },
+    [patch, qc],
+  );
 }

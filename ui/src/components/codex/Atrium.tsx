@@ -21,6 +21,7 @@ import {
 import { Card } from "./Card";
 import { formatRelativeTime } from "./codex-time";
 import { shortFolio } from "./folio-utils";
+import { ReadingContinuesPanel } from "./ReadingContinues";
 import { SkyCard } from "./SkyCard";
 import { moonPhase, sunArcPosition } from "./sky";
 
@@ -393,6 +394,9 @@ export function Atrium() {
           )}
         </div>
       </section>
+
+      {/* READING CONTINUES — the bases pilot; hidden without a reading base */}
+      <ReadingContinuesPanel />
     </div>
   );
 }

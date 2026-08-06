@@ -1,20 +1,28 @@
-# Codex Reading Log · stub
+# Codex Reading Log
 
-**Status:** deferred (placed behind `VITE_ENABLE_PROSPECTIVE_PANELS` flag in Atrium/Diurnal)
-**Why deferred:** requires a domain model that does not yet exist in the vault layer.
+**Status:** answered by reference — implemented on the bases system
+(`docs/superpowers/specs/2026-08-06-bases-design.md`, §10 Pilot).
 
-## What's needed
-- A `books` table with title, author, total_pages, current_page, started_at, finished_at
-- An endpoint to list active books and update progress
-- The "Reading Continues" panel (currently hardcoded Calvino/Borges/Murray entries) consumes this
+## Resolution of the open questions
 
-## Open questions
-- Are books a kind of vault page (with frontmatter), or a separate model?
-- How is progress recorded — a journal entry, a quick UI control, or import from Goodreads/Kavita?
-- Should the panel show only active reads or also queued/finished?
+- **Are books vault pages or a separate model?** BOOK pages with declared
+  properties. No separate table: the generic `page_properties` index and the
+  `bases/reading.base.toml` schema replace the bespoke `books` model.
+- **How is progress recorded?** A `progress` property patch
+  (`PATCH /api/vault/pages/by-id/{id}/properties`) — from the Atrium panel's
+  advance affordance, the `/bases/reading` table, or Neovim directly.
+- **Active vs. queued/finished?** The panel consumes the base's `Continues`
+  view (`status = "reading"`); the full shelf lives in the `/bases/reading`
+  table's other views.
 
-## Touchpoints when this lands
-- ui/src/components/codex/Atrium.tsx · the gated "Reading Continues" panel
-- ui/src/api/books.ts · new hook
-- src/api/books_routes.rs · new endpoints
-- src/vault/books.rs · domain logic
+## Touchpoints (as landed)
+
+- `ui/src/components/codex/ReadingContinues.tsx` — the Atrium panel,
+  consuming `GET /api/vault/bases/reading/views/continues`
+- `ui/src/api/bases.ts` — view + property-patch hooks
+- `src/api/bases.rs` / `src/api/properties.rs` — the generic endpoints
+- vault `bases/reading.base.toml` — the schema (see the spec §3 for the
+  reference file; it lives in the vault, not this repo)
+
+The panel renders nothing until the vault carries a `reading` base with a
+`Continues` view, so vaults without one see no change.
