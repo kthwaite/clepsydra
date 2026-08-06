@@ -39,6 +39,7 @@ pub mod relabel;
 pub mod rewriter;
 pub mod sync;
 pub mod toml_json;
+pub mod toml_patch;
 pub mod tree;
 
 use std::path::{Path, PathBuf};
