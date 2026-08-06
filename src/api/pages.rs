@@ -99,6 +99,14 @@ pub struct CreatePageRequest {
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
     pub body: Option<String>,
+    /// Declared kind token (case-insensitive, e.g. `QUOTE`), written to the
+    /// page's `type:` frontmatter as part of the same create mutation.
+    #[serde(default)]
+    pub kind: Option<crate::vault::kind::Kind>,
+    /// Declared project slug, written to the page's `project:` frontmatter as
+    /// part of the same create mutation.
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -107,6 +115,36 @@ pub struct UpdatePageRequest {
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
     pub body: Option<String>,
+    /// Optimistic-concurrency guard: lowercase hex SHA-256 of the page body
+    /// the client last read. When present and it no longer matches the
+    /// current body, the update fails with 409 instead of overwriting
+    /// changes the client never saw. The mutation coordinator's path lock
+    /// extends the guarantee to the write itself.
+    #[serde(default)]
+    pub expected_body_sha256: Option<String>,
+}
+
+/// Lowercase hex SHA-256 of a page body, the token clients echo back via
+/// [`UpdatePageRequest::expected_body_sha256`].
+pub fn body_sha256(body: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(body.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Query parameters for `GET /pages`: pagination plus optional filters.
+#[derive(Debug, Deserialize)]
+pub struct ListPagesQuery {
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    /// Resolved kind token (case-insensitive).
+    pub kind: Option<String>,
+    /// Exact tag match.
+    pub tag: Option<String>,
+    /// Exact declared-project match.
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,31 +299,69 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
     tag = "Pages",
     params(
         ("limit" = Option<u32>, Query, description = "Maximum number of pages to return"),
-        ("offset" = Option<u32>, Query, description = "Page offset for pagination")
+        ("offset" = Option<u32>, Query, description = "Page offset for pagination"),
+        ("kind" = Option<String>, Query, description = "Only pages of this resolved kind token (e.g. QUOTE)"),
+        ("tag" = Option<String>, Query, description = "Only pages carrying this tag"),
+        ("project" = Option<String>, Query, description = "Only pages declaring this project")
     ),
     responses(
         (status = 200, description = "List pages", body = PageSummaryListResponse),
+        (status = 400, description = "Unknown kind token", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
 pub async fn list_pages(
     State(state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
+    Query(query): Query<ListPagesQuery>,
 ) -> Result<Json<PaginatedResponse<PageSummary>>, ApiError> {
+    // Validate the kind filter up front: an unknown token is a client error,
+    // not an empty result set.
+    let kind = query
+        .kind
+        .as_deref()
+        .map(|token| {
+            crate::vault::kind::Kind::from_token(token)
+                .map(|k| k.as_str().to_string())
+                .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))
+        })
+        .transpose()?;
+    let tag = query.tag.clone();
+    let project = query.project.clone();
+
     let pages = state
         .index
         .with_index(move |index, _vault| {
-            let mut stmt = index.connection().prepare(
+            let mut sql = String::from(
                 "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
                         p.project,
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t WHERE t.page_id = p.id), '')
-                   FROM pages p
-                  ORDER BY p.path",
-            )?;
+                   FROM pages p",
+            );
+            let mut clauses: Vec<&str> = Vec::new();
+            let mut values: Vec<String> = Vec::new();
+            if let Some(kind) = kind {
+                clauses.push("p.kind = ?");
+                values.push(kind);
+            }
+            if let Some(tag) = tag {
+                clauses
+                    .push("EXISTS (SELECT 1 FROM tags t2 WHERE t2.page_id = p.id AND t2.tag = ?)");
+                values.push(tag);
+            }
+            if let Some(project) = project {
+                clauses.push("p.project = ?");
+                values.push(project);
+            }
+            if !clauses.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&clauses.join(" AND "));
+            }
+            sql.push_str(" ORDER BY p.path");
 
+            let mut stmt = index.connection().prepare(&sql)?;
             let pages: Vec<PageSummary> = stmt
-                .query_map([], page_summary_from_row)?
+                .query_map(rusqlite::params_from_iter(values), page_summary_from_row)?
                 .collect::<Result<_, _>>()?;
 
             Ok::<_, rusqlite::Error>(pages)
@@ -294,6 +370,10 @@ pub async fn list_pages(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
+    let pagination = PaginationParams {
+        limit: query.limit,
+        offset: query.offset,
+    };
     Ok(Json(PaginatedResponse::from_vec(pages, &pagination)))
 }
 
@@ -408,6 +488,13 @@ pub async fn create_page(
     if let Some(aliases) = body.aliases {
         meta.aliases = aliases;
     }
+    // Declared kind/project ride the same create mutation, so a page never
+    // exists in a half-assigned state (and a failed create leaves nothing).
+    meta.kind = body.kind;
+    if let Some(project) = body.project {
+        validate_project_slug(&project).map_err(ApiError::bad_request)?;
+        meta.project = Some(project);
+    }
     let page_body = body.body.unwrap_or_default();
 
     let notify = |notification: MutationNotification| {
@@ -469,6 +556,18 @@ pub async fn update_page(
     })?;
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+
+    // Reject a write based on a body the client no longer holds. The
+    // coordinator compares `expected_content` under the path lock, so a body
+    // that matches here still matches at write time.
+    if let Some(expected) = &body.expected_body_sha256
+        && !expected.eq_ignore_ascii_case(&body_sha256(&page.body))
+    {
+        return Err(ApiError::conflict(format!(
+            "page body changed since it was read: {path} — re-read and re-apply"
+        )));
+    }
+
     let mut meta = page.meta;
     let mut page_body = page.body;
 
@@ -910,9 +1009,12 @@ Some quoted text.\n";
         // Call the handler
         let resp = list_pages(
             State(state),
-            Query(PaginationParams {
+            Query(ListPagesQuery {
                 limit: None,
                 offset: None,
+                kind: None,
+                tag: None,
+                project: None,
             }),
         )
         .await

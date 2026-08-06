@@ -37,8 +37,9 @@ pub(crate) fn apply_edit(
 /// and surrounding whitespace ignored).
 ///
 /// A section runs until the next heading of the same or a shallower level.
-/// Heading detection is line-based and does not exclude fenced code blocks; a
-/// `#`-prefixed line inside a fence can be mistaken for a heading.
+/// Lines inside fenced code blocks (backtick or tilde fences) are never
+/// treated as headings, so a `# comment` in an example cannot become a
+/// section boundary.
 pub(crate) fn append_to_body(
     body: &str,
     content: &str,
@@ -49,9 +50,11 @@ pub(crate) fn append_to_body(
     };
 
     let lines: Vec<&str> = body.lines().collect();
+    let fenced = fence_flags(&lines);
     let Some((start, level)) = lines
         .iter()
         .enumerate()
+        .filter(|(i, _)| !fenced[*i])
         .find_map(|(i, line)| heading_level(line, heading).map(|level| (i, level)))
     else {
         return Err(format!(
@@ -64,7 +67,7 @@ pub(crate) fn append_to_body(
         .iter()
         .enumerate()
         .skip(start + 1)
-        .find(|(_, line)| atx_level(line).is_some_and(|l| l <= level))
+        .find(|(i, line)| !fenced[*i] && atx_level(line).is_some_and(|l| l <= level))
         .map(|(i, _)| i)
         .unwrap_or(lines.len());
 
@@ -93,6 +96,41 @@ fn join_block(body: &str, content: &str) -> String {
     } else {
         format!("{}\n\n{}\n", trimmed, content.trim_end())
     }
+}
+
+/// Per-line "inside a fenced code block" flags, opening and closing fence
+/// lines included. A fence opens on a line whose trimmed start is three or
+/// more backticks or tildes; it closes on a line of at least as many of the
+/// same character followed only by whitespace (CommonMark's closing rule).
+/// An unclosed fence runs to the end of the body.
+fn fence_flags(lines: &[&str]) -> Vec<bool> {
+    let mut flags = Vec::with_capacity(lines.len());
+    let mut open: Option<(char, usize)> = None;
+    for line in lines {
+        let trimmed = line.trim_start();
+        match open {
+            None => {
+                let first = trimmed.chars().next();
+                if let Some(c @ ('`' | '~')) = first {
+                    let run = trimmed.chars().take_while(|x| *x == c).count();
+                    if run >= 3 {
+                        open = Some((c, run));
+                        flags.push(true);
+                        continue;
+                    }
+                }
+                flags.push(false);
+            }
+            Some((c, run)) => {
+                flags.push(true);
+                let close_run = trimmed.chars().take_while(|x| *x == c).count();
+                if close_run >= run && trimmed[close_run..].trim().is_empty() {
+                    open = None;
+                }
+            }
+        }
+    }
+    flags
 }
 
 /// The ATX heading level of `line` (1-6), if it is one.
@@ -207,5 +245,38 @@ mod tests {
         let body = "# Top\n\n## Sub\n\nsub text\n\n# Next\n";
         let out = append_to_body(body, "tail", Some("Top")).unwrap();
         assert!(out.contains("sub text\n\ntail\n\n# Next"), "{out}");
+    }
+
+    #[test]
+    fn hash_lines_inside_backtick_fences_are_not_boundaries() {
+        let body = "# Log\n\n```sh\n# not a heading\necho hi\n```\n\ntext\n\n# Done\n";
+        let out = append_to_body(body, "tail", Some("Log")).unwrap();
+        // The append lands after `text`, before `# Done` — never inside the fence.
+        assert!(out.contains("text\n\ntail\n\n# Done"), "{out}");
+        assert!(out.contains("# not a heading\necho hi\n```"), "{out}");
+    }
+
+    #[test]
+    fn headings_inside_fences_are_not_targets() {
+        let body = "```\n# Fake\n```\n\n# Real\n\nbody\n";
+        let err = append_to_body(body, "x", Some("Fake")).unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+        assert!(append_to_body(body, "x", Some("Real")).is_ok());
+    }
+
+    #[test]
+    fn tilde_fences_and_nested_backticks_are_tracked() {
+        // A ~~~~ fence containing ``` must stay open until the ~~~~ closes.
+        let body = "# Log\n\n~~~~\n```\n# inner\n```\n~~~~\n\n# Done\n";
+        let out = append_to_body(body, "tail", Some("Log")).unwrap();
+        assert!(out.contains("~~~~\n\ntail\n\n# Done"), "{out}");
+    }
+
+    #[test]
+    fn unclosed_fence_runs_to_end_of_body() {
+        let body = "# Log\n\n```\n# never closed\n";
+        let out = append_to_body(body, "tail", Some("Log")).unwrap();
+        // Everything after the open fence is fenced; append goes to the end.
+        assert!(out.ends_with("tail\n"), "{out}");
     }
 }

@@ -24,6 +24,55 @@ fn pages_url(path: &str) -> String {
     format!("/api/vault/pages/{}", encode_vault_path(path))
 }
 
+/// Resolve where a new page lands, enforcing the metadata-projected layout
+/// (ADR-0001) so a freshly created page is never in a folder the reconcile
+/// sweep would immediately move it out of:
+///
+/// - declared project => `<kind-folder>/<project>` exactly; no `folder`
+///   override is accepted
+/// - declared kind (no project) => the kind's canonical folder, or a `folder`
+///   beneath it
+/// - neither => `folder` free-form, defaulting to `notes`
+fn resolve_create_folder(
+    declared: Option<Kind>,
+    project: Option<&str>,
+    folder: Option<&str>,
+) -> Result<String, String> {
+    let folder = folder
+        .map(|f| f.trim().trim_matches('/').to_string())
+        .filter(|f| !f.is_empty());
+    let base = declared.unwrap_or(Kind::Note).canonical_folder();
+
+    if let Some(project) = project {
+        let projected = format!("{base}/{project}");
+        return match folder {
+            None => Ok(projected),
+            Some(f) if f == projected => Ok(projected),
+            Some(f) => Err(format!(
+                "'folder' \"{f}\" cannot be combined with project \"{project}\" — a declared \
+                 project files the page under {projected}/ (the vault relocates it there); \
+                 omit 'folder'"
+            )),
+        };
+    }
+
+    if let Some(declared) = declared {
+        let canonical = declared.canonical_folder();
+        return match folder {
+            None => Ok(canonical.to_string()),
+            Some(f) if f == canonical || f.starts_with(&format!("{canonical}/")) => Ok(f),
+            Some(f) => Err(format!(
+                "'folder' \"{f}\" conflicts with kind {kind}: declared {kind} pages live under \
+                 {canonical}/ (the vault relocates them there) — use a subfolder like \
+                 \"{canonical}/...\" or omit 'folder'",
+                kind = declared.as_str(),
+            )),
+        };
+    }
+
+    Ok(folder.unwrap_or_else(|| base.to_string()))
+}
+
 /// Maximum page-body size (in bytes) returned inline before truncation.
 const MAX_BODY_BYTES: usize = 50_000;
 
@@ -54,6 +103,13 @@ pub struct ListPagesParams {
     pub limit: Option<u32>,
     /// Offset into the path-ordered page list, for pagination.
     pub offset: Option<u32>,
+    /// Only pages of this resolved kind (NOTE, PROJECT, JOURNAL, TODO, QUOTE,
+    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE).
+    pub kind: Option<String>,
+    /// Only pages carrying this exact tag.
+    pub tag: Option<String>,
+    /// Only pages declaring this exact project.
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -104,8 +160,11 @@ pub struct CreatePageParams {
     /// PERSON, TASK, CYCLE). Defaults to NOTE. Declared in frontmatter and
     /// used to pick the canonical folder.
     pub kind: Option<String>,
-    /// Folder override, vault-relative (e.g. `notes/drafts`). Defaults to the
-    /// kind's canonical folder (notes, quotes, journals, ...).
+    /// Folder override, vault-relative. With a declared kind it must be the
+    /// kind's canonical folder or a subfolder beneath it (e.g. `notes/drafts`
+    /// for NOTE); it cannot be combined with 'project'. Defaults to the
+    /// kind's canonical folder (notes, quotes, journals, ...), or
+    /// `<kind-folder>/<project>` when a project is declared.
     pub folder: Option<String>,
     /// Initial markdown body.
     pub body: Option<String>,
@@ -372,20 +431,36 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_list_pages",
-        description = "List pages (path-ordered) with id, path, title, canonical name, kind, project, and tags. Paginated via limit/offset; the response's total field reports the full count.",
+        description = "List pages (path-ordered) with id, path, title, canonical name, kind, project, and tags, optionally filtered by kind, tag, and/or project. Paginated via limit/offset; the response's total field reports the full filtered count.",
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     pub async fn vault_list_pages(
         &self,
         Parameters(params): Parameters<ListPagesParams>,
     ) -> Result<String, String> {
-        let query = vec![
+        if let Some(token) = &params.kind
+            && Kind::from_token(token).is_none()
+        {
+            return Err(format!(
+                "unknown kind \"{token}\" — valid kinds: {KIND_TOKENS}"
+            ));
+        }
+        let mut query = vec![
             (
                 "limit",
                 params.limit.unwrap_or(DEFAULT_LIST_LIMIT).to_string(),
             ),
             ("offset", params.offset.unwrap_or(0).to_string()),
         ];
+        if let Some(kind) = params.kind {
+            query.push(("kind", kind));
+        }
+        if let Some(tag) = params.tag {
+            query.push(("tag", tag));
+        }
+        if let Some(project) = params.project {
+            query.push(("project", project));
+        }
         let value = self
             .client
             .get_json("/api/vault/pages", &query)
@@ -453,7 +528,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_create_page",
-        description = "Create a new page. The canonical filename (yyyymmdd.slug.shortid.md) is derived from the title — never construct paths by hand. Files under the kind's canonical folder unless 'folder' overrides it; kind/project are declared in frontmatter when given. Search first (vault_search) to avoid duplicates. Returns the created page, including the path to use for follow-up calls.",
+        description = "Create a new page in one atomic call; kind/project are declared as part of the create itself. The canonical filename (yyyymmdd.slug.shortid.md) is derived from the title — never construct paths by hand. A declared kind files under its canonical folder ('folder' may only choose a subfolder beneath it); a declared project files under <kind-folder>/<project> and takes no 'folder' override. Search first (vault_search) to avoid duplicates. Returns the created page, including the path for follow-up calls.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -468,71 +543,41 @@ impl VaultMcpServer {
         if title.is_empty() {
             return Err("title must not be empty".to_string());
         }
-        let kind = match &params.kind {
-            Some(token) => Kind::from_token(token)
-                .ok_or_else(|| format!("unknown kind \"{token}\" — valid kinds: {KIND_TOKENS}"))?,
-            None => Kind::Note,
-        };
-        let folder = params
-            .folder
-            .as_deref()
-            .map(|f| f.trim().trim_matches('/').to_string())
-            .unwrap_or_else(|| kind.canonical_folder().to_string());
+        let declared =
+            match &params.kind {
+                Some(token) => Some(Kind::from_token(token).ok_or_else(|| {
+                    format!("unknown kind \"{token}\" — valid kinds: {KIND_TOKENS}")
+                })?),
+                None => None,
+            };
+        let folder = resolve_create_folder(
+            declared,
+            params.project.as_deref(),
+            params.folder.as_deref(),
+        )?;
 
         let filename = crate::vault::page_filename::page_filename(
             chrono::Utc::now(),
             title,
             &crate::vault::block_id::generate_short_id(),
         );
-        let path = if folder.is_empty() {
-            filename
-        } else {
-            format!("{folder}/{filename}")
-        };
+        let path = format!("{folder}/{filename}");
 
+        // Kind/project ride the create request itself, so the page never
+        // exists half-assigned and a failed create leaves nothing behind.
         let create_body = serde_json::json!({
             "title": title,
             "tags": params.tags,
             "aliases": params.aliases,
             "body": params.body,
+            "kind": declared.map(Kind::as_str),
+            "project": params.project,
         });
         let mut value = self
             .client
             .post_json(&pages_url(&path), &create_body)
             .await
             .map_err(|e| e.to_string())?;
-
-        // Declaring kind/project happens through the assign endpoint so the
-        // server owns frontmatter rewriting and any folder reconciliation.
-        if params.kind.is_some() || params.project.is_some() {
-            let created_path = value
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or(&path)
-                .to_string();
-            let assign_body = serde_json::json!({
-                "kind": params.kind.as_ref().map(|_| kind.as_str()),
-                "project": params.project,
-                "clear_project": false,
-            });
-            value = self
-                .client
-                .post_json(
-                    &format!(
-                        "/api/vault/pages-assign/{}",
-                        encode_vault_path(&created_path)
-                    ),
-                    &assign_body,
-                )
-                .await
-                .map_err(|e| {
-                    format!(
-                        "page was created at {created_path}, but declaring kind/project \
-                         failed: {e}"
-                    )
-                })?;
-        }
-
         truncate_body(&mut value, MAX_BODY_BYTES);
         render(&value)
     }
@@ -588,17 +633,20 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<EditPageParams>,
     ) -> Result<String, String> {
-        let body = self.fetch_body(&params.path).await?;
+        let (body, sha) = self.fetch_body(&params.path).await?;
         let (new_body, replacements) = super::edit::apply_edit(
             &body,
             &params.old_string,
             &params.new_string,
             params.replace_all.unwrap_or(false),
         )?;
+        // The hash of the body this edit was computed against travels with
+        // the write, so a concurrent change surfaces as a 409 instead of
+        // being silently overwritten.
         self.client
             .put_json(
                 &pages_url(&params.path),
-                &serde_json::json!({ "body": new_body }),
+                &serde_json::json!({ "body": new_body, "expected_body_sha256": sha }),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -627,14 +675,14 @@ impl VaultMcpServer {
         let mut attempts = 0;
         loop {
             attempts += 1;
-            let body = self.fetch_body(&params.path).await?;
+            let (body, sha) = self.fetch_body(&params.path).await?;
             let new_body =
                 super::edit::append_to_body(&body, &params.content, params.heading.as_deref())?;
             match self
                 .client
                 .put_json(
                     &pages_url(&params.path),
-                    &serde_json::json!({ "body": new_body }),
+                    &serde_json::json!({ "body": new_body, "expected_body_sha256": sha }),
                 )
                 .await
             {
@@ -889,19 +937,21 @@ impl VaultMcpServer {
         render(&value)
     }
 
-    /// Fetch the current full (untruncated) body of a page for read-modify-
-    /// write tools.
-    async fn fetch_body(&self, path: &str) -> Result<String, String> {
+    /// Fetch the current full (untruncated) body of a page plus its SHA-256,
+    /// the optimistic-concurrency token read-modify-write tools echo back.
+    async fn fetch_body(&self, path: &str) -> Result<(String, String), String> {
         let value = self
             .client
             .get_json(&pages_url(path), &[])
             .await
             .map_err(|e| e.to_string())?;
-        value
+        let body = value
             .get("body")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .ok_or_else(|| format!("page response for {path} carried no body field"))
+            .ok_or_else(|| format!("page response for {path} carried no body field"))?;
+        let sha = crate::api::pages::body_sha256(&body);
+        Ok((body, sha))
     }
 }
 
@@ -1117,6 +1167,9 @@ mod tests {
                 .vault_list_pages(Parameters(ListPagesParams {
                     limit: Some(1),
                     offset: Some(0),
+                    kind: None,
+                    tag: None,
+                    project: None,
                 }))
                 .await,
         );
@@ -1238,7 +1291,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_page_with_project_declares_the_project() {
+    async fn create_page_with_project_files_under_the_project_subfolder() {
         let (server, _tmp) = serve_seeded_vault().await;
         let value = parse(
             server
@@ -1249,6 +1302,211 @@ mod tests {
                 .await,
         );
         assert_eq!(value["project"], "skunkworks");
+        assert!(
+            value["path"]
+                .as_str()
+                .unwrap()
+                .starts_with("notes/skunkworks/"),
+            "project pages live under <kind-folder>/<project>: {}",
+            value["path"]
+        );
+    }
+
+    #[tokio::test]
+    async fn create_page_folder_must_sit_under_a_declared_kinds_canonical_folder() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_create_page(Parameters(CreatePageParams {
+                kind: Some("quote".to_string()),
+                folder: Some("drafts".to_string()),
+                ..create_params("Misfiled Quote")
+            }))
+            .await
+            .expect_err("conflicting folder should be rejected");
+        assert!(err.contains("quotes"), "{err}");
+
+        let value = parse(
+            server
+                .vault_create_page(Parameters(CreatePageParams {
+                    kind: Some("quote".to_string()),
+                    folder: Some("quotes/stoics".to_string()),
+                    ..create_params("Filed Quote")
+                }))
+                .await,
+        );
+        assert!(
+            value["path"]
+                .as_str()
+                .unwrap()
+                .starts_with("quotes/stoics/"),
+            "subfolder beneath the canonical folder is allowed: {}",
+            value["path"]
+        );
+        assert_eq!(value["kind"], "QUOTE");
+        assert_eq!(value["inferred"], false);
+    }
+
+    #[tokio::test]
+    async fn create_page_rejects_folder_combined_with_project() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_create_page(Parameters(CreatePageParams {
+                project: Some("skunkworks".to_string()),
+                folder: Some("drafts".to_string()),
+                ..create_params("X")
+            }))
+            .await
+            .expect_err("folder+project should be rejected");
+        assert!(err.contains("notes/skunkworks"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn stale_body_hash_is_rejected_instead_of_overwriting() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        // A reader captures the body hash...
+        let (_body, stale_sha) = server.fetch_body("notes/alpha.md").await.unwrap();
+        // ...then another writer changes the page...
+        server
+            .vault_update_page(Parameters(UpdatePageParams {
+                path: "notes/alpha.md".to_string(),
+                title: None,
+                tags: None,
+                aliases: None,
+                body: Some("rewritten by someone else\n".to_string()),
+            }))
+            .await
+            .unwrap();
+        // ...so a write carrying the stale hash must 409, not clobber.
+        let err = server
+            .client
+            .put_json(
+                &pages_url("notes/alpha.md"),
+                &serde_json::json!({
+                    "body": "based on a stale read",
+                    "expected_body_sha256": stale_sha,
+                }),
+            )
+            .await
+            .expect_err("stale hash should conflict");
+        assert!(err.is_conflict(), "expected 409, got: {err}");
+
+        let (body, _) = server.fetch_body("notes/alpha.md").await.unwrap();
+        assert_eq!(body, "rewritten by someone else\n", "no lost update");
+    }
+
+    #[tokio::test]
+    async fn list_pages_filters_by_tag_kind_and_project() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        server
+            .vault_create_page(Parameters(CreatePageParams {
+                kind: Some("quote".to_string()),
+                project: None,
+                ..create_params("Filter Target")
+            }))
+            .await
+            .unwrap();
+        server
+            .vault_create_page(Parameters(CreatePageParams {
+                project: Some("skunkworks".to_string()),
+                ..create_params("Project Page")
+            }))
+            .await
+            .unwrap();
+
+        let by_tag = parse(
+            server
+                .vault_list_pages(Parameters(ListPagesParams {
+                    limit: None,
+                    offset: None,
+                    kind: None,
+                    tag: Some("testing".to_string()),
+                    project: None,
+                }))
+                .await,
+        );
+        assert_eq!(by_tag["total"], 2, "alpha and beta carry 'testing'");
+
+        let by_kind = parse(
+            server
+                .vault_list_pages(Parameters(ListPagesParams {
+                    limit: None,
+                    offset: None,
+                    kind: Some("quote".to_string()),
+                    tag: None,
+                    project: None,
+                }))
+                .await,
+        );
+        assert_eq!(by_kind["total"], 1);
+        assert_eq!(by_kind["items"][0]["title"], "Filter Target");
+
+        let by_project = parse(
+            server
+                .vault_list_pages(Parameters(ListPagesParams {
+                    limit: None,
+                    offset: None,
+                    kind: None,
+                    tag: None,
+                    project: Some("skunkworks".to_string()),
+                }))
+                .await,
+        );
+        assert_eq!(by_project["total"], 1);
+        assert_eq!(by_project["items"][0]["title"], "Project Page");
+
+        let err = server
+            .vault_list_pages(Parameters(ListPagesParams {
+                limit: None,
+                offset: None,
+                kind: Some("recipe".to_string()),
+                tag: None,
+                project: None,
+            }))
+            .await
+            .expect_err("unknown kind filter should be rejected");
+        assert!(err.contains("QUOTE"), "{err}");
+    }
+
+    #[test]
+    fn resolve_create_folder_enforces_the_projection_contract() {
+        // Free-form when nothing is declared.
+        assert_eq!(resolve_create_folder(None, None, None).unwrap(), "notes");
+        assert_eq!(
+            resolve_create_folder(None, None, Some("scratch/inbox")).unwrap(),
+            "scratch/inbox"
+        );
+        // Declared kind pins the top folder.
+        assert_eq!(
+            resolve_create_folder(Some(Kind::Quote), None, None).unwrap(),
+            "quotes"
+        );
+        assert_eq!(
+            resolve_create_folder(Some(Kind::Quote), None, Some("quotes/stoics")).unwrap(),
+            "quotes/stoics"
+        );
+        assert!(resolve_create_folder(Some(Kind::Quote), None, Some("drafts")).is_err());
+        // Declared project pins the whole path.
+        assert_eq!(
+            resolve_create_folder(None, Some("clep"), None).unwrap(),
+            "notes/clep"
+        );
+        assert_eq!(
+            resolve_create_folder(Some(Kind::Code), Some("clep"), None).unwrap(),
+            "code/clep"
+        );
+        assert_eq!(
+            resolve_create_folder(Some(Kind::Code), Some("clep"), Some("code/clep")).unwrap(),
+            "code/clep"
+        );
+        assert!(resolve_create_folder(None, Some("clep"), Some("drafts")).is_err());
+    }
+
+    #[test]
+    fn body_sha256_matches_known_vector() {
+        assert_eq!(
+            crate::api::pages::body_sha256(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 
     #[tokio::test]
