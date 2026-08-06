@@ -64,7 +64,10 @@ async fn mutation_assign_id_emits_coordinator_notification() {
         .await
         .assert_status_ok();
 
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["page.md"]);
     assert!(removed.is_empty());
 

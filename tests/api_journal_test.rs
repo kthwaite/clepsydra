@@ -75,7 +75,10 @@ async fn mutation_creation_emits_exact_coordinator_notification() {
         .await
         .assert_status_ok();
 
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec![journal_path]);
     assert!(removed.is_empty());
     assert!(
@@ -112,7 +115,10 @@ async fn mutation_capture_emits_coordinator_notification() {
         .await
         .assert_status_ok();
 
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec![journal_path.clone()]);
     assert!(removed.is_empty());
 

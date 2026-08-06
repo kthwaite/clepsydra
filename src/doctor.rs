@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use axum_server::tls_rustls::RustlsConfig;
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::Settings;
@@ -226,6 +226,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         check_academic(v, &mut report);
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_bases(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
         report.push(skip("cas", "store", "skipped — vault unavailable"));
@@ -236,6 +237,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "legacy census",
             "skipped — vault unavailable",
         ));
+        report.push(skip("bases", "registry", "skipped — vault unavailable"));
     }
 
     check_runtime(&mut report);
@@ -1271,6 +1273,129 @@ fn read_bcl_date(path: &Path) -> Option<chrono::NaiveDate> {
 }
 
 // ---------------------------------------------------------------------------
+// Check: base registry
+// ---------------------------------------------------------------------------
+
+/// Base file validation, property/system-field shadowing, and a
+/// type-violation census. Read-only over the base files and the index DB.
+fn check_bases(vault: &Vault, report: &mut Report) {
+    use crate::vault::base::{BaseRegistry, PropertyType, SYSTEM_FIELDS};
+
+    const SECTION: &str = "bases";
+
+    let registry = BaseRegistry::load(vault.root());
+    if registry.bases.is_empty() && registry.diagnostics.is_empty() {
+        report.push(info(SECTION, "registry", "no base files under bases/"));
+        return;
+    }
+
+    if registry.diagnostics.is_empty() {
+        report.push(ok(
+            SECTION,
+            "registry",
+            format!("{} base(s) parsed cleanly", registry.bases.len()),
+        ));
+    } else {
+        let mut detail = format!(
+            "{} base(s), {} diagnostic(s):",
+            registry.bases.len(),
+            registry.diagnostics.len()
+        );
+        for d in &registry.diagnostics {
+            detail.push_str(&format!("\n  [{}] {}", d.slug, d.message));
+        }
+        report.push(warn(SECTION, "registry", detail));
+    }
+
+    // Shadowing + type-violation censuses need the index DB; skip gracefully
+    // when it has not been built yet.
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let conn =
+        match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(c) => c,
+            Err(_) => {
+                report.push(skip(
+                    SECTION,
+                    "shadowing",
+                    "skipped — index DB not available",
+                ));
+                return;
+            }
+        };
+
+    // Vault properties that shadow system fields (reachable only via
+    // `prop.<name>` in filters).
+    let placeholders = vec!["?"; SYSTEM_FIELDS.len()].join(", ");
+    let shadowed: Vec<String> = conn
+        .prepare(&format!(
+            "SELECT DISTINCT key FROM page_properties WHERE key IN ({placeholders}) ORDER BY key"
+        ))
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map(rusqlite::params_from_iter(SYSTEM_FIELDS.iter()), |r| {
+                r.get::<_, String>(0)
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_default();
+    if shadowed.is_empty() {
+        report.push(ok(
+            SECTION,
+            "shadowing",
+            "no vault property shadows a system field",
+        ));
+    } else {
+        report.push(warn(
+            SECTION,
+            "shadowing",
+            format!(
+                "vault properties shadow system fields (reach them as prop.<name>): {}",
+                shadowed.join(", ")
+            ),
+        ));
+    }
+
+    // Type-violation census: declared number/date/bool properties whose
+    // indexed rows lack the native typed projection (e.g. rating = "4").
+    // Vault-wide by key; base membership filters are not applied here.
+    let mut violations: Vec<String> = Vec::new();
+    for base in &registry.bases {
+        for (key, def) in &base.file.properties {
+            let column = match def.property_type {
+                PropertyType::Number => "value_num",
+                PropertyType::Date | PropertyType::Datetime => "value_date",
+                PropertyType::Bool => "value_bool",
+                _ => continue,
+            };
+            let count: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(DISTINCT page_id) FROM page_properties
+                         WHERE key = ?1 AND {column} IS NULL"
+                    ),
+                    params![key],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if count > 0 {
+                violations.push(format!(
+                    "[{}] {key}: {count} page(s) hold a non-{:?} value",
+                    base.slug, def.property_type
+                ));
+            }
+        }
+    }
+    if violations.is_empty() {
+        report.push(ok(SECTION, "type census", "no type violations"));
+    } else {
+        report.push(warn(
+            SECTION,
+            "type census",
+            format!("type violations:\n  {}", violations.join("\n  ")),
+        ));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Check: frontmatter legacy census
 // ---------------------------------------------------------------------------
 
@@ -1676,6 +1801,61 @@ mod tests {
             .find(|r| r.section == "bcl" && r.name == "config")
             .expect("bcl.config");
         assert_eq!(r.status, Status::Warn);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn bases_section_reports_shadowing_and_type_violations() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+
+        // A base declaring `rating = number`, plus a page violating it and
+        // carrying a `kind` extra that shadows the system field.
+        fs::create_dir_all(vault_root.join("bases")).unwrap();
+        fs::write(
+            vault_root.join("bases/reading.base.toml"),
+            "name = \"Reading\"\n\n[properties]\nrating = { type = \"number\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            vault_root.join("book.md"),
+            "+++\nid = \"0190f8a0-0000-7000-8000-0000000000d9\"\nkind = \"work\"\nrating = \"4\"\n+++\nbody\n",
+        )
+        .unwrap();
+
+        // The censuses read the index DB; build it first.
+        let mut index =
+            crate::vault::index::VaultIndex::open(&vault_root.join(".clepsydra/cache.db")).unwrap();
+        index.build(&Vault::open(&vault_root).unwrap()).unwrap();
+        drop(index);
+
+        write_top_level_config(cwd, &vault_root);
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let registry = report
+            .results
+            .iter()
+            .find(|r| r.section == "bases" && r.name == "registry")
+            .expect("bases.registry");
+        assert_eq!(registry.status, Status::Ok, "{}", registry.detail);
+
+        let shadowing = report
+            .results
+            .iter()
+            .find(|r| r.section == "bases" && r.name == "shadowing")
+            .expect("bases.shadowing");
+        assert_eq!(shadowing.status, Status::Warn);
+        assert!(shadowing.detail.contains("kind"), "{}", shadowing.detail);
+
+        let census = report
+            .results
+            .iter()
+            .find(|r| r.section == "bases" && r.name == "type census")
+            .expect("bases.type census");
+        assert_eq!(census.status, Status::Warn);
+        assert!(census.detail.contains("rating"), "{}", census.detail);
     }
 
     #[tokio::test]

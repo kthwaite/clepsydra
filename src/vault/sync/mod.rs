@@ -11,6 +11,9 @@ pub enum ChangeEvent {
     Upsert(VaultPath),
     /// A file was removed.
     Remove(VaultPath),
+    /// A `bases/*.base.toml` file changed: reload the base registry and
+    /// re-check the linkable epoch (which may force a full re-derive).
+    BaseChanged,
 }
 
 /// Statistics from a single sync cycle.
@@ -106,6 +109,17 @@ impl SyncEngine {
                         let r = index.resolve_links_for_page(dep_path)?;
                         stats.deps_reresolved += r;
                     }
+                }
+                ChangeEvent::BaseChanged => {
+                    // A full build reloads the registry and runs the linkable
+                    // epoch check; when the effective set changed, that build
+                    // re-derives every page's frontmatter links. When it did
+                    // not, skip-unchanged makes this a cheap sweep.
+                    let build_stats = index.build(vault)?;
+                    stats.pages_indexed += build_stats.pages_indexed;
+                    stats.pages_skipped += build_stats.pages_skipped;
+                    stats.pages_removed += build_stats.pages_removed;
+                    index.resolve_links()?;
                 }
             }
         }

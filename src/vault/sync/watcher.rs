@@ -18,17 +18,24 @@ fn map_debounced_event(
 ) -> Option<ChangeEvent> {
     let path = &event.path;
 
-    // Skip non-.md files.
-    if path.extension().and_then(|e| e.to_str()) != Some("md") {
-        return None;
-    }
-
-    // Skip .clepsydra/ directory and normalize path under either raw or canonical root.
+    // Normalize path under either raw or canonical root.
     let rel = path
         .strip_prefix(root)
         .or_else(|_| path.strip_prefix(root_canonical))
         .ok()?;
     let rel_str = rel.to_string_lossy().replace('\\', "/");
+
+    // Base definition files reload the registry instead of indexing a page.
+    if rel_str.starts_with("bases/") && rel_str.ends_with(".base.toml") {
+        return Some(ChangeEvent::BaseChanged);
+    }
+
+    // Skip non-.md files.
+    if path.extension().and_then(|e| e.to_str()) != Some("md") {
+        return None;
+    }
+
+    // Skip .clepsydra/ directory.
     if rel_str.starts_with(".clepsydra/") {
         return None;
     }
@@ -145,6 +152,46 @@ mod tests {
 
         assert!(map_debounced_event(&root, &root, &txt).is_none());
         assert!(map_debounced_event(&root, &root, &hidden).is_none());
+    }
+
+    #[test]
+    fn maps_base_file_to_base_changed() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join("bases")).unwrap();
+        let base = DebouncedEvent {
+            path: root.join("bases/reading.base.toml"),
+            kind: DebouncedEventKind::Any,
+        };
+        assert!(matches!(
+            map_debounced_event(&root, &root, &base),
+            Some(ChangeEvent::BaseChanged)
+        ));
+
+        // A markdown file under bases/ is still mapped as a page event (the
+        // sync engine drops it via excluded_patterns).
+        let md = DebouncedEvent {
+            path: root.join("bases/notes.md"),
+            kind: DebouncedEventKind::Any,
+        };
+        assert!(matches!(
+            map_debounced_event(&root, &root, &md),
+            Some(ChangeEvent::Remove(_) | ChangeEvent::Upsert(_))
+        ));
+
+        // A .toml outside bases/ stays dropped.
+        let stray = DebouncedEvent {
+            path: root.join("notes/x.toml"),
+            kind: DebouncedEventKind::Any,
+        };
+        assert!(map_debounced_event(&root, &root, &stray).is_none());
+
+        // A non-.base.toml inside bases/ stays dropped too.
+        let plain = DebouncedEvent {
+            path: root.join("bases/readme.toml"),
+            kind: DebouncedEventKind::Any,
+        };
+        assert!(map_debounced_event(&root, &root, &plain).is_none());
     }
 
     #[test]

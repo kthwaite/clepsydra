@@ -2793,6 +2793,7 @@ async fn create_page_emits_sync_notification() {
         clepsydra::api::events::SyncNotification::IndexChanged { upserted, .. } => {
             assert!(upserted.contains(&"test-notify.md".to_string()));
         }
+        other => panic!("expected IndexChanged, got {other:?}"),
     }
 }
 

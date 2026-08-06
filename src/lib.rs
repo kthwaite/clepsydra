@@ -230,22 +230,27 @@ fn drain_change_batch(
     batch
 }
 
-fn notification_from_batch(batch: &[ChangeEvent]) -> Option<api::events::SyncNotification> {
+fn notifications_from_batch(batch: &[ChangeEvent]) -> Vec<api::events::SyncNotification> {
     let mut upserted: Vec<String> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
+    let mut base_registry_changed = false;
 
     for ev in batch {
         match ev {
             ChangeEvent::Upsert(vp) => upserted.push(vp.as_str().to_string()),
             ChangeEvent::Remove(vp) => removed.push(vp.as_str().to_string()),
+            ChangeEvent::BaseChanged => base_registry_changed = true,
         }
     }
 
-    if upserted.is_empty() && removed.is_empty() {
-        None
-    } else {
-        Some(api::events::SyncNotification::IndexChanged { upserted, removed })
+    let mut notifications = Vec::new();
+    if !upserted.is_empty() || !removed.is_empty() {
+        notifications.push(api::events::SyncNotification::IndexChanged { upserted, removed });
     }
+    if base_registry_changed {
+        notifications.push(api::events::SyncNotification::BaseRegistryChanged);
+    }
+    notifications
 }
 
 /// Resolve the on-disk cert + key paths for the given TLS settings, without
@@ -456,7 +461,7 @@ async fn process_sync_batch(
     batch: Vec<ChangeEvent>,
     change_tx: &tokio::sync::broadcast::Sender<api::events::SyncNotification>,
 ) {
-    let notification = notification_from_batch(&batch);
+    let notifications = notifications_from_batch(&batch);
     match index.process_sync_events(batch).await {
         Ok(stats) => {
             if stats.pages_indexed > 0 || stats.pages_removed > 0 {
@@ -469,7 +474,7 @@ async fn process_sync_batch(
                     "sync cycle complete"
                 );
             }
-            if let Some(notification) = notification {
+            for notification in notifications {
                 let _ = change_tx.send(notification);
             }
         }
@@ -689,24 +694,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn notification_from_batch_collects_upserts_and_removes() {
+    fn notifications_from_batch_collect_upserts_and_removes() {
         let batch = vec![
             ChangeEvent::Upsert(vault::path::VaultPath::new("notes/a.md").unwrap()),
             ChangeEvent::Remove(vault::path::VaultPath::new("notes/b.md").unwrap()),
             ChangeEvent::Upsert(vault::path::VaultPath::new("notes/c.md").unwrap()),
         ];
 
-        let notification = notification_from_batch(&batch).expect("expected notification");
-        let api::events::SyncNotification::IndexChanged { upserted, removed } = notification;
+        let notifications = notifications_from_batch(&batch);
+        assert_eq!(notifications.len(), 1);
+        let api::events::SyncNotification::IndexChanged { upserted, removed } = &notifications[0]
+        else {
+            panic!("expected IndexChanged");
+        };
 
-        assert_eq!(upserted, vec!["notes/a.md", "notes/c.md"]);
-        assert_eq!(removed, vec!["notes/b.md"]);
+        assert_eq!(upserted, &["notes/a.md", "notes/c.md"]);
+        assert_eq!(removed, &["notes/b.md"]);
     }
 
     #[test]
-    fn notification_from_empty_batch_is_none() {
+    fn notifications_from_empty_batch_are_empty() {
         let batch = Vec::<ChangeEvent>::new();
-        assert!(notification_from_batch(&batch).is_none());
+        assert!(notifications_from_batch(&batch).is_empty());
+    }
+
+    #[test]
+    fn base_change_in_batch_emits_registry_notification() {
+        let batch = vec![
+            ChangeEvent::Upsert(vault::path::VaultPath::new("notes/a.md").unwrap()),
+            ChangeEvent::BaseChanged,
+        ];
+        let notifications = notifications_from_batch(&batch);
+        assert_eq!(notifications.len(), 2);
+        assert!(matches!(
+            notifications[1],
+            api::events::SyncNotification::BaseRegistryChanged
+        ));
     }
 
     #[tokio::test]

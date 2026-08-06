@@ -190,7 +190,9 @@ async fn archive_ingest_creates_page_and_stores_blobs() {
         "expected vault_path to start with 'archive/', got: {}",
         body["vault_path"]
     );
-    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap();
+    let SyncNotification::IndexChanged { upserted, removed } = changes.recv().await.unwrap() else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec![body["vault_path"].as_str().unwrap()]);
     assert!(removed.is_empty());
 

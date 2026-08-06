@@ -63,7 +63,10 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
         .json();
     let task_path = task["path"].as_str().unwrap();
     let task_id = task["id"].as_str().unwrap();
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec![task_path]);
     assert!(removed.is_empty());
 
@@ -86,7 +89,10 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
         .json(&serde_json::json!({ "link": null }))
         .await
         .assert_status_ok();
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec![task_path]);
     assert!(removed.is_empty());
     let outlinks: Vec<serde_json::Value> = server
@@ -113,7 +119,10 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
         }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["cycles/S-42.md"]);
     assert!(removed.is_empty());
 
@@ -138,7 +147,10 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
         .json(&serde_json::json!({ "goal": "updated policy goal" }))
         .await
         .assert_status_ok();
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["cycles/S-42.md"]);
     assert!(removed.is_empty());
     let backlinks: Vec<serde_json::Value> = server
@@ -1234,13 +1246,22 @@ async fn seal_cycle_routes_carryover_to_backlog() {
 
     let body: serde_json::Value = res.json();
     assert_eq!(body["state"], "CLOSED", "cycle state: {body}");
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["cycles/S-13.md"]);
     assert!(removed.is_empty());
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["tasks/TSK-0002.md"]);
     assert!(removed.is_empty());
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["tasks/TSK-0003.md"]);
     assert!(removed.is_empty());
     assert!(
@@ -1404,10 +1425,16 @@ async fn carryover_later_task_failure_preserves_prior_mutations_and_notification
         "the failing later task must remain untouched"
     );
 
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["cycles/S-13.md"]);
     assert!(removed.is_empty());
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await;
+    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
+    else {
+        panic!("expected IndexChanged")
+    };
     assert_eq!(upserted, vec!["tasks/TSK-0001.md"]);
     assert!(removed.is_empty());
     assert!(

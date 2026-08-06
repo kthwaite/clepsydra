@@ -20,6 +20,8 @@ pub enum SyncNotification {
         upserted: Vec<String>,
         removed: Vec<String>,
     },
+    /// A base definition file changed; open views should refetch.
+    BaseRegistryChanged,
 }
 
 /// SSE endpoint that streams [`SyncNotification`] events to connected clients.
