@@ -164,6 +164,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/bases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every base with its views and diagnostic count. */
+        get: operations["list_bases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/bases/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Full parsed definition plus diagnostics for one base. */
+        get: operations["get_base"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/bases/{slug}/views/{view}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Evaluate a saved view, honoring its filter, sort, grouping, and
+         *     aggregates, with per-request pagination and sort overrides.
+         */
+        get: operations["evaluate_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/bcl": {
         parameters: {
             query?: never;
@@ -685,6 +739,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/pages/by-id/{uuid}/properties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Apply a property patch to the page with the given id. */
+        patch: operations["patch_properties"];
+        trace?: never;
+    };
     "/api/vault/pages/{path}": {
         parameters: {
             query?: never;
@@ -696,6 +767,23 @@ export interface paths {
         put: operations["update_page"];
         post: operations["create_page"];
         delete: operations["delete_page"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate an ad-hoc query over the whole vault. */
+        post: operations["run_query"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -737,6 +825,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description An aggregate over a group (or the whole result set). */
+        Aggregate: {
+            field?: string | null;
+            fn: components["schemas"]["AggregateFn"];
+        };
+        /** @enum {string} */
+        AggregateFn: "count" | "sum" | "avg" | "min" | "max";
         AmbiguousName: {
             canonical_name: string;
             page_ids: string[];
@@ -792,6 +887,61 @@ export interface components {
             source_path: string;
             source_title?: string | null;
             target_raw: string;
+        };
+        /** @description A parsed, validated base. */
+        BaseDefinition: components["schemas"]["BaseFile"] & {
+            /** @description Filename stem; the API identity. */
+            slug: string;
+        };
+        BaseDetailResponse: components["schemas"]["BaseDefinition"] & {
+            diagnostics: components["schemas"]["BaseDiagnostic"][];
+        };
+        /** @description A validation diagnostic for a base file. Never fatal to the registry. */
+        BaseDiagnostic: {
+            message: string;
+            /** @description Slug of the base (filename stem), even when parsing failed. */
+            slug: string;
+        };
+        /** @description The parsed model of a `.base.toml` file. */
+        BaseFile: {
+            description?: string | null;
+            filter?: null | components["schemas"]["Filter"];
+            name: string;
+            /** @description Declared properties in file order. */
+            properties: [
+                string,
+                {
+                    /**
+                     * @description Advisory single-value constraint for `relation` (diagnostic, never
+                     *     enforcement).
+                     */
+                    many?: boolean | null;
+                    /**
+                     * @description Options for `select` / `multi_select`. An empty list means open
+                     *     vocabulary: completion offers observed values, no diagnostics for
+                     *     novel ones.
+                     */
+                    options?: string[];
+                    type: components["schemas"]["PropertyType"];
+                }
+            ][];
+            views?: components["schemas"]["ViewDefinition"][];
+        };
+        BaseListResponse: {
+            bases: components["schemas"]["BaseSummary"][];
+            /**
+             * @description Diagnostics for files that failed to parse entirely (their slug never
+             *     reaches the `bases` list).
+             */
+            diagnostics: components["schemas"]["BaseDiagnostic"][];
+        };
+        /** @description One entry in the registry listing. */
+        BaseSummary: {
+            description?: string | null;
+            diagnostic_count: number;
+            name: string;
+            slug: string;
+            views: string[];
         };
         BclResponse: {
             /** @description Computed Brimley-Cocoon Line date, `YYYY-MM-DD`. `None` when unconfigured. */
@@ -1011,6 +1161,8 @@ export interface components {
             local_value?: string | null;
             source_value?: string | null;
         };
+        /** @description Recursive filter AST: {"all": [Filter]}, {"any": [Filter]}, {"not": Filter}, or {"field", "op", "value"} */
+        Filter: Record<string, never>;
         FolderInfo: {
             name: string;
             path: string;
@@ -1056,6 +1208,18 @@ export interface components {
         GraphResponse: {
             edges: components["schemas"]["GraphEdge"][];
             nodes: components["schemas"]["GraphNode"][];
+        };
+        GroupResult: {
+            /** @description One value per requested aggregate, in request order. */
+            aggregates: Record<string, never>[];
+            /** @description The raw group key; `null` is the empty bucket. */
+            key: Record<string, never>;
+            rows: components["schemas"]["QueryRow"][];
+            /**
+             * Format: int64
+             * @description True total row count for the group (rows may be capped).
+             */
+            total: number;
         };
         ImportDoiRequest: {
             doi: string;
@@ -1116,6 +1280,11 @@ export interface components {
         MovePageRequest: {
             destination: string;
         };
+        /**
+         * @description Comparison operators for filter predicates.
+         * @enum {string}
+         */
+        Op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "contains" | "in" | "links_to" | "is_empty" | "not_empty";
         OutlinkEntry: {
             kind: string;
             source_field?: string | null;
@@ -1219,6 +1388,94 @@ export interface components {
             rewrite?: string;
             source?: string;
         };
+        /** @description A declared property in a base's schema. */
+        PropertyDefinition: {
+            /**
+             * @description Advisory single-value constraint for `relation` (diagnostic, never
+             *     enforcement).
+             */
+            many?: boolean | null;
+            /**
+             * @description Options for `select` / `multi_select`. An empty list means open
+             *     vocabulary: completion offers observed values, no diagnostics for
+             *     novel ones.
+             */
+            options?: string[];
+            type: components["schemas"]["PropertyType"];
+        };
+        PropertyPatchRequest: {
+            /** @description Keys to remove. */
+            clear?: string[];
+            /** @description Revision (blake3 of the exact page bytes) the client last saw. */
+            expected_revision: string;
+            /** @description Keys to set, with their new JSON values. */
+            set?: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description Type hints per key (`{ "started": "date" }`): JSON has no date type,
+             *     so hinted ISO strings are written as native TOML date-times.
+             */
+            types?: {
+                [key: string]: components["schemas"]["PropertyType"];
+            };
+        };
+        PropertyPatchResponse: {
+            id: string;
+            path: string;
+            /**
+             * @description Refreshed property projections (read-after-write): key → value, with
+             *     multi-valued keys as arrays.
+             */
+            properties: Record<string, never>;
+            /** @description Revision of the page after the patch. */
+            revision: string;
+        };
+        /**
+         * @description Closed set of declarable property types (v1).
+         * @enum {string}
+         */
+        PropertyType: "text" | "number" | "bool" | "date" | "datetime" | "select" | "multi_select" | "url" | "relation";
+        QueryOutput: {
+            rows: components["schemas"]["QueryRow"][];
+            /** @enum {string} */
+            shape: "flat";
+            /** Format: int64 */
+            total: number;
+        } | {
+            groups: components["schemas"]["GroupResult"][];
+            /** @enum {string} */
+            shape: "grouped";
+        };
+        QueryRequest: {
+            aggregates?: components["schemas"]["Aggregate"][];
+            columns?: string[];
+            filter?: null | components["schemas"]["Filter"];
+            group_by?: string | null;
+            /** Format: int32 */
+            group_row_limit?: number | null;
+            /** Format: int32 */
+            limit?: number | null;
+            /** Format: int32 */
+            offset?: number;
+            sort?: components["schemas"]["SortKey"][];
+            /** @description Inline property-type hints (`{ "rating": "number" }`). */
+            types?: {
+                [key: string]: components["schemas"]["PropertyType"];
+            };
+        };
+        /**
+         * @description One result row: system fields plus materialized columns (`ord = 0`
+         *     projections as canonical JSON).
+         */
+        QueryRow: {
+            columns: Record<string, never>;
+            id: string;
+            kind: string;
+            path: string;
+            project?: string | null;
+            title?: string | null;
+        };
         /**
          * @description Reading progress status for an academic work.
          * @enum {string}
@@ -1250,6 +1507,13 @@ export interface components {
         SimilarResponse: {
             items: components["schemas"]["SimilarEntry"][];
         };
+        /** @enum {string} */
+        SortDir: "asc" | "desc";
+        /** @description One sort key in a view. */
+        SortKey: {
+            dir?: components["schemas"]["SortDir"];
+            field: string;
+        };
         /** @description Location within a source document (page, quote, bounding rect). */
         SourceLocation: {
             /** Format: int32 */
@@ -1263,6 +1527,9 @@ export interface components {
             /** @enum {string} */
             type: "index_changed";
             upserted: string[];
+        } | {
+            /** @enum {string} */
+            type: "base_registry_changed";
         };
         TagCount: {
             /** Format: int64 */
@@ -1351,6 +1618,16 @@ export interface components {
             pages: number;
             /** Format: int64 */
             tags: number;
+        };
+        /** @description A saved view: layout, optional extra filter, sort, grouping, columns. */
+        ViewDefinition: {
+            aggregates?: components["schemas"]["Aggregate"][];
+            columns?: string[];
+            filter?: null | components["schemas"]["Filter"];
+            group_by?: string | null;
+            layout?: string;
+            name: string;
+            sort?: components["schemas"]["SortKey"][];
         };
         WorkDetail: {
             assets?: string[];
@@ -2078,6 +2355,94 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiError"];
                 };
+            };
+        };
+    };
+    list_bases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseListResponse"];
+                };
+            };
+        };
+    };
+    get_base: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Base slug (filename stem) */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseDetailResponse"];
+                };
+            };
+            /** @description Unknown base */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    evaluate_view: {
+        parameters: {
+            query?: {
+                /** @description Flat row limit */
+                limit?: number;
+                /** @description Flat row offset */
+                offset?: number;
+                /** @description Sort-field override */
+                sort?: string;
+                /** @description asc | desc for the sort override */
+                dir?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Base slug */
+                slug: string;
+                /** @description View name */
+                view: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryOutput"];
+                };
+            };
+            /** @description Unknown base or view */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3573,6 +3938,53 @@ export interface operations {
             };
         };
     };
+    patch_properties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Page UUID */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropertyPatchRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyPatchResponse"];
+                };
+            };
+            /** @description Unrepresentable value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown page */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stale expected_revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_page: {
         parameters: {
             query?: never;
@@ -3799,6 +4211,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiError"];
                 };
+            };
+        };
+    };
+    run_query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryOutput"];
+                };
+            };
+            /** @description Invalid filter, field, or value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

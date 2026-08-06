@@ -99,7 +99,7 @@ impl Op {
 
 /// The filter AST. Deserializes identically from base files (TOML — inline
 /// tables or array-of-tables) and the generic query endpoint (JSON).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Filter {
     All(Vec<Filter>),
@@ -113,6 +113,21 @@ pub enum Filter {
         value: serde_json::Value,
     },
 }
+
+// The AST is recursive; utoipa's derived schema generation recurses without
+// terminating on it, so the OpenAPI surface describes it as an opaque object.
+impl utoipa::PartialSchema for Filter {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some(
+                "Recursive filter AST: {\"all\": [Filter]}, {\"any\": [Filter]}, \
+                 {\"not\": Filter}, or {\"field\", \"op\", \"value\"}",
+            ))
+            .into()
+    }
+}
+
+impl ToSchema for Filter {}
 
 /// One sort key in a view.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

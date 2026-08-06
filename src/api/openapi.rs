@@ -91,13 +91,41 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::board::cycles::create_cycle,
         crate::api::board::cycles::patch_cycle,
         // Deeplink
-        crate::api::deeplink::resolve_url
+        crate::api::deeplink::resolve_url,
+        // Bases
+        crate::api::bases::list_bases,
+        crate::api::bases::get_base,
+        crate::api::bases::evaluate_view,
+        crate::api::query::run_query,
+        crate::api::properties::patch_properties
     ),
     components(
         schemas(
             // Shared
             crate::api::error::ApiError,
             crate::vault::kind::Kind,
+            // Bases
+            crate::vault::base::PropertyType,
+            crate::vault::base::PropertyDefinition,
+            crate::vault::base::Filter,
+            crate::vault::base::Op,
+            crate::vault::base::SortKey,
+            crate::vault::base::SortDir,
+            crate::vault::base::Aggregate,
+            crate::vault::base::AggregateFn,
+            crate::vault::base::ViewDefinition,
+            crate::vault::base::BaseFile,
+            crate::vault::base::BaseDefinition,
+            crate::vault::base::BaseDiagnostic,
+            crate::vault::query::QueryRow,
+            crate::vault::query::GroupResult,
+            crate::vault::query::QueryOutput,
+            crate::api::bases::BaseSummary,
+            crate::api::bases::BaseListResponse,
+            crate::api::bases::BaseDetailResponse,
+            crate::api::query::QueryRequest,
+            crate::api::properties::PropertyPatchRequest,
+            crate::api::properties::PropertyPatchResponse,
             // Pages
             crate::api::pages::PageSummary,
             crate::api::pages::PageMetaResponse,

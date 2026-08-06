@@ -185,6 +185,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/", get(list_pages).post(create_default_page))
         .route("/by-id/{uuid}", get(get_page_by_id).put(update_page_by_id))
         .route(
+            "/by-id/{uuid}/properties",
+            axum::routing::patch(crate::api::properties::patch_properties),
+        )
+        .route(
             "/{*path}",
             get(get_page)
                 .post(create_page)

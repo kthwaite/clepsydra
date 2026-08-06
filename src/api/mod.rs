@@ -2,6 +2,7 @@ pub mod academic;
 pub mod agenda;
 pub mod archive;
 pub mod attachments;
+pub mod bases;
 pub mod bcl;
 pub mod blocks;
 pub mod board;
@@ -16,6 +17,8 @@ pub mod location;
 pub mod openapi;
 pub mod pages;
 pub mod pagination;
+pub mod properties;
+pub mod query;
 pub mod tasks;
 pub mod uptime;
 
@@ -125,6 +128,8 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/tasks", tasks::router())
         .nest("/board", board::router())
         .nest("/agenda", agenda::router())
+        .nest("/bases", bases::router())
+        .nest("/query", query::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))
         .route(
