@@ -7,12 +7,7 @@ export interface CycleMetricProps {
   color?: string;
 }
 
-export function CycleMetric({
-  label,
-  value,
-  testId,
-  color,
-}: CycleMetricProps) {
+export function CycleMetric({ label, value, testId, color }: CycleMetricProps) {
   return (
     <div className="flex min-w-[78px] flex-col gap-[3px]">
       <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">

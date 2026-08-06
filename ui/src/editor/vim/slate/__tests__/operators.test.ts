@@ -309,11 +309,7 @@ describe("linewise units on items owning nested lists", () => {
   it("2dd spanning parent and child captures the item once", () => {
     const editor = nestedDoc();
     keys(editor, "2ddp");
-    expect(snapshot(editor)).toEqual([
-      "li:sibling",
-      "li:|parent",
-      "li2:child",
-    ]);
+    expect(snapshot(editor)).toEqual(["li:sibling", "li:|parent", "li2:child"]);
   });
 
   it("cc clears the parent line but keeps the nested list", () => {
@@ -324,10 +320,7 @@ describe("linewise units on items owning nested lists", () => {
   });
 
   it("unwraps an item with a nested list when pasting into paragraphs", () => {
-    const editor = makeEditor(
-      ul(li("par|ent", ul(li("child")))),
-      p("after"),
-    );
+    const editor = makeEditor(ul(li("par|ent", ul(li("child")))), p("after"));
     const state = keys(editor, "yy");
     keys(editor, "Gp", state);
     expect(snapshot(editor)).toEqual([

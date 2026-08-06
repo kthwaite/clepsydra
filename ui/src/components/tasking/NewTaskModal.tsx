@@ -145,199 +145,199 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
       onKeyDown={handleKeyDown}
       constrainHeight
     >
-            {/* Header */}
-            <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-              <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
-                +
-              </span>
-              <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-                NEW TASKING
-              </span>
-              <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-                {opLabel} · COMMIT TO REGISTER
-              </span>
-              <button
-                type="button"
-                className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-                onClick={closeTaskModal}
-                data-testid="new-task-close-btn"
-              >
-                ESC
-              </button>
-            </div>
+      {/* Header */}
+      <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
+        <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
+          +
+        </span>
+        <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
+          NEW TASKING
+        </span>
+        <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
+          {opLabel} · COMMIT TO REGISTER
+        </span>
+        <button
+          type="button"
+          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+          onClick={closeTaskModal}
+          data-testid="new-task-close-btn"
+        >
+          ESC
+        </button>
+      </div>
 
-            {/* Body */}
-            <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
-              {/* TITLE */}
-              <EdField label="TASKING / TITLE">
-                <input
-                  ref={titleRef}
-                  type="text"
-                  className={INPUT_CLS}
-                  autoFocus
-                  placeholder="describe the unit of work…"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  data-testid="new-task-title"
-                />
-              </EdField>
+      {/* Body */}
+      <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
+        {/* TITLE */}
+        <EdField label="TASKING / TITLE">
+          <input
+            ref={titleRef}
+            type="text"
+            className={INPUT_CLS}
+            autoFocus
+            placeholder="describe the unit of work…"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            data-testid="new-task-title"
+          />
+        </EdField>
 
-              {/* OPERATION + CYCLE */}
-              <div className="grid grid-cols-2 gap-[12px]">
-                <EdField label="OPERATION">
-                  <select
-                    className={SELECT_CLS}
-                    value={project}
-                    onChange={(e) => setProject(e.target.value)}
-                    data-testid="new-task-operation"
-                  >
-                    <option value="">UNFILED / NONE</option>
-                    {operations.map((op) => (
-                      <option key={op.id} value={opKey(op)}>
-                        {op.code} — {op.name}
-                      </option>
-                    ))}
-                  </select>
-                </EdField>
-                <EdField label="CYCLE">
-                  <select
-                    className={SELECT_CLS}
-                    value={cycle}
-                    onChange={(e) => setCycle(e.target.value)}
-                    data-testid="new-task-cycle"
-                  >
-                    <option value="BACKLOG">BACKLOG / UNSCHEDULED</option>
-                    {cycles.map((c) => (
-                      <option key={c.id} value={c.code}>
-                        {c.code} · {c.label} ({c.state})
-                      </option>
-                    ))}
-                  </select>
-                </EdField>
-              </div>
+        {/* OPERATION + CYCLE */}
+        <div className="grid grid-cols-2 gap-[12px]">
+          <EdField label="OPERATION">
+            <select
+              className={SELECT_CLS}
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+              data-testid="new-task-operation"
+            >
+              <option value="">UNFILED / NONE</option>
+              {operations.map((op) => (
+                <option key={op.id} value={opKey(op)}>
+                  {op.code} — {op.name}
+                </option>
+              ))}
+            </select>
+          </EdField>
+          <EdField label="CYCLE">
+            <select
+              className={SELECT_CLS}
+              value={cycle}
+              onChange={(e) => setCycle(e.target.value)}
+              data-testid="new-task-cycle"
+            >
+              <option value="BACKLOG">BACKLOG / UNSCHEDULED</option>
+              {cycles.map((c) => (
+                <option key={c.id} value={c.code}>
+                  {c.code} · {c.label} ({c.state})
+                </option>
+              ))}
+            </select>
+          </EdField>
+        </div>
 
-              {/* DISPOSITION */}
-              <EdField label="DISPOSITION">
-                <DispositionRow
-                  value={status}
-                  onChange={setStatus}
-                  testIdPrefix="new-task"
-                />
-              </EdField>
+        {/* DISPOSITION */}
+        <EdField label="DISPOSITION">
+          <DispositionRow
+            value={status}
+            onChange={setStatus}
+            testIdPrefix="new-task"
+          />
+        </EdField>
 
-              {/* PRIORITY */}
-              <EdField label="PRIORITY">
-                <PriorityRow
-                  value={priority}
-                  onChange={setPriority}
-                  testIdPrefix="new-task"
-                />
-              </EdField>
+        {/* PRIORITY */}
+        <EdField label="PRIORITY">
+          <PriorityRow
+            value={priority}
+            onChange={setPriority}
+            testIdPrefix="new-task"
+          />
+        </EdField>
 
-              {/* OPERATOR / EST / DUE */}
-              <div className="grid grid-cols-3 gap-[12px]">
-                <EdField label="OPERATOR">
-                  <input
-                    type="text"
-                    className={INPUT_CLS}
-                    value={assignee}
-                    onChange={(e) => setAssignee(e.target.value)}
-                    data-testid="new-task-assignee"
-                  />
-                </EdField>
-                <EdField label="EST">
-                  <input
-                    type="text"
-                    className={INPUT_CLS}
-                    value={estimate}
-                    onChange={(e) => setEstimate(e.target.value)}
-                    data-testid="new-task-estimate"
-                  />
-                </EdField>
-                <EdField label="DUE" hint="YYYY-MM-DD">
-                  <input
-                    type="text"
-                    className={INPUT_CLS}
-                    placeholder="2026-12-31"
-                    value={due}
-                    onChange={(e) => setDue(e.target.value)}
-                    data-testid="new-task-due"
-                  />
-                </EdField>
-              </div>
+        {/* OPERATOR / EST / DUE */}
+        <div className="grid grid-cols-3 gap-[12px]">
+          <EdField label="OPERATOR">
+            <input
+              type="text"
+              className={INPUT_CLS}
+              value={assignee}
+              onChange={(e) => setAssignee(e.target.value)}
+              data-testid="new-task-assignee"
+            />
+          </EdField>
+          <EdField label="EST">
+            <input
+              type="text"
+              className={INPUT_CLS}
+              value={estimate}
+              onChange={(e) => setEstimate(e.target.value)}
+              data-testid="new-task-estimate"
+            />
+          </EdField>
+          <EdField label="DUE" hint="YYYY-MM-DD">
+            <input
+              type="text"
+              className={INPUT_CLS}
+              placeholder="2026-12-31"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              data-testid="new-task-due"
+            />
+          </EdField>
+        </div>
 
-              {/* TAGS + CHECKLIST */}
-              <div className="grid grid-cols-2 gap-[12px]">
-                <EdField label="TAGS" hint="comma-sep">
-                  <input
-                    type="text"
-                    className={INPUT_CLS}
-                    placeholder="INFRA, PROCESS"
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    data-testid="new-task-tags"
-                  />
-                </EdField>
-                {/* CHECKLIST: one item per line → checklist[] array on POST.
+        {/* TAGS + CHECKLIST */}
+        <div className="grid grid-cols-2 gap-[12px]">
+          <EdField label="TAGS" hint="comma-sep">
+            <input
+              type="text"
+              className={INPUT_CLS}
+              placeholder="INFRA, PROCESS"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              data-testid="new-task-tags"
+            />
+          </EdField>
+          {/* CHECKLIST: one item per line → checklist[] array on POST.
                     Plan deviation: prototype used a count field; we use a
                     textarea so items carry actual text in the page body. */}
-                <EdField label="CHECKLIST" hint="one item per line">
-                  <textarea
-                    className={`${INPUT_CLS} resize-none`}
-                    rows={3}
-                    placeholder={"item 1\nitem 2"}
-                    value={checklist}
-                    onChange={(e) => setChecklist(e.target.value)}
-                    data-testid="new-task-checklist"
-                  />
-                </EdField>
-              </div>
+          <EdField label="CHECKLIST" hint="one item per line">
+            <textarea
+              className={`${INPUT_CLS} resize-none`}
+              rows={3}
+              placeholder={"item 1\nitem 2"}
+              value={checklist}
+              onChange={(e) => setChecklist(e.target.value)}
+              data-testid="new-task-checklist"
+            />
+          </EdField>
+        </div>
 
-              {/* DOSSIER LINK */}
-              <EdField label="DOSSIER LINK" hint="optional">
-                <input
-                  type="text"
-                  className={INPUT_CLS}
-                  placeholder="[[dossier]]"
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                  data-testid="new-task-link"
-                />
-              </EdField>
-            </div>
+        {/* DOSSIER LINK */}
+        <EdField label="DOSSIER LINK" hint="optional">
+          <input
+            type="text"
+            className={INPUT_CLS}
+            placeholder="[[dossier]]"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            data-testid="new-task-link"
+          />
+        </EdField>
+      </div>
 
-            {/* Footer */}
-            <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-              <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
-                <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-                  ⌘↵
-                </span>{" "}
-                commit ·{" "}
-                <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-                  ESC
-                </span>{" "}
-                cancel
-              </div>
-              <div className="flex gap-[8px]">
-                <button
-                  type="button"
-                  className="cl-btn"
-                  onClick={closeTaskModal}
-                  data-testid="new-task-cancel"
-                >
-                  CANCEL
-                </button>
-                <button
-                  type="button"
-                  className="cl-btn cl-btn-hot"
-                  onClick={commit}
-                  disabled={create.isPending}
-                  data-testid="new-task-commit"
-                >
-                  {create.isPending ? "COMMITTING…" : "COMMIT TASK"}
-                </button>
-              </div>
-            </div>
+      {/* Footer */}
+      <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
+        <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
+          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+            ⌘↵
+          </span>{" "}
+          commit ·{" "}
+          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+            ESC
+          </span>{" "}
+          cancel
+        </div>
+        <div className="flex gap-[8px]">
+          <button
+            type="button"
+            className="cl-btn"
+            onClick={closeTaskModal}
+            data-testid="new-task-cancel"
+          >
+            CANCEL
+          </button>
+          <button
+            type="button"
+            className="cl-btn cl-btn-hot"
+            onClick={commit}
+            disabled={create.isPending}
+            data-testid="new-task-commit"
+          >
+            {create.isPending ? "COMMITTING…" : "COMMIT TASK"}
+          </button>
+        </div>
+      </div>
     </BoardModalFrame>
   );
 }

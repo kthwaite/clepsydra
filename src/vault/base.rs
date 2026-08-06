@@ -194,8 +194,9 @@ pub struct BaseFile {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
-    /// Declared properties in file order.
+    /// Declared properties in file order (serialized as a key → definition map).
     #[serde(with = "property_map")]
+    #[schema(value_type = std::collections::HashMap<String, PropertyDefinition>)]
     pub properties: Vec<(String, PropertyDefinition)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<ViewDefinition>,

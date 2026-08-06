@@ -4,11 +4,13 @@ import { invalidateByPath, queryKeys } from "#/api/keys";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
-interface SyncNotification {
-  type: "index_changed";
-  upserted: string[];
-  removed: string[];
-}
+type SyncNotification =
+  | {
+      type: "index_changed";
+      upserted: string[];
+      removed: string[];
+    }
+  | { type: "base_registry_changed" };
 
 export function useVaultEvents(): ConnectionStatus {
   const queryClient = useQueryClient();
@@ -35,6 +37,13 @@ export function useVaultEvents(): ConnectionStatus {
             invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
             invalidateByPath(queryClient, queryKeys.folders.pathPrefix);
             invalidateByPath(queryClient, queryKeys.index.pathPrefix);
+            // Page edits move rows in and out of base views (the Neovim case).
+            invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
+            invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+          }
+          if (data.type === "base_registry_changed") {
+            invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
+            invalidateByPath(queryClient, queryKeys.query.pathPrefix);
           }
         } catch {
           // ignore malformed events

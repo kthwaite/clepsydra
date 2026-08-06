@@ -7,8 +7,8 @@ import {
   useState,
 } from "react";
 import { useSearch, useTags } from "#/api/index";
-import { shortFolio } from "#/components/codex/folio-utils";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
+import { shortFolio } from "#/components/codex/folio-utils";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -248,115 +248,115 @@ export function CommandPalette() {
       panelClassName="flex flex-col"
       widthClassName="w-[92%]"
     >
-        {/* header / channel */}
-        <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
-          <span className="cl-mono text-[9px] tracking-[0.16em] text-ink-mute">
-            CHANNEL
-          </span>
-          <span className="cl-mono text-[13px] font-bold tracking-[0.08em] text-accent">
-            CLP&gt;
-          </span>
-          <input
-            ref={inputRef}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="grep | go | id | tag — ⏎ to dispatch · esc to close"
-            className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
-          />
-          <span className="cl-mono border border-ink/40 px-[6px] py-[1px] text-[10px] tracking-[0.08em] text-ink-mute">
-            ESC
-          </span>
-        </div>
-        {/* results */}
-        <div className="cl-noscroll max-h-[340px] overflow-auto py-[4px]">
-          {filtered.length === 0 && (
-            <div className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint">
-              — NO RESULTS —
-            </div>
-          )}
-          {filtered.map((c, i) => {
-            const active = i === sel;
-            return (
-              <button
-                type="button"
-                key={`${c.kind}:${c.id}:${i}`}
-                onMouseEnter={() => setSel(i)}
-                onClick={() => {
-                  c.action();
-                  close();
-                }}
+      {/* header / channel */}
+      <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
+        <span className="cl-mono text-[9px] tracking-[0.16em] text-ink-mute">
+          CHANNEL
+        </span>
+        <span className="cl-mono text-[13px] font-bold tracking-[0.08em] text-accent">
+          CLP&gt;
+        </span>
+        <input
+          ref={inputRef}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="grep | go | id | tag — ⏎ to dispatch · esc to close"
+          className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
+        />
+        <span className="cl-mono border border-ink/40 px-[6px] py-[1px] text-[10px] tracking-[0.08em] text-ink-mute">
+          ESC
+        </span>
+      </div>
+      {/* results */}
+      <div className="cl-noscroll max-h-[340px] overflow-auto py-[4px]">
+        {filtered.length === 0 && (
+          <div className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint">
+            — NO RESULTS —
+          </div>
+        )}
+        {filtered.map((c, i) => {
+          const active = i === sel;
+          return (
+            <button
+              type="button"
+              key={`${c.kind}:${c.id}:${i}`}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => {
+                c.action();
+                close();
+              }}
+              className={cn(
+                "grid w-full cursor-pointer grid-cols-[50px_112px_1fr_20px] items-center gap-[10px] px-[14px] py-[4px] text-left leading-[1.4]",
+                active && "bg-ink",
+              )}
+            >
+              <span
                 className={cn(
-                  "grid w-full cursor-pointer grid-cols-[50px_112px_1fr_20px] items-center gap-[10px] px-[14px] py-[4px] text-left leading-[1.4]",
-                  active && "bg-ink",
+                  "cl-mono text-[9px] tracking-[0.16em]",
+                  active ? "text-paper" : "text-accent",
                 )}
               >
+                {KIND_LABEL[c.kind]}
+              </span>
+              <span
+                className={cn(
+                  "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] tracking-[0.04em]",
+                  active ? "text-paper" : "text-ink-2",
+                )}
+              >
+                {c.id}
+              </span>
+              <span className="flex min-w-0 flex-col">
                 <span
                   className={cn(
-                    "cl-mono text-[9px] tracking-[0.16em]",
-                    active ? "text-paper" : "text-accent",
+                    "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] uppercase tracking-[0.02em]",
+                    active ? "text-paper" : "text-ink",
                   )}
                 >
-                  {KIND_LABEL[c.kind]}
+                  {c.title}
                 </span>
-                <span
-                  className={cn(
-                    "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] tracking-[0.04em]",
-                    active ? "text-paper" : "text-ink-2",
-                  )}
-                >
-                  {c.id}
-                </span>
-                <span className="flex min-w-0 flex-col">
+                {c.sub && (
                   <span
                     className={cn(
-                      "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] uppercase tracking-[0.02em]",
-                      active ? "text-paper" : "text-ink",
+                      "cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] normal-case",
+                      active ? "text-paper/75" : "text-ink-mute",
                     )}
                   >
-                    {c.title}
+                    {c.sub}
                   </span>
-                  {c.sub && (
-                    <span
-                      className={cn(
-                        "cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] normal-case",
-                        active ? "text-paper/75" : "text-ink-mute",
-                      )}
-                    >
-                      {c.sub}
-                    </span>
-                  )}
-                </span>
-                <span
-                  className={cn(
-                    "text-[10px]",
-                    active ? "text-paper" : "text-ink-faint",
-                  )}
-                >
-                  ⏎
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {/* footer / keycap legend */}
-        <div className="cl-mono flex items-center gap-[18px] border-t border-ink px-[14px] py-[6px] text-[9px] uppercase tracking-[0.14em] text-ink-faint">
-          <span>
-            <span className="border border-ink/40 px-[4px] py-[1px]">↑</span>
-            <span className="ml-[3px] border border-ink/40 px-[4px] py-[1px]">
-              ↓
-            </span>{" "}
-            nav
-          </span>
-          <span>
-            <span className="border border-ink/40 px-[4px] py-[1px]">⏎</span>{" "}
-            dispatch
-          </span>
-          <span>
-            <span className="border border-ink/40 px-[4px] py-[1px]">ESC</span>{" "}
-            close
-          </span>
-          <span className="ml-auto">{filtered.length} HITS</span>
-        </div>
+                )}
+              </span>
+              <span
+                className={cn(
+                  "text-[10px]",
+                  active ? "text-paper" : "text-ink-faint",
+                )}
+              >
+                ⏎
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {/* footer / keycap legend */}
+      <div className="cl-mono flex items-center gap-[18px] border-t border-ink px-[14px] py-[6px] text-[9px] uppercase tracking-[0.14em] text-ink-faint">
+        <span>
+          <span className="border border-ink/40 px-[4px] py-[1px]">↑</span>
+          <span className="ml-[3px] border border-ink/40 px-[4px] py-[1px]">
+            ↓
+          </span>{" "}
+          nav
+        </span>
+        <span>
+          <span className="border border-ink/40 px-[4px] py-[1px]">⏎</span>{" "}
+          dispatch
+        </span>
+        <span>
+          <span className="border border-ink/40 px-[4px] py-[1px]">ESC</span>{" "}
+          close
+        </span>
+        <span className="ml-auto">{filtered.length} HITS</span>
+      </div>
     </CodexModalShell>
   );
 }

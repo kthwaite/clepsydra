@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
+import { useOpenTab } from "#/hooks/useOpenTab";
 
 /**
  * Resolve a dossier canonical name to a vault path via the search index, then

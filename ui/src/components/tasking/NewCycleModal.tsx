@@ -170,137 +170,137 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
       }}
       constrainHeight
     >
-            {/* Header */}
-            <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-              <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
-                ◴
-              </span>
-              <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-                NEW CYCLE
-              </span>
-              <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-                {windowLabel} · OPEN A CADENCE WINDOW
-              </span>
+      {/* Header */}
+      <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
+        <span className="cl-display text-[16px] font-extrabold text-[var(--hot)]">
+          ◴
+        </span>
+        <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
+          NEW CYCLE
+        </span>
+        <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
+          {windowLabel} · OPEN A CADENCE WINDOW
+        </span>
+        <button
+          type="button"
+          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+          onClick={closeCycleModal}
+          data-testid="new-cycle-close-btn"
+        >
+          ESC
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
+        {/* LABEL + CODE */}
+        <div className="grid grid-cols-2 gap-[12px]">
+          <EdField label="CYCLE / LABEL">
+            <input
+              ref={labelRef}
+              type="text"
+              className={INPUT_CLS}
+              autoFocus
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              data-testid="new-cycle-label"
+            />
+          </EdField>
+          <EdField label="REGISTER ID" hint="S-NN">
+            <input
+              type="text"
+              className={INPUT_CLS}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              data-testid="new-cycle-code"
+            />
+          </EdField>
+        </div>
+
+        {/* WINDOW */}
+        <div className="grid grid-cols-2 gap-[12px]">
+          <EdField label="WINDOW / OPEN" hint="start">
+            <input
+              type="date"
+              className={INPUT_CLS}
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              data-testid="new-cycle-start"
+            />
+          </EdField>
+          <EdField label="WINDOW / SEAL" hint="end">
+            <input
+              type="date"
+              className={INPUT_CLS}
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              data-testid="new-cycle-end"
+            />
+          </EdField>
+        </div>
+
+        {/* INITIAL STATE */}
+        <EdField label="INITIAL STATE" hint="cadence">
+          <div className="flex gap-[6px]">
+            {["PLANNED", "ACTIVE"].map((st) => (
               <button
+                key={st}
                 type="button"
-                className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-                onClick={closeCycleModal}
-                data-testid="new-cycle-close-btn"
+                className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
+                onClick={() => setState(st)}
+                data-testid={`new-cycle-state-${st}`}
               >
-                ESC
+                {st}
               </button>
-            </div>
+            ))}
+          </div>
+        </EdField>
 
-            {/* Body */}
-            <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
-              {/* LABEL + CODE */}
-              <div className="grid grid-cols-2 gap-[12px]">
-                <EdField label="CYCLE / LABEL">
-                  <input
-                    ref={labelRef}
-                    type="text"
-                    className={INPUT_CLS}
-                    autoFocus
-                    value={label}
-                    onChange={(e) => setLabel(e.target.value)}
-                    data-testid="new-cycle-label"
-                  />
-                </EdField>
-                <EdField label="REGISTER ID" hint="S-NN">
-                  <input
-                    type="text"
-                    className={INPUT_CLS}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    data-testid="new-cycle-code"
-                  />
-                </EdField>
-              </div>
+        {/* GOAL */}
+        <EdField label="CYCLE GOAL" hint="one line">
+          <textarea
+            className={`${INPUT_CLS} resize-none`}
+            rows={2}
+            placeholder="what this cadence window is for…"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            data-testid="new-cycle-goal"
+          />
+        </EdField>
+      </div>
 
-              {/* WINDOW */}
-              <div className="grid grid-cols-2 gap-[12px]">
-                <EdField label="WINDOW / OPEN" hint="start">
-                  <input
-                    type="date"
-                    className={INPUT_CLS}
-                    value={start}
-                    onChange={(e) => setStart(e.target.value)}
-                    data-testid="new-cycle-start"
-                  />
-                </EdField>
-                <EdField label="WINDOW / SEAL" hint="end">
-                  <input
-                    type="date"
-                    className={INPUT_CLS}
-                    value={end}
-                    onChange={(e) => setEnd(e.target.value)}
-                    data-testid="new-cycle-end"
-                  />
-                </EdField>
-              </div>
-
-              {/* INITIAL STATE */}
-              <EdField label="INITIAL STATE" hint="cadence">
-                <div className="flex gap-[6px]">
-                  {["PLANNED", "ACTIVE"].map((st) => (
-                    <button
-                      key={st}
-                      type="button"
-                      className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
-                      onClick={() => setState(st)}
-                      data-testid={`new-cycle-state-${st}`}
-                    >
-                      {st}
-                    </button>
-                  ))}
-                </div>
-              </EdField>
-
-              {/* GOAL */}
-              <EdField label="CYCLE GOAL" hint="one line">
-                <textarea
-                  className={`${INPUT_CLS} resize-none`}
-                  rows={2}
-                  placeholder="what this cadence window is for…"
-                  value={goal}
-                  onChange={(e) => setGoal(e.target.value)}
-                  data-testid="new-cycle-goal"
-                />
-              </EdField>
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-              <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
-                <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-                  ⌘↵
-                </span>{" "}
-                open ·{" "}
-                <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
-                  ESC
-                </span>{" "}
-                cancel
-              </div>
-              <div className="flex gap-[8px]">
-                <button
-                  type="button"
-                  className="cl-btn"
-                  onClick={closeCycleModal}
-                  data-testid="new-cycle-cancel"
-                >
-                  CANCEL
-                </button>
-                <button
-                  type="button"
-                  className="cl-btn cl-btn-hot"
-                  onClick={commit}
-                  disabled={create.isPending}
-                  data-testid="new-cycle-commit"
-                >
-                  {create.isPending ? "OPENING…" : "◴ OPEN CYCLE"}
-                </button>
-              </div>
-            </div>
+      {/* Footer */}
+      <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
+        <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
+          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+            ⌘↵
+          </span>{" "}
+          open ·{" "}
+          <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
+            ESC
+          </span>{" "}
+          cancel
+        </div>
+        <div className="flex gap-[8px]">
+          <button
+            type="button"
+            className="cl-btn"
+            onClick={closeCycleModal}
+            data-testid="new-cycle-cancel"
+          >
+            CANCEL
+          </button>
+          <button
+            type="button"
+            className="cl-btn cl-btn-hot"
+            onClick={commit}
+            disabled={create.isPending}
+            data-testid="new-cycle-commit"
+          >
+            {create.isPending ? "OPENING…" : "◴ OPEN CYCLE"}
+          </button>
+        </div>
+      </div>
     </BoardModalFrame>
   );
 }

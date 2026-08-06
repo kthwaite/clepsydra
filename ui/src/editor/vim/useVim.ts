@@ -162,5 +162,11 @@ export function useVim(editor: Editor, enabled: boolean): VimHandle {
     );
   }, [enabled]);
 
-  return { mode: state.mode, pending, handleKeyDown, handleDOMBeforeInput, handleMouseDown };
+  return {
+    mode: state.mode,
+    pending,
+    handleKeyDown,
+    handleDOMBeforeInput,
+    handleMouseDown,
+  };
 }

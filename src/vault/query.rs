@@ -496,19 +496,19 @@ pub struct QueryRow {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     pub columns: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct GroupResult {
     /// The raw group key; `null` is the empty bucket.
-    #[schema(value_type = Object)]
+    #[schema(value_type = serde_json::Value)]
     pub key: serde_json::Value,
     /// True total row count for the group (rows may be capped).
     pub total: i64,
     /// One value per requested aggregate, in request order.
-    #[schema(value_type = Vec<Object>)]
+    #[schema(value_type = Vec<serde_json::Value>)]
     pub aggregates: Vec<serde_json::Value>,
     pub rows: Vec<QueryRow>,
 }

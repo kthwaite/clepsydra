@@ -1,9 +1,9 @@
 import {
   createEditor,
   type Descendant,
-  Element as SlateElement,
   Editor,
   Node,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
@@ -28,9 +28,7 @@ function makeSchemaEditor(value?: Descendant[]) {
   const editor = withHistory(
     withAutoformat(withOutliner(withSchema(createEditor()))),
   );
-  editor.children = value ?? [
-    { type: "paragraph", children: [{ text: "" }] },
-  ];
+  editor.children = value ?? [{ type: "paragraph", children: [{ text: "" }] }];
   Transforms.select(editor, Editor.end(editor, [0]));
   return editor;
 }
@@ -48,10 +46,7 @@ function elementChildren(node: Descendant): Descendant[] {
   return node.children;
 }
 
-function isFootnoteDefinition(
-  node: Descendant,
-  identifier?: string,
-): boolean {
+function isFootnoteDefinition(node: Descendant, identifier?: string): boolean {
   return (
     SlateElement.isElement(node) &&
     node.type === "footnote-def" &&
@@ -486,7 +481,6 @@ describe("withAutoformat integration", () => {
         expect(editor.children).toHaveLength(1);
       }
     });
-
   });
 
   describe("footnote shortcut", () => {
@@ -571,9 +565,9 @@ describe("withAutoformat integration", () => {
       editor.undo();
 
       expect(Node.string(editor.children[0])).toBe("[^undo");
-      expect(
-        editor.children.some((node) => isFootnoteDefinition(node)),
-      ).toBe(false);
+      expect(editor.children.some((node) => isFootnoteDefinition(node))).toBe(
+        false,
+      );
     });
   });
 

@@ -100,11 +100,7 @@ export function pointAtBlockOffset(
  * Map vim (line, column) coordinates to a Slate point. `off` is clamped to
  * the line length.
  */
-export function pointOfPos(
-  editor: Editor,
-  lines: Line[],
-  pos: LinePos,
-): Point {
+export function pointOfPos(editor: Editor, lines: Line[], pos: LinePos): Point {
   const line = lines[Math.max(0, Math.min(pos.li, lines.length - 1))];
   const target = line.start + Math.max(0, Math.min(pos.off, line.text.length));
   return pointAtBlockOffset(editor, line.blockPath, target);

@@ -633,9 +633,9 @@ describe("TimelineView — UNFILED non-null project", () => {
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     // orphan-unknown-project doesn't match any op → UNFILED group
     expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("tl-grp-UNFILED").textContent,
-    ).toContain("UNFILED");
+    expect(screen.getByTestId("tl-grp-UNFILED").textContent).toContain(
+      "UNFILED",
+    );
   });
 });
 

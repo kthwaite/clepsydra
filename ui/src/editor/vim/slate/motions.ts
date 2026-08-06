@@ -218,7 +218,14 @@ export function resolveMotion(
       if (!last) return { target: null };
       const kind = motion.reverse ? REVERSED[last.kind] : last.kind;
       return {
-        target: resolveFind(lines, from, kind, last.char, n, kind === last.kind),
+        target: resolveFind(
+          lines,
+          from,
+          kind,
+          last.char,
+          n,
+          kind === last.kind,
+        ),
       };
     }
   }

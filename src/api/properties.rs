@@ -53,7 +53,7 @@ pub struct PropertyPatchResponse {
     pub revision: String,
     /// Refreshed property projections (read-after-write): key → value, with
     /// multi-valued keys as arrays.
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, serde_json::Value>)]
     pub properties: serde_json::Map<String, serde_json::Value>,
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { code, docFrom, li, makeEditor, snapshot, ul } from "./fixtures";
 import { INITIAL_VIM_STATE, type VimState } from "../types";
+import { code, docFrom, li, makeEditor, snapshot, ul } from "./fixtures";
 import { keys } from "./helpers";
 
 describe("x", () => {

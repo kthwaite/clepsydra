@@ -1,5 +1,5 @@
-import { Editor, Element, Node, Path, Transforms } from "slate";
 import type { Descendant, Range } from "slate";
+import { Editor, Element, Node, Path, Transforms } from "slate";
 import type { Operator } from "../core/ast";
 import { nextBoundary } from "./graphemes";
 import {
@@ -128,7 +128,12 @@ function groupSpan(lines: Line[], a: number, b: number): LineGroup[] {
     if (prev && Path.equals(prev.blockPath, line.blockPath)) {
       prev.last = i;
     } else {
-      groups.push({ blockPath: line.blockPath, first: i, last: i, whole: false });
+      groups.push({
+        blockPath: line.blockPath,
+        first: i,
+        last: i,
+        whole: false,
+      });
     }
   }
   for (const group of groups) {
@@ -349,7 +354,11 @@ export function pasteLinewise(
     for (let i = 0; i < n; i++) parts.push(once);
     const text = parts.join("\n");
     const at = after
-      ? pointAtBlockOffset(editor, line.blockPath, line.start + line.text.length)
+      ? pointAtBlockOffset(
+          editor,
+          line.blockPath,
+          line.start + line.text.length,
+        )
       : pointAtBlockOffset(editor, line.blockPath, line.start);
     Transforms.insertText(editor, after ? `\n${text}` : `${text}\n`, { at });
     const target = after ? from.li + 1 : from.li;

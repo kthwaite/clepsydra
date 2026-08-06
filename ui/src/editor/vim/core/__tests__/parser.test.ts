@@ -21,25 +21,73 @@ function expectCommand(
 
 describe("motions", () => {
   it("emits basic motions without a count", () => {
-    expectCommand(["h"], { t: "move", motion: { t: "char", dir: -1 }, count: null });
-    expectCommand(["l"], { t: "move", motion: { t: "char", dir: 1 }, count: null });
-    expectCommand(["j"], { t: "move", motion: { t: "line-vert", dir: 1 }, count: null });
-    expectCommand(["k"], { t: "move", motion: { t: "line-vert", dir: -1 }, count: null });
-    expectCommand(["w"], { t: "move", motion: { t: "word", kind: "w" }, count: null });
-    expectCommand(["b"], { t: "move", motion: { t: "word", kind: "b" }, count: null });
-    expectCommand(["e"], { t: "move", motion: { t: "word", kind: "e" }, count: null });
+    expectCommand(["h"], {
+      t: "move",
+      motion: { t: "char", dir: -1 },
+      count: null,
+    });
+    expectCommand(["l"], {
+      t: "move",
+      motion: { t: "char", dir: 1 },
+      count: null,
+    });
+    expectCommand(["j"], {
+      t: "move",
+      motion: { t: "line-vert", dir: 1 },
+      count: null,
+    });
+    expectCommand(["k"], {
+      t: "move",
+      motion: { t: "line-vert", dir: -1 },
+      count: null,
+    });
+    expectCommand(["w"], {
+      t: "move",
+      motion: { t: "word", kind: "w" },
+      count: null,
+    });
+    expectCommand(["b"], {
+      t: "move",
+      motion: { t: "word", kind: "b" },
+      count: null,
+    });
+    expectCommand(["e"], {
+      t: "move",
+      motion: { t: "word", kind: "e" },
+      count: null,
+    });
     expectCommand(["$"], { t: "move", motion: { t: "line-end" }, count: null });
-    expectCommand(["^"], { t: "move", motion: { t: "first-nonblank" }, count: null });
-    expectCommand(["G"], { t: "move", motion: { t: "doc", edge: "last" }, count: null });
+    expectCommand(["^"], {
+      t: "move",
+      motion: { t: "first-nonblank" },
+      count: null,
+    });
+    expectCommand(["G"], {
+      t: "move",
+      motion: { t: "doc", edge: "last" },
+      count: null,
+    });
   });
 
   it("maps arrow keys to char/line motions", () => {
-    expectCommand(["<Left>"], { t: "move", motion: { t: "char", dir: -1 }, count: null });
-    expectCommand(["<Down>"], { t: "move", motion: { t: "line-vert", dir: 1 }, count: null });
+    expectCommand(["<Left>"], {
+      t: "move",
+      motion: { t: "char", dir: -1 },
+      count: null,
+    });
+    expectCommand(["<Down>"], {
+      t: "move",
+      motion: { t: "line-vert", dir: 1 },
+      count: null,
+    });
   });
 
   it("emits bare 0 as line-start", () => {
-    expectCommand(["0"], { t: "move", motion: { t: "line-start" }, count: null });
+    expectCommand(["0"], {
+      t: "move",
+      motion: { t: "line-start" },
+      count: null,
+    });
   });
 
   it("treats 0 after a digit as part of the count", () => {
@@ -51,23 +99,55 @@ describe("motions", () => {
   });
 
   it("applies counts to motions", () => {
-    expectCommand(["3", "w"], { t: "move", motion: { t: "word", kind: "w" }, count: 3 });
-    expectCommand(["5", "G"], { t: "move", motion: { t: "doc", edge: "last" }, count: 5 });
+    expectCommand(["3", "w"], {
+      t: "move",
+      motion: { t: "word", kind: "w" },
+      count: 3,
+    });
+    expectCommand(["5", "G"], {
+      t: "move",
+      motion: { t: "doc", edge: "last" },
+      count: 5,
+    });
   });
 
   it("parses gg and 5gg", () => {
-    expectCommand(["g", "g"], { t: "move", motion: { t: "doc", edge: "first" }, count: null });
-    expectCommand(["5", "g", "g"], { t: "move", motion: { t: "doc", edge: "first" }, count: 5 });
+    expectCommand(["g", "g"], {
+      t: "move",
+      motion: { t: "doc", edge: "first" },
+      count: null,
+    });
+    expectCommand(["5", "g", "g"], {
+      t: "move",
+      motion: { t: "doc", edge: "first" },
+      count: 5,
+    });
   });
 
   it("parses f/t/F/T with a target char", () => {
-    expectCommand(["f", "x"], { t: "move", motion: { t: "find", kind: "f", char: "x" }, count: null });
-    expectCommand(["T", ";"], { t: "move", motion: { t: "find", kind: "T", char: ";" }, count: null });
+    expectCommand(["f", "x"], {
+      t: "move",
+      motion: { t: "find", kind: "f", char: "x" },
+      count: null,
+    });
+    expectCommand(["T", ";"], {
+      t: "move",
+      motion: { t: "find", kind: "T", char: ";" },
+      count: null,
+    });
   });
 
   it("parses ; and , as repeat-find", () => {
-    expectCommand([";"], { t: "move", motion: { t: "repeat-find", reverse: false }, count: null });
-    expectCommand([","], { t: "move", motion: { t: "repeat-find", reverse: true }, count: null });
+    expectCommand([";"], {
+      t: "move",
+      motion: { t: "repeat-find", reverse: false },
+      count: null,
+    });
+    expectCommand([","], {
+      t: "move",
+      motion: { t: "repeat-find", reverse: true },
+      count: null,
+    });
   });
 });
 

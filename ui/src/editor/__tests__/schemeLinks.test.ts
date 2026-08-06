@@ -37,7 +37,9 @@ describe("openSchemeLink", () => {
       notify,
     });
     expect(openTab).not.toHaveBeenCalled();
-    expect(notify).toHaveBeenCalledWith("No page matches clepsydra://page/nope");
+    expect(notify).toHaveBeenCalledWith(
+      "No page matches clepsydra://page/nope",
+    );
   });
 
   it("notifies when resolution throws", async () => {
@@ -61,18 +63,29 @@ describe("resolveSchemeUrl", () => {
   it("returns the path on 200", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ path: "a/b.md" }), { status: 200 })),
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ path: "a/b.md" }), { status: 200 }),
+      ),
     );
-    await expect(resolveSchemeUrl("clepsydra://page/b")).resolves.toBe("a/b.md");
+    await expect(resolveSchemeUrl("clepsydra://page/b")).resolves.toBe(
+      "a/b.md",
+    );
     expect(fetch).toHaveBeenCalledWith(
       `/api/vault/resolve?url=${encodeURIComponent("clepsydra://page/b")}`,
     );
   });
 
   it("returns null on 404 and throws on 500", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 404 })),
+    );
     await expect(resolveSchemeUrl("clepsydra://page/nope")).resolves.toBeNull();
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 500 })),
+    );
     await expect(resolveSchemeUrl("clepsydra://page/x")).rejects.toThrow();
   });
 });

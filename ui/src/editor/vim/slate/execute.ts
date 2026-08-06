@@ -18,7 +18,6 @@ import {
   pointOfPos,
 } from "./lines";
 import { resolveMotion } from "./motions";
-import { resolveTextObject } from "./text-objects";
 import {
   applyCharwise,
   captureLinewise,
@@ -31,6 +30,7 @@ import {
   pasteLinewise,
   selectPos,
 } from "./operators";
+import { resolveTextObject } from "./text-objects";
 import type { LinePos, VimState } from "./types";
 import { classify, wordEnd } from "./words";
 
@@ -333,8 +333,7 @@ function run(
     }
     case "visual-object": {
       const lines = getLines(editor);
-      const from =
-        state.visualHead ?? cursorPos(editor, lines);
+      const from = state.visualHead ?? cursorPos(editor, lines);
       const span = resolveTextObject(lines, from, command.object);
       if (!span) return {};
       // Reselect the object (end is exclusive; the head sits on its last char).

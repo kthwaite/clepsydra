@@ -1,10 +1,10 @@
 import { type FormEvent, useRef, useState } from "react";
 import { useTags } from "#/api/index";
 import { useAssignPage, useCreatePage } from "#/api/pages";
+import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagsInput } from "#/components/codex/TagsInput";
-import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
@@ -114,7 +114,6 @@ export function InscribeModal() {
     reset();
     onClose();
   };
-
 
   return (
     <CodexModalShell

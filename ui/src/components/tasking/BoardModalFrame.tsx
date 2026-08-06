@@ -1,8 +1,8 @@
 import type { KeyboardEventHandler, ReactNode } from "react";
 import {
-  Dialog as RACDialog,
   Modal,
   ModalOverlay,
+  Dialog as RACDialog,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
 
@@ -45,8 +45,7 @@ export function BoardModalFrame({
               constrainHeight && "max-h-[82vh]",
             )}
             style={{
-              boxShadow:
-                "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
+              boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
             }}
             onKeyDown={onKeyDown}
             data-testid={modalTestId}

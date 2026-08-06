@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import type { Editor } from "slate";
+import { describe, expect, it } from "vitest";
 import type { Motion } from "../../core/ast";
 import { getLines, pointOfPos, posOfPoint } from "../lines";
 import { type MotionResolution, resolveMotion } from "../motions";
 import { INITIAL_VIM_STATE, type VimState } from "../types";
-import { code, docFrom, makeEditor, p, t, ul, li, hr } from "./fixtures";
+import { code, docFrom, hr, li, makeEditor, p, t, ul } from "./fixtures";
 
 function resolve(
   editor: Editor,
@@ -251,7 +251,9 @@ describe("find motions", () => {
       lastFind: { kind: "F", char: "b" },
     };
     expect(
-      charTarget(resolve(editor, { t: "repeat-find", reverse: false }, null, state)),
+      charTarget(
+        resolve(editor, { t: "repeat-find", reverse: false }, null, state),
+      ),
     ).toEqual({ li: 0, off: 2 });
     const fwd = docFrom("|bzbzb");
     const fState: VimState = {
@@ -259,7 +261,9 @@ describe("find motions", () => {
       lastFind: { kind: "f", char: "b" },
     };
     expect(
-      charTarget(resolve(fwd, { t: "repeat-find", reverse: false }, null, fState)),
+      charTarget(
+        resolve(fwd, { t: "repeat-find", reverse: false }, null, fState),
+      ),
     ).toEqual({ li: 0, off: 2 });
   });
 
@@ -271,7 +275,9 @@ describe("find motions", () => {
       lastFind: { kind: "t", char: "b" },
     };
     expect(
-      charTarget(resolve(editor, { t: "repeat-find", reverse: false }, null, state)),
+      charTarget(
+        resolve(editor, { t: "repeat-find", reverse: false }, null, state),
+      ),
     ).toEqual({ li: 0, off: 3 });
   });
 

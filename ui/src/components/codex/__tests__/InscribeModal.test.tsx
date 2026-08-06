@@ -117,7 +117,9 @@ describe("InscribeModal", () => {
     render(<InscribeModal />);
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Tagged");
     await user.type(screen.getByRole("combobox", { name: "Tags" }), "ru");
-    expect(screen.getByRole("listbox", { name: "Tag suggestions" })).toBeVisible();
+    expect(
+      screen.getByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeVisible();
     await user.keyboard("{Tab}");
     await user.click(screen.getByRole("button", { name: /commit to archive/ }));
     const [vars] = createMutate.mock.calls[0];

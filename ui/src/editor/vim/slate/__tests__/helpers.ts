@@ -33,7 +33,10 @@ export function keys(
       };
       continue;
     }
-    const result = parser.feed(key, state.mode === "visual" ? "visual" : "normal");
+    const result = parser.feed(
+      key,
+      state.mode === "visual" ? "visual" : "normal",
+    );
     if (result.kind === "command") {
       state = { ...state, ...executeCommand(editor, state, result.command) };
     }

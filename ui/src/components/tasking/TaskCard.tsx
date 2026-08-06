@@ -6,8 +6,8 @@
  */
 
 import type { BoardTask } from "#/api/board";
-import { checklistProgress } from "./board-stats";
 import { ChecklistBar } from "./board-presentation";
+import { checklistProgress } from "./board-stats";
 
 // ── priority colour maps ──────────────────────────────────────────────────────
 

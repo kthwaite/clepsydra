@@ -36,8 +36,8 @@ import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useDeleteTask, usePatchTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { opKey } from "./board-constants";
-import { checklistProgress } from "./board-stats";
 import { ChecklistBar } from "./board-presentation";
+import { checklistProgress } from "./board-stats";
 import {
   DispositionRow,
   EdField,
@@ -294,7 +294,12 @@ export function TaskEditPanel({
   );
 
   // Checklist progress (read-only: decision 7)
-  const { done, total, percent: pct, isComplete } = checklistProgress(task.checks);
+  const {
+    done,
+    total,
+    percent: pct,
+    isComplete,
+  } = checklistProgress(task.checks);
 
   const barColor = PRI_BAR_COLOR[task.priority] ?? "var(--ink-3)";
   const priTextColor = PRI_TEXT_COLOR[task.priority] ?? "var(--ink-mute)";

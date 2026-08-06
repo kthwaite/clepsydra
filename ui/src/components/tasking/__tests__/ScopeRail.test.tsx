@@ -198,10 +198,7 @@ describe("ScopeRail", () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
     const row = screen.getByText("C-01").closest("button");
 
-    expect(row).toHaveClass(
-      "border-l-[var(--hot)]",
-      "bg-[var(--paper)]",
-    );
+    expect(row).toHaveClass("border-l-[var(--hot)]", "bg-[var(--paper)]");
   });
 
   it("applies active classes to the selected backlog row", () => {
@@ -209,10 +206,7 @@ describe("ScopeRail", () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
     const row = screen.getByText("BKLG").closest("button");
 
-    expect(row).toHaveClass(
-      "border-l-[var(--hot)]",
-      "bg-[var(--paper)]",
-    );
+    expect(row).toHaveClass("border-l-[var(--hot)]", "bg-[var(--paper)]");
   });
 
   it("+ NEW TASKING opens taskModal with no project when ALL", async () => {

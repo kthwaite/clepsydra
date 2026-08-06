@@ -42,6 +42,8 @@ export const queryKeys = {
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },
   index: { pathPrefix: "/api/vault/index" },
+  bases: { pathPrefix: "/api/vault/bases" },
+  query: { pathPrefix: "/api/vault/query" },
 } as const;
 
 /** Invalidate all openapi-react-query queries whose path (queryKey[1]) starts with `prefix`. */

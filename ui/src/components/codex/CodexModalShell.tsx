@@ -1,8 +1,8 @@
 import type { KeyboardEventHandler, ReactNode } from "react";
 import {
-  Dialog as RACDialog,
   Modal,
   ModalOverlay,
+  Dialog as RACDialog,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
 

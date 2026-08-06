@@ -1,7 +1,7 @@
 import {
   Editor,
-  type Point,
   Path,
+  type Point,
   Element as SlateElement,
   Text,
   Transforms,
@@ -207,10 +207,7 @@ function tryMarkTransform(
   return true;
 }
 
-function tryBracketTransform(
-  editor: Editor,
-  closerConsumed = false,
-): boolean {
+function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
@@ -277,10 +274,7 @@ function tryBracketTransform(
   return true;
 }
 
-function tryLinkTransform(
-  editor: Editor,
-  closerConsumed = false,
-): boolean {
+function tryLinkTransform(editor: Editor, closerConsumed = false): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
@@ -305,11 +299,7 @@ function tryLinkTransform(
   const linkText = textBefore.slice(openBracketIdx + 1, bracketParenIdx);
   const url = textBefore.slice(bracketParenIdx + 2, contentEnd);
 
-  if (
-    linkText.length === 0 ||
-    linkText.startsWith("^") ||
-    url.length === 0
-  ) {
+  if (linkText.length === 0 || linkText.startsWith("^") || url.length === 0) {
     return false;
   }
 

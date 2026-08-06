@@ -1,5 +1,4 @@
 import type { Command, FindKind, Motion, Operator, VimMode } from "./ast";
-import { isPrintable, type VimKey } from "./keys";
 import {
   actionCommand,
   FIND_KEYS,
@@ -8,6 +7,7 @@ import {
   OPERATOR_KEYS,
   TEXT_OBJECT_KEYS,
 } from "./keymaps";
+import { isPrintable, type VimKey } from "./keys";
 
 export type ParseResult =
   | { kind: "pending" }
