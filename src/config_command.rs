@@ -141,8 +141,8 @@ pub fn render_trace(
         if candidate == &resolution.path {
             writeln!(
                 writer,
-                "→ {}",
-                candidate.display().truecolor(ACCENT.0, ACCENT.1, ACCENT.2)
+                "{}",
+                format_args!("→ {}", candidate.display()).truecolor(ACCENT.0, ACCENT.1, ACCENT.2)
             )?;
         } else {
             writeln!(writer, "  {}", candidate.display().dimmed())?;
@@ -228,6 +228,15 @@ mod tests {
                 PathBuf::from("/xdg/clepsydra/config.toml"),
             ],
         };
+        let mut styled = Vec::new();
+        render_trace(&resolution, &mut styled).unwrap();
+        let styled = String::from_utf8(styled).unwrap();
+        assert!(styled.contains("\u{1b}[2m/cwd/config.toml\u{1b}[0m"));
+        assert!(styled.contains("\u{1b}[38;2;238;119;51m→"));
+        assert!(styled.contains(
+            "\u{1b}[38;2;238;119;51m→ /xdg/clepsydra/config.toml\u{1b}[39m"
+        ));
+
         let mut plain = Vec::new();
         {
             let mut stream = anstream::AutoStream::new(&mut plain, anstream::ColorChoice::Never);
