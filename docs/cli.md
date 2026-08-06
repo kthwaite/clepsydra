@@ -77,24 +77,42 @@ vault config at `<vault>/.clepsydra/config.toml`.
 
 ```bash
 clepsydra config show
+clepsydra config show --origin
+clepsydra config path
+clepsydra config path --trace
 clepsydra config create
 ```
 
-`config show` prints the first existing application config from this lookup
-order:
+`config show` and `config path` select the first existing application config
+from this lookup order:
 
 1. `./config.toml`
 2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
 3. `$HOME/.config/clepsydra/config.toml`
 
-It writes only the file contents to stdout, verbatim, with no heading, path, or
-extra newline. An empty config therefore produces zero bytes of output.
+`config show` writes the selected file's bytes to stdout verbatim, with no
+heading, path, or extra newline. It writes nothing to stderr by default.
+`config show --origin` preserves that byte-exact stdout and writes exactly
+`Origin: <selected path>\n` to stderr after styling is removed.
 
-`config create` creates
+`config path` writes only `<selected path>\n` to stdout and nothing to stderr.
+`config path --trace` preserves that path-only stdout and traces to stderr only
+the candidates actually considered, in lookup order. Unselected candidates
+start with two spaces; the selected candidate starts with `→ `. Resolution
+stops at the selected file, so later candidates do not appear.
+
+Origin and trace diagnostics use automatic color on stderr when the stream
+supports it. Redirected stderr is plain text, and `NO_COLOR=1` disables ANSI
+color. Stdout is never styled.
+
+`config create` creates a fully commented application config template at
 `$XDG_CONFIG_HOME/clepsydra/config.toml`, or
 `$HOME/.config/clepsydra/config.toml` when `XDG_CONFIG_HOME` is unset. It
-creates missing parent directories, creates an empty file, and prints the
-created path. It refuses to overwrite an existing file.
+creates missing parent directories and prints `Created config at <path>`.
+The template documents defaults and precedence and contains commented
+`[server]`, `[server.tls]`, and `[vault]` sections with every example
+assignment still commented. It is therefore non-empty but parses as an empty
+TOML table. The command refuses to overwrite an existing file.
 
 ---
 

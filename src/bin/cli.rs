@@ -13,7 +13,7 @@ use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
     version,
     about = "Clepsydra CLI",
     long_about = "CLI for managing Clepsydra vaults and running the API server.\n\nConfiguration lookup order (for commands that require config):\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml",
-    after_help = "Examples:\n  clepsydra init ~/vault\n  clepsydra serve\n  clepsydra new \"Project Plan\"\n  clepsydra new \"Inbox\" --body \"- [ ] follow up\"\n  clepsydra config show\n  clepsydra config create"
+    after_help = "Examples:\n  clepsydra init ~/vault\n  clepsydra serve\n  clepsydra new \"Project Plan\"\n  clepsydra new \"Inbox\" --body \"- [ ] follow up\"\n  clepsydra config show\n  clepsydra config show --origin\n  clepsydra config path\n  clepsydra config path --trace\n  clepsydra config create"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -23,8 +23,16 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum ConfigCommands {
     #[command(about = "Print the application config selected by normal lookup")]
-    Show,
-    #[command(about = "Create an empty user application config")]
+    Show {
+        #[arg(long, help = "Print the selected config path to stderr")]
+        origin: bool,
+    },
+    #[command(about = "Print the selected application config path")]
+    Path {
+        #[arg(long, help = "Trace considered config paths to stderr")]
+        trace: bool,
+    },
+    #[command(about = "Create a commented application config template")]
     Create,
 }
 
@@ -59,7 +67,7 @@ enum Commands {
     },
     #[command(
         about = "Inspect or create application config",
-        long_about = "Inspect the application config selected by Clepsydra or create an empty user config. This command does not operate on vault-level .clepsydra/config.toml files."
+        long_about = "Inspect the application config selected by Clepsydra, print its path, or create a commented user config template. This command does not operate on vault-level .clepsydra/config.toml files."
     )]
     Config {
         #[command(subcommand)]
@@ -209,10 +217,27 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             Ok(0)
         }
         Commands::Config { command } => match command {
-            ConfigCommands::Show => {
+            ConfigCommands::Show { origin } => {
                 let cwd = std::env::current_dir()?;
-                let contents = clepsydra::config_command::read_existing(&cwd)?;
-                std::io::stdout().lock().write_all(&contents)?;
+                let config = clepsydra::config_command::read_existing(&cwd)?;
+                if origin {
+                    let mut stderr = anstream::AutoStream::auto(std::io::stderr().lock());
+                    clepsydra::config_command::render_origin(
+                        &config.resolution.path,
+                        &mut stderr,
+                    )?;
+                }
+                std::io::stdout().lock().write_all(&config.contents)?;
+                Ok(0)
+            }
+            ConfigCommands::Path { trace } => {
+                let cwd = std::env::current_dir()?;
+                let resolution = clepsydra::config_command::resolve_existing(&cwd)?;
+                if trace {
+                    let mut stderr = anstream::AutoStream::auto(std::io::stderr().lock());
+                    clepsydra::config_command::render_trace(&resolution, &mut stderr)?;
+                }
+                println!("{}", resolution.path.display());
                 Ok(0)
             }
             ConfigCommands::Create => {
@@ -436,15 +461,48 @@ mod cli_tests {
         run_cli(cli).await
     }
 
-    #[test]
-    fn config_show_parses() {
-        let cli = Cli::try_parse_from(["clep", "config", "show"]).unwrap();
-        assert!(matches!(
-            cli.command,
+    fn config_show_origin(args: &[&str]) -> bool {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
             Commands::Config {
-                command: ConfigCommands::Show
-            }
-        ));
+                command: ConfigCommands::Show { origin },
+            } => origin,
+            other => panic!("expected config show, got {other:?}"),
+        }
+    }
+
+    fn config_path_trace(args: &[&str]) -> bool {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Config {
+                command: ConfigCommands::Path { trace },
+            } => trace,
+            other => panic!("expected config path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_show_defaults_origin_off() {
+        assert!(!config_show_origin(&["clep", "config", "show"]));
+    }
+
+    #[test]
+    fn config_show_accepts_origin() {
+        assert!(config_show_origin(&[
+            "clep", "config", "show", "--origin",
+        ]));
+    }
+
+    #[test]
+    fn config_path_defaults_trace_off() {
+        assert!(!config_path_trace(&["clep", "config", "path"]));
+    }
+
+    #[test]
+    fn config_path_accepts_trace() {
+        assert!(config_path_trace(&[
+            "clep", "config", "path", "--trace",
+        ]));
     }
 
     #[test]

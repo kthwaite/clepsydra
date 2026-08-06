@@ -11,7 +11,7 @@ Clepsydra uses two config layers:
 
 ### Lookup order
 
-For commands that need app config (`serve`, `new`, `config show`), Clepsydra checks in this order:
+For commands that need app config (`serve`, `new`, `config show`, and `config path`), Clepsydra checks in this order:
 
 1. `./config.toml` (current working directory)
 2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
@@ -21,14 +21,34 @@ For commands that need app config (`serve`, `new`, `config show`), Clepsydra che
 
 ```bash
 clepsydra config show
+clepsydra config show --origin
+clepsydra config path
+clepsydra config path --trace
 clepsydra config create
 ```
 
-`config show` prints the first existing file from the lookup order verbatim.
-`config create` creates an empty user config at
+`config show` prints the first existing file from the lookup order byte for
+byte on stdout, with no added newline and no stderr output. `--origin` leaves
+stdout unchanged and writes `Origin: <selected path>\n` to stderr.
+
+`config path` writes only `<selected path>\n` to stdout and nothing to stderr.
+With `--trace`, stderr lists only the candidates actually considered, in
+lookup order: unselected candidates have a two-space prefix and the selected
+candidate has a `→ ` prefix. Lookup stops at the selected file, so the trace
+does not include later candidates.
+
+Origin and trace diagnostics use automatic color only on stderr when supported.
+Redirected stderr is plain text, `NO_COLOR=1` disables ANSI color, and stdout
+is never styled.
+
+`config create` creates a fully commented user config template at
 `$XDG_CONFIG_HOME/clepsydra/config.toml`, or
 `$HOME/.config/clepsydra/config.toml` when `XDG_CONFIG_HOME` is unset. It
 creates missing parent directories and refuses to overwrite an existing file.
+The non-empty template documents precedence and defaults in commented
+`[server]`, `[server.tls]`, and `[vault]` sections; all example assignments
+remain commented, so the template parses as an empty TOML table. The compact
+active equivalent is shown below.
 
 ### Example
 
