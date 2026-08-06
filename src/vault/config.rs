@@ -74,6 +74,9 @@ fn default_excluded_patterns() -> Vec<String> {
         ".git/**".to_string(),
         "node_modules".to_string(),
         "node_modules/**".to_string(),
+        // Base definitions are registry files, not pages.
+        "bases".to_string(),
+        "bases/**".to_string(),
     ]
 }
 

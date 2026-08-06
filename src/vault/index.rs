@@ -210,6 +210,11 @@ CREATE TABLE IF NOT EXISTS code_counters (
     next_value  INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS derivation_meta (
+    key     TEXT PRIMARY KEY,
+    value   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS page_properties (
     page_id     TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     key         TEXT NOT NULL,
@@ -366,15 +371,40 @@ impl VaultIndex {
     /// Pages removed from disk are pruned from the database.
     pub fn build(&mut self, vault: &Vault) -> Result<BuildStats, IndexError> {
         let mut stats = BuildStats::default();
-        let linkable_properties = &vault.config().vault.linkable_properties;
+
+        // The base registry loads BEFORE page indexing: relation-typed
+        // properties join the effective linkable set, and a change to that
+        // set (the linkable epoch) disables skip-unchanged for this build so
+        // untouched pages get their frontmatter links re-derived.
+        let registry = crate::vault::base::BaseRegistry::load(vault.root());
+        let linkable_properties = crate::vault::base::effective_linkable_properties(
+            &vault.config().vault.linkable_properties,
+            &registry,
+        );
+        let epoch = crate::vault::base::linkable_epoch(&linkable_properties);
+
         let tx = self.conn.transaction()?;
+        let stored_epoch: Option<String> = tx
+            .query_row(
+                "SELECT value FROM derivation_meta WHERE key = 'linkable_epoch'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let force_rederive = stored_epoch.as_deref() != Some(epoch.as_str());
+
         let (mut parsed_files, seen_paths) =
-            collect_indexed_pages(vault, &tx, linkable_properties, &mut stats)?;
+            collect_indexed_pages(vault, &tx, &linkable_properties, force_rederive, &mut stats)?;
         resolve_duplicate_uuids(&mut parsed_files, &mut stats)?;
         for pf in &parsed_files {
             upsert_indexed_page(pf, &tx, &self.derivers, &mut stats)?;
         }
         prune_stale_pages(&tx, &seen_paths, &mut stats)?;
+        tx.execute(
+            "INSERT INTO derivation_meta (key, value) VALUES ('linkable_epoch', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![epoch],
+        )?;
         tx.commit()?;
         Ok(stats)
     }
@@ -503,7 +533,15 @@ impl VaultIndex {
         vault_path: &VaultPath,
     ) -> Result<bool, IndexError> {
         let abs_path = vault.resolve(vault_path);
-        let linkable_properties = &vault.config().vault.linkable_properties;
+        // Single-page path: compose the effective linkable set from the
+        // current registry so relation-typed frontmatter links derive here
+        // too. Epoch bookkeeping stays in `build` — a set change forces the
+        // full re-derive there.
+        let registry = crate::vault::base::BaseRegistry::load(vault.root());
+        let linkable_properties = &crate::vault::base::effective_linkable_properties(
+            &vault.config().vault.linkable_properties,
+            &registry,
+        );
 
         let mut content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
         let (meta, body, rewrote_frontmatter, fm_warning) = parse_or_repair_frontmatter(&content);
@@ -1614,6 +1652,7 @@ fn collect_indexed_pages(
     vault: &Vault,
     tx: &rusqlite::Transaction,
     linkable_properties: &[String],
+    force_rederive: bool,
     stats: &mut BuildStats,
 ) -> Result<(Vec<IndexedPage>, HashSet<String>), IndexError> {
     let mut parsed_files: Vec<IndexedPage> = Vec::new();
@@ -1683,7 +1722,7 @@ fn collect_indexed_pages(
             )
             .ok();
 
-        if existing_hash.as_deref() == Some(&content_hash) {
+        if !force_rederive && existing_hash.as_deref() == Some(&content_hash) {
             stats.pages_skipped += 1;
             continue;
         }
@@ -2307,5 +2346,107 @@ mod property_derivation_tests {
             )
             .unwrap();
         assert_eq!(present, 1, "open must add page_properties to an old DB");
+    }
+}
+
+#[cfg(test)]
+mod linkable_epoch_tests {
+    use super::*;
+    use crate::vault::base::{BaseRegistry, effective_linkable_properties, linkable_epoch};
+
+    const SERIES_PAGE: &str = "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e1\"\ntitle = \"Book\"\nseries = [\"[[Solar Cycle]]\"]\n+++\nbody\n";
+    const SERIES_BASE: &str =
+        "name = \"Reading\"\n\n[properties]\nseries = { type = \"relation\" }\n";
+
+    fn setup(with_base: bool) -> (tempfile::TempDir, Vault, VaultIndex) {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("book.md"), SERIES_PAGE).unwrap();
+        if with_base {
+            fs::create_dir_all(tmp.path().join("bases")).unwrap();
+            fs::write(tmp.path().join("bases/reading.base.toml"), SERIES_BASE).unwrap();
+        }
+        let index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        (tmp, vault, index)
+    }
+
+    fn series_link_count(index: &VaultIndex) -> i64 {
+        index
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM links WHERE source_field = 'series'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn registry_loads_bases_and_effective_set_unions_config() {
+        let (tmp, vault, _index) = setup(true);
+        let registry = BaseRegistry::load(tmp.path());
+        assert_eq!(registry.bases.len(), 1);
+        assert_eq!(registry.bases[0].slug, "reading");
+        assert_eq!(registry.relation_property_keys(), vec!["series"]);
+
+        let effective =
+            effective_linkable_properties(&vault.config().vault.linkable_properties, &registry);
+        assert!(effective.contains(&"tags".to_string()));
+        assert!(effective.contains(&"series".to_string()));
+        // Union is deduped even when config already carries the key.
+        let mut with_dup = vault.config().vault.linkable_properties.clone();
+        with_dup.push("series".to_string());
+        let deduped = effective_linkable_properties(&with_dup, &registry);
+        assert_eq!(
+            deduped.iter().filter(|k| *k == "series").count(),
+            1,
+            "duplicate keys collapse"
+        );
+    }
+
+    #[test]
+    fn derivation_meta_created_and_epoch_written_by_build() {
+        let (_tmp, vault, mut index) = setup(false);
+        index.build(&vault).unwrap();
+        let epoch: String = index
+            .connection()
+            .query_row(
+                "SELECT value FROM derivation_meta WHERE key = 'linkable_epoch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(epoch.len(), 64);
+        assert_eq!(
+            epoch,
+            linkable_epoch(&vault.config().vault.linkable_properties)
+        );
+    }
+
+    #[test]
+    fn epoch_mismatch_rederives_unchanged_page_links() {
+        // Build once WITHOUT the base: `series` is not linkable, no link rows.
+        let (tmp, vault, mut index) = setup(false);
+        index.build(&vault).unwrap();
+        assert_eq!(series_link_count(&index), 0);
+
+        // Add the base declaring `series = relation`. The page file itself is
+        // untouched — without the epoch check, skip-unchanged would silently
+        // keep its stale link set.
+        fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        fs::write(tmp.path().join("bases/reading.base.toml"), SERIES_BASE).unwrap();
+
+        let stats = index.build(&vault).unwrap();
+        assert_eq!(stats.pages_skipped, 0, "epoch mismatch must bypass skip");
+        assert_eq!(
+            series_link_count(&index),
+            1,
+            "unchanged page's series link must appear after the epoch rebuild"
+        );
+
+        // Epoch is now stable: the next build skips unchanged pages again.
+        let stats = index.build(&vault).unwrap();
+        assert!(stats.pages_skipped >= 1, "no-op rebuild must skip");
+        assert_eq!(series_link_count(&index), 1);
     }
 }

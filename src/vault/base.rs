@@ -246,6 +246,111 @@ pub struct BaseDiagnostic {
     pub message: String,
 }
 
+/// The in-process collection of parsed bases plus per-file diagnostics.
+///
+/// Loaded from `<vault>/bases/*.base.toml` before the first index build (the
+/// linkable-set epoch depends on it). Broken files contribute diagnostics but
+/// never poison the rest of the registry.
+#[derive(Debug, Default, Clone)]
+pub struct BaseRegistry {
+    pub bases: Vec<BaseDefinition>,
+    pub diagnostics: Vec<BaseDiagnostic>,
+}
+
+impl BaseRegistry {
+    /// Parse every `bases/*.base.toml` under the vault root, in filename
+    /// order. A missing `bases/` directory yields an empty registry.
+    pub fn load(vault_root: &Path) -> Self {
+        let mut registry = BaseRegistry::default();
+        let dir = vault_root.join("bases");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return registry;
+        };
+        let mut paths: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.ends_with(".base.toml"))
+            })
+            .collect();
+        paths.sort();
+
+        for path in paths {
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    registry.diagnostics.push(BaseDiagnostic {
+                        slug: slug_from_path(&path),
+                        message: format!("cannot read base file: {e}"),
+                    });
+                    continue;
+                }
+            };
+            let (base, mut diagnostics) = parse_base(&path, &content);
+            registry.diagnostics.append(&mut diagnostics);
+            if let Some(base) = base {
+                if registry.bases.iter().any(|b| b.slug == base.slug) {
+                    registry.diagnostics.push(BaseDiagnostic {
+                        slug: base.slug.clone(),
+                        message: format!("duplicate base slug `{}`", base.slug),
+                    });
+                } else {
+                    registry.bases.push(base);
+                }
+            }
+        }
+        registry
+    }
+
+    pub fn get(&self, slug: &str) -> Option<&BaseDefinition> {
+        self.bases.iter().find(|b| b.slug == slug)
+    }
+
+    /// Keys of every relation-typed property declared by any base.
+    pub fn relation_property_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .bases
+            .iter()
+            .flat_map(|b| b.file.properties.iter())
+            .filter(|(_, def)| def.property_type == PropertyType::Relation)
+            .map(|(k, _)| k.clone())
+            .collect();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+}
+
+/// The effective linkable-property set: `config ∪ relation-typed keys across
+/// all bases`, deduped with config order first.
+pub fn effective_linkable_properties(
+    config_linkable: &[String],
+    registry: &BaseRegistry,
+) -> Vec<String> {
+    let mut effective = config_linkable.to_vec();
+    for key in registry.relation_property_keys() {
+        if !effective.contains(&key) {
+            effective.push(key);
+        }
+    }
+    effective
+}
+
+/// Stable fingerprint of the effective linkable set. Persisted in
+/// `derivation_meta`; a mismatch disables skip-unchanged for one build so
+/// existing pages get their links re-derived under the new set.
+pub fn linkable_epoch(effective: &[String]) -> String {
+    let mut sorted = effective.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    blake3::hash(sorted.join("\n").as_bytes())
+        .to_hex()
+        .to_string()
+}
+
 /// Derive the base slug from its file path (`bases/reading.base.toml` →
 /// `reading`).
 pub fn slug_from_path(path: &Path) -> String {
