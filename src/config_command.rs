@@ -9,6 +9,37 @@ use thiserror::Error;
 
 use crate::VESSEL_ACCENT as ACCENT;
 
+const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
+#
+# Every setting below is commented out. Uncomment the sections and values you
+# want to override; leaving them commented preserves Clepsydra's defaults.
+#
+# Precedence: defaults → config file → environment → serve flags.
+# Environment keys use CLEPSYDRA__SECTION__KEY, for example:
+# CLEPSYDRA__SERVER__HOST or CLEPSYDRA__VAULT__ROOT.
+
+# [server]
+# Bind host. Default: localhost.
+# host = "localhost"
+# Bind port. Default: 3000.
+# port = 3000
+# Disable the embedded frontend when true. Default: false.
+# dev_mode = false
+
+# [server.tls]
+# Serve HTTPS when true. Default: false.
+# enabled = false
+# Optional certificate paths. cert_path and key_path must be set together.
+# If both are omitted, TLS uses an automatically provisioned localhost cert.
+# cert_path = "certs/localhost.pem"
+# key_path = "certs/localhost-key.pem"
+
+# [vault]
+# Vault root. Relative paths resolve relative to this config file.
+# Default: ./vault.
+# root = "./vault"
+"##;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct ConfigResolution {
     pub path: PathBuf,
@@ -141,7 +172,18 @@ fn create_with_env(
     })?;
 
     match OpenOptions::new().write(true).create_new(true).open(&path) {
-        Ok(_) => Ok(path),
+        Ok(mut file) => {
+            if let Err(source) = file.write_all(LITERATE_CONFIG_TEMPLATE.as_bytes()) {
+                drop(file);
+                let _ = fs::remove_file(&path);
+                return Err(ConfigCommandError::Io {
+                    operation: "write",
+                    path,
+                    source,
+                });
+            }
+            Ok(path)
+        }
         Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
             Err(ConfigCommandError::AlreadyExists { path })
         }
@@ -376,7 +418,7 @@ mod tests {
 
         assert_eq!(path, root.join("clepsydra/config.toml"));
         assert!(path.is_file());
-        assert_eq!(fs::metadata(path).unwrap().len(), 0);
+        assert_eq!(fs::read(path).unwrap(), LITERATE_CONFIG_TEMPLATE.as_bytes());
     }
 
     #[test]
@@ -386,7 +428,48 @@ mod tests {
         let path = create_with_env(None, Some(home.path().as_os_str().to_owned())).unwrap();
 
         assert_eq!(path, home.path().join(".config/clepsydra/config.toml"));
-        assert_eq!(fs::metadata(path).unwrap().len(), 0);
+        assert_eq!(fs::read(path).unwrap(), LITERATE_CONFIG_TEMPLATE.as_bytes());
+    }
+
+    #[test]
+    fn create_writes_literate_comment_only_template() {
+        let xdg = tempfile::tempdir().unwrap();
+        let path = create_with_env(Some(xdg.path().as_os_str().to_owned()), None).unwrap();
+        let contents = fs::read_to_string(path).unwrap();
+
+        assert!(!contents.is_empty());
+        for expected in [
+            "# [server]",
+            "# host = \"localhost\"",
+            "# port = 3000",
+            "# dev_mode = false",
+            "# [server.tls]",
+            "# enabled = false",
+            "# cert_path = \"certs/localhost.pem\"",
+            "# key_path = \"certs/localhost-key.pem\"",
+            "# [vault]",
+            "# root = \"./vault\"",
+        ] {
+            assert!(
+                contents.contains(expected),
+                "missing template line: {expected}"
+            );
+        }
+
+        let parsed = contents.parse::<toml::Table>().unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn template_documents_precedence_and_tls_pairing() {
+        let xdg = tempfile::tempdir().unwrap();
+        let path = create_with_env(Some(xdg.path().as_os_str().to_owned()), None).unwrap();
+        let contents = fs::read_to_string(path).unwrap();
+
+        assert!(contents.contains("CLEPSYDRA__SERVER__HOST"));
+        assert!(contents.contains("defaults → config file → environment → serve flags"));
+        assert!(contents.contains("cert_path and key_path must be set together"));
+        assert!(contents.contains("relative to this config file"));
     }
 
     #[test]
