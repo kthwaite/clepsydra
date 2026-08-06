@@ -2,7 +2,7 @@
 
 ## Goal
 
-Extend the application-config commands so `clep config show` can identify the selected file without contaminating its stdout data stream, and `clep config create` produces a useful, fully commented configuration guide instead of a zero-byte file.
+Extend the application-config commands so `clep config show` can identify the selected file without contaminating its stdout data stream, `clep config path` can report and trace resolution, and `clep config create` produces a useful, fully commented configuration guide instead of a zero-byte file.
 
 ## `clep config show --origin`
 
@@ -25,6 +25,25 @@ Keeping origin metadata on stderr preserves uses such as `clep config show --ori
 The config-command library operation returns a value containing both the resolved `PathBuf` and the file's `Vec<u8>`. This guarantees the displayed origin is the file that supplied the displayed bytes and avoids a second lookup race.
 
 A focused renderer accepts a path and `std::io::Write`, following the existing library renderer pattern. The CLI supplies an auto-coloring stderr stream when `--origin` is set.
+
+## `clep config path --trace`
+
+Without flags, `clep config path` resolves the selected application config and writes only `<resolved path>\n` to stdout. This output is stable and suitable for command substitution.
+
+With `--trace`, stdout remains exactly the resolved path line. Stderr lists only the candidates actually examined, in lookup order, ending at the selected file:
+
+```text
+  /working/directory/config.toml
+→ /xdg/clepsydra/config.toml
+```
+
+Unselected considered paths are dimmed. The arrow and selected path use Clepsydra's orange accent. `anstream` applies the same terminal detection and color-environment behavior as `show --origin`; redirected or color-disabled stderr has the same structure without ANSI escapes.
+
+Resolution stops when it finds the selected file, so lower-precedence candidates are not listed as considered. When no config exists, all candidates were considered; the existing not-found error lists them, stdout stays empty, and `--trace` does not emit a duplicate candidate report.
+
+### Shared resolution model
+
+The config-command library exposes one resolution result containing the selected path and the ordered considered paths. `show` reads the selected file from that resolution, while `path` prints it and optionally renders its trace. This keeps `show --origin`, `path`, and `path --trace` on one lookup policy and ensures each invocation resolves once.
 
 ## `clep config create` literate template
 
@@ -58,7 +77,8 @@ After exclusive creation, the template is written with `write_all`. If writing f
 ## CLI and API changes
 
 - `ConfigCommands::Show` gains a boolean `--origin` flag.
-- The byte-only config read result becomes a struct containing `path` and `contents`; the existing CLI caller and tests migrate in a clean cutover.
+- `ConfigCommands::Path` is added with a boolean `--trace` flag.
+- Config resolution returns the selected path plus ordered considered paths; the byte-reading operation returns that selected path with its contents.
 - `ConfigCommands::Create` syntax and success output remain unchanged.
 - No new dependency is required; `anstream` and `owo-colors` already exist.
 
@@ -70,10 +90,14 @@ Behavioral tests cover:
 - returning the resolved path together with exact, potentially non-UTF-8 bytes;
 - origin rendering with the exact `Origin: <path>\n` structure independently of terminal detection;
 - the unchanged contents-only stdout contract;
+- parsing `clep config path --trace` and defaulting the flag off;
+- local, XDG, and HOME resolution stopping at the selected candidate;
+- path output containing only the resolved path and newline;
+- trace rendering in considered order, with no candidates after the selected file;
 - creation writing a non-empty template;
 - all application-config sections and keys appearing commented in the template;
 - parsing the template successfully as an empty TOML document;
 - parent-directory creation and overwrite refusal remaining intact;
 - an existing config remaining byte-for-byte unchanged after refused creation.
 
-CLI and configuration documentation show `--origin`, explain stderr placement and color behavior, and replace the empty-config description with the literate-template contract.
+CLI and configuration documentation show `--origin` and `path [--trace]`, explain stdout/stderr placement and color behavior, and replace the empty-config description with the literate-template contract.
