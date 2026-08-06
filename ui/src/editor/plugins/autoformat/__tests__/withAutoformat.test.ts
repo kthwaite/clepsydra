@@ -118,6 +118,17 @@ describe("withAutoformat integration", () => {
       expect(leaves.some((l: any) => l.code && l.text === "code")).toBe(true);
     });
 
+    it("`text` inside parentheses applies code mark", () => {
+      const editor = makeEditor();
+      type(editor, "(`foo bar`");
+      const para = editor.children[0] as any;
+      const leaves = para.children;
+      expect(leaves.some((l: any) => l.code && l.text === "foo bar")).toBe(
+        true,
+      );
+      expect(leaves.some((l: any) => l.text.includes("("))).toBe(true);
+    });
+
     it("] after [label inserts () and places the caret inside", () => {
       const editor = makeSchemaEditor();
       type(editor, "[Example]");

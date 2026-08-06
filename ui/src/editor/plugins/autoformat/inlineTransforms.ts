@@ -13,6 +13,15 @@ import type { CustomElement } from "#/editor/types";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
 
+// An opener delimiter is valid at text start or after whitespace, punctuation,
+// or a symbol (CommonMark left-flanking). Letters and digits reject, so
+// mid-word delimiters (snake_case, file`names`) never trigger.
+const OPENER_BOUNDARY = /[\s\p{P}\p{S}]/u;
+
+function isOpenerBoundary(charBefore: string): boolean {
+  return OPENER_BOUNDARY.test(charBefore);
+}
+
 /**
  * Attempts an inline transform triggered by the typed character.
  * Returns true if a transform was applied, false otherwise.
@@ -153,8 +162,8 @@ function tryMarkTransform(
     }
     if (!matches) continue;
 
-    // Opener validity: at text start or preceded by whitespace
-    if (i > 0 && !/\s/.test(textBefore[i - 1])) continue;
+    // Opener validity: at text start or preceded by a boundary char
+    if (i > 0 && !isOpenerBoundary(textBefore[i - 1])) continue;
 
     // Make sure it's exactly the right width (not more chars of same type before)
     if (i > 0 && textBefore[i - 1] === typed) continue;
@@ -216,7 +225,7 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
   const contentEnd = textBefore.length - (closerConsumed ? 1 : 0);
   const openBracketIdx = textBefore.lastIndexOf("[", contentEnd - 1);
   if (openBracketIdx === -1) return false;
-  if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
+  if (openBracketIdx > 0 && !isOpenerBoundary(textBefore[openBracketIdx - 1]))
     return false;
   if (hasInvalidBracketSyntax(textBefore, openBracketIdx, contentEnd))
     return false;
@@ -290,8 +299,8 @@ function tryLinkTransform(editor: Editor, closerConsumed = false): boolean {
   const openBracketIdx = textBefore.lastIndexOf("[", bracketParenIdx - 1);
   if (openBracketIdx === -1) return false;
 
-  // Opener validity: at text start or preceded by whitespace
-  if (openBracketIdx > 0 && !/\s/.test(textBefore[openBracketIdx - 1]))
+  // Opener validity: at text start or preceded by a boundary char
+  if (openBracketIdx > 0 && !isOpenerBoundary(textBefore[openBracketIdx - 1]))
     return false;
   if (hasInvalidBracketSyntax(textBefore, openBracketIdx, bracketParenIdx))
     return false;
