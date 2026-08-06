@@ -11,11 +11,24 @@ Clepsydra uses two config layers:
 
 ### Lookup order
 
-For commands that need app config (`serve`, `new`), Clepsydra checks in this order:
+For commands that need app config (`serve`, `new`, `config show`), Clepsydra checks in this order:
 
 1. `./config.toml` (current working directory)
 2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
 3. `$HOME/.config/clepsydra/config.toml`
+
+### Inspecting and creating the file
+
+```bash
+clepsydra config show
+clepsydra config create
+```
+
+`config show` prints the first existing file from the lookup order verbatim.
+`config create` creates an empty user config at
+`$XDG_CONFIG_HOME/clepsydra/config.toml`, or
+`$HOME/.config/clepsydra/config.toml` when `XDG_CONFIG_HOME` is unset. It
+creates missing parent directories and refuses to overwrite an existing file.
 
 ### Example
 

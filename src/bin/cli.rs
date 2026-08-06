@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -13,11 +13,19 @@ use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
     version,
     about = "Clepsydra CLI",
     long_about = "CLI for managing Clepsydra vaults and running the API server.\n\nConfiguration lookup order (for commands that require config):\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml",
-    after_help = "Examples:\n  clepsydra init ~/vault\n  clepsydra serve\n  clepsydra new \"Project Plan\"\n  clepsydra new \"Inbox\" --body \"- [ ] follow up\""
+    after_help = "Examples:\n  clepsydra init ~/vault\n  clepsydra serve\n  clepsydra new \"Project Plan\"\n  clepsydra new \"Inbox\" --body \"- [ ] follow up\"\n  clepsydra config show\n  clepsydra config create"
 )]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommands {
+    #[command(about = "Print the application config selected by normal lookup")]
+    Show,
+    #[command(about = "Create an empty user application config")]
+    Create,
 }
 
 #[derive(Debug, Subcommand)]
@@ -48,6 +56,14 @@ enum Commands {
         title: String,
         #[arg(short, long, value_name = "TEXT", help = "Optional initial body text")]
         body: Option<String>,
+    },
+    #[command(
+        about = "Inspect or create application config",
+        long_about = "Inspect the application config selected by Clepsydra or create an empty user config. This command does not operate on vault-level .clepsydra/config.toml files."
+    )]
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
     },
     #[command(
         about = "Show environment/config diagnostics",
@@ -192,6 +208,19 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             );
             Ok(0)
         }
+        Commands::Config { command } => match command {
+            ConfigCommands::Show => {
+                let cwd = std::env::current_dir()?;
+                let contents = clepsydra::config_command::read_existing(&cwd)?;
+                std::io::stdout().lock().write_all(&contents)?;
+                Ok(0)
+            }
+            ConfigCommands::Create => {
+                let path = clepsydra::config_command::create()?;
+                println!("Created config at {}", path.display());
+                Ok(0)
+            }
+        },
         Commands::Env => {
             println!("env command not implemented yet");
             Ok(0)
@@ -405,6 +434,33 @@ mod cli_tests {
     ) -> Result<i32, Box<dyn std::error::Error>> {
         let _guard = CwdGuard::enter(root);
         run_cli(cli).await
+    }
+
+    #[test]
+    fn config_show_parses() {
+        let cli = Cli::try_parse_from(["clep", "config", "show"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Config {
+                command: ConfigCommands::Show
+            }
+        ));
+    }
+
+    #[test]
+    fn config_create_parses() {
+        let cli = Cli::try_parse_from(["clep", "config", "create"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Config {
+                command: ConfigCommands::Create
+            }
+        ));
+    }
+
+    #[test]
+    fn config_requires_a_subcommand() {
+        assert!(Cli::try_parse_from(["clep", "config"]).is_err());
     }
 
     #[tokio::test]

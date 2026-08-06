@@ -16,11 +16,13 @@ Examples in this doc use `clepsydra ...`; replace with `cargo run -- ...` if nee
 |---|---|---|
 | `clepsydra init [PATH]` | Initialize a vault directory | ✅ implemented |
 | `clepsydra new <TITLE> [--body TEXT]` | Create a note in configured vault | ✅ implemented |
+| `clepsydra config show` | Print the selected application config verbatim | ✅ implemented |
+| `clepsydra config create` | Create an empty user application config | ✅ implemented |
 | `clepsydra serve` | Start the API server (HTTP, or HTTPS with `--tls`) | ✅ implemented |
 | `clepsydra mcp` | MCP server on stdio (proxies the running API server) | ✅ implemented |
 | `clepsydra version` | Print version | ✅ implemented |
 | `clepsydra env` | Environment/config diagnostics | ⚠️ placeholder |
-| `clepsydra doctor` | Health checks | ⚠️ placeholder |
+| `clepsydra doctor` | Health checks | ✅ implemented |
 
 ---
 
@@ -65,6 +67,34 @@ Common errors:
 - `no config.toml found ...`
 - `config ... does not define [vault].root`
 - `note already exists: ...`
+
+---
+
+## `config`
+
+Inspect or create the application config. These commands do not operate on the
+vault config at `<vault>/.clepsydra/config.toml`.
+
+```bash
+clepsydra config show
+clepsydra config create
+```
+
+`config show` prints the first existing application config from this lookup
+order:
+
+1. `./config.toml`
+2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
+3. `$HOME/.config/clepsydra/config.toml`
+
+It writes only the file contents to stdout, verbatim, with no heading, path, or
+extra newline. An empty config therefore produces zero bytes of output.
+
+`config create` creates
+`$XDG_CONFIG_HOME/clepsydra/config.toml`, or
+`$HOME/.config/clepsydra/config.toml` when `XDG_CONFIG_HOME` is unset. It
+creates missing parent directories, creates an empty file, and prints the
+created path. It refuses to overwrite an existing file.
 
 ---
 
@@ -133,10 +163,11 @@ Equivalent to `clepsydra --version`.
 
 ## `env` and `doctor`
 
-These commands are currently placeholders and print:
+`env` is currently a placeholder and prints:
 
 - `env command not implemented yet`
-- `doctor command not implemented yet`
+
+`doctor` is implemented and runs the health checks described above.
 
 ---
 
@@ -146,13 +177,16 @@ These commands are currently placeholders and print:
 # 1) Initialize a vault once
 clepsydra init ./my-vault
 
-# 2) Create app config (config.toml) pointing at it
+# 2) Create an empty user application config
+clepsydra config create
+
+# 3) Edit that config and point [vault].root at the vault
 # [vault]
 # root = "./my-vault"
 
-# 3) Start server
+# 4) Start server
 clepsydra serve
 
-# 4) Create notes from another terminal
+# 5) Create notes from another terminal
 clepsydra new "Research log"
 ```
