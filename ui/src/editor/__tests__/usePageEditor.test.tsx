@@ -256,3 +256,167 @@ describe("usePageEditor debounce survival", () => {
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
   });
 });
+
+function notFoundError() {
+  return { status: 404, error: "page not found", detail: null, hint: null };
+}
+
+function ensuredPage(body = "") {
+  return {
+    path: "journals/2026-08-06.md",
+    revision: "rev-e",
+    body,
+    meta: { title: "2026-08-06", tags: ["journal"], aliases: [] },
+  };
+}
+
+async function flushDraftSave() {
+  await act(async () => {
+    vi.advanceTimersByTime(1500);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+describe("usePageEditor draft mode", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    usePageMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: notFoundError(),
+      refetch: refetchPageMock,
+    });
+    useUpdatePageMock.mockImplementation(() => ({
+      mutateAsync: mutateAsyncMock,
+    }));
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("enters draft state on 404 when ensure is provided", () => {
+    const ensure = vi.fn();
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md", { ensure }),
+    );
+    expect(result.current.isDraft).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.saveStatus).toBe("saved");
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it("still surfaces the 404 as an error without ensure", () => {
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md"),
+    );
+    expect(result.current.isDraft).toBe(false);
+    expect(result.current.error).not.toBeNull();
+  });
+
+  it("ensures before the first update and adopts the template", async () => {
+    const ensure = vi
+      .fn()
+      .mockResolvedValue({ page: ensuredPage(), created: true });
+    mutateAsyncMock.mockResolvedValue({ ...makePage("B"), revision: "rev-f" });
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md", { ensure }),
+    );
+
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await flushDraftSave();
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.invocationCallOrder[0]).toBeLessThan(
+      mutateAsyncMock.mock.invocationCallOrder[0],
+    );
+    const request = mutateAsyncMock.mock.calls[0][0];
+    expect(request.body.expected_revision).toBe("rev-e");
+    expect(request.body.body).toBe("B\n");
+    // Untouched template metadata is adopted, not re-sent.
+    expect(request.body.title).toBeUndefined();
+    expect(result.current.title).toBe("2026-08-06");
+    expect(result.current.tags).toEqual(["journal"]);
+    expect(result.current.isDraft).toBe(false);
+  });
+
+  it("keeps a user-typed title through the first save", async () => {
+    const ensure = vi
+      .fn()
+      .mockResolvedValue({ page: ensuredPage(), created: true });
+    mutateAsyncMock.mockResolvedValue({ ...makePage(""), revision: "rev-f" });
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md", { ensure }),
+    );
+
+    act(() => result.current.setTitle("My day"));
+    await flushDraftSave();
+
+    const request = mutateAsyncMock.mock.calls[0][0];
+    expect(request.body.title).toBe("My day");
+    expect(result.current.title).toBe("My day");
+  });
+
+  it("retries ensure on the next save after a failure", async () => {
+    const ensure = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue({ page: ensuredPage(), created: true });
+    mutateAsyncMock.mockResolvedValue({ ...makePage("B"), revision: "rev-f" });
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md", { ensure }),
+    );
+
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await flushDraftSave();
+    expect(result.current.saveStatus).toBe("error");
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
+    expect(result.current.isDraft).toBe(true);
+
+    act(() => result.current.onSlateChange(paragraph("Bx"), astChangeEditor()));
+    await flushDraftSave();
+    expect(ensure).toHaveBeenCalledTimes(2);
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts an existing empty journal without conflict", async () => {
+    const ensure = vi
+      .fn()
+      .mockResolvedValue({ page: ensuredPage(""), created: false });
+    mutateAsyncMock.mockResolvedValue({ ...makePage("B"), revision: "rev-f" });
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md", { ensure }),
+    );
+
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await flushDraftSave();
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(result.current.revisionConflict).toBeNull();
+  });
+
+  it("raises the conflict flow when the page already has content", async () => {
+    const ensure = vi.fn().mockResolvedValue({
+      page: ensuredPage("Someone else\n"),
+      created: false,
+    });
+    const { result } = renderHook(() =>
+      usePageEditor("journals/2026-08-06.md", { ensure }),
+    );
+
+    act(() => result.current.onSlateChange(paragraph("B"), astChangeEditor()));
+    await flushDraftSave();
+
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
+    expect(result.current.saveStatus).toBe("error");
+    expect(result.current.revisionConflict).toEqual({
+      currentRevision: "rev-e",
+    });
+  });
+});

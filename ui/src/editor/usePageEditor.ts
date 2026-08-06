@@ -39,9 +39,31 @@ function decodeRevisionConflict(value: unknown): RevisionConflict | null {
   return { currentRevision: apiError.detail.current_revision };
 }
 
+export interface EnsuredPage {
+  path: string;
+  revision: string;
+  body: string;
+  meta: {
+    title?: string | null;
+    tags?: string[] | null;
+    aliases?: string[] | null;
+  };
+}
+
+export interface EnsureResult {
+  page: EnsuredPage;
+  created: boolean;
+}
+
+export interface PageEditorOptions {
+  /** Create the page on the first save when it does not exist yet. */
+  ensure?: () => Promise<EnsureResult>;
+}
+
 interface PageEditorState {
   isLoading: boolean;
   error: unknown;
+  isDraft: boolean;
   initialValue: Descendant[];
   editorRevision: number;
   title: string;
@@ -64,8 +86,21 @@ interface PageEditorState {
   project: string | null;
 }
 
-export function usePageEditor(path: string): PageEditorState {
+export function usePageEditor(
+  path: string,
+  options?: PageEditorOptions,
+): PageEditorState {
   const { data: page, isLoading, error, refetch: refetchPage } = usePage(path);
+  const pageNotFound = isApiError(error) && error.status === 404;
+  const canDraft = Boolean(options?.ensure);
+  const [ensured, setEnsured] = useState(false);
+  const isDraft = pageNotFound && canDraft && !ensured && !page;
+  // Render-assigned refs so doSave reads current values without new deps
+  // (same pattern as doSaveRef below).
+  const ensureRef = useRef(options?.ensure);
+  ensureRef.current = options?.ensure;
+  const isDraftRef = useRef(false);
+  isDraftRef.current = isDraft;
   const updatePage = useUpdatePage();
   // The mutation result object is recreated on every render; mutateAsync is
   // referentially stable and keeps doSave/effect cleanup stable as well.
@@ -158,6 +193,11 @@ export function usePageEditor(path: string): PageEditorState {
     setSaveStatus("saved");
   }, [page]);
 
+  // A new path is a new page lifecycle; forget any prior ensure.
+  useEffect(() => {
+    setEnsured(false);
+  }, [path]);
+
   const doSave = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -210,6 +250,50 @@ export function usePageEditor(path: string): PageEditorState {
 
     void (async () => {
       try {
+        if (isDraftRef.current && ensureRef.current) {
+          const result = await ensureRef.current();
+          const serverTitle = result.page.meta.title ?? "";
+          const serverTags = result.page.meta.tags ?? [];
+          const serverAliases = result.page.meta.aliases ?? [];
+
+          if (!result.created && result.page.body.trim() !== "") {
+            // The page was created and written elsewhere between load and
+            // save. Surface the conflict-reload flow instead of overwriting.
+            savingRef.current = false;
+            saveRequestedRef.current = false;
+            const conflict = { currentRevision: result.page.revision };
+            conflictRef.current = conflict;
+            setRevisionConflict(conflict);
+            setSaveStatus("error");
+            setSaveError("page already has content");
+            return;
+          }
+
+          revisionRef.current = result.page.revision;
+          savedRef.current = {
+            title: serverTitle,
+            tags: serverTags,
+            aliases: serverAliases,
+            body: result.page.body,
+          };
+          // Adopt template metadata the user did not touch while drafting;
+          // fields they edited diff against the new baseline instead.
+          if (titleRef.current === "") {
+            titleRef.current = serverTitle;
+            setTitleState(serverTitle);
+          }
+          if (tagsRef.current.length === 0) {
+            tagsRef.current = serverTags;
+            setTagsState(serverTags);
+          }
+          if (aliasesRef.current.length === 0) {
+            aliasesRef.current = serverAliases;
+            setAliasesState(serverAliases);
+          }
+          isDraftRef.current = false;
+          setEnsured(true);
+        }
+
         const response = await updatePageMutateAsync({
           params: { path: { path } },
           body: {
@@ -401,7 +485,8 @@ export function usePageEditor(path: string): PageEditorState {
 
   return {
     isLoading,
-    error,
+    error: pageNotFound && canDraft ? null : error,
+    isDraft,
     initialValue,
     editorRevision,
     title,
