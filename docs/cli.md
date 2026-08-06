@@ -17,6 +17,7 @@ Examples in this doc use `clepsydra ...`; replace with `cargo run -- ...` if nee
 | `clepsydra init [PATH]` | Initialize a vault directory | ✅ implemented |
 | `clepsydra new <TITLE> [--body TEXT]` | Create a note in configured vault | ✅ implemented |
 | `clepsydra serve` | Start the API server (HTTP, or HTTPS with `--tls`) | ✅ implemented |
+| `clepsydra mcp` | MCP server on stdio (proxies the running API server) | ✅ implemented |
 | `clepsydra version` | Print version | ✅ implemented |
 | `clepsydra env` | Environment/config diagnostics | ⚠️ placeholder |
 | `clepsydra doctor` | Health checks | ⚠️ placeholder |

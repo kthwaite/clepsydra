@@ -86,6 +86,18 @@ enum Commands {
         port: Option<u16>,
     },
     #[command(
+        about = "Start the MCP server on stdio",
+        long_about = "Speak MCP (Model Context Protocol) on stdio, proxying tool calls to the running Clepsydra HTTP API server.\n\nThe server is discovered via the usual config lookup:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\n`clep serve` must already be running; tool calls fail with a hint otherwise.",
+        after_help = "Example MCP client registration (.mcp.json):\n  { \"mcpServers\": { \"clepsydra\": { \"command\": \"clep\", \"args\": [\"mcp\"] } } }"
+    )]
+    Mcp {
+        #[arg(
+            long,
+            help = "Allow targeting a non-loopback [server].host from config"
+        )]
+        allow_remote: bool,
+    },
+    #[command(
         about = "Open a clepsydra:// or obsidian:// URL in the running server's UI",
         long_about = "Translate a deep-link URL into a local HTTP hit on the server's /deeplink endpoint and open it in the default browser.\n\nThis is the entry point the macOS URL-handler applet (see `register-url`) invokes; it can also be called directly.",
         after_help = "Examples:\n  clepsydra open-url \"clepsydra://page/Alpha%20Project\"\n  clepsydra open-url \"obsidian://open?vault=brain&file=Note\" --print"
@@ -200,6 +212,10 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Serve { lsp, tls, port } => {
             run_server(lsp, ServeOverrides { tls, port }).await?;
+            Ok(0)
+        }
+        Commands::Mcp { allow_remote } => {
+            clepsydra::mcp::run_mcp(allow_remote).await?;
             Ok(0)
         }
         Commands::OpenUrl { url, print } => {
