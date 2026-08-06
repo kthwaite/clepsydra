@@ -143,16 +143,29 @@ pub fn extract_links(body: &str) -> Vec<Link> {
 /// Build synthetic [`Link`]s from frontmatter property values.
 ///
 /// Each value becomes a `LinkKind::PropertyRef` with span `0..0` (since they
-/// do not correspond to positions in the body text).
+/// do not correspond to positions in the body text). Values written in
+/// wikilink syntax (`[[Target]]`, `[[Target|display]]`) are unwrapped to the
+/// bare target so relation-typed properties resolve like body links.
 pub fn extract_property_refs(field_name: &str, values: &[String]) -> Vec<Link> {
     values
         .iter()
-        .map(|val| Link {
-            target_raw: val.clone(),
-            span: 0..0,
-            kind: LinkKind::PropertyRef {
-                source_field: field_name.to_string(),
-            },
+        .map(|val| {
+            let trimmed = val.trim();
+            let target = trimmed
+                .strip_prefix("[[")
+                .and_then(|s| s.strip_suffix("]]"))
+                .map(|inner| match inner.split_once('|') {
+                    Some((t, _)) => t,
+                    None => inner,
+                })
+                .unwrap_or(trimmed);
+            Link {
+                target_raw: target.to_string(),
+                span: 0..0,
+                kind: LinkKind::PropertyRef {
+                    source_field: field_name.to_string(),
+                },
+            }
         })
         .collect()
 }
