@@ -90,6 +90,47 @@ describe("BaseTableView", () => {
     expect(props.onOpenPage).toHaveBeenCalledWith("book.md");
   });
 
+  it("system and undeclared columns render read-only", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "kind", "id", "mystery"],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 1,
+        rows: [
+          {
+            ...row,
+            columns: { kind: "BOOK", id: "01", mystery: "undeclared" },
+          },
+        ],
+      },
+    });
+    // kind/id (system) and mystery (undeclared) are plain text, not editors.
+    for (const text of ["BOOK", "01", "undeclared"]) {
+      const cell = screen.getByText(text);
+      expect(cell.tagName).toBe("SPAN");
+      await user.click(cell);
+    }
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
+  it("renders an error banner instead of an empty table on view failure", () => {
+    renderView({ output: undefined, viewError: "query error: bad filter" });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("bad filter");
+    expect(screen.queryByRole("grid")).toBeNull();
+  });
+
   it("commits an edited property cell with only the changed key", async () => {
     const user = userEvent.setup();
     const props = renderView({});

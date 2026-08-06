@@ -805,15 +805,26 @@ fn fetch_rows(
     limit: Option<u32>,
     offset: u32,
 ) -> Result<Vec<QueryRow>, QueryError> {
-    // Column joins for requested property columns.
+    // Column joins for requested property columns. Multi-valued system
+    // columns (tags, aliases) come from the exact meta_json arrays; scalar
+    // system columns are already in the fixed select list.
     let mut select_cols =
         "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.journal_date, p.word_count"
             .to_string();
     let mut column_joins = String::new();
     let mut column_params: Vec<SqlValue> = Vec::new();
-    let mut prop_columns: Vec<String> = Vec::new();
+    // Requested column name → position among the appended (json) columns.
+    let mut json_columns: Vec<String> = Vec::new();
     for (i, name) in spec.columns.iter().enumerate() {
         match resolve_field(name, ctx)? {
+            ResolvedField::Sys(SysField::Tags) => {
+                select_cols.push_str(", json_extract(p.meta_json, '$.tags')");
+                json_columns.push(name.clone());
+            }
+            ResolvedField::Sys(SysField::Aliases) => {
+                select_cols.push_str(", json_extract(p.meta_json, '$.aliases')");
+                json_columns.push(name.clone());
+            }
             ResolvedField::Sys(_) => {} // already in the fixed select list
             ResolvedField::Prop { key, .. } => {
                 let alias = format!("c{i}");
@@ -822,7 +833,7 @@ fn fetch_rows(
                 ));
                 column_params.push(SqlValue::Text(key));
                 select_cols.push_str(&format!(", {alias}.value_json"));
-                prop_columns.push(name.clone());
+                json_columns.push(name.clone());
             }
         }
     }
@@ -883,21 +894,25 @@ fn fetch_rows(
     let n_fixed = 9;
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
         let mut columns = serde_json::Map::new();
-        // System columns requested by name.
-        let sys_pairs: [(&str, serde_json::Value); 6] = [
+        // Scalar system columns requested by name (the full SYSTEM_FIELDS
+        // contract; tags/aliases arrive via the appended json columns).
+        let sys_pairs: [(&str, serde_json::Value); 9] = [
+            ("id", sql_value_to_json(row.get(0)?)),
+            ("path", sql_value_to_json(row.get(1)?)),
+            ("title", sql_value_to_json(row.get(2)?)),
+            ("kind", sql_value_to_json(row.get(3)?)),
+            ("project", sql_value_to_json(row.get(4)?)),
             ("created_at", sql_value_to_json(row.get(5)?)),
             ("updated_at", sql_value_to_json(row.get(6)?)),
             ("journal_date", sql_value_to_json(row.get(7)?)),
             ("word_count", sql_value_to_json(row.get(8)?)),
-            ("path", sql_value_to_json(row.get(1)?)),
-            ("title", sql_value_to_json(row.get(2)?)),
         ];
         for name in &spec.columns {
             if let Some((_, v)) = sys_pairs.iter().find(|(n, _)| n == name) {
                 columns.insert(name.clone(), v.clone());
             }
         }
-        for (i, name) in prop_columns.iter().enumerate() {
+        for (i, name) in json_columns.iter().enumerate() {
             let raw: Option<String> = row.get(n_fixed + i)?;
             let value = raw
                 .and_then(|s| serde_json::from_str(&s).ok())
@@ -1393,5 +1408,41 @@ themes  = { type = "multi_select", options = [] }
         assert_eq!(a.columns["title"], serde_json::json!("Book A"));
         let e = rows.iter().find(|r| r.path == "e.md").unwrap();
         assert_eq!(e.columns["rating"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn every_system_field_materializes_as_a_column() {
+        let (_tmp, index, base) = fixture();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            columns: vec![
+                "id".into(),
+                "path".into(),
+                "kind".into(),
+                "project".into(),
+                "tags".into(),
+                "aliases".into(),
+                "word_count".into(),
+            ],
+            ..Default::default()
+        };
+        let out = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
+        let QueryOutput::Flat { rows, .. } = out else {
+            panic!("expected flat");
+        };
+        let a = rows.iter().find(|r| r.path == "a.md").unwrap();
+        assert_eq!(
+            a.columns["id"],
+            serde_json::json!("0190f8a0-0000-7000-8000-00000000000a")
+        );
+        assert_eq!(a.columns["path"], serde_json::json!("a.md"));
+        assert_eq!(a.columns["kind"], serde_json::json!("BOOK"));
+        assert_eq!(a.columns["project"], serde_json::Value::Null);
+        assert_eq!(a.columns["tags"], serde_json::json!(["sf"]));
+        assert!(a.columns["word_count"].is_number());
+        // A tagless page carries an empty/absent array, not a missing key.
+        let e = rows.iter().find(|r| r.path == "e.md").unwrap();
+        assert_eq!(e.columns["tags"], serde_json::Value::Null);
+        assert_eq!(e.columns["aliases"], serde_json::Value::Null);
     }
 }

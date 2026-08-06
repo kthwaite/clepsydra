@@ -34,6 +34,10 @@ export function BaseTable({ slug }: BaseTableProps) {
     );
   }
 
+  // The view endpoint's typed error channel is `never`, so failures arrive
+  // untyped; surface the ApiError body's message when present.
+  const viewError = viewQuery.error as unknown as { error?: string } | null;
+
   return (
     <BaseTableView
       definition={detail.data}
@@ -43,6 +47,8 @@ export function BaseTable({ slug }: BaseTableProps) {
         setSortOverride({});
       }}
       output={viewQuery.data}
+      viewError={viewError ? (viewError.error ?? "request failed") : undefined}
+      viewLoading={viewQuery.isLoading}
       sortOverride={sortOverride}
       onSortChange={setSortOverride}
       onOpenPage={(path) => openTab("page", path)}

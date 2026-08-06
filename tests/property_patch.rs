@@ -201,6 +201,34 @@ async fn patch_on_legacy_page_heals_to_toml_then_applies() {
 }
 
 #[tokio::test]
+async fn reserved_system_keys_are_rejected() {
+    let (server, tmp) = ApiFixture::builder()
+        .pre_index_seed(seed)
+        .build()
+        .into_server_and_temp();
+    let revision = revision_of(&server, "book.md").await;
+    let before = fs::read_to_string(tmp.path().join("vault/book.md")).unwrap();
+
+    for body in [
+        serde_json::json!({ "set": { "id": "not-yours" }, "expected_revision": revision }),
+        serde_json::json!({ "set": { "type": "NOTE" }, "expected_revision": revision }),
+        serde_json::json!({ "clear": ["created_at"], "expected_revision": revision }),
+    ] {
+        let res = server
+            .patch(&format!("/api/vault/pages/by-id/{PAGE_ID}/properties"))
+            .json(&body)
+            .await;
+        res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    // Defense in depth: the file is untouched.
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("vault/book.md")).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
 async fn unknown_page_is_404() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(seed)

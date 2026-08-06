@@ -1,6 +1,8 @@
 import type { PropertyType } from "#/api/bases";
 import { BoolCell } from "./BoolCell";
 import { DateCell } from "./DateCell";
+import { DateTimeCell } from "./DateTimeCell";
+import { MultiSelectCell } from "./MultiSelectCell";
 import { NumberCell } from "./NumberCell";
 import { RelationCell } from "./RelationCell";
 import { SelectCell } from "./SelectCell";
@@ -18,8 +20,8 @@ export const CELL_EDITORS: Record<PropertyType, CellEditorComponent> = {
   number: NumberCell,
   bool: BoolCell,
   date: DateCell,
-  datetime: DateCell,
+  datetime: DateTimeCell,
   select: SelectCell,
-  multi_select: SelectCell,
+  multi_select: MultiSelectCell,
   relation: RelationCell,
 };

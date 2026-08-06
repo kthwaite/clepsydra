@@ -30,12 +30,7 @@ export function EditableCell({
         definition={definition}
         onCommit={(next, hint) => {
           setEditing(false);
-          // Multi-valued properties always ship as arrays on the wire.
-          const wrapped =
-            definition.type === "multi_select" && typeof next === "string"
-              ? [next]
-              : next;
-          onCommit(wrapped, hint);
+          onCommit(next, hint);
         }}
         onCancel={() => setEditing(false)}
       />

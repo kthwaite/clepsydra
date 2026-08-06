@@ -23,6 +23,9 @@ export interface BaseTableViewProps {
   activeView: string;
   onViewChange: (name: string) => void;
   output: QueryOutput | undefined;
+  /** When set, the grid is replaced by an error banner. */
+  viewError?: string;
+  viewLoading?: boolean;
   sortOverride: ViewOverrides;
   onSortChange: (override: ViewOverrides) => void;
   onOpenPage: (path: string) => void;
@@ -34,10 +37,19 @@ export interface BaseTableViewProps {
   ) => void;
 }
 
-/** System columns render read-only; everything else edits via the registry. */
+/**
+ * System fields render read-only — the complete contract, mirroring
+ * `SYSTEM_FIELDS` in `src/vault/base.rs`. Only *declared* properties reach
+ * an editor; anything else (system metadata, undeclared keys) is inert.
+ */
 const SYSTEM_COLUMNS = new Set([
-  "title",
+  "id",
   "path",
+  "title",
+  "kind",
+  "project",
+  "tags",
+  "aliases",
   "created_at",
   "updated_at",
   "journal_date",
@@ -66,6 +78,8 @@ export function BaseTableView({
   activeView,
   onViewChange,
   output,
+  viewError,
+  viewLoading,
   sortOverride,
   onSortChange,
   onOpenPage,
@@ -138,25 +152,25 @@ export function BaseTableView({
                   >
                     {row.title ?? row.path}
                   </button>
-                ) : SYSTEM_COLUMNS.has(column) ? (
+                ) : !SYSTEM_COLUMNS.has(column) &&
+                  definition.properties[column] ? (
+                  <EditableCell
+                    value={
+                      (row.columns as Record<string, CellValue>)[column] ?? null
+                    }
+                    definition={definition.properties[column]}
+                    onCommit={(value, hint) =>
+                      onCommitCell(row, column, value, hint)
+                    }
+                  />
+                ) : (
+                  // System fields and undeclared keys are read-only.
                   <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
                     {formatCellValue(
                       (row.columns as Record<string, CellValue>)[column] ??
                         null,
                     )}
                   </span>
-                ) : (
-                  <EditableCell
-                    value={
-                      (row.columns as Record<string, CellValue>)[column] ?? null
-                    }
-                    definition={
-                      definition.properties[column] ?? { type: "text" }
-                    }
-                    onCommit={(value, hint) =>
-                      onCommitCell(row, column, value, hint)
-                    }
-                  />
                 )}
               </Cell>
             ))}
@@ -194,7 +208,16 @@ export function BaseTableView({
         </nav>
       </div>
 
-      {groups ? (
+      {viewError ? (
+        <p
+          role="alert"
+          className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
+        >
+          View failed: {viewError}
+        </p>
+      ) : viewLoading ? (
+        <p className="cl-mono px-1 py-2 text-[11px] text-ink-mute">Loading…</p>
+      ) : groups ? (
         <div className="flex flex-col gap-4">
           {groups.map((group) => {
             const key =

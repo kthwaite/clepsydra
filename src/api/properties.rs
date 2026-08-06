@@ -65,6 +65,19 @@ fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
     }
 }
 
+/// Frontmatter keys owned by the system serializer; patching them as
+/// properties would corrupt page identity or bypass typed update paths.
+const RESERVED_KEYS: [&str; 8] = [
+    "id",
+    "title",
+    "type",
+    "project",
+    "tags",
+    "aliases",
+    "created_at",
+    "updated_at",
+];
+
 /// Apply a property patch to the page with the given id.
 #[utoipa::path(
     patch,
@@ -75,7 +88,7 @@ fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
     request_body = PropertyPatchRequest,
     responses(
         (status = 200, body = PropertyPatchResponse),
-        (status = 400, description = "Unrepresentable value"),
+        (status = 400, description = "Reserved key or unrepresentable value"),
         (status = 404, description = "Unknown page"),
         (status = 409, description = "Stale expected_revision")
     )
@@ -86,6 +99,17 @@ pub async fn patch_properties(
     Json(request): Json<PropertyPatchRequest>,
 ) -> Result<Json<PropertyPatchResponse>, ApiError> {
     let page_id = uuid.to_string();
+
+    if let Some(key) = request
+        .set
+        .keys()
+        .chain(request.clear.iter())
+        .find(|k| RESERVED_KEYS.contains(&k.as_str()))
+    {
+        return Err(ApiError::bad_request(format!(
+            "`{key}` is a system frontmatter key and cannot be patched as a property"
+        )));
+    }
 
     // Resolve the page path from the index.
     let lookup_id = page_id.clone();

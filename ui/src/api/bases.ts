@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
-import { $api } from "./client";
+import { $api, fetchClient } from "./client";
 import { invalidateByPath, queryKeys } from "./keys";
 
 export type BaseDetailResponse = components["schemas"]["BaseDetailResponse"];
@@ -83,10 +83,13 @@ export function usePropertyCommit() {
       hint?: PropertyType,
     ) => {
       try {
-        const pageRes = await fetch(`/api/vault/pages/${page.path}`);
-        if (!pageRes.ok)
-          throw new Error(`page fetch failed: ${pageRes.status}`);
-        const { revision } = (await pageRes.json()) as { revision: string };
+        // The generated client's path-parameter encoding matches the page
+        // routes exactly (a raw template literal would break on # or %).
+        const pageRes = await fetchClient.GET("/api/vault/pages/{path}", {
+          params: { path: { path: page.path } },
+        });
+        const revision = pageRes.data?.revision;
+        if (!revision) throw new Error("page revision fetch failed");
 
         await patch.mutateAsync({
           params: { path: { uuid: page.id } },

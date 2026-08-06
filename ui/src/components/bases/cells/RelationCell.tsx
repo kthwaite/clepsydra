@@ -12,21 +12,27 @@ function unwrap(value: CellValue): string {
   return inner.split("|")[0] ?? inner;
 }
 
+function targetsOf(value: CellValue): string[] {
+  const raw = Array.isArray(value) ? value : value == null ? [] : [value];
+  return raw.map(unwrap).filter((t) => t !== "");
+}
+
 /**
- * Relation cell: a text input with canonical-name suggestions from the
- * search index (the ProjectCombo pattern, datalist-flavored). Commits the
- * value in wikilink syntax; multi-valued relations edit their first target.
+ * Relation cell: edits the FULL target list as comma-separated names (so a
+ * multi-target relation never silently collapses to its first element),
+ * committing each target back in wikilink syntax. Canonical-name
+ * suggestions from the search index apply while a single target is typed.
  */
 export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
-  const first = Array.isArray(value) ? (value[0] ?? null) : value;
-  const [draft, setDraft] = useState(unwrap(first));
+  const [draft, setDraft] = useState(targetsOf(value).join(", "));
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const listId = useId();
+  const singleTarget = !draft.includes(",");
 
   useEffect(() => {
     let cancelled = false;
     const q = draft.trim();
-    if (q === "") {
+    if (q === "" || q.includes(",")) {
       setSuggestions([]);
       return;
     }
@@ -53,14 +59,19 @@ export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
         autoFocus
         aria-label="Edit relation"
         className={CELL_INPUT_CLASS}
-        list={listId}
+        list={singleTarget ? listId : undefined}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={onCancel}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
-            const target = draft.trim();
-            onCommit(target === "" ? null : [`[[${target}]]`]);
+            const targets = draft
+              .split(",")
+              .map((t) => t.trim())
+              .filter((t) => t !== "");
+            onCommit(
+              targets.length === 0 ? null : targets.map((t) => `[[${t}]]`),
+            );
           }
           if (e.key === "Escape") onCancel();
         }}

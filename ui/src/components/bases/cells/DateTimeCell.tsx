@@ -1,0 +1,53 @@
+import { useState } from "react";
+import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+
+/** Split an ISO date-time into a datetime-local value and its zone suffix. */
+function splitIso(value: string): { local: string; suffix: string } {
+  const match = value.match(/^(.*?)(Z|[+-]\d{2}:\d{2})?$/);
+  const body = match?.[1] ?? value;
+  const suffix = match?.[2] ?? "";
+  // datetime-local wants YYYY-MM-DDTHH:MM(:SS); pad a bare date.
+  const local = body.includes("T") ? body : body ? `${body}T00:00:00` : "";
+  return { local, suffix };
+}
+
+/**
+ * The datetime editor keeps what `<input type="date">` would throw away:
+ * the time component and the original zone suffix both survive the edit.
+ */
+export function DateTimeCell({
+  value,
+  definition,
+  onCommit,
+  onCancel,
+}: CellEditorProps) {
+  const initial = typeof value === "string" ? splitIso(value) : null;
+  const [draft, setDraft] = useState(initial?.local ?? "");
+  const suffix = initial?.suffix ?? "";
+
+  const commit = () => {
+    if (draft === "") {
+      onCommit(null);
+      return;
+    }
+    // Reattach the value's original zone suffix (none for local date-times).
+    onCommit(`${draft}${suffix}`, definition.type);
+  };
+
+  return (
+    <input
+      autoFocus
+      aria-label="Edit datetime"
+      type="datetime-local"
+      step={1}
+      className={CELL_INPUT_CLASS}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={onCancel}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") onCancel();
+      }}
+    />
+  );
+}

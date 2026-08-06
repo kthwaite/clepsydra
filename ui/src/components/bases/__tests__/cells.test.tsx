@@ -73,6 +73,61 @@ describe("cell editors", () => {
     expect(screen.getByRole("button", { name: "Gene Wolfe" })).toBeTruthy();
   });
 
+  it("multi-select preserves the existing array when toggling a value", async () => {
+    const user = userEvent.setup();
+    const onCommit = renderCell(["memory", "identity"], {
+      type: "multi_select",
+      options: ["memory", "identity", "style", "grief"],
+    });
+    await user.click(screen.getByRole("button", { name: "memory, identity" }));
+    const select = screen.getByRole("listbox", { name: "Edit multi-select" });
+    // Toggle a third option on; the original two must survive the commit.
+    await user.selectOptions(select, "style");
+    await user.keyboard("{Enter}");
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    const [committed] = onCommit.mock.calls[0];
+    expect(committed).toEqual(
+      expect.arrayContaining(["memory", "identity", "style"]),
+    );
+    expect(committed).toHaveLength(3);
+  });
+
+  it("datetime edit preserves the time component and zone suffix", async () => {
+    const user = userEvent.setup();
+    const onCommit = renderCell("2026-08-06T14:30:00Z", { type: "datetime" });
+    await user.click(
+      screen.getByRole("button", { name: "2026-08-06T14:30:00Z" }),
+    );
+    const input = screen.getByLabelText("Edit datetime");
+    // Commit without touching the value: nothing may be truncated.
+    input.focus();
+    await user.keyboard("{Enter}");
+    expect(onCommit).toHaveBeenCalledWith("2026-08-06T14:30:00Z", "datetime");
+  });
+
+  it("relation cell edits the full multi-target list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+    );
+    const user = userEvent.setup();
+    const onCommit = renderCell(["[[Solar Cycle]]", "[[Book of Days]]"], {
+      type: "relation",
+    });
+    await user.click(
+      screen.getByRole("button", { name: "[[Solar Cycle]], [[Book of Days]]" }),
+    );
+    const input = screen.getByRole("textbox", { name: "Edit relation" });
+    // Both existing targets are editable, not just the first.
+    expect((input as HTMLInputElement).value).toBe("Solar Cycle, Book of Days");
+    await user.type(input, ", Lunar Cycle{Enter}");
+    expect(onCommit).toHaveBeenCalledWith(
+      ["[[Solar Cycle]]", "[[Book of Days]]", "[[Lunar Cycle]]"],
+      undefined,
+    );
+    vi.unstubAllGlobals();
+  });
+
   it("relation cell commits wikilink syntax", async () => {
     vi.stubGlobal(
       "fetch",
