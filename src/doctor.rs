@@ -225,11 +225,17 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         check_cas(v, opts.full, &mut report);
         check_academic(v, &mut report);
         check_bcl(v, &mut report);
+        check_frontmatter(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
         report.push(skip("cas", "store", "skipped — vault unavailable"));
         report.push(skip("academic", "folders", "skipped — vault unavailable"));
         report.push(skip("bcl", "config", "skipped — vault unavailable"));
+        report.push(skip(
+            "frontmatter",
+            "legacy census",
+            "skipped — vault unavailable",
+        ));
     }
 
     check_runtime(&mut report);
@@ -1262,6 +1268,41 @@ fn check_bcl(vault: &Vault, report: &mut Report) {
 fn read_bcl_date(path: &Path) -> Option<chrono::NaiveDate> {
     let raw = std::fs::read_to_string(path).ok()?;
     chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()
+}
+
+// ---------------------------------------------------------------------------
+// Check: frontmatter legacy census
+// ---------------------------------------------------------------------------
+
+/// Read-only census of legacy `---` YAML pages awaiting TOML migration.
+/// serde_yaml (and its quarantined reader) can be removed once this reads
+/// zero across users' vaults.
+fn check_frontmatter(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "frontmatter";
+    const LISTED: usize = 10;
+
+    let legacy = crate::vault::migrate::legacy_pages(vault);
+    if legacy.is_empty() {
+        report.push(ok(
+            SECTION,
+            "legacy census",
+            "no legacy --- pages; frontmatter is fully TOML",
+        ));
+        return;
+    }
+
+    let mut detail = format!("{} legacy --- page(s) pending migration:", legacy.len());
+    for p in legacy.iter().take(LISTED) {
+        detail.push_str("\n  ");
+        detail.push_str(p.as_str());
+    }
+    if legacy.len() > LISTED {
+        detail.push_str(&format!("\n  … and {} more", legacy.len() - LISTED));
+    }
+    report.push(
+        info(SECTION, "legacy census", detail)
+            .with_hint("run `clepsydra migrate --write` to convert (commit your vault first)"),
+    );
 }
 
 // ---------------------------------------------------------------------------

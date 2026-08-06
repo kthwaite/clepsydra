@@ -107,6 +107,16 @@ enum Commands {
         dry_run: bool,
     },
     #[command(
+        about = "Convert legacy YAML frontmatter to TOML",
+        long_about = "Sweep the vault for pages with legacy `---` YAML frontmatter and convert them to `+++` TOML.\n\nDry run by default: prints what would convert and touches nothing. Pass --write to apply. Conversion preserves the page id, every field, and the body; YAML comments inside frontmatter are NOT preserved — commit your vault first.\n\n`clepsydra doctor` reports the remaining legacy-page census.",
+        after_help = "Examples:\n  clepsydra migrate            # dry run\n  clepsydra migrate --write    # convert in place"
+    )]
+    Migrate {
+        /// Apply the conversion (default is a dry run).
+        #[arg(long)]
+        write: bool,
+    },
+    #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
         long_about = "Build and install a small URL-handler app at ~/Applications/Clepsydra URL Handler.app that routes clepsydra:// links (and optionally obsidian:// links) to this clepsydra binary via `open-url`.\n\nmacOS only.",
         after_help = "Examples:\n  clepsydra register-url\n  clepsydra register-url --obsidian   # also claim obsidian:// (competes with Obsidian if installed)"
@@ -243,6 +253,40 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 if dry_run { " (dry run)" } else { "" }
             );
             Ok(0)
+        }
+        Commands::Migrate { write } => {
+            let cwd = std::env::current_dir()?;
+            let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+            let vault_root =
+                clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+            let vault = clepsydra::vault::Vault::open(&vault_root)?;
+
+            println!(
+                "Converting legacy YAML frontmatter to TOML. YAML comments inside frontmatter are not preserved — commit your vault before running with --write."
+            );
+            let report = clepsydra::vault::migrate::migrate(&vault, write);
+            let verb = if report.dry_run {
+                "would convert"
+            } else {
+                "converted"
+            };
+            for path in &report.converted {
+                println!("  {verb} {path}");
+            }
+            for warning in &report.warnings {
+                println!("  warning {warning}");
+            }
+            println!(
+                "migrate: {} legacy page(s) {verb}, {} warning(s){}",
+                report.converted.len(),
+                report.warnings.len(),
+                if report.dry_run {
+                    " (dry run — pass --write to apply)"
+                } else {
+                    ""
+                }
+            );
+            Ok(if report.warnings.is_empty() { 0 } else { 1 })
         }
         Commands::Grep {
             query,
