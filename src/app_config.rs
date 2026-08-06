@@ -39,10 +39,18 @@ pub(crate) fn config_candidates_with_env(
 
     let mut candidates = vec![base_dir.join("config.toml")];
 
-    if let Some(xdg_file) = xdg_config_file(xdg_config_home, home)
-        && !candidates.contains(&xdg_file)
-    {
-        candidates.push(xdg_file);
+    if let Some(xdg_config_home) = xdg_config_home {
+        let xdg_file = PathBuf::from(xdg_config_home).join("clepsydra/config.toml");
+        if !candidates.contains(&xdg_file) {
+            candidates.push(xdg_file);
+        }
+    }
+
+    if let Some(home) = home {
+        let home_file = PathBuf::from(home).join(".config/clepsydra/config.toml");
+        if !candidates.contains(&home_file) {
+            candidates.push(home_file);
+        }
     }
 
     candidates
@@ -57,15 +65,6 @@ pub(crate) fn find_config_path_with_env(
     config_candidates_with_env(start_dir, xdg_config_home, home)
         .into_iter()
         .find(|p| p.is_file())
-}
-
-/// Helper to construct the XDG config path from env vars, if set.
-fn xdg_config_file(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
-    if let Some(xdg) = xdg_config_home {
-        return Some(PathBuf::from(xdg).join("clepsydra/config.toml"));
-    }
-
-    home.map(|h| PathBuf::from(h).join(".config/clepsydra/config.toml"))
 }
 
 #[cfg(test)]
@@ -120,5 +119,27 @@ mod tests {
             find_config_path_with_env(&cwd, Some(xdg.as_os_str().to_os_string()), None).unwrap();
 
         assert_eq!(found, xdg_cfg);
+    }
+
+    #[test]
+    fn find_config_falls_back_to_home_when_xdg_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("cwd");
+        let xdg = dir.path().join("xdg");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(home.join(".config/clepsydra")).unwrap();
+
+        let home_cfg = home.join(".config/clepsydra/config.toml");
+        std::fs::write(&home_cfg, "[vault]\nroot = \"/home/vault\"\n").unwrap();
+
+        let found = find_config_path_with_env(
+            &cwd,
+            Some(xdg.as_os_str().to_os_string()),
+            Some(home.as_os_str().to_os_string()),
+        )
+        .unwrap();
+
+        assert_eq!(found, home_cfg);
     }
 }

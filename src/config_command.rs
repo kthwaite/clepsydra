@@ -98,7 +98,7 @@ mod tests {
         let xdg_file = xdg.path().join("clepsydra/config.toml");
         fs::create_dir_all(xdg_file.parent().unwrap()).unwrap();
         fs::write(&xdg_file, b"xdg = true\n").unwrap();
-        fs::write(dir.path().join("config.toml"), b"local = true").unwrap();
+        fs::write(dir.path().join("config.toml"), b"\xff\xfe\x00local").unwrap();
 
         let bytes = read_existing_with_env(
             dir.path(),
@@ -107,7 +107,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(bytes, b"local = true");
+        assert_eq!(bytes, b"\xff\xfe\x00local");
     }
 
     #[test]
@@ -130,6 +130,40 @@ mod tests {
         .unwrap();
 
         assert_eq!(bytes, b"source = 'xdg'");
+    }
+
+    #[test]
+    fn read_falls_back_to_home_when_xdg_file_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let xdg = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home_file = home.path().join(".config/clepsydra/config.toml");
+        fs::create_dir_all(home_file.parent().unwrap()).unwrap();
+        fs::write(&home_file, b"source = 'home'").unwrap();
+
+        let bytes = read_existing_with_env(
+            dir.path(),
+            Some(xdg.path().as_os_str().to_owned()),
+            Some(home.path().as_os_str().to_owned()),
+        )
+        .unwrap();
+
+        assert_eq!(bytes, b"source = 'home'");
+    }
+
+    #[test]
+    fn read_uses_home_when_xdg_is_unset() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home_file = home.path().join(".config/clepsydra/config.toml");
+        fs::create_dir_all(home_file.parent().unwrap()).unwrap();
+        fs::write(&home_file, b"source = 'home-only'").unwrap();
+
+        let bytes =
+            read_existing_with_env(dir.path(), None, Some(home.path().as_os_str().to_owned()))
+                .unwrap();
+
+        assert_eq!(bytes, b"source = 'home-only'");
     }
 
     #[test]
