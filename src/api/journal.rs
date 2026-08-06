@@ -68,7 +68,7 @@ pub struct JournalTodayResponse {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/today", get(get_today))
+        .route("/today", get(get_today).post(ensure_today))
         .route("/today/capture", post(capture_today))
         .route("/range", get(get_range))
         .route("/recent", get(get_recent))
@@ -140,7 +140,7 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /journal/today — get or auto-create today's journal page.
+/// GET /journal/today — read today's journal page (404 when absent).
 ///
 /// The response includes a `carried_forward` array of incomplete tasks from
 /// journal pages in the past 7 days (excluding today). These tasks are not
@@ -150,9 +150,12 @@ async fn get_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<JournalTodayResponse>, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
-    let (vault_path, _created) = ensure_journal(&state, &date).await?;
-
+    let vault_path = journal_path(&date)?;
     let abs_path = state.vault.resolve(&vault_path);
+    if !abs_path.exists() {
+        return Err(ApiError::not_found(format!("journal not found: {date}")));
+    }
+
     let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
@@ -254,6 +257,27 @@ async fn get_today(
         page: detail,
         carried_forward: carried,
     }))
+}
+
+/// POST /journal/today — create today's journal if missing (get-or-create).
+///
+/// Returns 201 with the page when it was created, 200 when it already
+/// existed. The journal template (title = date, `journal` tag) lives in
+/// `ensure_journal` and nowhere else.
+async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
+    let date = state.clock.now().format("%Y-%m-%d").to_string();
+    let (vault_path, created) = ensure_journal(&state, &date).await?;
+
+    let abs_path = state.vault.resolve(&vault_path);
+    let page = Page::from_file(&abs_path, vault_path)
+        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(page_detail(page))).into_response())
 }
 
 /// GET /journal/:date — get a journal page by date.

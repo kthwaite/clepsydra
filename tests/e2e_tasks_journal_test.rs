@@ -159,6 +159,9 @@ async fn full_workflow_tasks_journal_agenda() {
     );
 
     // --- Step 5: Get today's journal — carry-forward should include only the remaining incomplete task ---
+    // Today's journal must exist before GET can return carried_forward.
+    server.post("/api/vault/journal/today").await;
+
     let res = server.get("/api/vault/journal/today").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();

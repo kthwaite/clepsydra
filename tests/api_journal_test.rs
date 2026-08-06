@@ -71,9 +71,9 @@ async fn mutation_creation_emits_exact_coordinator_notification() {
     let mut changes = state.change_tx.subscribe();
 
     server
-        .get("/api/vault/journal/today")
+        .post("/api/vault/journal/today")
         .await
-        .assert_status_ok();
+        .assert_status(StatusCode::CREATED);
 
     let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
     else {
@@ -149,13 +149,61 @@ async fn mutation_capture_emits_coordinator_notification() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn get_today_creates_journal_if_missing() {
+async fn get_today_returns_404_when_missing() {
     let (server, _tmp) = setup_server();
+    let res = server.get("/api/vault/journal/today").await;
+    res.assert_status(StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_today_does_not_create_journal() {
+    let (server, _tmp) = setup_server();
+    let res = server.get("/api/vault/journal/today").await;
+    res.assert_status(StatusCode::NOT_FOUND);
+
+    // get_by_date checks the filesystem directly, so a 404 here proves no
+    // file was written; recent must stay empty for the same reason.
+    let by_date = server
+        .get(&format!("/api/vault/journal/{}", today_str()))
+        .await;
+    by_date.assert_status(StatusCode::NOT_FOUND);
+
+    let recent: serde_json::Value = server.get("/api/vault/journal/recent").await.json();
+    assert!(
+        recent.as_array().unwrap().is_empty(),
+        "GET /journal/today must not create a journal"
+    );
+}
+
+#[tokio::test]
+async fn get_today_reads_existing_journal() {
+    let (server, _tmp) = setup_server();
+    let created = server.post("/api/vault/journal/today").await;
+    created.assert_status(StatusCode::CREATED);
+    let created_body: serde_json::Value = created.json();
+    let id = created_body["meta"]["id"].as_str().unwrap().to_string();
+
     let res = server.get("/api/vault/journal/today").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
-    assert!(body["path"].as_str().unwrap().starts_with("journals/"));
-    assert!(body["path"].as_str().unwrap().ends_with(".md"));
+    assert_eq!(body["meta"]["id"].as_str().unwrap(), id);
+}
+
+// ---------------------------------------------------------------------------
+// POST /journal/today
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_today_creates_with_template() {
+    let (server, _tmp) = setup_server();
+    let res = server.post("/api/vault/journal/today").await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body["path"].as_str().unwrap(),
+        format!("journals/{}.md", today_str())
+    );
+    assert_eq!(body["meta"]["title"].as_str().unwrap(), today_str());
     assert!(
         body["meta"]["tags"]
             .as_array()
@@ -163,26 +211,35 @@ async fn get_today_creates_journal_if_missing() {
             .iter()
             .any(|t| t == "journal")
     );
-    // Title should be today's date
-    let title = body["meta"]["title"].as_str().unwrap();
-    assert_eq!(title, today_str());
+    assert_eq!(body["body"].as_str().unwrap(), "");
+    assert!(body["revision"].as_str().is_some());
 }
 
 #[tokio::test]
-async fn get_today_returns_existing_journal() {
+async fn post_today_returns_existing_without_overwrite() {
     let (server, _tmp) = setup_server();
-
-    // Create today's journal
-    let first = server.get("/api/vault/journal/today").await;
-    first.assert_status_ok();
+    let first = server.post("/api/vault/journal/today").await;
+    first.assert_status(StatusCode::CREATED);
     let first_body: serde_json::Value = first.json();
     let first_id = first_body["meta"]["id"].as_str().unwrap().to_string();
 
-    // Get it again — should return the same page (same ID)
-    let second = server.get("/api/vault/journal/today").await;
-    second.assert_status_ok();
+    server
+        .post("/api/vault/journal/today/capture")
+        .json(&serde_json::json!({ "content": "Existing content" }))
+        .await
+        .assert_status_ok();
+
+    let second = server.post("/api/vault/journal/today").await;
+    second.assert_status_ok(); // 200, not 201
     let second_body: serde_json::Value = second.json();
     assert_eq!(second_body["meta"]["id"].as_str().unwrap(), first_id);
+    assert!(
+        second_body["body"]
+            .as_str()
+            .unwrap()
+            .contains("Existing content"),
+        "POST must not overwrite an existing journal"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +251,7 @@ async fn get_by_date_returns_existing() {
     let (server, _tmp) = setup_server();
 
     // Create a journal via the today endpoint
-    server.get("/api/vault/journal/today").await;
+    server.post("/api/vault/journal/today").await;
 
     // Now fetch by today's date explicitly
     let date = today_str();
@@ -230,7 +287,7 @@ async fn capture_appends_to_today() {
     let (server, _tmp) = setup_server();
 
     // Create today's journal
-    server.get("/api/vault/journal/today").await;
+    server.post("/api/vault/journal/today").await;
 
     // Capture content
     let res = server
@@ -292,7 +349,7 @@ async fn recent_returns_last_n_days() {
     let (server, _tmp) = setup_server();
 
     // Create today's journal
-    server.get("/api/vault/journal/today").await;
+    server.post("/api/vault/journal/today").await;
 
     // Query recent journals (today should appear)
     let res = server.get("/api/vault/journal/recent?days=3").await;
@@ -309,7 +366,7 @@ async fn recent_returns_last_n_days() {
 async fn recent_defaults_to_7_days() {
     let (server, _tmp) = setup_server();
 
-    server.get("/api/vault/journal/today").await;
+    server.post("/api/vault/journal/today").await;
 
     let res = server.get("/api/vault/journal/recent").await;
     res.assert_status_ok();
@@ -328,7 +385,7 @@ async fn range_returns_journals_in_date_range() {
     let (server, _tmp) = setup_server();
 
     // Create today's journal
-    server.get("/api/vault/journal/today").await;
+    server.post("/api/vault/journal/today").await;
 
     let today = today_str();
     let res = server
@@ -392,6 +449,9 @@ async fn today_journal_includes_carried_forward_tasks() {
         std::fs::write(journals_dir.join(format!("{yesterday_clone}.md")), &content).unwrap();
     });
 
+    // Today's journal must exist before GET can return carried_forward.
+    server.post("/api/vault/journal/today").await;
+
     // Get today's journal — it should include carried_forward
     let res = server.get("/api/vault/journal/today").await;
     res.assert_status_ok();
@@ -433,6 +493,8 @@ async fn today_journal_includes_carried_forward_tasks() {
 #[tokio::test]
 async fn today_journal_carried_forward_empty_when_no_recent_tasks() {
     let (server, _tmp) = setup_server();
+
+    server.post("/api/vault/journal/today").await;
 
     let res = server.get("/api/vault/journal/today").await;
     res.assert_status_ok();

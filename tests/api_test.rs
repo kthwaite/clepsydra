@@ -941,6 +941,8 @@ async fn page_detail_mapping_matches_get_for_journal_and_link_endpoints() {
         "create-from-link and path GET detail mappings differ"
     );
 
+    let response = server.post("/api/vault/journal/today").await;
+    response.assert_status(StatusCode::CREATED);
     let response = server.get("/api/vault/journal/today").await;
     response.assert_status_ok();
     let mut today: serde_json::Value = response.json();

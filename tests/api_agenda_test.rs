@@ -156,10 +156,7 @@ async fn agenda_today_includes_journal_tasks() {
     let (server, _tmp) = setup_server();
 
     // Create today's journal with an incomplete task (no due date)
-    server
-        .get("/api/vault/journal/today")
-        .await
-        .assert_status_ok();
+    server.post("/api/vault/journal/today").await;
     server
         .post("/api/vault/journal/today/capture")
         .json(&serde_json::json!({ "content": "- [ ] Journal task without due date" }))
@@ -187,10 +184,7 @@ async fn agenda_today_deduplicates() {
     // Create today's journal with a task that is also due today.
     // This matches BOTH the journal_date condition and the due condition,
     // but should appear only once.
-    server
-        .get("/api/vault/journal/today")
-        .await
-        .assert_status_ok();
+    server.post("/api/vault/journal/today").await;
     server
         .post("/api/vault/journal/today/capture")
         .json(&serde_json::json!({
