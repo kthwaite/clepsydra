@@ -153,7 +153,7 @@ export function Atrium() {
             <span className="tabular-nums">{clock} LOCAL</span>
           </div>
           <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
-            {greeting(now)}.
+            {greeting(now)}
           </h1>
         </div>
 
@@ -521,7 +521,7 @@ function isLeap(y: number): boolean {
 
 function greeting(d: Date): string {
   const h = d.getHours();
-  if (h < 5) return "Still awake";
+  if (h < 5) return "Still awake?!";
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   if (h < 22) return "Good evening";
@@ -553,7 +553,7 @@ const APHORISMS: { text: string; who: string }[] = [
   },
   {
     text: "The smallest unit of memory is the willingness to return.",
-    who: "—",
+    who: "Claude Opus 4.7",
   },
   {
     text: "What is to give light must endure burning.",
