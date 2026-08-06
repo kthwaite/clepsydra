@@ -261,6 +261,206 @@ pub struct BaseDiagnostic {
     pub message: String,
 }
 
+// ---------------------------------------------------------------------------
+// In-memory filter matching (LSP path: cheap, no SQL)
+// ---------------------------------------------------------------------------
+
+/// Evaluate a base's membership filter against a parsed page's metadata —
+/// the completion/diagnostics path, where hitting SQLite per keystroke is
+/// not warranted. Semantics mirror the SQL compilation for the common ops;
+/// anything unresolvable is conservatively `false`.
+pub fn base_matches_meta(
+    base: &BaseDefinition,
+    meta: &crate::vault::page::PageMeta,
+    path: &str,
+) -> bool {
+    match &base.file.filter {
+        Some(filter) => filter_matches_meta(filter, meta, path),
+        None => true,
+    }
+}
+
+fn filter_matches_meta(filter: &Filter, meta: &crate::vault::page::PageMeta, path: &str) -> bool {
+    match filter {
+        Filter::All(children) => children.iter().all(|c| filter_matches_meta(c, meta, path)),
+        Filter::Any(children) => children.iter().any(|c| filter_matches_meta(c, meta, path)),
+        Filter::Not(child) => !filter_matches_meta(child, meta, path),
+        Filter::Cmp { field, op, value } => cmp_matches_meta(field, *op, value, meta, path),
+    }
+}
+
+fn cmp_matches_meta(
+    field: &str,
+    op: Op,
+    value: &serde_json::Value,
+    meta: &crate::vault::page::PageMeta,
+    path: &str,
+) -> bool {
+    let bare = field
+        .strip_prefix("sys.")
+        .or_else(|| field.strip_prefix("prop."))
+        .unwrap_or(field);
+    let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
+
+    if is_system {
+        // Multi-valued system fields: membership semantics.
+        let list: Option<Vec<String>> = match bare {
+            "tags" => Some(meta.tags.clone()),
+            "aliases" => Some(meta.aliases.clone()),
+            _ => None,
+        };
+        if let Some(items) = list {
+            return match op {
+                Op::Eq | Op::Contains => {
+                    value.as_str().is_some_and(|v| items.iter().any(|i| i == v))
+                }
+                Op::Ne => value.as_str().is_none_or(|v| !items.iter().any(|i| i == v)),
+                Op::In => value.as_array().is_some_and(|vs| {
+                    vs.iter()
+                        .filter_map(|v| v.as_str())
+                        .any(|v| items.iter().any(|i| i == v))
+                }),
+                Op::IsEmpty => items.is_empty(),
+                Op::NotEmpty => !items.is_empty(),
+                _ => false,
+            };
+        }
+
+        let scalar: Option<String> = match bare {
+            "id" => Some(meta.id.to_string()),
+            "path" => Some(path.to_string()),
+            "title" => meta.title.clone(),
+            "kind" => Some(
+                crate::vault::kind::resolve(path, meta.kind)
+                    .0
+                    .as_str()
+                    .to_string(),
+            ),
+            "project" => meta.project.clone(),
+            "created_at" => meta.created_at.map(|dt| dt.to_rfc3339()),
+            "updated_at" => meta.updated_at.map(|dt| dt.to_rfc3339()),
+            // journal_date / word_count are index-derived; unknowable here.
+            _ => None,
+        };
+        return scalar_matches(scalar.as_deref(), op, value);
+    }
+
+    // Property: native TOML value from extras.
+    let current = meta.extra.get(bare);
+    match op {
+        Op::IsEmpty => current.is_none_or(toml_value_is_empty),
+        Op::NotEmpty => current.is_some_and(|v| !toml_value_is_empty(v)),
+        _ => current.is_some_and(|v| toml_value_matches(v, op, value)),
+    }
+}
+
+fn toml_value_is_empty(value: &toml::Value) -> bool {
+    match value {
+        toml::Value::String(s) => s.is_empty(),
+        toml::Value::Array(items) => items.is_empty(),
+        _ => false,
+    }
+}
+
+fn scalar_matches(current: Option<&str>, op: Op, value: &serde_json::Value) -> bool {
+    match op {
+        Op::IsEmpty => current.is_none(),
+        Op::NotEmpty => current.is_some(),
+        Op::In => match (current, value.as_array()) {
+            (Some(c), Some(items)) => items.iter().filter_map(|v| v.as_str()).any(|v| v == c),
+            _ => false,
+        },
+        Op::Contains => match (current, value.as_str()) {
+            (Some(c), Some(v)) => c.contains(v),
+            _ => false,
+        },
+        Op::Ne => match (current, value.as_str()) {
+            (Some(c), Some(v)) => c != v,
+            (None, _) => true,
+            _ => false,
+        },
+        _ => match (current, value.as_str()) {
+            (Some(c), Some(v)) => match op {
+                Op::Eq => c == v,
+                Op::Lt => c < v,
+                Op::Lte => c <= v,
+                Op::Gt => c > v,
+                Op::Gte => c >= v,
+                _ => false,
+            },
+            _ => false,
+        },
+    }
+}
+
+/// Compare a native TOML value (any element for arrays) against a JSON
+/// literal under `op`.
+fn toml_value_matches(current: &toml::Value, op: Op, value: &serde_json::Value) -> bool {
+    if let toml::Value::Array(items) = current {
+        return match op {
+            // "No element equals" for ne.
+            Op::Ne => !items
+                .iter()
+                .any(|item| toml_value_matches(item, Op::Eq, value)),
+            _ => items.iter().any(|item| toml_value_matches(item, op, value)),
+        };
+    }
+    match op {
+        Op::In => value
+            .as_array()
+            .is_some_and(|vs| vs.iter().any(|v| toml_value_matches(current, Op::Eq, v))),
+        Op::Contains => match (current, value.as_str()) {
+            (toml::Value::String(s), Some(v)) => s.contains(v),
+            _ => false,
+        },
+        Op::LinksTo => match (current, value.as_str()) {
+            (toml::Value::String(s), Some(target)) => {
+                let bare = s
+                    .trim()
+                    .strip_prefix("[[")
+                    .and_then(|x| x.strip_suffix("]]"))
+                    .map(|inner| inner.split_once('|').map(|(t, _)| t).unwrap_or(inner))
+                    .unwrap_or(s.trim());
+                crate::vault::canonical::CanonicalName::from_title(bare).as_str()
+                    == crate::vault::canonical::CanonicalName::from_title(target).as_str()
+            }
+            _ => false,
+        },
+        _ => {
+            let ordering = toml_json_ordering(current, value);
+            match (op, ordering) {
+                (Op::Eq, Some(std::cmp::Ordering::Equal)) => true,
+                (Op::Ne, Some(o)) => o != std::cmp::Ordering::Equal,
+                (Op::Ne, None) => true,
+                (Op::Lt, Some(std::cmp::Ordering::Less)) => true,
+                (Op::Lte, Some(o)) => o != std::cmp::Ordering::Greater,
+                (Op::Gt, Some(std::cmp::Ordering::Greater)) => true,
+                (Op::Gte, Some(o)) => o != std::cmp::Ordering::Less,
+                _ => false,
+            }
+        }
+    }
+}
+
+fn toml_json_ordering(
+    current: &toml::Value,
+    value: &serde_json::Value,
+) -> Option<std::cmp::Ordering> {
+    match (current, value) {
+        (toml::Value::Integer(i), serde_json::Value::Number(n)) => {
+            (*i as f64).partial_cmp(&n.as_f64()?)
+        }
+        (toml::Value::Float(f), serde_json::Value::Number(n)) => f.partial_cmp(&n.as_f64()?),
+        (toml::Value::Boolean(b), serde_json::Value::Bool(v)) => Some(b.cmp(v)),
+        (toml::Value::String(s), serde_json::Value::String(v)) => Some(s.as_str().cmp(v.as_str())),
+        // ISO 8601 collates correctly as text.
+        (toml::Value::Datetime(dt), serde_json::Value::String(v)) => {
+            Some(dt.to_string().as_str().cmp(v.as_str()))
+        }
+        _ => None,
+    }
+}
+
 /// The in-process collection of parsed bases plus per-file diagnostics.
 ///
 /// Loaded from `<vault>/bases/*.base.toml` before the first index build (the

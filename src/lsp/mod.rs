@@ -308,7 +308,7 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
 
-        let line_text = {
+        let (line_text, frontmatter_meta) = {
             let docs = self.documents.lock().await;
             let doc = match docs.get(&uri) {
                 Some(d) => d,
@@ -318,14 +318,47 @@ impl LanguageServer for LspBackend {
             if line_idx >= doc.rope.len_lines() {
                 return Ok(None);
             }
-            doc.rope.line(line_idx).to_string()
+            let line_text = doc.rope.line(line_idx).to_string();
+
+            // Property intelligence keys off the `+++` TOML region: past the
+            // opening fence, before the body, and not on a fence line.
+            // Legacy `---` pages get none (the census-driven migration makes
+            // this self-limiting).
+            let is_toml = doc.rope.len_bytes() >= 3 && doc.rope.byte_slice(0..3) == "+++";
+            let line_start_byte = doc.rope.line_to_byte(line_idx);
+            let inside_frontmatter = is_toml
+                && line_idx >= 1
+                && line_start_byte < doc.body_byte_offset
+                && line_text.trim_end() != "+++";
+            let meta = inside_frontmatter.then(|| doc.meta.clone());
+            (line_text, meta)
         };
 
         let character = pos.character as usize;
 
+        // Wikilink completion works in body and frontmatter alike — relation
+        // values (`series = ["[[…`) delegate to the same completer.
         if let Some(prefix) = completion::wikilink_prefix(&line_text, character) {
             let items = self.complete_wikilinks(&prefix).await?;
             return Ok(Some(CompletionResponse::Array(items)));
+        }
+
+        if let Some(meta) = frontmatter_meta {
+            if let Some((key, prefix)) = completion::property_value_prefix(&line_text, character) {
+                let items = self.complete_property_values(&key, &prefix).await?;
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
+            if let Some(prefix) = completion::property_key_prefix(&line_text, character) {
+                let items = self.complete_property_keys(&prefix, &meta, &uri);
+                return Ok(if items.is_empty() {
+                    None
+                } else {
+                    Some(CompletionResponse::Array(items))
+                });
+            }
+            return Ok(None);
         }
 
         if let Some(prefix) = completion::tag_prefix(&line_text, character) {
@@ -1117,6 +1150,123 @@ impl LspBackend {
             .collect())
     }
 
+    /// Complete frontmatter property keys from the base registry.
+    ///
+    /// Keys from bases whose filter matches the current document's parsed
+    /// meta rank first; other bases' keys follow at lower sort text. The
+    /// filter match is evaluated in memory — no SQL on the completion path.
+    fn complete_property_keys(
+        &self,
+        prefix: &str,
+        meta: &crate::vault::page::PageMeta,
+        uri: &Url,
+    ) -> Vec<CompletionItem> {
+        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let path = self
+            .uri_to_vault_path(uri)
+            .map(|vp| vp.as_str().to_string())
+            .unwrap_or_default();
+
+        // key → (item, best rank) so a key declared by several bases appears once.
+        let mut best: std::collections::HashMap<String, (CompletionItem, char)> =
+            std::collections::HashMap::new();
+        for base in &registry.bases {
+            let rank = if crate::vault::base::base_matches_meta(base, meta, &path) {
+                '0'
+            } else {
+                '1'
+            };
+            for (key, def) in &base.file.properties {
+                if !key.starts_with(prefix) {
+                    continue;
+                }
+                let replace = match best.get(key) {
+                    Some((_, existing_rank)) => rank < *existing_rank,
+                    None => true,
+                };
+                if replace {
+                    let item = CompletionItem {
+                        label: key.clone(),
+                        kind: Some(CompletionItemKind::FIELD),
+                        detail: Some(format!("{:?} — {}", def.property_type, base.file.name)),
+                        insert_text: Some(format!("{key} = ")),
+                        sort_text: Some(format!("{rank}{key}")),
+                        ..Default::default()
+                    };
+                    best.insert(key.clone(), (item, rank));
+                }
+            }
+        }
+        let mut items: Vec<CompletionItem> = best.into_values().map(|(item, _)| item).collect();
+        items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
+        items
+    }
+
+    /// Complete frontmatter property values: declared `select`/`multi_select`
+    /// options; observed values for open vocabularies (empty options list).
+    async fn complete_property_values(
+        &self,
+        key: &str,
+        prefix: &str,
+    ) -> Result<Vec<CompletionItem>> {
+        use crate::vault::base::PropertyType;
+        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+
+        let mut options: Vec<String> = Vec::new();
+        let mut open_vocabulary = false;
+        for base in &registry.bases {
+            if let Some(def) = base.property(key)
+                && matches!(
+                    def.property_type,
+                    PropertyType::Select | PropertyType::MultiSelect
+                )
+            {
+                if def.options.is_empty() {
+                    open_vocabulary = true;
+                } else {
+                    options.extend(def.options.iter().cloned());
+                }
+            }
+        }
+
+        if options.is_empty() && open_vocabulary {
+            // Open vocabulary: offer values observed anywhere in the vault.
+            let key = key.to_string();
+            options = self
+                .state
+                .index
+                .with_index(
+                    move |index, _| -> std::result::Result<Vec<String>, rusqlite::Error> {
+                        let mut stmt = index.connection().prepare(
+                            "SELECT DISTINCT value_text FROM page_properties \
+                         WHERE key = ?1 AND value_text IS NOT NULL ORDER BY value_text LIMIT 50",
+                        )?;
+                        let rows = stmt
+                            .query_map(rusqlite::params![key], |row| row.get(0))?
+                            .filter_map(|r| r.ok())
+                            .collect();
+                        Ok(rows)
+                    },
+                )
+                .await
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+                .unwrap_or_default();
+        }
+
+        options.sort();
+        options.dedup();
+        Ok(options
+            .into_iter()
+            .filter(|o| o.starts_with(prefix))
+            .map(|option| CompletionItem {
+                label: option.clone(),
+                kind: Some(CompletionItemKind::ENUM_MEMBER),
+                insert_text: Some(option),
+                ..Default::default()
+            })
+            .collect())
+    }
+
     /// Resolve a backlink to a source range using its indexed span offsets.
     ///
     /// Uses the span_start/span_end from the backlink record directly,
@@ -1159,8 +1309,18 @@ impl LspBackend {
     /// (multiple matches) as informational diagnostics with related locations.
     async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
         let names = self.canonical_names.read().await;
-        let diagnostics =
+        let mut diagnostics =
             crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, self.state.vault.root());
+
+        // Frontmatter property diagnostics against the base registry.
+        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let path = self
+            .uri_to_vault_path(uri)
+            .map(|vp| vp.as_str().to_string())
+            .unwrap_or_default();
+        diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
+            doc, &registry, &path, &names,
+        ));
         drop(names);
         self.client
             .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
@@ -1187,6 +1347,7 @@ pub async fn run_lsp(state: Arc<AppState>) {
 
 #[cfg(test)]
 mod tests {
+    use super::LspBackend;
     use super::test_support::*;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -1557,5 +1718,128 @@ mod tests {
         };
         assert_eq!(ca.kind, Some(CodeActionKind::QUICKFIX));
         assert!(ca.title.contains("Ghost"));
+    }
+
+    // -- Phase 5: frontmatter property intelligence ------------------------
+
+    const READING_BASE: &str = "name = \"Reading\"\n\n[filter]\nfield = \"kind\"\nop = \"eq\"\nvalue = \"BOOK\"\n\n[properties]\nauthor = { type = \"text\" }\nstatus = { type = \"select\", options = [\"queued\", \"reading\", \"finished\", \"abandoned\"] }\nseries = { type = \"relation\" }\n";
+    const HABITS_BASE: &str = "name = \"Habits\"\n\n[filter]\nfield = \"kind\"\nop = \"eq\"\nvalue = \"NOTE\"\n\n[properties]\ncadence = { type = \"text\" }\n";
+
+    async fn complete_at(
+        backend: &LspBackend,
+        uri: &Url,
+        line: u32,
+        character: u32,
+    ) -> Option<Vec<CompletionItem>> {
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        match backend.completion(params).await.unwrap() {
+            Some(CompletionResponse::Array(v)) => Some(v),
+            Some(CompletionResponse::List(l)) => Some(l.items),
+            None => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn frontmatter_key_completion_ranks_matching_base_first() {
+        let text =
+            "+++\nid = \"0190f8a0-0000-7000-8000-000000000071\"\ntype = \"BOOK\"\n\n+++\nbody\n";
+        let (backend, _tmp) = make_backend(&[
+            ("bases/reading.base.toml", READING_BASE),
+            ("bases/habits.base.toml", HABITS_BASE),
+            ("book.md", text),
+        ]);
+        let uri = uri_for(&backend, "book.md");
+        open_doc(&backend, &uri, text).await;
+
+        // Cursor at column 0 of the blank line inside the fences.
+        let items = complete_at(&backend, &uri, 3, 0).await.expect("items");
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"author"), "{labels:?}");
+        assert!(labels.contains(&"cadence"), "{labels:?}");
+        // The matching base (Reading, kind = BOOK) ranks ahead of Habits.
+        let author = items.iter().find(|i| i.label == "author").unwrap();
+        let cadence = items.iter().find(|i| i.label == "cadence").unwrap();
+        assert!(author.sort_text < cadence.sort_text);
+        assert_eq!(author.insert_text.as_deref(), Some("author = "));
+    }
+
+    #[tokio::test]
+    async fn frontmatter_key_completion_absent_in_body_and_legacy() {
+        let toml_text = "+++\nid = \"0190f8a0-0000-7000-8000-000000000072\"\n+++\naut\n";
+        let legacy_text =
+            "---\nid: 0190f8a0-0000-7000-8000-000000000073\ntype: BOOK\n\n---\nbody\n";
+        let (backend, _tmp) = make_backend(&[
+            ("bases/reading.base.toml", READING_BASE),
+            ("a.md", toml_text),
+            ("b.md", legacy_text),
+        ]);
+
+        // Body position: a bare word is not a property key context.
+        let uri_a = uri_for(&backend, "a.md");
+        open_doc(&backend, &uri_a, toml_text).await;
+        assert!(complete_at(&backend, &uri_a, 3, 3).await.is_none());
+
+        // Legacy page: no property intelligence inside --- fences.
+        let uri_b = uri_for(&backend, "b.md");
+        open_doc(&backend, &uri_b, legacy_text).await;
+        assert!(complete_at(&backend, &uri_b, 3, 0).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn frontmatter_key_completion_empty_without_bases() {
+        let text = "+++\nid = \"0190f8a0-0000-7000-8000-000000000074\"\n\n+++\nbody\n";
+        let (backend, _tmp) = make_backend(&[("a.md", text)]);
+        let uri = uri_for(&backend, "a.md");
+        open_doc(&backend, &uri, text).await;
+        assert!(complete_at(&backend, &uri, 2, 0).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn frontmatter_select_value_completion_offers_options() {
+        let text = "+++\nid = \"0190f8a0-0000-7000-8000-000000000075\"\ntype = \"BOOK\"\nstatus = \"\n+++\nbody\n";
+        let (backend, _tmp) =
+            make_backend(&[("bases/reading.base.toml", READING_BASE), ("book.md", text)]);
+        let uri = uri_for(&backend, "book.md");
+        open_doc(&backend, &uri, text).await;
+
+        // Cursor right after the opening quote on the status line.
+        let items = complete_at(&backend, &uri, 3, 10).await.expect("items");
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["abandoned", "finished", "queued", "reading"]);
+    }
+
+    #[tokio::test]
+    async fn frontmatter_relation_completion_matches_body_wikilinks() {
+        let text = "+++\nid = \"0190f8a0-0000-7000-8000-000000000076\"\ntype = \"BOOK\"\nseries = [\"[[Sol\n+++\n[[Sol\n";
+        let (backend, _tmp) = make_backend(&[
+            ("bases/reading.base.toml", READING_BASE),
+            ("book.md", text),
+            (
+                "Solar Cycle.md",
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000aa\"\ntitle = \"Solar Cycle\"\n+++\n",
+            ),
+        ]);
+        let uri = uri_for(&backend, "book.md");
+        open_doc(&backend, &uri, text).await;
+
+        // In-frontmatter relation completion ("series = [\"[[Sol") …
+        let fm_items = complete_at(&backend, &uri, 3, 16).await.expect("items");
+        // … must be identical to body wikilink completion ("[[Sol").
+        let body_items = complete_at(&backend, &uri, 5, 5).await.expect("items");
+        let fm_labels: Vec<&str> = fm_items.iter().map(|i| i.label.as_str()).collect();
+        let body_labels: Vec<&str> = body_items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(fm_labels, body_labels);
+        assert!(
+            fm_labels.iter().any(|l| l.contains("Solar Cycle")),
+            "{fm_labels:?}"
+        );
     }
 }

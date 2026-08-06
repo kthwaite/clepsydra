@@ -28,6 +28,57 @@ pub fn tag_prefix(line_text: &str, character: usize) -> Option<String> {
     None
 }
 
+/// Detect a frontmatter property-key context: the cursor sits in a bare
+/// identifier at the start of the line (no `=` yet). Returns the typed
+/// prefix. Only meaningful when the cursor is inside `+++` fences.
+pub fn property_key_prefix(line_text: &str, character: usize) -> Option<String> {
+    let end = clamp_to_char_boundary(line_text, character);
+    let before = &line_text[..end];
+    if before.contains('=') {
+        return None;
+    }
+    let trimmed = before.trim_start();
+    // Keys start at column 0 (no leading indent in TOML frontmatter).
+    if trimmed.len() != before.len() {
+        return None;
+    }
+    if trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+/// Detect a frontmatter property-value string context: the cursor is inside
+/// an unclosed double-quoted string on a `key = …` line (scalar or array
+/// element). Returns `(key, typed_prefix)`.
+pub fn property_value_prefix(line_text: &str, character: usize) -> Option<(String, String)> {
+    let end = clamp_to_char_boundary(line_text, character);
+    let before = &line_text[..end];
+    let (key_part, value_part) = before.split_once('=')?;
+    let key = key_part.trim();
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return None;
+    }
+    // Inside a string iff the value side carries an odd number of quotes.
+    if value_part.matches('"').count() % 2 == 0 {
+        return None;
+    }
+    let after_quote = &value_part[value_part.rfind('"')? + 1..];
+    // A wikilink inside the string is the relation completer's context.
+    if after_quote.contains("[[") {
+        return None;
+    }
+    Some((key.to_string(), after_quote.to_string()))
+}
+
 /// Clamp a byte offset to the nearest valid UTF-8 char boundary at or before it.
 fn clamp_to_char_boundary(s: &str, offset: usize) -> usize {
     let offset = offset.min(s.len());
@@ -138,5 +189,50 @@ mod tests {
     fn tag_offset_mid_codepoint() {
         let result = tag_prefix("你#tag", 1);
         assert!(result.is_none());
+    }
+
+    // ---- property_key_prefix tests ----
+
+    #[test]
+    fn key_prefix_at_line_start() {
+        assert_eq!(property_key_prefix("sta", 3), Some("sta".to_string()));
+        assert_eq!(property_key_prefix("", 0), Some("".to_string()));
+    }
+
+    #[test]
+    fn key_prefix_rejects_after_equals_or_indent() {
+        assert_eq!(property_key_prefix("status = \"re", 12), None);
+        assert_eq!(property_key_prefix("  sta", 5), None);
+        assert_eq!(property_key_prefix("some words", 10), None);
+    }
+
+    // ---- property_value_prefix tests ----
+
+    #[test]
+    fn value_prefix_inside_open_string() {
+        assert_eq!(
+            property_value_prefix("status = \"rea", 13),
+            Some(("status".to_string(), "rea".to_string()))
+        );
+        assert_eq!(
+            property_value_prefix("status = \"", 10),
+            Some(("status".to_string(), "".to_string()))
+        );
+    }
+
+    #[test]
+    fn value_prefix_inside_array_element() {
+        assert_eq!(
+            property_value_prefix("themes = [\"mem", 14),
+            Some(("themes".to_string(), "mem".to_string()))
+        );
+    }
+
+    #[test]
+    fn value_prefix_rejects_closed_string_and_wikilinks() {
+        assert_eq!(property_value_prefix("status = \"reading\"", 18), None);
+        // `[[` inside the string belongs to the relation completer.
+        assert_eq!(property_value_prefix("series = [\"[[Sol", 16), None);
+        assert_eq!(property_value_prefix("no equals here", 14), None);
     }
 }
