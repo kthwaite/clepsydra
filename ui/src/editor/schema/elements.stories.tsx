@@ -12,9 +12,10 @@ import { useMemo } from "react";
 import { createEditor, type Descendant } from "slate";
 import { withHistory } from "slate-history";
 import { Editable, Slate, withReact } from "slate-react";
-import { decorateCode } from "#/editor/decorate-code";
+import { makeDecorateCode } from "#/editor/decorate-code";
 import { renderElement } from "#/editor/elements/renderElement";
 import { renderLeaf } from "#/editor/elements/renderLeaf";
+import { refractor } from "#/editor/refractor-languages";
 import { makeBlockquote } from "./elements/blockquote";
 import { makeBlockRef } from "./elements/blockRef";
 import { makeCodeBlock } from "./elements/codeBlock";
@@ -50,6 +51,9 @@ import { withSchema } from "./withSchema";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 });
+
+// Stories import the grammar bundle eagerly — no lazy-loading ceremony here.
+const decorateCode = makeDecorateCode(refractor);
 
 function SchemaPreview({ value }: { value: Descendant[] }) {
   const editor = useMemo(

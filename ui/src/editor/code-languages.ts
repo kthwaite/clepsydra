@@ -1,4 +1,4 @@
-import { refractor } from "#/editor/refractor-languages";
+import type { Refractor } from "#/editor/refractor-lazy";
 
 /** Common languages surfaced first in the picker, in priority order. */
 export const COMMON_LANGUAGES = [
@@ -41,8 +41,13 @@ export function displayLabel(id: string): string {
  * aliases in CURATED_ALIASES (e.g. zsh), which get their own row. The plaintext
  * family (plain/plaintext/text/txt — all the same empty grammar) is
  * excluded; the picker's dedicated "Plain text" reset row covers it.
+ *
+ * The grammar bundle is injected (see refractor-lazy.ts). While it is still
+ * loading (`refractor` null) the curated set stands in — every entry in it is
+ * known to be registered once the bundle lands.
  */
-export function listLanguageIds(): string[] {
+export function listLanguageIds(refractor: Refractor | null): string[] {
+  if (!refractor) return [...COMMON_LANGUAGES, ...CURATED_ALIASES];
   // Drop the plaintext family by grammar identity (plain/plaintext/text/txt
   // all map to the same empty grammar object), so they vanish in one filter.
   const grammars = refractor.languages as Record<string, object>;
@@ -84,8 +89,11 @@ export function listLanguageIds(): string[] {
  * Case-insensitive substring filter over `listLanguageIds()`.
  * An empty query returns the full curated-first ordering.
  */
-export function filterLanguages(query: string): string[] {
-  const all = listLanguageIds();
+export function filterLanguages(
+  refractor: Refractor | null,
+  query: string,
+): string[] {
+  const all = listLanguageIds(refractor);
   const q = query.trim().toLowerCase();
   if (!q) return all;
   return all.filter((id) => id.toLowerCase().includes(q));

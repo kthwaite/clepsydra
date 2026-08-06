@@ -21,7 +21,7 @@ import {
 } from "#/editor/transforms/blockConversions";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
-import { decorateCode } from "./decorate-code";
+import { makeDecorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
@@ -35,6 +35,7 @@ import {
   toggleCheckbox,
   withOutliner,
 } from "./plugins/withOutliner";
+import { useRefractor } from "./refractor-lazy";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBlockRef } from "./schema/elements/blockRef";
 import { makeWikilink } from "./schema/elements/wikilink";
@@ -100,6 +101,14 @@ export function SlateEditor({
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
   const assignBlockId = useAssignBlockId();
+
+  // Grammars load lazily on the first decorate pass over a highlighted code
+  // block; the fresh decorate identity when they land re-runs decorations.
+  const highlighter = useRefractor();
+  const decorateCode = useMemo(
+    () => makeDecorateCode(highlighter),
+    [highlighter],
+  );
 
   // Per-editor, non-persistent: each editor instance starts with vim off.
   const [isVimEnabled, setIsVimEnabled] = useState(false);

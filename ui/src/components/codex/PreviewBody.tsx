@@ -1,9 +1,19 @@
+import { lazy, Suspense } from "react";
 import {
   countWords,
   previewMarkdownSource,
 } from "#/components/codex/folio-utils";
-import { PreviewMarkdown } from "#/components/codex/PreviewMarkdown";
 import { kindLabel, resolveKind } from "#/lib/kind";
+
+// react-markdown drags the whole unified/micromark pipeline (~130 kB minified)
+// with it — far too heavy for the eager entry chunk when it only renders hover
+// previews. Loaded on first use; the card's fill-in-as-data-arrives behaviour
+// already covers the brief empty excerpt.
+const PreviewMarkdown = lazy(() =>
+  import("#/components/codex/PreviewMarkdown").then((m) => ({
+    default: m.PreviewMarkdown,
+  })),
+);
 
 // Soft fade so clipped content reads as "continues below" rather than a hard cut.
 const FADE = "linear-gradient(to bottom, black 78%, transparent)";
@@ -56,7 +66,9 @@ export function PreviewBody({
           className="max-h-[160px] overflow-hidden"
           style={{ maskImage: FADE, WebkitMaskImage: FADE }}
         >
-          <PreviewMarkdown content={markdown} />
+          <Suspense fallback={null}>
+            <PreviewMarkdown content={markdown} />
+          </Suspense>
         </div>
       )}
       {showTags && tags.length > 0 && (

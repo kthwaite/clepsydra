@@ -1,4 +1,3 @@
-import { refractor } from "refractor";
 import { describe, expect, it } from "vitest";
 import {
   COMMON_LANGUAGES,
@@ -7,6 +6,7 @@ import {
   filterLanguages,
   listLanguageIds,
 } from "#/editor/code-languages";
+import { refractor } from "#/editor/refractor-languages";
 
 describe("code-languages", () => {
   it("displayLabel uppercases the id", () => {
@@ -15,49 +15,49 @@ describe("code-languages", () => {
   });
 
   it("listLanguageIds pins registered common languages first, in order", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     const expectedCommon = COMMON_LANGUAGES.filter((id) => ids.includes(id));
     expect(ids.slice(0, expectedCommon.length)).toEqual(expectedCommon);
   });
 
   it("listLanguageIds has no duplicates", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("listLanguageIds includes well-known grammars", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     expect(ids).toContain("rust");
     expect(ids).toContain("javascript");
   });
 
   it("filterLanguages('') returns the full ordering", () => {
-    expect(filterLanguages("")).toEqual(listLanguageIds());
+    expect(filterLanguages(refractor, "")).toEqual(listLanguageIds(refractor));
   });
 
   it("filterLanguages matches case-insensitive substrings", () => {
-    expect(filterLanguages("RUS")).toContain("rust");
+    expect(filterLanguages(refractor, "RUS")).toContain("rust");
   });
 
   it("filterLanguages returns [] for no matches", () => {
-    expect(filterLanguages("zzzznotalang")).toEqual([]);
+    expect(filterLanguages(refractor, "zzzznotalang")).toEqual([]);
   });
 
   it("collapses aliases to their canonical name", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     expect(ids).toContain("javascript");
     expect(ids).not.toContain("js");
     expect(ids).not.toContain("ts");
   });
 
   it("registers tsx and jsx (curated commons absent from the base bundle)", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     expect(ids).toContain("tsx");
     expect(ids).toContain("jsx");
   });
 
   it("excludes the plaintext family (the Plain text reset covers that)", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     expect(ids).not.toContain("plaintext");
     expect(ids).not.toContain("txt");
     expect(ids).not.toContain("text");
@@ -66,7 +66,7 @@ describe("code-languages", () => {
 
   it("lists each grammar at most once (curated aliases excepted)", () => {
     const curated = new Set<string>(CURATED_ALIASES);
-    const ids = listLanguageIds().filter((id) => !curated.has(id));
+    const ids = listLanguageIds(refractor).filter((id) => !curated.has(id));
     const grammars = refractor.languages as Record<string, object>;
     const seen = new Set<object>();
     for (const id of ids) {
@@ -77,7 +77,7 @@ describe("code-languages", () => {
   });
 
   it("surfaces zsh as its own row sharing the bash grammar", () => {
-    const ids = listLanguageIds();
+    const ids = listLanguageIds(refractor);
     const grammars = refractor.languages as Record<string, object>;
     expect(ids).toContain("zsh");
     expect(ids).toContain("bash");
@@ -86,6 +86,14 @@ describe("code-languages", () => {
   });
 
   it("filterLanguages finds zsh", () => {
-    expect(filterLanguages("zsh")).toContain("zsh");
+    expect(filterLanguages(refractor, "zsh")).toContain("zsh");
+  });
+
+  it("falls back to the curated set while the grammar bundle loads", () => {
+    expect(listLanguageIds(null)).toEqual([
+      ...COMMON_LANGUAGES,
+      ...CURATED_ALIASES,
+    ]);
+    expect(filterLanguages(null, "rus")).toEqual(["rust"]);
   });
 });

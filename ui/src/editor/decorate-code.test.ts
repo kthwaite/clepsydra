@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decorateCode } from "./decorate-code";
+import { makeDecorateCode } from "./decorate-code";
+import { refractor } from "./refractor-languages";
+
+// Tests exercise the loaded state directly with the registered singleton.
+const decorateCode = makeDecorateCode(refractor);
 
 const codeBlock = (language: string, text: string) => ({
   type: "code-block" as const,
@@ -8,6 +12,12 @@ const codeBlock = (language: string, text: string) => ({
 });
 
 describe("decorateCode", () => {
+  it("returns [] while the grammar bundle is still loading", () => {
+    const pending = makeDecorateCode(null);
+    const node = codeBlock("javascript", "const x = 1;");
+    expect(pending([node as any, [0]])).toEqual([]);
+  });
+
   it("returns [] for non-code-block nodes", () => {
     const para = { type: "paragraph", children: [{ text: "hi" }] };
     expect(decorateCode([para as any, [0]])).toEqual([]);

@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import { displayLabel, filterLanguages } from "#/editor/code-languages";
+import { loadRefractor, useRefractor } from "#/editor/refractor-lazy";
 import { cn } from "#/lib/cn";
 
 /** Sentinel row id for the "Plain text" reset entry (never a real lang id). */
@@ -47,7 +48,17 @@ export function CodeLangPicker({
     middleware: [offset(6), flip(), shift({ padding: 8 })],
   });
 
-  const langs = useMemo(() => filterLanguages(query), [query]);
+  // The full grammar list lives in a lazy chunk (refractor-lazy.ts); until it
+  // lands the curated common set stands in, then the list fills out in place.
+  const highlighter = useRefractor();
+  useEffect(() => {
+    void loadRefractor();
+  }, []);
+
+  const langs = useMemo(
+    () => filterLanguages(highlighter, query),
+    [highlighter, query],
+  );
   // The Plain text reset row always trails the (possibly empty) language list.
   const rows = useMemo(() => [...langs, PLAIN], [langs]);
 
