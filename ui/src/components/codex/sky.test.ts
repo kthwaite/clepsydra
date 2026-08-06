@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { bezierPoint, describeMoon, sunArcPosition } from "./sky";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  bezierPoint,
+  describeMoon,
+  nextLocalDate,
+  selectDisplayedSunrise,
+  sunArcPosition,
+} from "./sky";
 
 describe("describeMoon", () => {
   it("names the new moon and marks it neither waxing nor full", () => {
@@ -41,5 +47,79 @@ describe("sunArcPosition", () => {
   it("is ~0.5 at solar midpoint", () => {
     const mid = new Date("2026-05-02T13:12:00Z");
     expect(sunArcPosition(mid, sunrise, sunset).t).toBeCloseTo(0.5, 1);
+  });
+});
+
+describe("selectDisplayedSunrise", () => {
+  const todaySunrise = new Date("2026-05-02T05:54:00Z");
+  const todaySunset = new Date("2026-05-02T20:31:00Z");
+  const tomorrowSunrise = new Date("2026-05-03T05:52:00Z");
+
+  it("keeps today's sunrise before sunset without evaluating tomorrow", () => {
+    const getTomorrow = vi.fn(() => tomorrowSunrise);
+    expect(
+      selectDisplayedSunrise(
+        new Date("2026-05-02T20:30:59Z"),
+        todaySunrise,
+        todaySunset,
+        getTomorrow,
+      ),
+    ).toEqual({ time: todaySunrise, isTomorrow: false });
+    expect(getTomorrow).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "2026-05-02T20:31:00Z",
+    "2026-05-02T23:59:59Z",
+  ])("uses tomorrow's sunrise at and after sunset (%s)", (now) => {
+    expect(
+      selectDisplayedSunrise(
+        new Date(now),
+        todaySunrise,
+        todaySunset,
+        () => tomorrowSunrise,
+      ),
+    ).toEqual({ time: tomorrowSunrise, isTomorrow: true });
+  });
+
+  it("uses the new current date's sunrise without an indicator after midnight", () => {
+    const currentSunrise = new Date("2026-05-03T05:52:00Z");
+    expect(
+      selectDisplayedSunrise(
+        new Date("2026-05-03T00:00:00Z"),
+        currentSunrise,
+        new Date("2026-05-03T20:33:00Z"),
+        () => new Date("2026-05-04T05:50:00Z"),
+      ),
+    ).toEqual({ time: currentSunrise, isTomorrow: false });
+  });
+});
+
+describe("nextLocalDate", () => {
+  beforeEach(() => {
+    vi.stubEnv("TZ", "America/New_York");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("advances across spring DST while retaining local clock fields", () => {
+    const source = new Date(2026, 2, 7, 12, 34, 56, 789);
+    const sourceTime = source.getTime();
+    const next = nextLocalDate(source);
+
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(
+      "America/New_York",
+    );
+    expect(next.getFullYear()).toBe(2026);
+    expect(next.getMonth()).toBe(2);
+    expect(next.getDate()).toBe(8);
+    expect(next.getHours()).toBe(12);
+    expect(next.getMinutes()).toBe(34);
+    expect(next.getSeconds()).toBe(56);
+    expect(next.getMilliseconds()).toBe(789);
+    expect(next.getTime() - source.getTime()).toBe(23 * 60 * 60 * 1000);
+    expect(source.getTime()).toBe(sourceTime);
   });
 });

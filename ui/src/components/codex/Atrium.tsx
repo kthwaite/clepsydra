@@ -23,7 +23,12 @@ import { formatRelativeTime } from "./codex-time";
 import { shortFolio } from "./folio-utils";
 import { ReadingContinuesPanel } from "./ReadingContinues";
 import { SkyCard } from "./SkyCard";
-import { moonPhase, sunArcPosition } from "./sky";
+import {
+  moonPhase,
+  nextLocalDate,
+  selectDisplayedSunrise,
+  sunArcPosition,
+} from "./sky";
 
 export function Atrium() {
   const navigate = useNavigate();
@@ -96,9 +101,17 @@ export function Atrium() {
     const lat = location?.latitude ?? null;
     const lon = location?.longitude ?? null;
     const hasLoc = lat !== null && lon !== null;
-    const times = hasLoc
-      ? SunCalc.getTimes(now, lat, lon)
-      : { sunrise: atHour(now, 6), sunset: atHour(now, 20) };
+    const getSunTimes = (date: Date) =>
+      hasLoc
+        ? SunCalc.getTimes(date, lat, lon)
+        : { sunrise: atHour(date, 6), sunset: atHour(date, 20) };
+    const times = getSunTimes(now);
+    const displayedSunrise = selectDisplayedSunrise(
+      now,
+      times.sunrise,
+      times.sunset,
+      () => getSunTimes(nextLocalDate(now)).sunrise,
+    );
     const arc = sunArcPosition(now, times.sunrise, times.sunset);
     const moon = moonPhase(now);
     const remMin = Math.max(
@@ -107,7 +120,8 @@ export function Atrium() {
     );
     return {
       moon,
-      sunrise: fmtTime(times.sunrise),
+      sunrise: fmtTime(displayedSunrise.time),
+      sunriseIsTomorrow: displayedSunrise.isTomorrow,
       sunset: fmtTime(times.sunset),
       lightLeft: `${Math.floor(remMin / 60)}h ${pad(remMin % 60)}m`,
       arc,

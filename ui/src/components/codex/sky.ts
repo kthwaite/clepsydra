@@ -42,6 +42,24 @@ export function moonPhase(now: Date): MoonInfo {
   return describeMoon(SunCalc.getMoonIllumination(now));
 }
 
+export function nextLocalDate(date: Date): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + 1);
+  return next;
+}
+
+export function selectDisplayedSunrise(
+  now: Date,
+  todaySunrise: Date,
+  todaySunset: Date,
+  tomorrowSunrise: () => Date,
+): { time: Date; isTomorrow: boolean } {
+  if (now.getTime() >= todaySunset.getTime()) {
+    return { time: tomorrowSunrise(), isTomorrow: true };
+  }
+  return { time: todaySunrise, isTomorrow: false };
+}
+
 // Day-arc quadratic Bézier control points (matches SPLASH viewBox 0 0 600 56):
 // P0 (24,48) → P1 (300,-32) → P2 (576,48).
 const P0 = { x: 24, y: 48 };
