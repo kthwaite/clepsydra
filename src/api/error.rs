@@ -68,6 +68,16 @@ impl ApiError {
         }
     }
 
+    pub fn revision_conflict(current_revision: String) -> Self {
+        Self::conflict_with_detail(
+            "page changed since it was loaded",
+            serde_json::json!({
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }),
+        )
+    }
+
     pub fn bad_request(msg: impl Into<String>) -> Self {
         Self {
             status: 400,

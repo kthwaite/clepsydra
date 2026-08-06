@@ -48,9 +48,9 @@ it trusts the server's own mkcert certificate. It refuses a non-loopback
 | `vault_links` | read | Backlinks, outlinks, or similar pages |
 | `vault_tags` | read | Tag vocabulary with usage counts |
 | `vault_create_page` | write | New page in one atomic mutation; derives the canonical `yyyymmdd.slug.shortid.md` path, declares kind/project |
-| `vault_update_page` | write | Whole-field replacement of title/tags/aliases/body |
-| `vault_edit_page` | write | Exact-match string edit of the body, guarded by a content hash |
-| `vault_append_page` | write | Append to the page or to a heading's section (hash-guarded, one retry) |
+| `vault_update_page` | write | Whole-field replacement of title/tags/aliases/body, guarded by the current revision |
+| `vault_edit_page` | write | Exact-match string edit of the body, guarded by the current revision |
+| `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
 | `vault_journal_capture` | write | Quick-capture into today's journal |
 | `vault_assign` | organise | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organise | Explicit rename/relocate with link rewriting |
@@ -63,12 +63,11 @@ have been refiled), stale-write 409s say re-read and retry, and the delete
 tool's backlink refusal includes the linking pages so the agent can review
 them before forcing.
 
-Read-modify-write tools (`vault_edit_page`, `vault_append_page`) send the
-SHA-256 of the body they read along with the write
-(`expected_body_sha256` on `PUT /pages/{path}`); the server rejects the
-write with 409 if the body changed since that read, and the mutation
-coordinator's path lock carries the check through to the write itself — a
-concurrent edit can never be silently overwritten. `vault_create_page`
+Page-write tools read the page's current full-content revision and send it
+as `expected_revision` on `PUT /pages/{path}`. The server rejects the write
+with 409 if the page changed since that read, and the mutation coordinator's
+path lock carries the check through to the write itself — a concurrent edit
+cannot be silently overwritten. `vault_create_page`
 declares kind/project inside the create mutation itself, and its `folder`
 parameter is constrained to locations the metadata-projected layout
 (ADR-0001) would not immediately move the page out of.

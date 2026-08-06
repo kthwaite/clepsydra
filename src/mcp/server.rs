@@ -605,7 +605,10 @@ impl VaultMcpServer {
                     .to_string(),
             );
         }
+        let current = self.fetch_page(&params.path).await?;
+        let revision = Self::page_field(&current, &params.path, "revision")?;
         let update_body = serde_json::json!({
+            "expected_revision": revision,
             "title": params.title,
             "tags": params.tags,
             "aliases": params.aliases,
@@ -633,20 +636,22 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<EditPageParams>,
     ) -> Result<String, String> {
-        let (body, sha) = self.fetch_body(&params.path).await?;
+        let current = self.fetch_page(&params.path).await?;
+        let body = Self::page_field(&current, &params.path, "body")?;
+        let revision = Self::page_field(&current, &params.path, "revision")?;
         let (new_body, replacements) = super::edit::apply_edit(
             &body,
             &params.old_string,
             &params.new_string,
             params.replace_all.unwrap_or(false),
         )?;
-        // The hash of the body this edit was computed against travels with
-        // the write, so a concurrent change surfaces as a 409 instead of
-        // being silently overwritten.
+        // The revision this edit was computed against travels with the write,
+        // so a concurrent change surfaces as a 409 instead of being silently
+        // overwritten.
         self.client
             .put_json(
                 &pages_url(&params.path),
-                &serde_json::json!({ "body": new_body, "expected_body_sha256": sha }),
+                &serde_json::json!({ "body": new_body, "expected_revision": revision }),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -675,14 +680,16 @@ impl VaultMcpServer {
         let mut attempts = 0;
         loop {
             attempts += 1;
-            let (body, sha) = self.fetch_body(&params.path).await?;
+            let current = self.fetch_page(&params.path).await?;
+            let body = Self::page_field(&current, &params.path, "body")?;
+            let revision = Self::page_field(&current, &params.path, "revision")?;
             let new_body =
                 super::edit::append_to_body(&body, &params.content, params.heading.as_deref())?;
             match self
                 .client
                 .put_json(
                     &pages_url(&params.path),
-                    &serde_json::json!({ "body": new_body, "expected_body_sha256": sha }),
+                    &serde_json::json!({ "body": new_body, "expected_revision": revision }),
                 )
                 .await
             {
@@ -937,21 +944,21 @@ impl VaultMcpServer {
         render(&value)
     }
 
-    /// Fetch the current full (untruncated) body of a page plus its SHA-256,
-    /// the optimistic-concurrency token read-modify-write tools echo back.
-    async fn fetch_body(&self, path: &str) -> Result<(String, String), String> {
-        let value = self
-            .client
+    /// Fetch the current full page response for a read-modify-write tool.
+    async fn fetch_page(&self, path: &str) -> Result<Value, String> {
+        self.client
             .get_json(&pages_url(path), &[])
             .await
-            .map_err(|e| e.to_string())?;
-        let body = value
-            .get("body")
+            .map_err(|e| e.to_string())
+    }
+
+    /// Extract a required string field from a page response.
+    fn page_field(value: &Value, path: &str, field: &str) -> Result<String, String> {
+        value
+            .get(field)
             .and_then(Value::as_str)
             .map(str::to_string)
-            .ok_or_else(|| format!("page response for {path} carried no body field"))?;
-        let sha = crate::api::pages::body_sha256(&body);
-        Ok((body, sha))
+            .ok_or_else(|| format!("page response for {path} carried no {field} field"))
     }
 }
 
@@ -1361,10 +1368,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_body_hash_is_rejected_instead_of_overwriting() {
+    async fn stale_revision_is_rejected_instead_of_overwriting() {
         let (server, _tmp) = serve_seeded_vault().await;
-        // A reader captures the body hash...
-        let (_body, stale_sha) = server.fetch_body("notes/alpha.md").await.unwrap();
+        // A reader captures the page revision...
+        let stale_page = server.fetch_page("notes/alpha.md").await.unwrap();
+        let stale_revision =
+            VaultMcpServer::page_field(&stale_page, "notes/alpha.md", "revision").unwrap();
         // ...then another writer changes the page...
         server
             .vault_update_page(Parameters(UpdatePageParams {
@@ -1376,21 +1385,22 @@ mod tests {
             }))
             .await
             .unwrap();
-        // ...so a write carrying the stale hash must 409, not clobber.
+        // ...so a write carrying the stale revision must 409, not clobber.
         let err = server
             .client
             .put_json(
                 &pages_url("notes/alpha.md"),
                 &serde_json::json!({
                     "body": "based on a stale read",
-                    "expected_body_sha256": stale_sha,
+                    "expected_revision": stale_revision,
                 }),
             )
             .await
-            .expect_err("stale hash should conflict");
+            .expect_err("stale revision should conflict");
         assert!(err.is_conflict(), "expected 409, got: {err}");
 
-        let (body, _) = server.fetch_body("notes/alpha.md").await.unwrap();
+        let current = server.fetch_page("notes/alpha.md").await.unwrap();
+        let body = VaultMcpServer::page_field(&current, "notes/alpha.md", "body").unwrap();
         assert_eq!(body, "rewritten by someone else\n", "no lost update");
     }
 
@@ -1499,14 +1509,6 @@ mod tests {
             "code/clep"
         );
         assert!(resolve_create_folder(None, Some("clep"), Some("drafts")).is_err());
-    }
-
-    #[test]
-    fn body_sha256_matches_known_vector() {
-        assert_eq!(
-            crate::api::pages::body_sha256(""),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
     }
 
     #[tokio::test]

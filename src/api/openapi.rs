@@ -26,8 +26,10 @@ use utoipa_swagger_ui::SwaggerUi;
     paths(
         // Pages
         crate::api::pages::list_pages,
+        crate::api::pages::create_default_page,
         crate::api::pages::get_page,
         crate::api::pages::get_page_by_id,
+        crate::api::pages::update_page_by_id,
         crate::api::pages::create_page,
         crate::api::pages::update_page,
         crate::api::pages::delete_page,
@@ -102,6 +104,7 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::pages::PageDetailResponse,
             crate::api::pages::PageSummaryListResponse,
             crate::api::pages::CreatePageRequest,
+            crate::api::pages::CreateDefaultPageRequest,
             crate::api::pages::UpdatePageRequest,
             crate::api::pages::MovePageRequest,
             crate::api::pages::AssignRequest,
@@ -209,6 +212,68 @@ mod tests {
                 "NOTE", "PROJECT", "JOURNAL", "TODO", "QUOTE", "BOOK", "CAPTURE", "CODE", "PERSON",
                 "TASK", "CYCLE"
             ]
+        );
+    }
+
+    #[test]
+    fn page_detail_revision_is_a_required_string() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let page_detail = &json["components"]["schemas"]["PageDetailResponse"];
+        let required = page_detail["required"]
+            .as_array()
+            .expect("PageDetailResponse.required should be an array");
+        assert!(
+            required.iter().any(|field| field == "revision"),
+            "PageDetailResponse should require revision"
+        );
+        assert_eq!(
+            page_detail["properties"]["revision"]["type"], "string",
+            "PageDetailResponse.revision should be a string"
+        );
+    }
+
+    #[test]
+    fn page_update_requires_expected_revision_and_documents_conflicts() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let update_request = &json["components"]["schemas"]["UpdatePageRequest"];
+        let required = update_request["required"]
+            .as_array()
+            .expect("UpdatePageRequest.required should be an array");
+        assert!(
+            required.iter().any(|field| field == "expected_revision"),
+            "UpdatePageRequest should require expected_revision"
+        );
+        assert_eq!(
+            update_request["properties"]["expected_revision"]["type"], "string",
+            "UpdatePageRequest.expected_revision should be a string"
+        );
+
+        let responses = &json["paths"]["/api/vault/pages/{path}"]["put"]["responses"];
+        assert!(
+            responses.get("409").is_some(),
+            "page update should document revision conflicts"
+        );
+    }
+
+    #[test]
+    fn openapi_documents_mobile_page_operations() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+
+        let collection = &json["paths"]["/api/vault/pages"];
+        assert!(collection.get("get").is_some());
+        assert!(collection.get("post").is_some());
+
+        let by_id = &json["paths"]["/api/vault/pages/by-id/{uuid}"];
+        assert!(by_id.get("get").is_some());
+        assert!(by_id.get("put").is_some());
+
+        assert!(
+            json["components"]["schemas"]
+                .get("CreateDefaultPageRequest")
+                .is_some()
         );
     }
 

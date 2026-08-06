@@ -18,9 +18,14 @@ use super::page::{Page, PageMeta, write_page_content};
 use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
 
+type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
+type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
+
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
     locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
+    before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
+    after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -69,13 +74,6 @@ pub struct ReplacePageContentCommand {
     pub path: VaultPath,
     pub expected_content: String,
     pub content: String,
-}
-
-#[derive(Debug)]
-pub struct PageMutationResult {
-    pub path: VaultPath,
-    pub meta: PageMeta,
-    pub body: String,
 }
 
 #[derive(Debug)]
@@ -183,6 +181,29 @@ impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
             locks: parking_lot::Mutex::new(HashMap::new()),
+            before_update_publish_hook: parking_lot::Mutex::new(None),
+            after_page_id_lookup_hook: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Install a synchronization observer immediately after an update's
+    /// compare-and-swap read and before filesystem publication.
+    #[doc(hidden)]
+    pub fn set_before_update_publish_hook(&self, hook: Option<Arc<BeforeUpdatePublishHook>>) {
+        *self.before_update_publish_hook.lock() = hook;
+    }
+
+    /// Install a synchronization observer after an indexed UUID lookup and
+    /// before its candidate path is acquired or used.
+    #[doc(hidden)]
+    pub fn set_after_page_id_lookup_hook(&self, hook: Option<Arc<AfterPageIdLookupHook>>) {
+        *self.after_page_id_lookup_hook.lock() = hook;
+    }
+
+    pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
+        let hook = self.after_page_id_lookup_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook(path);
         }
     }
 
@@ -249,7 +270,7 @@ impl MutationCoordinator {
         index: &IndexHandle,
         command: CreatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
-    ) -> Result<PageMutationResult, MutationError> {
+    ) -> Result<Page, MutationError> {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
@@ -258,7 +279,7 @@ impl MutationCoordinator {
                 let blocking_path = absolute.clone();
                 let page_path = command.path.clone();
                 let content = write_page_content(&command.meta, &command.body);
-                let (guard, durability_error) =
+                let (guard, (durability_error, content)) =
                     run_blocking_fs(absolute.clone(), guard, move || {
                         if let Some(parent) = blocking_path.parent() {
                             fs::create_dir_all(parent).map_err(|source| {
@@ -270,7 +291,7 @@ impl MutationCoordinator {
                             })?;
                         }
                         match atomic_create(&blocking_path, content.as_bytes()) {
-                            Ok(()) => Ok(None),
+                            Ok(()) => Ok((None, content)),
                             Err(AtomicPublicationError::NotPublished(source))
                                 if source.kind() == io::ErrorKind::AlreadyExists =>
                             {
@@ -287,7 +308,7 @@ impl MutationCoordinator {
                                 })
                             }
                             Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                Ok(Some(source))
+                                Ok((Some(source), content))
                             }
                         }
                     })
@@ -308,10 +329,11 @@ impl MutationCoordinator {
                         source,
                     });
                 }
-                Ok(PageMutationResult {
+                Ok(Page {
                     path: command.path,
                     meta: command.meta,
                     body: command.body,
+                    raw_content: content,
                 })
             })
             .await?;
@@ -399,7 +421,7 @@ impl MutationCoordinator {
         hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
         command: UpdatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
-    ) -> Result<PageMutationResult, MutationError> {
+    ) -> Result<Page, MutationError> {
         match &command.project {
             ProjectAssignment::Set(project)
                 if command.meta.project.as_deref() != Some(project.as_str()) =>
@@ -447,13 +469,14 @@ impl MutationCoordinator {
         let original_path = command.path.clone();
         let notification_source = original_path.clone();
         let index = index.clone();
+        let before_update_publish_hook = self.before_update_publish_hook.lock().clone();
         let result =
             run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
                 let blocking_path = absolute.clone();
                 let page_path = command.path.clone();
                 let expected_content = command.expected_content.clone();
                 let content = write_page_content(&command.meta, &command.body);
-                let (guard, durability_error) =
+                let (guard, (durability_error, content)) =
                     run_blocking_fs(absolute.clone(), guard, move || {
                         let current = match fs::read_to_string(&blocking_path) {
                             Ok(current) => current,
@@ -471,6 +494,9 @@ impl MutationCoordinator {
                         if current != expected_content {
                             return Err(MutationError::Stale(page_path));
                         }
+                        if let Some(hook) = before_update_publish_hook {
+                            hook(&page_path);
+                        }
                         if let Some((destination, destination_absolute)) = destination_check
                             && destination_absolute.exists()
                         {
@@ -480,7 +506,7 @@ impl MutationCoordinator {
                             )));
                         }
                         match atomic_replace(&blocking_path, content.as_bytes()) {
-                            Ok(()) => Ok(None),
+                            Ok(()) => Ok((None, content)),
                             Err(AtomicPublicationError::NotPublished(source)) => {
                                 Err(MutationError::Filesystem {
                                     filesystem_applied: false,
@@ -489,7 +515,7 @@ impl MutationCoordinator {
                                 })
                             }
                             Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                Ok(Some(source))
+                                Ok((Some(source), content))
                             }
                         }
                     })
@@ -551,10 +577,11 @@ impl MutationCoordinator {
                         source,
                     });
                 }
-                Ok(PageMutationResult {
+                Ok(Page {
                     path: final_path,
                     meta: command.meta,
                     body: command.body,
+                    raw_content: content,
                 })
             })
             .await?;

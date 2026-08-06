@@ -169,6 +169,8 @@ export function Diurnal() {
               <SaveIndicator
                 status={editor.saveStatus}
                 error={editor.saveError}
+                revisionConflict={editor.revisionConflict}
+                onReloadAfterConflict={editor.reloadAfterConflict}
               />
             </div>
             <PageEditorHeader

@@ -1,7 +1,11 @@
 mod support;
 
 use std::fs;
+use std::future::{Future, poll_fn};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::Poll;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -26,6 +30,62 @@ fn setup_server() -> (TestServer, TempDir) {
 fn setup_app() -> (Router, TempDir) {
     let fixture = ApiFixture::builder().build();
     (fixture.app, fixture.temp_dir)
+}
+
+struct CountingFixedClock {
+    now: chrono::DateTime<chrono::Utc>,
+    calls: AtomicUsize,
+}
+
+impl clepsydra::api::Clock for CountingFixedClock {
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.now
+    }
+}
+
+fn markdown_file_count(root: &std::path::Path) -> usize {
+    fs::read_dir(root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        markdown_file_count(&path)
+                    } else {
+                        usize::from(path.extension().and_then(|value| value.to_str()) == Some("md"))
+                    }
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+async fn advance_request_to_held_path_lock<F>(mut request: Pin<&mut F>, index: &IndexHandle)
+where
+    F: Future,
+{
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "request completed before its indexed path lookup"
+    );
+
+    index.with_index(|_, _| ()).await.unwrap();
+
+    let path_poll = poll_fn(|context| Poll::Ready(Future::poll(request.as_mut(), context))).await;
+    assert!(
+        path_poll.is_pending(),
+        "request completed instead of waiting for the held candidate-path lock"
+    );
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 fn delayed_multipart_request(
@@ -154,6 +214,618 @@ async fn page_mutation_create_preserves_response_dto() {
 }
 
 #[tokio::test]
+async fn page_update_rejects_stale_revision_without_changing_file() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({ "title": "Conflict", "body": "one" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let first: serde_json::Value = created.json();
+    let revision = first["revision"].as_str().unwrap();
+
+    let updated = server
+        .put("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({
+            "body": "two",
+            "expected_revision": revision
+        }))
+        .await;
+    updated.assert_status_ok();
+    let updated: serde_json::Value = updated.json();
+
+    let stale = server
+        .put("/api/vault/pages/conflict.md")
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"],);
+
+    let current: serde_json::Value = server.get("/api/vault/pages/conflict.md").await.json();
+    assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn page_update_requires_expected_revision() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/revision-required.md")
+        .json(&serde_json::json!({ "title": "Revision", "body": "one" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    server
+        .put("/api/vault/pages/revision-required.md")
+        .json(&serde_json::json!({ "body": "two" }))
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn page_update_by_id_follows_indexed_identity_after_move() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/by-id.md")
+        .json(&serde_json::json!({ "title": "By ID", "body": "before move" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let revision = created["revision"].as_str().unwrap();
+
+    server
+        .post("/api/vault/pages-move/by-id.md")
+        .json(&serde_json::json!({ "destination": "moved/by-id.md" }))
+        .await
+        .assert_status_ok();
+
+    let response = server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "updated after move",
+            "expected_revision": revision
+        }))
+        .await;
+    response.assert_status_ok();
+    let updated: serde_json::Value = response.json();
+    assert_eq!(updated["path"], "moved/by-id.md");
+    assert_eq!(updated["body"], "updated after move");
+
+    let fetched: serde_json::Value = server.get("/api/vault/pages/moved/by-id.md").await.json();
+    assert_eq!(updated, fetched);
+}
+
+#[tokio::test]
+async fn page_update_by_id_returns_not_found_for_missing_uuid() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .put("/api/vault/pages/by-id/01951234-0000-7000-8000-000000000404")
+        .json(&serde_json::json!({
+            "body": "missing",
+            "expected_revision": "0".repeat(64)
+        }))
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn page_update_by_id_rejects_stale_revision_without_changing_file() {
+    let (server, _tmp) = setup_server();
+    let created = server
+        .post("/api/vault/pages/by-id-conflict.md")
+        .json(&serde_json::json!({ "title": "By ID Conflict", "body": "one" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let first_revision = created["revision"].as_str().unwrap();
+
+    let updated = server
+        .put("/api/vault/pages/by-id-conflict.md")
+        .json(&serde_json::json!({
+            "body": "two",
+            "expected_revision": first_revision
+        }))
+        .await;
+    updated.assert_status_ok();
+    let updated: serde_json::Value = updated.json();
+
+    let stale = server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": first_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+
+    let current: serde_json::Value = server
+        .get("/api/vault/pages/by-id-conflict.md")
+        .await
+        .json();
+    assert_eq!(current["body"], "two");
+}
+
+#[tokio::test]
+async fn page_by_id_get_waits_for_move_lock_before_access() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/get-race.md")
+        .json(&serde_json::json!({ "title": "GET Race", "body": "identity body" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+
+    let candidate = clepsydra::vault::path::VaultPath::new("get-race.md").unwrap();
+    let guard = fixture
+        .state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&candidate))
+        .await;
+    let request = Request::get(format!("/api/vault/pages/by-id/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let mut in_flight = Box::pin(fixture.app.clone().oneshot(request));
+    advance_request_to_held_path_lock(in_flight.as_mut(), &fixture.state.index).await;
+
+    let move_request = Request::post("/api/vault/pages-move/get-race.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-race.md" })).unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed while candidate lock was held"
+    );
+    drop(guard);
+    let response = in_flight.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let fetched = response_json(response).await;
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "get-race.md");
+    assert_eq!(fetched["body"], "identity body");
+    let move_response = moving.await.unwrap();
+    assert_eq!(move_response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn page_update_by_id_waits_for_move_lock_before_update() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/put-race.md")
+        .json(&serde_json::json!({ "title": "PUT Race", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let candidate = clepsydra::vault::path::VaultPath::new("put-race.md").unwrap();
+    let guard = fixture
+        .state
+        .mutation_coordinator
+        .lock_paths(std::slice::from_ref(&candidate))
+        .await;
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "body": "updated after concurrent move",
+        "expected_revision": original_revision
+    }))
+    .unwrap();
+    let request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+    let mut in_flight = Box::pin(fixture.app.clone().oneshot(request));
+    advance_request_to_held_path_lock(in_flight.as_mut(), &fixture.state.index).await;
+
+    let move_request = Request::post("/api/vault/pages-move/put-race.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-race.md" })).unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed while candidate lock was held"
+    );
+    drop(guard);
+    let response = in_flight.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["meta"]["id"], id);
+    assert_eq!(updated["path"], "put-race.md");
+    assert_eq!(updated["body"], "updated after concurrent move");
+    assert_ne!(updated["revision"], original_revision);
+    let move_response = moving.await.unwrap();
+    assert_eq!(move_response.status(), StatusCode::OK);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await
+        .json();
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "moved/put-race.md");
+    assert_eq!(fetched["body"], updated["body"]);
+    assert_eq!(fetched["revision"], updated["revision"]);
+
+    let stale = fixture
+        .server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": original_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_by_id_get_retries_relocation_between_lookup_and_access() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/get-relocation.md")
+        .json(&serde_json::json!({ "title": "GET Relocation", "body": "identity body" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    let hook_release = Arc::clone(&release_rx);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(Some(Arc::new(
+            move |path: &clepsydra::vault::path::VaultPath| {
+                let _ = entered_tx.send(path.as_str().to_string());
+                let _ = hook_release.lock().recv();
+            },
+        )));
+
+    let request = Request::get(format!("/api/vault/pages/by-id/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let getting = tokio::spawn(fixture.app.clone().oneshot(request));
+    assert_eq!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("GET by ID did not pause after its indexed lookup"),
+        "get-relocation.md"
+    );
+
+    let move_request = Request::post("/api/vault/pages-move/get-relocation.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/get-relocation.md" }))
+                .unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let move_response = match first_poll {
+        Poll::Ready(response) => response.unwrap(),
+        Poll::Pending => {
+            fixture.state.index.with_index(|_, _| ()).await.unwrap();
+            moving.await.unwrap()
+        }
+    };
+    assert_eq!(move_response.status(), StatusCode::OK);
+
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(None);
+    release_tx.send(()).unwrap();
+
+    let response = getting.await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let fetched = response_json(response).await;
+    assert_eq!(fetched["meta"]["id"], id);
+    assert_eq!(fetched["path"], "moved/get-relocation.md");
+    assert_eq!(fetched["body"], "identity body");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_update_by_id_retries_relocation_between_lookup_and_update() {
+    let fixture = ApiFixture::builder().build();
+    let created = fixture
+        .server
+        .post("/api/vault/pages/put-relocation.md")
+        .json(&serde_json::json!({ "title": "PUT Relocation", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    let hook_release = Arc::clone(&release_rx);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(Some(Arc::new(
+            move |path: &clepsydra::vault::path::VaultPath| {
+                let _ = entered_tx.send(path.as_str().to_string());
+                let _ = hook_release.lock().recv();
+            },
+        )));
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "body": "updated after concurrent move",
+        "expected_revision": original_revision.clone()
+    }))
+    .unwrap();
+    let request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload))
+        .unwrap();
+    let updating = tokio::spawn(fixture.app.clone().oneshot(request));
+    assert_eq!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("PUT by ID did not pause after its indexed lookup"),
+        "put-relocation.md"
+    );
+
+    let move_request = Request::post("/api/vault/pages-move/put-relocation.md")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&serde_json::json!({ "destination": "moved/put-relocation.md" }))
+                .unwrap(),
+        ))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    let move_response = match first_poll {
+        Poll::Ready(response) => response.unwrap(),
+        Poll::Pending => {
+            fixture.state.index.with_index(|_, _| ()).await.unwrap();
+            moving.await.unwrap()
+        }
+    };
+    assert_eq!(move_response.status(), StatusCode::OK);
+
+    fixture
+        .state
+        .mutation_coordinator
+        .set_after_page_id_lookup_hook(None);
+    release_tx.send(()).unwrap();
+
+    let response = updating.await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["meta"]["id"], id);
+    assert_eq!(updated["path"], "moved/put-relocation.md");
+    assert_eq!(updated["body"], "updated after concurrent move");
+    assert_ne!(updated["revision"], original_revision);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await
+        .json();
+    assert_eq!(fetched, updated);
+
+    let stale = fixture
+        .server
+        .put(&format!("/api/vault/pages/by-id/{id}"))
+        .json(&serde_json::json!({
+            "body": "stale overwrite",
+            "expected_revision": original_revision
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], updated["revision"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_move_waits_for_uuid_update_publish_and_preserves_single_identity() {
+    let fixture = ApiFixture::builder().build();
+    let root = fixture.temp_dir.path().join("vault");
+    let created = fixture
+        .server
+        .post("/api/vault/pages/publish-race.md")
+        .json(&serde_json::json!({ "title": "Publish Race", "body": "before" }))
+        .await;
+    created.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created.json();
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let original_revision = created["revision"].as_str().unwrap().to_string();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    let hook_release = Arc::clone(&release_rx);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_before_update_publish_hook(Some(Arc::new(
+            move |path: &clepsydra::vault::path::VaultPath| {
+                let _ = entered_tx.send(path.as_str().to_string());
+                let _ = hook_release.lock().recv();
+            },
+        )));
+
+    let update_payload = serde_json::to_vec(&serde_json::json!({
+        "body": "published before move",
+        "expected_revision": original_revision.clone()
+    }))
+    .unwrap();
+    let update_request = Request::put(format!("/api/vault/pages/by-id/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(update_payload))
+        .unwrap();
+    let updating = tokio::spawn(fixture.app.clone().oneshot(update_request));
+    assert_eq!(
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("UUID update did not reach the pre-publish seam"),
+        "publish-race.md"
+    );
+
+    let move_payload =
+        serde_json::to_vec(&serde_json::json!({ "destination": "moved/publish-race.md" })).unwrap();
+    let move_request = Request::post("/api/vault/pages-move/publish-race.md")
+        .header("content-type", "application/json")
+        .body(Body::from(move_payload))
+        .unwrap();
+    let mut moving = Box::pin(fixture.app.clone().oneshot(move_request));
+    let first_poll = poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        first_poll.is_pending(),
+        "move completed in its initial router poll"
+    );
+    fixture.state.index.with_index(|_, _| ()).await.unwrap();
+    let synchronized_poll =
+        poll_fn(|context| Poll::Ready(Future::poll(moving.as_mut(), context))).await;
+    assert!(
+        synchronized_poll.is_pending(),
+        "move completed while UUID update was paused before publication"
+    );
+
+    release_tx.send(()).unwrap();
+    let update_response = updating.await.unwrap().unwrap();
+    let move_response = moving.await.unwrap();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_before_update_publish_hook(None);
+
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let updated = response_json(update_response).await;
+    assert_eq!(updated["body"], "published before move");
+    assert_ne!(updated["revision"], original_revision);
+
+    assert_eq!(move_response.status(), StatusCode::OK);
+    let moved = response_json(move_response).await;
+    assert_eq!(moved["meta"]["id"], id);
+    assert_eq!(moved["path"], "moved/publish-race.md");
+    assert_eq!(moved["body"], "published before move");
+    assert_eq!(moved["revision"], updated["revision"]);
+
+    assert!(!root.join("publish-race.md").exists());
+    assert!(root.join("moved/publish-race.md").is_file());
+    let matching_identity_files = walkdir::WalkDir::new(&root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry.path().extension().and_then(|value| value.to_str()) == Some("md")
+        })
+        .filter_map(|entry| {
+            let relative = entry.path().strip_prefix(&root).ok()?.to_str()?;
+            let vault_path = clepsydra::vault::path::VaultPath::new(relative).ok()?;
+            clepsydra::vault::page::Page::from_file(entry.path(), vault_path).ok()
+        })
+        .filter(|page| page.meta.id.to_string() == id)
+        .count();
+    assert_eq!(matching_identity_files, 1);
+
+    let fetched = fixture
+        .server
+        .get(&format!("/api/vault/pages/by-id/{id}"))
+        .await;
+    fetched.assert_status_ok();
+    assert_eq!(fetched.json::<serde_json::Value>(), moved);
+}
+
+#[tokio::test]
+async fn create_default_page_uses_server_path_trimmed_title_and_one_clock_read() {
+    let clock = Arc::new(CountingFixedClock {
+        now: chrono::DateTime::parse_from_rfc3339("2025-02-16T10:30:45Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+        calls: AtomicUsize::new(0),
+    });
+    let fixture = ApiFixture::builder()
+        .configure(|root| {
+            fs::write(
+                root.join(".clepsydra/config.toml"),
+                "[vault]\ndefault_page_folder = \"notes\"\n",
+            )
+            .unwrap();
+        })
+        .clock(clock.clone())
+        .build();
+    let root = fixture.temp_dir.path().join("vault");
+
+    let response = fixture
+        .server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({
+            "title": "  Mobile Note  ",
+            "body": "Created on iPhone"
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    assert_eq!(created["meta"]["title"], "Mobile Note");
+    assert_eq!(created["meta"]["created_at"], "2025-02-16T10:30:45Z");
+    assert_eq!(created["meta"]["updated_at"], "2025-02-16T10:30:45Z");
+    assert_eq!(created["body"], "Created on iPhone");
+    assert_eq!(created["revision"].as_str().unwrap().len(), 64);
+    let path = created["path"].as_str().unwrap();
+    assert!(path.starts_with("notes/20250216.mobile-note."));
+    assert!(clepsydra::vault::path::is_canonical_page_filename(
+        path.rsplit('/').next().unwrap()
+    ));
+    assert_eq!(clock.calls.load(Ordering::SeqCst), 1);
+
+    let fetched: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/pages/{path}"))
+        .await
+        .json();
+    assert_eq!(created, fetched);
+    assert!(root.join(path).is_file());
+}
+
+#[tokio::test]
+async fn create_default_page_rejects_blank_titles_without_creating_markdown() {
+    let fixture = ApiFixture::builder().build();
+    let root = fixture.temp_dir.path().join("vault");
+    let initial_markdown_count = markdown_file_count(&root);
+
+    for title in ["", " \t\n "] {
+        fixture
+            .server
+            .post("/api/vault/pages")
+            .json(&serde_json::json!({ "title": title }))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(markdown_file_count(&root), initial_markdown_count);
+    }
+}
+
+#[tokio::test]
 async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
     let (server, _tmp) = setup_server();
 
@@ -172,6 +844,9 @@ async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
     let response = server.get("/api/vault/pages/detail.md").await;
     response.assert_status_ok();
     let fetched: serde_json::Value = response.json();
+    let revision = fetched["revision"].as_str().expect("page detail revision");
+    assert_eq!(revision.len(), 64);
+    assert_eq!(created["revision"], fetched["revision"]);
     assert_eq!(
         created, fetched,
         "create and path GET detail mappings differ"
@@ -189,6 +864,7 @@ async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
     let response = server
         .put("/api/vault/pages/detail.md")
         .json(&serde_json::json!({
+            "expected_revision": revision,
             "title": "Updated detail",
             "tags": ["mapping", "updated"],
             "aliases": ["Updated alias"],
@@ -1655,14 +2331,15 @@ async fn page_mutation_update_resolves_links_bidirectionally() {
     let (server, _tmp) = setup_server();
 
     // Create source with no links
-    server
+    let source = server
         .post("/api/vault/pages/source.md")
         .json(&serde_json::json!({
             "title": "Source",
             "body": "No links yet."
         }))
-        .await
-        .assert_status(StatusCode::CREATED);
+        .await;
+    source.assert_status(StatusCode::CREATED);
+    let source: serde_json::Value = source.json();
 
     // Create target
     server
@@ -1678,6 +2355,7 @@ async fn page_mutation_update_resolves_links_bidirectionally() {
     let res = server
         .put("/api/vault/pages/source.md")
         .json(&serde_json::json!({
+            "expected_revision": source["revision"],
             "body": "Now linking to [[Target]]."
         }))
         .await;

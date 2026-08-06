@@ -11,7 +11,8 @@ export type Chord = {
   /** KeyboardEvent.key — single chars lowercase ("k", "/", ","), named keys
    *  verbatim ("Tab", "Enter", "ArrowUp"). */
   key: string;
-  /** ⌘ on Mac, Ctrl elsewhere — matches metaKey || ctrlKey. */
+  /** ⌘ on Mac, Ctrl elsewhere. Strict: the other platform's modifier never
+   *  matches, so macOS Ctrl-E etc. keep their system cursor-motion behavior. */
   mod?: boolean;
   /** Ctrl specifically on every platform (Ctrl+Tab). Mutually exclusive
    *  with mod. */
@@ -231,15 +232,22 @@ type KeyLike = Pick<
  *  shift is only enforced on letters when the chord declares it (so ⌘⇧B
  *  still toggles bold). Non-letter keys enforce shift strictly so Ctrl+Tab
  *  and Ctrl+Shift+Tab stay distinct. */
-export function matchesChord(e: KeyLike, chord: Chord): boolean {
+export function matchesChord(
+  e: KeyLike,
+  chord: Chord,
+  isMac: boolean = IS_MAC,
+): boolean {
   const want = chord.key.length === 1 ? chord.key.toLowerCase() : chord.key;
   const got = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (got !== want) return false;
 
   if (chord.ctrl) {
     if (!e.ctrlKey || e.metaKey) return false;
-  } else if ((chord.mod ?? false) !== (e.metaKey || e.ctrlKey)) {
-    return false;
+  } else {
+    const [mod, other] = isMac
+      ? [e.metaKey, e.ctrlKey]
+      : [e.ctrlKey, e.metaKey];
+    if ((chord.mod ?? false) !== mod || other) return false;
   }
   if ((chord.alt ?? false) !== e.altKey) return false;
 

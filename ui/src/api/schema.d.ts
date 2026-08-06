@@ -306,6 +306,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Walk a folder and parse markdown frontmatter for each `.md` file, returning
+         *     `(VaultPath, PageMeta)` pairs suitable for invoking `PostDeleteHook`s.
+         */
         post: operations["move_folder"];
         delete?: never;
         options?: never;
@@ -340,6 +344,22 @@ export interface paths {
         put?: never;
         post: operations["create_folder"];
         delete: operations["delete_folder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/geocode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["geocode_search"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -577,7 +597,7 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_location"];
-        put?: never;
+        put: operations["put_location"];
         post?: never;
         delete?: never;
         options?: never;
@@ -594,7 +614,7 @@ export interface paths {
         };
         get: operations["list_pages"];
         put?: never;
-        post?: never;
+        post: operations["create_default_page"];
         delete?: never;
         options?: never;
         head?: never;
@@ -657,7 +677,7 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_page_by_id"];
-        put?: never;
+        put: operations["update_page_by_id"];
         post?: never;
         delete?: never;
         options?: never;
@@ -676,6 +696,22 @@ export interface paths {
         put: operations["update_page"];
         post: operations["create_page"];
         delete: operations["delete_page"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["resolve_url"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -916,6 +952,10 @@ export interface components {
              */
             state?: string | null;
         };
+        CreateDefaultPageRequest: {
+            body?: string | null;
+            title: string;
+        };
         CreateFromLinkRequest: {
             body?: string | null;
             folder?: string;
@@ -982,6 +1022,26 @@ export interface components {
         };
         FolderTreeResponse: {
             paths: string[];
+        };
+        /** @description Response body for `GET /geocode`. */
+        GeocodeResponse: {
+            /** @description Candidate locations matching the query, possibly empty. */
+            results: components["schemas"]["GeocodeResultDto"][];
+        };
+        /** @description A single geocoding candidate in the API response. */
+        GeocodeResultDto: {
+            /** @description Human-readable place name. */
+            label: string;
+            /**
+             * Format: double
+             * @description Latitude in degrees.
+             */
+            latitude: number;
+            /**
+             * Format: double
+             * @description Longitude in degrees.
+             */
+            longitude: number;
         };
         GraphEdge: {
             kind: string;
@@ -1072,6 +1132,7 @@ export interface components {
             meta: components["schemas"]["PageMetaResponse"];
             path: string;
             project?: string | null;
+            revision: string;
         };
         /** @description OpenAPI schema for page metadata exposed in `PageDetail`. */
         PageMetaResponse: {
@@ -1169,6 +1230,10 @@ export interface components {
             pages_skipped: number;
             warnings: string[];
         };
+        ResolveResponse: {
+            /** @description Vault-relative path of the resolved page. */
+            path: string;
+        };
         SearchResultEntry: {
             page_id: string;
             path: string;
@@ -1215,9 +1280,25 @@ export interface components {
             target_canonical?: string | null;
             target_raw: string;
         };
+        /** @description Request body for `PUT /location`: the new geographic location. */
+        UpdateLocationRequest: {
+            /** @description Optional human-readable label (e.g. `"London"`). */
+            label?: string | null;
+            /**
+             * Format: double
+             * @description Latitude in degrees, range `[-90, 90]`.
+             */
+            latitude: number;
+            /**
+             * Format: double
+             * @description Longitude in degrees, range `[-180, 180]`.
+             */
+            longitude: number;
+        };
         UpdatePageRequest: {
             aliases?: string[] | null;
             body?: string | null;
+            expected_revision: string;
             tags?: string[] | null;
             title?: string | null;
         };
@@ -2239,6 +2320,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Destination or stale mutation conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Internal server error */
             500: {
                 headers: {
@@ -2537,6 +2627,45 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiError"];
                 };
+            };
+        };
+    };
+    geocode_search: {
+        parameters: {
+            query: {
+                /** @description Free-text place name to geocode */
+                q: string;
+                /** @description Max candidates (default 5, max 10) */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Geocoding candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeocodeResponse"];
+                };
+            };
+            /** @description Blank query */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Upstream geocoding service failure */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3065,6 +3194,37 @@ export interface operations {
             };
         };
     };
+    put_location: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateLocationRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated vault location */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocationResponse"];
+                };
+            };
+            /** @description Latitude or longitude out of range */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_pages: {
         parameters: {
             query?: {
@@ -3086,6 +3246,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PageSummaryListResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    create_default_page: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDefaultPageRequest"];
+            };
+        };
+        responses: {
+            /** @description Page created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal server error */
@@ -3168,6 +3379,15 @@ export interface operations {
             };
             /** @description Page not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Destination or stale mutation conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3290,6 +3510,69 @@ export interface operations {
             };
         };
     };
+    update_page_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Page UUID */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePageRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page changed since it was loaded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     get_page: {
         parameters: {
             query?: never;
@@ -3376,6 +3659,15 @@ export interface operations {
             };
             /** @description Page not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page changed since it was loaded */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3501,6 +3793,47 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    resolve_url: {
+        parameters: {
+            query: {
+                /** @description clepsydra:// or obsidian:// URL */
+                url: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved page path */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveResponse"];
+                };
+            };
+            /** @description Unparseable link */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No page matches */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
