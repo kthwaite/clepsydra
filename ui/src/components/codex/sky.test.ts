@@ -68,19 +68,19 @@ describe("selectDisplayedSunrise", () => {
     expect(getTomorrow).not.toHaveBeenCalled();
   });
 
-  it.each(["2026-05-02T20:31:00Z", "2026-05-02T23:59:59Z"])(
-    "uses tomorrow's sunrise at and after sunset (%s)",
-    (now) => {
-      expect(
-        selectDisplayedSunrise(
-          new Date(now),
-          todaySunrise,
-          todaySunset,
-          () => tomorrowSunrise,
-        ),
-      ).toEqual({ time: tomorrowSunrise, isTomorrow: true });
-    },
-  );
+  it.each([
+    "2026-05-02T20:31:00Z",
+    "2026-05-02T23:59:59Z",
+  ])("uses tomorrow's sunrise at and after sunset (%s)", (now) => {
+    expect(
+      selectDisplayedSunrise(
+        new Date(now),
+        todaySunrise,
+        todaySunset,
+        () => tomorrowSunrise,
+      ),
+    ).toEqual({ time: tomorrowSunrise, isTomorrow: true });
+  });
 
   it("uses the new current date's sunrise without an indicator after midnight", () => {
     const currentSunrise = new Date("2026-05-03T05:52:00Z");
