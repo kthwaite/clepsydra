@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bezierPoint,
   describeMoon,
@@ -96,16 +96,30 @@ describe("selectDisplayedSunrise", () => {
 });
 
 describe("nextLocalDate", () => {
-  it("increments the local calendar date while retaining local clock fields", () => {
-    const source = new Date(2026, 2, 8, 12, 34, 56, 789);
+  beforeEach(() => {
+    vi.stubEnv("TZ", "America/New_York");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("advances across spring DST while retaining local clock fields", () => {
+    const source = new Date(2026, 2, 7, 12, 34, 56, 789);
+    const sourceTime = source.getTime();
     const next = nextLocalDate(source);
+
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(
+      "America/New_York",
+    );
     expect(next.getFullYear()).toBe(2026);
     expect(next.getMonth()).toBe(2);
-    expect(next.getDate()).toBe(9);
+    expect(next.getDate()).toBe(8);
     expect(next.getHours()).toBe(12);
     expect(next.getMinutes()).toBe(34);
     expect(next.getSeconds()).toBe(56);
     expect(next.getMilliseconds()).toBe(789);
-    expect(source.getDate()).toBe(8);
+    expect(next.getTime() - source.getTime()).toBe(23 * 60 * 60 * 1000);
+    expect(source.getTime()).toBe(sourceTime);
   });
 });
