@@ -17,6 +17,7 @@ use super::derivers::blocks::BlockDeriver;
 use super::derivers::canonical_names::CanonicalNameDeriver;
 use super::derivers::cite_key::CiteKeyDeriver;
 use super::derivers::links::LinkDeriver;
+use super::derivers::properties::PropertyDeriver;
 use super::derivers::tags::TagDeriver;
 use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
@@ -209,6 +210,22 @@ CREATE TABLE IF NOT EXISTS code_counters (
     next_value  INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS page_properties (
+    page_id     TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    key         TEXT NOT NULL,
+    ord         INTEGER NOT NULL DEFAULT 0,
+    value_json  TEXT NOT NULL,
+    value_text  TEXT,
+    value_num   REAL,
+    value_date  TEXT,
+    value_bool  INTEGER,
+    PRIMARY KEY (page_id, key, ord)
+);
+
+CREATE INDEX IF NOT EXISTS idx_page_props_key_text ON page_properties(key, value_text);
+CREATE INDEX IF NOT EXISTS idx_page_props_key_num  ON page_properties(key, value_num);
+CREATE INDEX IF NOT EXISTS idx_page_props_key_date ON page_properties(key, value_date);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     page_id UNINDEXED,
     path UNINDEXED,
@@ -294,6 +311,7 @@ impl VaultIndex {
                 Box::new(CiteKeyDeriver),
                 Box::new(LinkDeriver),
                 Box::new(TagDeriver),
+                Box::new(PropertyDeriver),
                 Box::new(BlockDeriver),
             ],
         })
@@ -618,6 +636,10 @@ impl VaultIndex {
         tx.execute("DELETE FROM blocks WHERE page_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
         tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
+        tx.execute(
+            "DELETE FROM page_properties WHERE page_id = ?1",
+            params![page_id],
+        )?;
         tx.execute(
             "DELETE FROM canonical_names WHERE page_id = ?1",
             params![page_id],
@@ -1839,6 +1861,10 @@ fn upsert_indexed_page(
     tx.execute("DELETE FROM links WHERE source_id = ?1", params![page_id])?;
     tx.execute("DELETE FROM tags WHERE page_id = ?1", params![page_id])?;
     tx.execute(
+        "DELETE FROM page_properties WHERE page_id = ?1",
+        params![page_id],
+    )?;
+    tx.execute(
         "DELETE FROM canonical_names WHERE page_id = ?1",
         params![page_id],
     )?;
@@ -2116,5 +2142,170 @@ mod kind_index_tests {
             )
             .unwrap();
         assert_eq!(wc, Some(5));
+    }
+}
+
+#[cfg(test)]
+mod property_derivation_tests {
+    use super::*;
+
+    fn open_vault_with(pages: &[(&str, &str)]) -> (tempfile::TempDir, Vault, VaultIndex) {
+        let tmp = tempfile::tempdir().unwrap();
+        for (rel, content) in pages {
+            let abs = tmp.path().join(rel);
+            fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            fs::write(&abs, content).unwrap();
+        }
+        let db_path = tmp.path().join(".clepsydra/index.db");
+        let mut index = VaultIndex::open(&db_path).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+        (tmp, vault, index)
+    }
+
+    const BOOK: &str = "+++\nid = \"0190f8a0-0000-7000-8000-0000000000f1\"\ntitle = \"Book\"\nauthor = \"Gene Wolfe\"\nrating = 4.5\npages = 371\ndone = false\nstarted = 2026-07-30\nthemes = [\"memory\", \"identity\"]\n\n[archive]\nurl = \"https://x\"\n+++\nbody\n";
+
+    #[test]
+    fn build_projects_mixed_extras_into_page_properties() {
+        let (_tmp, _vault, index) = open_vault_with(&[("book.md", BOOK)]);
+        let conn = index.connection();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM page_properties", [], |r| r.get(0))
+            .unwrap();
+        // author, rating, pages, done, started, themes x2, archive = 8 rows.
+        assert_eq!(count, 8);
+
+        let rating: f64 = conn
+            .query_row(
+                "SELECT value_num FROM page_properties WHERE key = 'rating'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rating, 4.5);
+
+        let started: String = conn
+            .query_row(
+                "SELECT value_date FROM page_properties WHERE key = 'started'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(started, "2026-07-30");
+
+        let themes: Vec<(i64, String)> = conn
+            .prepare(
+                "SELECT ord, value_text FROM page_properties WHERE key = 'themes' ORDER BY ord",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            themes,
+            vec![(0, "memory".to_string()), (1, "identity".to_string())]
+        );
+
+        let (archive_text, archive_json): (Option<String>, String) = conn
+            .query_row(
+                "SELECT value_text, value_json FROM page_properties WHERE key = 'archive'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(archive_text, None, "tables are opaque");
+        assert!(archive_json.contains("https://x"));
+    }
+
+    #[test]
+    fn rebuild_after_key_removal_deletes_its_rows() {
+        let (tmp, vault, mut index) = open_vault_with(&[("book.md", BOOK)]);
+
+        // Rewrite the page without `rating` (and with a changed value elsewhere).
+        let trimmed = BOOK.replace("rating = 4.5\n", "");
+        fs::write(tmp.path().join("book.md"), trimmed).unwrap();
+        index
+            .index_page(&vault, &VaultPath::new("book.md").unwrap())
+            .unwrap();
+
+        let conn = index.connection();
+        let rating_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM page_properties WHERE key = 'rating'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rating_rows, 0, "stale rows must be cleared on rebuild");
+
+        let author_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM page_properties WHERE key = 'author'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(author_rows, 1, "surviving keys re-derive exactly once");
+    }
+
+    #[test]
+    fn page_removal_cascades_property_rows() {
+        let (_tmp, _vault, mut index) = open_vault_with(&[("book.md", BOOK)]);
+        index
+            .remove_page(&VaultPath::new("book.md").unwrap())
+            .unwrap();
+        let count: i64 = index
+            .connection()
+            .query_row("SELECT COUNT(*) FROM page_properties", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "ON DELETE CASCADE must clear property rows");
+    }
+
+    #[test]
+    fn typed_projection_indexes_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let index = VaultIndex::open(&tmp.path().join("i.db")).unwrap();
+        let names: Vec<String> = index
+            .connection()
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'page_properties'")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        for expected in [
+            "idx_page_props_key_text",
+            "idx_page_props_key_num",
+            "idx_page_props_key_date",
+        ] {
+            assert!(names.iter().any(|n| n == expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn forward_migration_adds_table_to_preexisting_db() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("old.db");
+
+        // Simulate a pre-bases DB: full current schema minus page_properties.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute_batch("DROP TABLE page_properties;").unwrap();
+        }
+
+        let index = VaultIndex::open(&db_path).unwrap();
+        let present: i64 = index
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'page_properties'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 1, "open must add page_properties to an old DB");
     }
 }
