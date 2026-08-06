@@ -90,33 +90,33 @@ pub(crate) async fn create_task(
     // Board fields into extra (only set keys that have values)
     meta.extra.insert(
         "status".to_string(),
-        serde_yaml::Value::String(status.to_string()),
+        toml::Value::String(status.to_string()),
     );
     meta.extra.insert(
         "priority".to_string(),
-        serde_yaml::Value::String(priority.to_string()),
+        toml::Value::String(priority.to_string()),
     );
     if let Some(ref c) = cycle_opt {
         meta.extra
-            .insert("cycle".to_string(), serde_yaml::Value::String(c.clone()));
+            .insert("cycle".to_string(), toml::Value::String(c.clone()));
     }
     if let Some(ref a) = body.assignee {
         meta.extra
-            .insert("assignee".to_string(), serde_yaml::Value::String(a.clone()));
+            .insert("assignee".to_string(), toml::Value::String(a.clone()));
     }
     if let Some(ref e) = body.estimate {
         meta.extra
-            .insert("estimate".to_string(), serde_yaml::Value::String(e.clone()));
+            .insert("estimate".to_string(), toml::Value::String(e.clone()));
     }
     if let Some(ref d) = body.due {
         // Always write as a quoted YAML string to prevent serde_yaml emitting
         // bare dates that re-parse as non-strings
         meta.extra
-            .insert("due".to_string(), serde_yaml::Value::String(d.clone()));
+            .insert("due".to_string(), toml::Value::String(d.clone()));
     }
     if let Some(ref l) = body.link {
         meta.extra
-            .insert("link".to_string(), serde_yaml::Value::String(l.clone()));
+            .insert("link".to_string(), toml::Value::String(l.clone()));
     }
 
     // 6. Build checklist body
@@ -244,10 +244,8 @@ pub(crate) async fn patch_task(
     // status (validate)
     if let Some(status) = &body.status {
         validate_status(status)?;
-        meta.extra.insert(
-            "status".to_string(),
-            serde_yaml::Value::String(status.clone()),
-        );
+        meta.extra
+            .insert("status".to_string(), toml::Value::String(status.clone()));
     }
 
     // priority (validate)
@@ -255,7 +253,7 @@ pub(crate) async fn patch_task(
         validate_priority(priority)?;
         meta.extra.insert(
             "priority".to_string(),
-            serde_yaml::Value::String(priority.clone()),
+            toml::Value::String(priority.clone()),
         );
     }
 
@@ -334,7 +332,7 @@ fn apply_tri_state(meta: &mut PageMeta, key: &str, field: &Option<Option<String>
         }
         Some(Some(v)) => {
             meta.extra
-                .insert(key.to_string(), serde_yaml::Value::String(v.clone()));
+                .insert(key.to_string(), toml::Value::String(v.clone()));
         }
     }
 }

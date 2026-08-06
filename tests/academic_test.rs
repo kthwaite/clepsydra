@@ -182,8 +182,7 @@ A highlight.
     // Verify annotation's work_path was updated
     let ann_content = fs::read_to_string(root.join("library/annotations/highlight-1.md")).unwrap();
     assert!(
-        ann_content.contains("work_path: archive/my-paper.md")
-            || ann_content.contains("work_path: \"archive/my-paper.md\""),
+        ann_content.contains("work_path = \"archive/my-paper.md\""),
         "expected work_path updated to archive/my-paper.md, got:\n{ann_content}"
     );
 }

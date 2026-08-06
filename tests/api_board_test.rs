@@ -467,9 +467,12 @@ async fn create_task_allocates_code_and_files_under_operation() {
     let file_path = vault_root.join("tasks/op-sig3/TSK-0001.md");
     assert!(file_path.exists(), "task file should exist on disk");
     let content = std::fs::read_to_string(&file_path).unwrap();
-    assert!(content.contains("type: TASK"), "should have type: TASK");
     assert!(
-        content.contains("status: TRIAGE"),
+        content.contains("type = \"TASK\""),
+        "should have type: TASK"
+    );
+    assert!(
+        content.contains("status = \"TRIAGE\""),
         "should have status: TRIAGE"
     );
     assert!(
@@ -674,18 +677,24 @@ async fn create_task_persists_all_optional_fields() {
 
     // Disk frontmatter carries all fields
     let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
-    assert!(content.contains("assignee: kit"), "frontmatter:\n{content}");
-    assert!(content.contains("estimate: 3d"), "frontmatter:\n{content}");
     assert!(
-        content.contains("due:") && content.contains("2026-04-21"),
+        content.contains("assignee = \"kit\""),
         "frontmatter:\n{content}"
     );
     assert!(
-        content.contains("link:") && content.contains("CLP-0901-J"),
+        content.contains("estimate = \"3d\""),
         "frontmatter:\n{content}"
     );
     assert!(
-        content.contains("- ops") && content.contains("- sync"),
+        content.contains("due = ") && content.contains("2026-04-21"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("link = ") && content.contains("CLP-0901-J"),
+        "frontmatter:\n{content}"
+    );
+    assert!(
+        content.contains("\"ops\"") && content.contains("\"sync\""),
         "frontmatter should list both tags:\n{content}"
     );
 }
@@ -807,7 +816,7 @@ async fn project_assignment_patch_task_destination_collision_returns_409() {
     let vault_root = tmp.path().join("vault");
     let persisted = std::fs::read_to_string(vault_root.join("tasks/op-a/TSK-0001.md")).unwrap();
     assert!(
-        persisted.contains("project: op-a"),
+        persisted.contains("project = \"op-a\""),
         "a rejected refile must preserve the original project: {persisted}"
     );
     assert!(
@@ -850,15 +859,15 @@ async fn patch_task_updates_title_tags_and_link() {
     // Disk frontmatter reflects all three
     let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
     assert!(
-        content.contains("title: thaw legacy sync writes"),
+        content.contains("title = \"thaw legacy sync writes\""),
         "frontmatter:\n{content}"
     );
     assert!(
-        content.contains("link:") && content.contains("CLP-0901-J"),
+        content.contains("link = ") && content.contains("CLP-0901-J"),
         "frontmatter:\n{content}"
     );
     assert!(
-        content.contains("- ops") && content.contains("- sync"),
+        content.contains("\"ops\"") && content.contains("\"sync\""),
         "frontmatter should list both tags:\n{content}"
     );
 }
@@ -923,7 +932,7 @@ async fn patch_task_moves_column_and_clears_hold() {
     let file_path = vault_root.join("tasks/TSK-0481.md");
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert!(
-        content.contains("status: REVIEW"),
+        content.contains("status = \"REVIEW\""),
         "file should have status: REVIEW, got:\n{content}"
     );
     assert!(
@@ -1078,15 +1087,15 @@ async fn create_cycle_defaults_code_and_state() {
     assert!(file_path.exists(), "cycle file should exist on disk");
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert!(
-        content.contains("type: CYCLE"),
+        content.contains("type = \"CYCLE\""),
         "should have type: CYCLE, got:\n{content}"
     );
     assert!(
-        content.contains("state: PLANNED"),
+        content.contains("state = \"PLANNED\""),
         "should have state: PLANNED, got:\n{content}"
     );
     assert!(
-        content.contains("title: CYCLE 14"),
+        content.contains("title = \"CYCLE 14\""),
         "should have title, got:\n{content}"
     );
     assert!(
@@ -1260,7 +1269,7 @@ async fn seal_cycle_routes_carryover_to_backlog() {
     // SEALED task (TSK-0001): cycle should still be S-13
     let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
     assert!(
-        sealed_content.contains("cycle: S-13"),
+        sealed_content.contains("cycle = \"S-13\""),
         "SEALED task should keep cycle S-13, got:\n{sealed_content}"
     );
 
@@ -1302,14 +1311,14 @@ async fn seal_cycle_can_carry_to_next_cycle() {
     // FIELD task: cycle should now be S-14
     let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
     assert!(
-        content.contains("cycle: S-14"),
+        content.contains("cycle = \"S-14\""),
         "FIELD task should now reference S-14, got:\n{content}"
     );
 
     // SEALED task: cycle should still be S-13
     let sealed_content = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
     assert!(
-        sealed_content.contains("cycle: S-13"),
+        sealed_content.contains("cycle = \"S-13\""),
         "SEALED task should keep S-13, got:\n{sealed_content}"
     );
 }
@@ -1333,7 +1342,7 @@ async fn seal_cycle_without_carry_leaves_tasks() {
     // FIELD task: cycle should still be S-13
     let content = std::fs::read_to_string(vault_root.join("tasks/TSK-0002.md")).unwrap();
     assert!(
-        content.contains("cycle: S-13"),
+        content.contains("cycle = \"S-13\""),
         "without carry_to, FIELD task cycle should remain S-13, got:\n{content}"
     );
 }
@@ -1383,7 +1392,7 @@ async fn carryover_later_task_failure_preserves_prior_mutations_and_notification
     response.assert_status_internal_server_error();
 
     let cycle = std::fs::read_to_string(vault_root.join("cycles/S-13.md")).unwrap();
-    assert!(cycle.contains("state: CLOSED"));
+    assert!(cycle.contains("state = \"CLOSED\""));
     let first = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
     assert!(
         !first.contains("cycle:"),

@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::page::ExtraMap;
+
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
@@ -100,7 +102,7 @@ pub struct WorkMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cite_key: Option<String>,
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_yaml::Value>,
+    pub extra: HashMap<String, toml::Value>,
 }
 
 /// Frontmatter metadata for an annotation page.
@@ -116,65 +118,56 @@ pub struct AnnotationMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotation_type: Option<AnnotationType>,
     #[serde(flatten)]
-    pub extra: HashMap<String, serde_yaml::Value>,
+    pub extra: HashMap<String, toml::Value>,
 }
 
 // ---------------------------------------------------------------------------
 // Conversion helpers
 // ---------------------------------------------------------------------------
 
-/// Serialize a [`WorkMeta`] into a flat `HashMap` suitable for embedding
+/// Serialize a [`WorkMeta`] into a flat map suitable for embedding
 /// in `PageMeta::extra`, injecting `kind: "work"`.
-pub fn work_meta_to_extra(work: &WorkMeta) -> HashMap<String, serde_yaml::Value> {
-    let value = serde_yaml::to_value(work).expect("WorkMeta should always serialize");
-    let mut map: HashMap<String, serde_yaml::Value> = match value {
-        serde_yaml::Value::Mapping(m) => m
-            .into_iter()
-            .filter_map(|(k, v)| k.as_str().map(|s| (s.to_string(), v)))
-            .collect(),
-        _ => HashMap::new(),
+pub fn work_meta_to_extra(work: &WorkMeta) -> ExtraMap {
+    let value = toml::Value::try_from(work).expect("WorkMeta should always serialize");
+    let mut map = match value {
+        toml::Value::Table(t) => t,
+        _ => ExtraMap::new(),
     };
-    map.insert(
-        "kind".to_string(),
-        serde_yaml::Value::String("work".to_string()),
-    );
+    map.insert("kind".to_string(), toml::Value::String("work".to_string()));
     map
 }
 
 /// Attempt to reconstruct a [`WorkMeta`] from `PageMeta::extra`.
 ///
 /// Returns `None` if `kind` is not `"work"` or deserialization fails.
-pub fn extra_to_work_meta(extra: &HashMap<String, serde_yaml::Value>) -> Option<WorkMeta> {
+pub fn extra_to_work_meta(extra: &ExtraMap) -> Option<WorkMeta> {
     let kind = extra.get("kind")?.as_str()?;
     if kind != "work" {
         return None;
     }
 
-    let mut mapping = serde_yaml::Mapping::new();
+    let mut table = ExtraMap::new();
     for (k, v) in extra {
         if k == "kind" {
             continue;
         }
-        mapping.insert(serde_yaml::Value::String(k.clone()), v.clone());
+        table.insert(k.clone(), v.clone());
     }
 
-    serde_yaml::from_value(serde_yaml::Value::Mapping(mapping)).ok()
+    toml::Value::Table(table).try_into().ok()
 }
 
-/// Serialize an [`AnnotationMeta`] into a flat `HashMap` suitable for
+/// Serialize an [`AnnotationMeta`] into a flat map suitable for
 /// embedding in `PageMeta::extra`, injecting `kind: "annotation"`.
-pub fn annotation_meta_to_extra(ann: &AnnotationMeta) -> HashMap<String, serde_yaml::Value> {
-    let value = serde_yaml::to_value(ann).expect("AnnotationMeta should always serialize");
-    let mut map: HashMap<String, serde_yaml::Value> = match value {
-        serde_yaml::Value::Mapping(m) => m
-            .into_iter()
-            .filter_map(|(k, v)| k.as_str().map(|s| (s.to_string(), v)))
-            .collect(),
-        _ => HashMap::new(),
+pub fn annotation_meta_to_extra(ann: &AnnotationMeta) -> ExtraMap {
+    let value = toml::Value::try_from(ann).expect("AnnotationMeta should always serialize");
+    let mut map = match value {
+        toml::Value::Table(t) => t,
+        _ => ExtraMap::new(),
     };
     map.insert(
         "kind".to_string(),
-        serde_yaml::Value::String("annotation".to_string()),
+        toml::Value::String("annotation".to_string()),
     );
     map
 }
@@ -182,21 +175,19 @@ pub fn annotation_meta_to_extra(ann: &AnnotationMeta) -> HashMap<String, serde_y
 /// Attempt to reconstruct an [`AnnotationMeta`] from `PageMeta::extra`.
 ///
 /// Returns `None` if `kind` is not `"annotation"` or deserialization fails.
-pub fn extra_to_annotation_meta(
-    extra: &HashMap<String, serde_yaml::Value>,
-) -> Option<AnnotationMeta> {
+pub fn extra_to_annotation_meta(extra: &ExtraMap) -> Option<AnnotationMeta> {
     let kind = extra.get("kind")?.as_str()?;
     if kind != "annotation" {
         return None;
     }
 
-    let mut mapping = serde_yaml::Mapping::new();
+    let mut table = ExtraMap::new();
     for (k, v) in extra {
         if k == "kind" {
             continue;
         }
-        mapping.insert(serde_yaml::Value::String(k.clone()), v.clone());
+        table.insert(k.clone(), v.clone());
     }
 
-    serde_yaml::from_value(serde_yaml::Value::Mapping(mapping)).ok()
+    toml::Value::Table(table).try_into().ok()
 }

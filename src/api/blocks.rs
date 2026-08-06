@@ -333,30 +333,10 @@ async fn assign_block_id(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Find the byte offset where the body begins (after the closing `---\n`
-/// frontmatter fence). Returns 0 if no frontmatter is detected.
+/// Find the byte offset where the body begins (after the closing frontmatter
+/// fence, `+++` or legacy `---`). Returns 0 if no frontmatter is detected.
 fn find_body_offset(content: &str) -> usize {
-    if !content.starts_with("---") {
-        return 0;
-    }
-    let after_open = match content[3..].find('\n') {
-        Some(pos) => 3 + pos + 1,
-        None => return 0,
-    };
-    let rest = &content[after_open..];
-    let closing = if let Some(pos) = rest.find("\n---") {
-        after_open + pos + 1
-    } else if rest.starts_with("---") {
-        after_open
-    } else {
-        return 0;
-    };
-    let after_closing = closing + 3;
-    if after_closing < content.len() && content.as_bytes()[after_closing] == b'\n' {
-        after_closing + 1
-    } else {
-        after_closing
-    }
+    crate::vault::page::body_offset(content)
 }
 
 // ---------------------------------------------------------------------------

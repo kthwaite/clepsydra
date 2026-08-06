@@ -93,19 +93,15 @@ pub(crate) async fn create_cycle(
 
     meta.extra.insert(
         "state".to_string(),
-        serde_yaml::Value::String(cycle_state.as_str().to_string()),
+        toml::Value::String(cycle_state.as_str().to_string()),
     );
-    meta.extra.insert(
-        "start".to_string(),
-        serde_yaml::Value::String(body.start.clone()),
-    );
-    meta.extra.insert(
-        "end".to_string(),
-        serde_yaml::Value::String(body.end.clone()),
-    );
+    meta.extra
+        .insert("start".to_string(), toml::Value::String(body.start.clone()));
+    meta.extra
+        .insert("end".to_string(), toml::Value::String(body.end.clone()));
     if let Some(ref g) = body.goal {
         meta.extra
-            .insert("goal".to_string(), serde_yaml::Value::String(g.clone()));
+            .insert("goal".to_string(), toml::Value::String(g.clone()));
     }
 
     let notify = |notification: MutationNotification| {
@@ -233,20 +229,20 @@ pub(crate) async fn patch_cycle(
     if let Some(cycle_state) = new_state {
         meta.extra.insert(
             "state".to_string(),
-            serde_yaml::Value::String(cycle_state.as_str().to_string()),
+            toml::Value::String(cycle_state.as_str().to_string()),
         );
     }
     if let Some(ref g) = body.goal {
         meta.extra
-            .insert("goal".to_string(), serde_yaml::Value::String(g.clone()));
+            .insert("goal".to_string(), toml::Value::String(g.clone()));
     }
     if let Some(ref s) = body.start {
         meta.extra
-            .insert("start".to_string(), serde_yaml::Value::String(s.clone()));
+            .insert("start".to_string(), toml::Value::String(s.clone()));
     }
     if let Some(ref e) = body.end {
         meta.extra
-            .insert("end".to_string(), serde_yaml::Value::String(e.clone()));
+            .insert("end".to_string(), toml::Value::String(e.clone()));
     }
 
     // 6. Bump updated_at and update the cycle through the mutation policy.
@@ -334,10 +330,9 @@ pub(crate) async fn patch_cycle(
             if carry == "BACKLOG" {
                 task_meta.extra.remove("cycle");
             } else {
-                task_meta.extra.insert(
-                    "cycle".to_string(),
-                    serde_yaml::Value::String(carry.clone()),
-                );
+                task_meta
+                    .extra
+                    .insert("cycle".to_string(), toml::Value::String(carry.clone()));
             }
             task_meta.updated_at = Some(Utc::now());
 

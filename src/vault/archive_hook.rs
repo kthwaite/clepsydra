@@ -19,21 +19,21 @@ impl PostDeleteHook for ArchiveDeleteHook {
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Check if this page has archive metadata
         let archive = match meta.extra.get("archive") {
-            Some(serde_yaml::Value::Mapping(m)) => m,
+            Some(toml::Value::Table(m)) => m,
             _ => return Ok(()), // not an archive page, nothing to do
         };
 
         let mut unique_hashes = std::collections::HashSet::new();
 
         // Collect snapshot_hash
-        if let Some(serde_yaml::Value::String(hash)) = archive.get("snapshot_hash") {
+        if let Some(toml::Value::String(hash)) = archive.get("snapshot_hash") {
             unique_hashes.insert(hash.clone());
         }
 
         // Collect blob hashes
-        if let Some(serde_yaml::Value::Sequence(hashes)) = archive.get("blobs") {
+        if let Some(toml::Value::Array(hashes)) = archive.get("blobs") {
             for h in hashes {
-                if let serde_yaml::Value::String(hash) = h {
+                if let toml::Value::String(hash) = h {
                     unique_hashes.insert(hash.clone());
                 }
             }

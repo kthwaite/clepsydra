@@ -1405,21 +1405,10 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
         .count()
 }
 
-/// Find the byte offset where the body starts (after the frontmatter `---` fences).
+/// Find the byte offset where the body starts (after the frontmatter fences,
+/// `+++` or legacy `---`).
 pub(crate) fn find_body_start(content: &str) -> usize {
-    if !content.starts_with("---") {
-        return 0;
-    }
-    if let Some(end_fence) = content[3..].find("\n---") {
-        let fence_end = 3 + end_fence + 4; // skip past "\n---"
-        if fence_end < content.len() && content.as_bytes()[fence_end] == b'\n' {
-            fence_end + 1
-        } else {
-            fence_end
-        }
-    } else {
-        0
-    }
+    crate::vault::page::body_offset(content)
 }
 
 /// Add `kind`, `kind_inferred`, and `project` columns to `pages` if they don't exist.
@@ -1583,7 +1572,7 @@ fn extract_prop_links(meta: &PageMeta, linkable_properties: &[String]) -> Vec<Li
             "aliases" => meta.aliases.clone(),
             _ => {
                 if let Some(val) = meta.extra.get(prop) {
-                    yaml_value_to_strings(val)
+                    toml_value_to_strings(val)
                 } else {
                     Vec::new()
                 }
@@ -1889,12 +1878,12 @@ fn prune_stale_pages(
     Ok(())
 }
 
-/// Extract string values from a serde_yaml::Value (handles both scalar strings
-/// and sequences of strings).
-fn yaml_value_to_strings(val: &serde_yaml::Value) -> Vec<String> {
+/// Extract string values from a toml::Value (handles both scalar strings
+/// and arrays of strings).
+fn toml_value_to_strings(val: &toml::Value) -> Vec<String> {
     match val {
-        serde_yaml::Value::String(s) => vec![s.clone()],
-        serde_yaml::Value::Sequence(seq) => seq
+        toml::Value::String(s) => vec![s.clone()],
+        toml::Value::Array(items) => items
             .iter()
             .filter_map(|v| v.as_str().map(String::from))
             .collect(),

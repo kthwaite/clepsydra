@@ -819,7 +819,7 @@ fn compute_diffs_detects_year_change() {
     };
     local_meta
         .extra
-        .insert("year".to_string(), serde_yaml::Value::Number(2016.into()));
+        .insert("year".to_string(), toml::Value::Integer(2016));
 
     let diffs = compute_field_diffs(&entry, &local_meta);
     let year_diff = diffs.iter().find(|d| d.field == "year").unwrap();

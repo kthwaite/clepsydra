@@ -227,9 +227,9 @@ fn upsert_repairs_missing_or_incomplete_frontmatter() {
     let stats = SyncEngine::process_events(&events, &vault, &mut index).unwrap();
     assert_eq!(stats.pages_indexed, 1);
 
-    // File should now contain valid/populated frontmatter.
+    // File should now contain valid/populated frontmatter, healed to TOML.
     let rewritten = fs::read_to_string(&abs).unwrap();
-    assert!(rewritten.starts_with("---\n"));
+    assert!(rewritten.starts_with("+++\n"));
 
     let vp = VaultPath::new("draft.md").unwrap();
     let page = Page::from_file(&abs, vp).unwrap();

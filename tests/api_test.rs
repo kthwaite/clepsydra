@@ -4189,15 +4189,15 @@ async fn import_zotero_creates_works() {
     let article_path = results[0]["page_path"].as_str().unwrap();
     let content = fs::read_to_string(vault_root.join(article_path)).unwrap();
     assert!(
-        content.contains("source: zotero"),
+        content.contains("source = \"zotero\""),
         "should have import source"
     );
     assert!(
-        content.contains("zotero_key: ABC12345"),
+        content.contains("zotero_key = \"ABC12345\""),
         "should have zotero_key"
     );
     assert!(
-        content.contains("zotero_item_id: 1"),
+        content.contains("zotero_item_id = 1"),
         "should have zotero_item_id"
     );
 }

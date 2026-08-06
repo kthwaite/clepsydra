@@ -24,6 +24,7 @@ pub mod index_handle;
 pub mod index_policy;
 pub mod init;
 pub mod kind;
+pub mod legacy_yaml;
 pub mod link;
 pub mod location;
 pub mod mutation;
@@ -37,6 +38,7 @@ pub mod reconcile;
 pub mod relabel;
 pub mod rewriter;
 pub mod sync;
+pub mod toml_json;
 pub mod tree;
 
 use std::path::{Path, PathBuf};

@@ -322,45 +322,43 @@ fn resolve_page_path(
     Ok(page_path)
 }
 
-/// Build the PageMeta (with nested `archive` YAML mapping) for an ingest request.
+/// Build the PageMeta (with nested `archive` TOML table) for an ingest request.
 /// `decoded_blobs` supplies the non-snapshot blob hash list stored in frontmatter.
 fn build_archive_meta(
     req: &ArchiveRequest,
     decoded_blobs: &[(String, Vec<u8>, String)],
 ) -> PageMeta {
-    fn ys(s: &str) -> serde_yaml::Value {
-        serde_yaml::Value::String(s.to_string())
+    fn ts(s: &str) -> toml::Value {
+        toml::Value::String(s.to_string())
     }
     let mut meta = PageMeta::new();
     meta.title = Some(req.title.clone());
     meta.tags = req.tags.clone();
 
-    let mut archive_map = serde_yaml::Mapping::new();
-    archive_map.insert(ys("url"), ys(&req.url));
+    let mut archive_map = toml::Table::new();
+    archive_map.insert("url".into(), ts(&req.url));
     if let Some(ref canonical_url) = req.canonical_url {
-        archive_map.insert(ys("canonical_url"), ys(canonical_url));
+        archive_map.insert("canonical_url".into(), ts(canonical_url));
     }
-    archive_map.insert(ys("domain"), ys(&req.domain));
-    archive_map.insert(ys("captured_at"), ys(&req.captured_at));
-    archive_map.insert(ys("content_hash"), ys(&req.content_hash));
-    archive_map.insert(ys("snapshot_hash"), ys(&req.snapshot_hash));
+    archive_map.insert("domain".into(), ts(&req.domain));
+    archive_map.insert("captured_at".into(), ts(&req.captured_at));
+    archive_map.insert("content_hash".into(), ts(&req.content_hash));
+    archive_map.insert("snapshot_hash".into(), ts(&req.snapshot_hash));
     if let Some(ref description) = req.description {
-        archive_map.insert(ys("description"), ys(description));
+        archive_map.insert("description".into(), ts(description));
     }
 
-    let non_snapshot_blobs: Vec<serde_yaml::Value> = decoded_blobs
+    let non_snapshot_blobs: Vec<toml::Value> = decoded_blobs
         .iter()
         .filter(|(h, _, _)| *h != req.snapshot_hash)
-        .map(|(h, _, _)| serde_yaml::Value::String(h.clone()))
+        .map(|(h, _, _)| toml::Value::String(h.clone()))
         .collect();
     if !non_snapshot_blobs.is_empty() {
-        archive_map.insert(ys("blobs"), serde_yaml::Value::Sequence(non_snapshot_blobs));
+        archive_map.insert("blobs".into(), toml::Value::Array(non_snapshot_blobs));
     }
 
-    meta.extra.insert(
-        "archive".to_string(),
-        serde_yaml::Value::Mapping(archive_map),
-    );
+    meta.extra
+        .insert("archive".to_string(), toml::Value::Table(archive_map));
     meta
 }
 
@@ -903,10 +901,10 @@ mod tests {
         let meta = build_archive_meta(&req, &decoded);
 
         let archive = match meta.extra.get("archive") {
-            Some(serde_yaml::Value::Mapping(m)) => m,
+            Some(toml::Value::Table(m)) => m,
             other => panic!("expected archive mapping, got {other:?}"),
         };
-        let get = |k: &str| archive.get(serde_yaml::Value::String(k.to_string()));
+        let get = |k: &str| archive.get(k);
         assert_eq!(
             get("canonical_url").and_then(|v| v.as_str()),
             Some("https://example.com/canonical")
@@ -916,8 +914,8 @@ mod tests {
             Some("a description")
         );
         let blobs = get("blobs")
-            .and_then(|v| v.as_sequence())
-            .expect("blobs sequence present");
+            .and_then(|v| v.as_array())
+            .expect("blobs array present");
         let blob_hashes: Vec<&str> = blobs.iter().filter_map(|v| v.as_str()).collect();
         assert_eq!(
             blob_hashes,

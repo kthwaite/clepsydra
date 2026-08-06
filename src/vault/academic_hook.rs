@@ -41,7 +41,7 @@ impl PostMoveHook for AcademicMoveHook {
             // Update work_path in extra
             meta.extra.insert(
                 "work_path".to_string(),
-                serde_yaml::Value::String(new_path.as_str().to_string()),
+                toml::Value::String(new_path.as_str().to_string()),
             );
 
             let new_content = write_page_content(&meta, &body);

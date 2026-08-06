@@ -769,41 +769,29 @@ async fn patch_zotero_provenance(
     let item_id = item.item_id;
     let imported_at = Utc::now().to_rfc3339();
     mutate_academic_page(state, path, move |meta, _body| {
-        let mut import_map = serde_yaml::Mapping::new();
+        let mut import_map = toml::Table::new();
         import_map.insert(
-            serde_yaml::Value::String("source".to_string()),
-            serde_yaml::Value::String("zotero".to_string()),
+            "source".to_string(),
+            toml::Value::String("zotero".to_string()),
         );
-        import_map.insert(
-            serde_yaml::Value::String("zotero_key".to_string()),
-            serde_yaml::Value::String(zotero_key),
-        );
-        import_map.insert(
-            serde_yaml::Value::String("zotero_item_id".to_string()),
-            serde_yaml::Value::Number(item_id.into()),
-        );
-        import_map.insert(
-            serde_yaml::Value::String("imported_at".to_string()),
-            serde_yaml::Value::String(imported_at),
-        );
+        import_map.insert("zotero_key".to_string(), toml::Value::String(zotero_key));
+        import_map.insert("zotero_item_id".to_string(), toml::Value::Integer(item_id));
+        import_map.insert("imported_at".to_string(), toml::Value::String(imported_at));
         meta.extra
-            .insert("import".to_string(), serde_yaml::Value::Mapping(import_map));
+            .insert("import".to_string(), toml::Value::Table(import_map));
         if !assets.is_empty() {
             meta.extra.insert(
                 "assets".to_string(),
-                serde_yaml::to_value(&assets).unwrap_or_default(),
+                toml::Value::Array(assets.iter().cloned().map(toml::Value::String).collect()),
             );
         }
         if let Some(url) = pdf_url {
             let urls = meta
                 .extra
                 .entry("urls".to_string())
-                .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
-            if let serde_yaml::Value::Mapping(mapping) = urls {
-                mapping.insert(
-                    serde_yaml::Value::String("pdf".into()),
-                    serde_yaml::Value::String(url),
-                );
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+            if let toml::Value::Table(table) = urls {
+                table.insert("pdf".to_string(), toml::Value::String(url));
             }
         }
         Ok(())

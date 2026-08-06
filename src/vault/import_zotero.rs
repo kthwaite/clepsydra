@@ -543,7 +543,7 @@ pub fn compute_field_diffs(
 
     // Year — compare via extra.year
     let local_year = local.extra.get("year").and_then(|v| match v {
-        serde_yaml::Value::Number(n) => n.as_i64().map(|i| i as i32),
+        toml::Value::Integer(i) => Some(*i as i32),
         _ => None,
     });
     if local_year != source.year {
@@ -586,8 +586,8 @@ pub fn compute_field_diffs(
     let local_doi = local
         .extra
         .get("external_ids")
-        .and_then(|v| v.as_mapping())
-        .and_then(|m| m.get(serde_yaml::Value::String("doi".to_string())))
+        .and_then(|v| v.as_table())
+        .and_then(|m| m.get("doi"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     if local_doi != source.doi {
@@ -602,8 +602,8 @@ pub fn compute_field_diffs(
     let local_isbn = local
         .extra
         .get("external_ids")
-        .and_then(|v| v.as_mapping())
-        .and_then(|m| m.get(serde_yaml::Value::String("isbn".to_string())))
+        .and_then(|v| v.as_table())
+        .and_then(|m| m.get("isbn"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     if local_isbn != source.isbn {
@@ -641,63 +641,48 @@ pub fn apply_source_wins_to_meta(
 
     if let Some(year) = entry.year {
         meta.extra
-            .insert("year".to_string(), serde_yaml::Value::Number(year.into()));
+            .insert("year".to_string(), toml::Value::Integer(year.into()));
     }
     if let Some(ref venue) = entry.venue {
-        meta.extra.insert(
-            "venue".to_string(),
-            serde_yaml::Value::String(venue.clone()),
-        );
+        meta.extra
+            .insert("venue".to_string(), toml::Value::String(venue.clone()));
     }
     if let Some(ref publisher) = entry.publisher {
         meta.extra.insert(
             "publisher".to_string(),
-            serde_yaml::Value::String(publisher.clone()),
+            toml::Value::String(publisher.clone()),
         );
     }
 
-    let authors_val: Vec<serde_yaml::Value> = entry
+    let authors_val: Vec<toml::Value> = entry
         .authors
         .iter()
-        .map(|a| serde_yaml::Value::String(a.clone()))
+        .map(|a| toml::Value::String(a.clone()))
         .collect();
-    meta.extra.insert(
-        "authors".to_string(),
-        serde_yaml::Value::Sequence(authors_val),
-    );
+    meta.extra
+        .insert("authors".to_string(), toml::Value::Array(authors_val));
 
-    let mut ext_ids = serde_yaml::Mapping::new();
+    let mut ext_ids = toml::Table::new();
     if let Some(ref doi) = entry.doi {
-        ext_ids.insert(
-            serde_yaml::Value::String("doi".to_string()),
-            serde_yaml::Value::String(doi.clone()),
-        );
+        ext_ids.insert("doi".to_string(), toml::Value::String(doi.clone()));
     }
     if let Some(ref isbn) = entry.isbn {
-        ext_ids.insert(
-            serde_yaml::Value::String("isbn".to_string()),
-            serde_yaml::Value::String(isbn.clone()),
-        );
+        ext_ids.insert("isbn".to_string(), toml::Value::String(isbn.clone()));
     }
     if let Some(ref arxiv) = entry.arxiv {
-        ext_ids.insert(
-            serde_yaml::Value::String("arxiv".to_string()),
-            serde_yaml::Value::String(arxiv.clone()),
-        );
+        ext_ids.insert("arxiv".to_string(), toml::Value::String(arxiv.clone()));
     }
     if !ext_ids.is_empty() {
-        meta.extra.insert(
-            "external_ids".to_string(),
-            serde_yaml::Value::Mapping(ext_ids),
-        );
+        meta.extra
+            .insert("external_ids".to_string(), toml::Value::Table(ext_ids));
     }
 
     if let Some(import_val) = meta.extra.get_mut("import")
-        && let serde_yaml::Value::Mapping(import_map) = import_val
+        && let toml::Value::Table(import_map) = import_val
     {
         import_map.insert(
-            serde_yaml::Value::String("imported_at".to_string()),
-            serde_yaml::Value::String(chrono::Utc::now().to_rfc3339()),
+            "imported_at".to_string(),
+            toml::Value::String(chrono::Utc::now().to_rfc3339()),
         );
     }
 }
@@ -899,13 +884,10 @@ mod source_wins_tests {
         let mut meta = PageMeta::new();
         apply_source_wins_to_meta(&mut meta, &sample_entry());
         assert_eq!(meta.title.as_deref(), Some("A Study"));
-        assert_eq!(
-            meta.extra.get("year"),
-            Some(&serde_yaml::Value::Number(2020.into()))
-        );
+        assert_eq!(meta.extra.get("year"), Some(&toml::Value::Integer(2020)));
         assert_eq!(
             meta.extra.get("venue"),
-            Some(&serde_yaml::Value::String("Nature".into()))
+            Some(&toml::Value::String("Nature".into()))
         );
     }
 
@@ -917,28 +899,25 @@ mod source_wins_tests {
             .extra
             .get("external_ids")
             .expect("external_ids present");
-        let serde_yaml::Value::Mapping(m) = ext else {
+        let toml::Value::Table(m) = ext else {
             panic!("expected mapping")
         };
-        assert!(m.contains_key(serde_yaml::Value::String("doi".into())));
-        assert!(!m.contains_key(serde_yaml::Value::String("isbn".into())));
+        assert!(m.contains_key("doi"));
+        assert!(!m.contains_key("isbn"));
     }
 
     #[test]
     fn imported_at_updates_existing_import_mapping() {
         let mut meta = PageMeta::new();
-        let mut import_map = serde_yaml::Mapping::new();
-        import_map.insert(
-            serde_yaml::Value::String("source".into()),
-            serde_yaml::Value::String("zotero".into()),
-        );
+        let mut import_map = toml::Table::new();
+        import_map.insert("source".to_string(), toml::Value::String("zotero".into()));
         meta.extra
-            .insert("import".into(), serde_yaml::Value::Mapping(import_map));
+            .insert("import".into(), toml::Value::Table(import_map));
         apply_source_wins_to_meta(&mut meta, &sample_entry());
-        let serde_yaml::Value::Mapping(m) = meta.extra.get("import").unwrap() else {
+        let toml::Value::Table(m) = meta.extra.get("import").unwrap() else {
             panic!()
         };
-        assert!(m.contains_key(serde_yaml::Value::String("imported_at".into())));
+        assert!(m.contains_key("imported_at"));
     }
 
     #[test]

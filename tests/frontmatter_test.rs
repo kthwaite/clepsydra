@@ -1,21 +1,19 @@
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use clepsydra::vault::page::{
-    FrontmatterError, Page, PageMeta, parse_frontmatter, parse_or_repair_frontmatter,
+    ExtraMap, FrontmatterError, Page, PageMeta, parse_frontmatter, parse_or_repair_frontmatter,
     write_page_content,
 };
 use clepsydra::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
-// Task 8 — PageMeta serde
+// PageMeta parsing (legacy YAML dual-read)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn deserialize_full_frontmatter() {
-    let yaml = r#"
+fn deserialize_full_legacy_frontmatter() {
+    let content = r#"---
 id: "019578a1-c234-7000-8000-000000000001"
 title: "My Page"
 tags:
@@ -26,8 +24,10 @@ aliases:
 created_at: "2025-06-01T12:00:00Z"
 updated_at: "2025-06-02T08:30:00Z"
 custom_field: 42
+---
+Body
 "#;
-    let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
+    let (meta, _) = parse_frontmatter(content).unwrap();
     assert_eq!(
         meta.id,
         Uuid::parse_str("019578a1-c234-7000-8000-000000000001").unwrap()
@@ -39,14 +39,14 @@ custom_field: 42
     assert!(meta.updated_at.is_some());
     assert_eq!(
         meta.extra.get("custom_field"),
-        Some(&serde_yaml::Value::Number(serde_yaml::Number::from(42)))
+        Some(&toml::Value::Integer(42))
     );
 }
 
 #[test]
 fn deserialize_minimal_frontmatter() {
-    let yaml = r#"id: "019578a1-c234-7000-8000-000000000001""#;
-    let meta: PageMeta = serde_yaml::from_str(yaml).unwrap();
+    let content = "+++\nid = \"019578a1-c234-7000-8000-000000000001\"\n+++\n";
+    let (meta, _) = parse_frontmatter(content).unwrap();
     assert_eq!(
         meta.id,
         Uuid::parse_str("019578a1-c234-7000-8000-000000000001").unwrap()
@@ -70,13 +70,13 @@ fn round_trip_preserves_fields() {
         aliases: vec!["rt".into()],
         created_at: Some(now),
         updated_at: Some(now),
-        extra: HashMap::new(),
+        extra: ExtraMap::new(),
         kind: None,
         project: None,
     };
 
-    let yaml = serde_yaml::to_string(&meta).unwrap();
-    let deserialized: PageMeta = serde_yaml::from_str(&yaml).unwrap();
+    let rendered = write_page_content(&meta, "");
+    let (deserialized, _) = parse_frontmatter(&rendered).unwrap();
 
     assert_eq!(deserialized.id, meta.id);
     assert_eq!(deserialized.title, meta.title);
@@ -96,23 +96,23 @@ fn skip_serializing_empty_fields() {
         aliases: Vec::new(),
         created_at: None,
         updated_at: None,
-        extra: HashMap::new(),
+        extra: ExtraMap::new(),
         kind: None,
         project: None,
     };
 
-    let yaml = serde_yaml::to_string(&meta).unwrap();
-    assert!(!yaml.contains("title"));
-    assert!(!yaml.contains("tags"));
-    assert!(!yaml.contains("aliases"));
-    assert!(!yaml.contains("created_at"));
-    assert!(!yaml.contains("updated_at"));
+    let rendered = write_page_content(&meta, "");
+    assert!(!rendered.contains("title"));
+    assert!(!rendered.contains("tags"));
+    assert!(!rendered.contains("aliases"));
+    assert!(!rendered.contains("created_at"));
+    assert!(!rendered.contains("updated_at"));
     // id must still be present
-    assert!(yaml.contains("id"));
+    assert!(rendered.contains("id"));
 }
 
 // ---------------------------------------------------------------------------
-// Task 9 — Frontmatter parsing / writing
+// Frontmatter parsing / writing
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -147,7 +147,7 @@ fn write_page_content_round_trip() {
         aliases: Vec::new(),
         created_at: None,
         updated_at: None,
-        extra: HashMap::new(),
+        extra: ExtraMap::new(),
         kind: None,
         project: None,
     };
@@ -208,8 +208,22 @@ fn parse_or_repair_unparseable_yaml_preserves_file() {
     assert!(!meta.id.is_nil(), "default meta should have a v7 UUID");
 }
 
+#[test]
+fn healed_legacy_page_serializes_as_toml() {
+    // A YAML page that needs repair (missing id) must come back out as `+++`.
+    let content = "---\ntitle: Draft\n---\nHello\n";
+    let (meta, body, rewrote, _) = parse_or_repair_frontmatter(content);
+    assert!(rewrote);
+    let healed = write_page_content(&meta, &body);
+    assert!(
+        healed.starts_with("+++\n"),
+        "healed page must be TOML: {healed}"
+    );
+    assert!(healed.contains("title = \"Draft\""));
+}
+
 // ---------------------------------------------------------------------------
-// Task 10 — Page struct with file I/O
+// Page struct with file I/O
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -244,7 +258,7 @@ fn page_to_file_writes_correctly() {
         aliases: Vec::new(),
         created_at: None,
         updated_at: None,
-        extra: HashMap::new(),
+        extra: ExtraMap::new(),
         kind: None,
         project: None,
     };
@@ -261,7 +275,7 @@ fn page_to_file_writes_correctly() {
     page.to_file(&file_path).unwrap();
 
     let read_back = std::fs::read_to_string(&file_path).unwrap();
-    assert!(read_back.starts_with("---\n"));
+    assert!(read_back.starts_with("+++\n"));
     assert!(read_back.contains("019578a1-c234-7000-8000-000000000001"));
     assert!(read_back.contains("Hello world.\n"));
 }

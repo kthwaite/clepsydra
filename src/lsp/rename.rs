@@ -293,7 +293,8 @@ mod tests {
     fn update_title_in_frontmatter() {
         let content = "---\nid: 00000000-0000-0000-0000-000000000001\ntitle: Old Title\n---\nBody text here.\n";
         let new_text = update_frontmatter_title(content, "New Title");
-        assert!(new_text.contains("title: New Title"));
+        // The rewrite serializes back out as TOML (heal-on-touch).
+        assert!(new_text.contains("title = \"New Title\""));
         assert!(new_text.contains("Body text here."));
         assert!(!new_text.contains("Old Title"));
     }
