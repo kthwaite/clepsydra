@@ -60,7 +60,7 @@ export function mdastToSlate(markdown: string): Descendant[] {
   const mdast = processor.parse(markdown);
   const tree = processor.runSync(mdast) as Root;
 
-  const result = convertChildren(tree.children);
+  const result = convertChildren(tree.children, true, true);
 
   // Slate invariant: document must have at least one block
   if (result.length === 0) {
@@ -78,10 +78,15 @@ export function mdastToSlate(markdown: string): Descendant[] {
 function convertChildren(
   nodes: RootContent[],
   extractMetadata = true,
+  recognizeJournalTime = false,
 ): Descendant[] {
   const result: Descendant[] = [];
   for (const node of nodes) {
-    const converted = convertBlockNode(node, extractMetadata);
+    const converted = convertBlockNode(
+      node,
+      extractMetadata,
+      recognizeJournalTime,
+    );
     if (converted != null) {
       result.push(converted);
     }
@@ -96,6 +101,7 @@ function convertChildren(
 function convertBlockNode(
   node: RootContent,
   extractMetadata = true,
+  recognizeJournalTime = false,
 ): Descendant | null {
   switch (node.type) {
     case "paragraph": {
@@ -107,6 +113,19 @@ function convertBlockNode(
     }
 
     case "heading": {
+      const onlyChild = node.children.length === 1 ? node.children[0] : null;
+      if (
+        recognizeJournalTime &&
+        node.depth === 2 &&
+        onlyChild?.type === "text" &&
+        /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(onlyChild.value)
+      ) {
+        return {
+          type: "journal-time",
+          time: onlyChild.value,
+          children: [{ text: "" }],
+        };
+      }
       const el = {
         type: "heading" as const,
         level: node.depth,

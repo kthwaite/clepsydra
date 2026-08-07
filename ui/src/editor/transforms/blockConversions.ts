@@ -15,6 +15,7 @@ import {
   makeNumberedList,
 } from "#/editor/schema/elements/list";
 import { makeParagraph } from "#/editor/schema/elements/paragraph";
+import { insertJournalTimeHeading } from "#/editor/transforms/journalTime";
 
 export type BlockConversion =
   | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6 }
@@ -23,7 +24,8 @@ export type BlockConversion =
   | { type: "task"; checked?: boolean }
   | { type: "blockquote" }
   | { type: "code-block"; language?: string }
-  | { type: "thematic-break" };
+  | { type: "thematic-break" }
+  | { type: "journal-time" };
 
 export interface ApplyBlockConversionOptions {
   /** Path of the paragraph block to convert. */
@@ -73,6 +75,9 @@ export function applyBlockConversion(
         Transforms.setNodes(editor, props as any, { at });
         break;
       }
+      case "journal-time":
+        insertJournalTimeHeading(editor, new Date(), false);
+        break;
       case "thematic-break": {
         Transforms.setNodes(editor, { type: "thematic-break" } as any, { at });
         const nextPath = Path.next(at);

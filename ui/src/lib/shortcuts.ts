@@ -159,6 +159,12 @@ export const SHORTCUTS = {
     group: "Editor",
     scope: "editor",
   },
+  "editor.timeHeading": {
+    chord: { key: "Enter", mod: true, shift: true },
+    label: "Insert time heading",
+    group: "Editor",
+    scope: "editor",
+  },
   "editor.checkbox": {
     chord: { key: "Enter", mod: true },
     label: "Toggle checkbox",

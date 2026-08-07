@@ -8,9 +8,8 @@ import type { FootnoteDefElement } from "./types";
  *
  * Rules:
  *  - Footnote-def identifiers are kept unique.
- *  - A code block at the very end of the document gets a trailing empty
- *    paragraph so the cursor can reach below it (a code block traps Enter as a
- *    newline, so without this there is no way to add content beneath it).
+ *  - A terminal block that cannot create a following paragraph itself gets a
+ *    trailing empty paragraph so the cursor can reach below it.
  *
  * Dangling footnote-ref detection (a ref with no matching def) is intentionally
  * NOT handled here — it is surfaced non-destructively via decoration elsewhere.
@@ -41,14 +40,19 @@ export function runDocumentRules(editor: Editor): boolean {
 }
 
 /**
- * If the last top-level node is a code block, append an empty paragraph after
- * it. The empty paragraph carries no meaningful markdown and is re-derived on
- * reload, so this does not accumulate across save/load cycles.
+ * If the last top-level node traps the caret or is atomic, append an empty
+ * paragraph after it. The paragraph carries no meaningful markdown and is
+ * re-derived on reload, so it does not accumulate across save/load cycles.
  */
 function ensureTrailingParagraph(editor: Editor): boolean {
   const { children } = editor;
   const last = children[children.length - 1];
-  if (!SlateElement.isElement(last) || last.type !== "code-block") return false;
+  if (
+    !SlateElement.isElement(last) ||
+    (last.type !== "code-block" && last.type !== "journal-time")
+  ) {
+    return false;
+  }
 
   Transforms.insertNodes(
     editor,

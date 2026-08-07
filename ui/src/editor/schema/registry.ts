@@ -5,6 +5,7 @@ import { codeBlockDescriptor } from "./elements/codeBlock";
 import { footnoteDefDescriptor } from "./elements/footnoteDef";
 import { footnoteRefDescriptor } from "./elements/footnoteRef";
 import { headingDescriptor } from "./elements/heading";
+import { journalTimeDescriptor } from "./elements/journalTime";
 import { linkDescriptor } from "./elements/link";
 import {
   bulletedListDescriptor,
@@ -25,6 +26,7 @@ const ALL: ElementDescriptor[] = [
   numberedListDescriptor,
   listItemDescriptor,
   thematicBreakDescriptor,
+  journalTimeDescriptor,
   wikilinkDescriptor,
   linkDescriptor,
   blockRefDescriptor,

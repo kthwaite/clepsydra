@@ -40,6 +40,10 @@ import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBlockRef } from "./schema/elements/blockRef";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
+import {
+  handleJournalTimeHeadingDeletion,
+  insertJournalTimeHeading,
+} from "./transforms/journalTime";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 
@@ -67,10 +71,32 @@ export function slashCommandToConversion(id: string): BlockConversion | null {
       return { type: "code-block" };
     case "divider":
       return { type: "thematic-break" };
+    case "time":
+      return { type: "journal-time" };
     default:
       return null;
   }
 }
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    id: "time",
+    label: "Time Heading",
+    description: "Insert the current local time as a section heading",
+  },
+  { id: "h1", label: "Heading 1", description: "Large heading" },
+  { id: "h2", label: "Heading 2", description: "Medium heading" },
+  { id: "h3", label: "Heading 3", description: "Small heading" },
+  { id: "h4", label: "Heading 4", description: "Smaller heading" },
+  { id: "h5", label: "Heading 5", description: "Tiny heading" },
+  { id: "h6", label: "Heading 6", description: "Smallest heading" },
+  { id: "bullet", label: "Bullet list", description: "Unordered list" },
+  { id: "number", label: "Numbered list", description: "Ordered list" },
+  { id: "task", label: "Task list", description: "Checklist item" },
+  { id: "quote", label: "Blockquote", description: "Quoted text" },
+  { id: "code", label: "Code block", description: "Code snippet" },
+  { id: "divider", label: "Divider", description: "Horizontal rule" },
+];
 
 interface SlateEditorProps {
   initialValue: Descendant[];
@@ -262,23 +288,7 @@ export function SlateEditor({
     }
   };
 
-  const slashCommands: SlashCommand[] = useMemo(
-    () => [
-      { id: "h1", label: "Heading 1", description: "Large heading" },
-      { id: "h2", label: "Heading 2", description: "Medium heading" },
-      { id: "h3", label: "Heading 3", description: "Small heading" },
-      { id: "h4", label: "Heading 4", description: "Smaller heading" },
-      { id: "h5", label: "Heading 5", description: "Tiny heading" },
-      { id: "h6", label: "Heading 6", description: "Smallest heading" },
-      { id: "bullet", label: "Bullet list", description: "Unordered list" },
-      { id: "number", label: "Numbered list", description: "Ordered list" },
-      { id: "task", label: "Task list", description: "Checklist item" },
-      { id: "quote", label: "Blockquote", description: "Quoted text" },
-      { id: "code", label: "Code block", description: "Code snippet" },
-      { id: "divider", label: "Divider", description: "Horizontal rule" },
-    ],
-    [],
-  );
+  const slashCommands = SLASH_COMMANDS;
 
   const executeSlashCommand = useCallback(
     (cmd: SlashCommand) => {
@@ -338,6 +348,22 @@ export function SlateEditor({
       return;
     }
     if (vim.handleKeyDown(event)) {
+      return;
+    }
+
+    if (matchesChord(event, SHORTCUTS["editor.timeHeading"].chord)) {
+      event.preventDefault();
+      insertJournalTimeHeading(editor);
+      return;
+    }
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      handleJournalTimeHeadingDeletion(
+        editor,
+        event.key === "Backspace" ? "backward" : "forward",
+      )
+    ) {
+      event.preventDefault();
       return;
     }
 
