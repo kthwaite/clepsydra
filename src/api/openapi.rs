@@ -228,9 +228,7 @@ pub fn router<S>() -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    Router::new().merge(
-        SwaggerUi::new("/api/docs").url("/api/openapi.json", ApiDoc::openapi()),
-    )
+    Router::new().merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", ApiDoc::openapi()))
 }
 
 #[cfg(test)]
