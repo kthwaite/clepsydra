@@ -25,6 +25,7 @@ pub const SYSTEM_FIELDS: &[&str] = &[
     "aliases",
     "created_at",
     "updated_at",
+    "encryption",
     "journal_date",
     "word_count",
 ];
@@ -863,10 +864,10 @@ value = "BOOK"
 
     #[test]
     fn system_field_property_declaration_is_rejected() {
-        let content = "name = \"X\"\n\n[properties]\ntitle = { type = \"text\" }\nkind = { type = \"text\" }\n";
+        let content = "name = \"X\"\n\n[properties]\ntitle = { type = \"text\" }\nkind = { type = \"text\" }\nencryption = { type = \"text\" }\n";
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
         assert!(base.is_some());
-        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics.len(), 3);
         assert!(diagnostics[0].message.contains("shadows a system field"));
     }
 
