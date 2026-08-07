@@ -120,6 +120,7 @@ export function Folio({ tabId, path }: FolioProps) {
     () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
     [path, editor.kind, editor.bodyMarkdown],
   );
+  const presentation = presentationFor(kind);
   const inferred = editor.inferred;
   const project = editor.project;
   const wordCount = useMemo(
@@ -250,10 +251,10 @@ export function Folio({ tabId, path }: FolioProps) {
           </Block>
 
           {(() => {
-            const Extras = presentationFor(kind).metaExtras;
+            const Extras = presentation.metaExtras;
             return Extras ? (
               <Block label="Details">
-                <Extras path={path} />
+                <Extras path={path} tabId={tabId} isDraft={false} />
               </Block>
             ) : null;
           })()}
@@ -298,6 +299,7 @@ export function Folio({ tabId, path }: FolioProps) {
                 path={path}
                 title={editor.title}
                 onTitleChange={editor.setTitle}
+                readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
                 tags={editor.tags}
                 onTagsChange={editor.setTags}
                 aliases={editor.aliases}

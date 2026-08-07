@@ -10,6 +10,9 @@ interface PageEditorHeaderProps {
   onAliasesChange: (aliases: string[]) => void;
   /** Flush a save immediately — wired to title/tag blur. */
   onSaveNow?: () => void;
+  /** When set, the title renders as this static text and cannot be edited
+   *  (JOURNAL pages: the formatted day label). */
+  readOnlyTitle?: string;
 }
 
 /** Last path segment, e.g. "notes/ideas/my-note.md" → "my-note.md". */
@@ -26,17 +29,24 @@ export function PageEditorHeader({
   aliases,
   onAliasesChange,
   onSaveNow,
+  readOnlyTitle,
 }: PageEditorHeaderProps) {
   return (
     <div className="pb-4">
-      <input
-        type="text"
-        value={title}
-        onChange={(e) => onTitleChange(e.target.value)}
-        onBlur={onSaveNow}
-        placeholder={filename(path)}
-        className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground"
-      />
+      {readOnlyTitle !== undefined ? (
+        <h1 className="w-full font-heading text-2xl font-bold">
+          {readOnlyTitle}
+        </h1>
+      ) : (
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => onTitleChange(e.target.value)}
+          onBlur={onSaveNow}
+          placeholder={filename(path)}
+          className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground"
+        />
+      )}
 
       <TagInput
         label="Tags"
