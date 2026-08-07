@@ -32,15 +32,19 @@ public struct NoteEditorView: View {
         @Bindable var model = model
 
         VStack(spacing: 0) {
-            Picker("View", selection: $model.presentationMode) {
-                Text("Edit").tag(EditorViewModel.PresentationMode.edit)
-                Text("Preview").tag(EditorViewModel.PresentationMode.preview)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.top)
+            if model.isProtected {
+                protectedContent
+            } else {
+                Picker("View", selection: $model.presentationMode) {
+                    Text("Edit").tag(EditorViewModel.PresentationMode.edit)
+                    Text("Preview").tag(EditorViewModel.PresentationMode.preview)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top)
 
-            content
+                content
+            }
         }
         .navigationTitle(model.mode.isCreate ? "New Note" : "Edit Note")
 #if os(iOS)
@@ -114,6 +118,24 @@ public struct NoteEditorView: View {
             onSaved?(page)
             dismiss()
         }
+    }
+
+    private var protectedContent: some View {
+        ContentUnavailableView {
+            Label("Protected note", systemImage: "lock.fill")
+        } description: {
+            VStack(spacing: 8) {
+                Text(model.title)
+                    .font(.headline)
+                if let path = model.sourcePage?.path {
+                    Text(path)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Open this note in the Clepsydra web frontend to unlock or edit it.")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder

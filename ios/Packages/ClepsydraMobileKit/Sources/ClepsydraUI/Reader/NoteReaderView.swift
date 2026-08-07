@@ -25,7 +25,7 @@ public struct NoteReaderView: View {
                     Button("Edit") {
                         showingEditor = true
                     }
-                    .disabled(model.page == nil)
+                    .disabled(model.page == nil || model.page?.encrypted == true)
                 }
             }
             .sheet(isPresented: $showingEditor) {
@@ -59,7 +59,20 @@ public struct NoteReaderView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    MarkdownPreview(markdown: page.body)
+                    if page.encrypted {
+                        ContentUnavailableView {
+                            Label("Protected note", systemImage: "lock.fill")
+                        } description: {
+                            Text("Open this note in the Clepsydra web frontend to unlock it.")
+                        }
+                        if !page.meta.tags.isEmpty {
+                            Text(page.meta.tags.map { "#\($0)" }.joined(separator: " "))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        MarkdownPreview(markdown: page.body)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()

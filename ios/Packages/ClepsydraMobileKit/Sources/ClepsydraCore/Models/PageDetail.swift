@@ -60,6 +60,24 @@ public struct PageMeta: Codable, Equatable, Sendable {
     }
 }
 
+public struct PageEncryptionDescriptor: Codable, Equatable, Sendable {
+    public let format: String
+    public let version: Int
+    public let keyID: String
+
+    public init(format: String, version: Int, keyID: String) {
+        self.format = format
+        self.version = version
+        self.keyID = keyID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case format
+        case version
+        case keyID = "keyId"
+    }
+}
+
 public struct PageDetail: Codable, Equatable, Sendable, Identifiable {
     public var id: UUID { meta.id }
     public let path: String
@@ -70,6 +88,8 @@ public struct PageDetail: Codable, Equatable, Sendable, Identifiable {
     public let kind: String
     public let inferred: Bool
     public let project: String?
+    public let encrypted: Bool
+    public let encryption: PageEncryptionDescriptor?
 
     public init(
         path: String,
@@ -79,7 +99,9 @@ public struct PageDetail: Codable, Equatable, Sendable, Identifiable {
         revision: String,
         kind: String,
         inferred: Bool,
-        project: String?
+        project: String?,
+        encrypted: Bool = false,
+        encryption: PageEncryptionDescriptor? = nil
     ) {
         self.path = path
         self.canonicalName = canonicalName
@@ -89,6 +111,35 @@ public struct PageDetail: Codable, Equatable, Sendable, Identifiable {
         self.kind = kind
         self.inferred = inferred
         self.project = project
+        self.encrypted = encrypted
+        self.encryption = encryption
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case path
+        case canonicalName
+        case meta
+        case body
+        case revision
+        case kind
+        case inferred
+        case project
+        case encrypted
+        case encryption
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try container.decode(String.self, forKey: .path)
+        canonicalName = try container.decode(String.self, forKey: .canonicalName)
+        meta = try container.decode(PageMeta.self, forKey: .meta)
+        body = try container.decode(String.self, forKey: .body)
+        revision = try container.decode(String.self, forKey: .revision)
+        kind = try container.decode(String.self, forKey: .kind)
+        inferred = try container.decode(Bool.self, forKey: .inferred)
+        project = try container.decodeIfPresent(String.self, forKey: .project)
+        encryption = try container.decodeIfPresent(PageEncryptionDescriptor.self, forKey: .encryption)
+        encrypted = try container.decodeIfPresent(Bool.self, forKey: .encrypted) ?? (encryption != nil)
     }
 }
 
