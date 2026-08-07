@@ -1,10 +1,9 @@
 import path from "node:path";
-import mdx from "@mdx-js/rollup";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import rehypeSlug from "rehype-slug";
 import { defineConfig } from "vite";
+import { createMdxPlugin } from "./mdx-plugin";
 import pkg from "./package.json" with { type: "json" };
 
 // https://vite.dev/config/
@@ -26,10 +25,7 @@ export default defineConfig({
     },
   },
   plugins: [
-    {
-      enforce: "pre",
-      ...mdx({ include: /\.mdx$/, rehypePlugins: [rehypeSlug] }),
-    },
+    createMdxPlugin(),
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,

@@ -1,15 +1,11 @@
 import path from "node:path";
-import mdx from "@mdx-js/rollup";
 import react from "@vitejs/plugin-react";
-import rehypeSlug from "rehype-slug";
 import { defineConfig } from "vitest/config";
+import { createMdxPlugin } from "./mdx-plugin";
 
 export default defineConfig({
   plugins: [
-    {
-      enforce: "pre",
-      ...mdx({ include: /\.mdx$/, rehypePlugins: [rehypeSlug] }),
-    },
+    createMdxPlugin(),
     react({ include: /\.(jsx|js|mdx|md|tsx|ts)$/ }),
   ],
   resolve: {
