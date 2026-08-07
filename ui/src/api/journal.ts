@@ -78,18 +78,6 @@ export function useJournalEditorOptions(
   );
 }
 
-export function useJournalByDate(date: string) {
-  return useQuery<JournalDetail>({
-    queryKey: queryKeys.journal.byDate(date),
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/${date}`);
-      if (!res.ok) throw new Error("Failed to fetch journal");
-      return res.json();
-    },
-    enabled: !!date,
-  });
-}
-
 export function useJournalRecent(days = 7) {
   return useQuery<JournalSummary[]>({
     queryKey: queryKeys.journal.recent(days),

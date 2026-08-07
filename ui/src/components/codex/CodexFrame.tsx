@@ -13,13 +13,7 @@ import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
-type View =
-  | "atrium"
-  | "folio"
-  | "gazetteer"
-  | "constellation"
-  | "diurnal"
-  | "tasking";
+type View = "atrium" | "folio" | "gazetteer" | "constellation" | "tasking";
 
 /** Nav order + diegetic index numbers. */
 const NAV: ReadonlyArray<readonly [View, string]> = [
@@ -27,7 +21,6 @@ const NAV: ReadonlyArray<readonly [View, string]> = [
   ["folio", "FOLIO"],
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
-  ["diurnal", "DIURNAL"],
   ["tasking", "TASKING"],
 ];
 
@@ -54,7 +47,6 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     if (forceView) return forceView;
     const p = location.pathname;
     if (p === "/" || p === "") return "atrium";
-    if (p.startsWith("/journal")) return "diurnal";
     if (p.startsWith("/gazetteer")) return "gazetteer";
     if (p.startsWith("/tasking")) return "tasking";
     if (p.startsWith("/workspace")) {
@@ -66,7 +58,6 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 
   const onNav = (target: View) => {
     if (target === "atrium") navigate({ to: "/" });
-    else if (target === "diurnal") navigate({ to: "/journal" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
     else if (target === "constellation") {
       openTab("graph");
@@ -246,7 +237,6 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 function useFolioCode(view: View): string {
   const { tabs, activeTabId } = useWorkspaceStore();
   if (view === "atrium") return "ATRIUM";
-  if (view === "diurnal") return "DIURNAL";
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
   if (view === "tasking") return "TASKING";

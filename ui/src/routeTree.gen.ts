@@ -14,7 +14,6 @@ import { Route as BasesSlugRouteImport } from "./routes/bases.$slug";
 import { Route as GazetteerRouteImport } from "./routes/gazetteer";
 import { Route as GraphRouteImport } from "./routes/graph";
 import { Route as IndexRouteImport } from "./routes/index";
-import { Route as JournalRouteImport } from "./routes/journal";
 import { Route as LinkMissRouteImport } from "./routes/link-miss";
 import { Route as PagesSplatRouteImport } from "./routes/pages/$";
 import { Route as TaskingRouteImport } from "./routes/tasking";
@@ -38,11 +37,6 @@ const GazetteerRoute = GazetteerRouteImport.update({
 const GraphRoute = GraphRouteImport.update({
   id: "/graph",
   path: "/graph",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const JournalRoute = JournalRouteImport.update({
-  id: "/journal",
-  path: "/journal",
   getParentRoute: () => rootRouteImport,
 } as any);
 const LinkMissRoute = LinkMissRouteImport.update({
@@ -76,7 +70,6 @@ export interface FileRoutesByFullPath {
   "/agenda": typeof AgendaRoute;
   "/gazetteer": typeof GazetteerRoute;
   "/graph": typeof GraphRoute;
-  "/journal": typeof JournalRoute;
   "/link-miss": typeof LinkMissRoute;
   "/tasking": typeof TaskingRoute;
   "/workspace": typeof WorkspaceRoute;
@@ -88,7 +81,6 @@ export interface FileRoutesByTo {
   "/agenda": typeof AgendaRoute;
   "/gazetteer": typeof GazetteerRoute;
   "/graph": typeof GraphRoute;
-  "/journal": typeof JournalRoute;
   "/link-miss": typeof LinkMissRoute;
   "/tasking": typeof TaskingRoute;
   "/workspace": typeof WorkspaceRoute;
@@ -101,7 +93,6 @@ export interface FileRoutesById {
   "/agenda": typeof AgendaRoute;
   "/gazetteer": typeof GazetteerRoute;
   "/graph": typeof GraphRoute;
-  "/journal": typeof JournalRoute;
   "/link-miss": typeof LinkMissRoute;
   "/tasking": typeof TaskingRoute;
   "/workspace": typeof WorkspaceRoute;
@@ -115,7 +106,6 @@ export interface FileRouteTypes {
     | "/agenda"
     | "/gazetteer"
     | "/graph"
-    | "/journal"
     | "/link-miss"
     | "/tasking"
     | "/workspace"
@@ -127,7 +117,6 @@ export interface FileRouteTypes {
     | "/agenda"
     | "/gazetteer"
     | "/graph"
-    | "/journal"
     | "/link-miss"
     | "/tasking"
     | "/workspace"
@@ -139,7 +128,6 @@ export interface FileRouteTypes {
     | "/agenda"
     | "/gazetteer"
     | "/graph"
-    | "/journal"
     | "/link-miss"
     | "/tasking"
     | "/workspace"
@@ -152,7 +140,6 @@ export interface RootRouteChildren {
   AgendaRoute: typeof AgendaRoute;
   GazetteerRoute: typeof GazetteerRoute;
   GraphRoute: typeof GraphRoute;
-  JournalRoute: typeof JournalRoute;
   LinkMissRoute: typeof LinkMissRoute;
   TaskingRoute: typeof TaskingRoute;
   WorkspaceRoute: typeof WorkspaceRoute;
@@ -188,13 +175,6 @@ declare module "@tanstack/react-router" {
       path: "/graph";
       fullPath: "/graph";
       preLoaderRoute: typeof GraphRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/journal": {
-      id: "/journal";
-      path: "/journal";
-      fullPath: "/journal";
-      preLoaderRoute: typeof JournalRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/link-miss": {
@@ -240,7 +220,6 @@ const rootRouteChildren: RootRouteChildren = {
   AgendaRoute: AgendaRoute,
   GazetteerRoute: GazetteerRoute,
   GraphRoute: GraphRoute,
-  JournalRoute: JournalRoute,
   LinkMissRoute: LinkMissRoute,
   TaskingRoute: TaskingRoute,
   WorkspaceRoute: WorkspaceRoute,

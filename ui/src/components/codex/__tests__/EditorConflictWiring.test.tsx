@@ -43,9 +43,7 @@ vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("#/api/journal", () => ({
-  useJournalByDate: () => ({ data: undefined, isLoading: false, error: null }),
   useJournalRecent: () => ({ data: [] }),
-  useQuickCapture: () => ({ mutate: vi.fn(), isPending: false }),
   useEnsureJournalToday: () => ({ mutateAsync: vi.fn() }),
   useJournalEditorOptions: () => undefined,
 }));
@@ -64,7 +62,6 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: () => ({ activeIndex: -1, scrollTo: vi.fn() }),
 }));
 
-import { Diurnal } from "../Diurnal";
 import { Folio } from "../Folio";
 
 function loadedEditor(reloadAfterConflict: () => Promise<void>) {
@@ -106,19 +103,6 @@ describe("desktop conflict recovery wiring", () => {
     usePageEditorMock.mockReturnValue(loadedEditor(reloadAfterConflict));
 
     render(<Folio tabId="tab-1" path="notes/draft.md" />);
-    const reload = screen.getByRole("button", { name: "Reload conflict" });
-    expect(reload).toHaveAttribute("data-revision", "rev-b");
-    await user.click(reload);
-
-    expect(reloadAfterConflict).toHaveBeenCalledTimes(1);
-  });
-
-  it("wires Diurnal conflict reload to its journal editor", async () => {
-    const user = userEvent.setup();
-    const reloadAfterConflict = vi.fn().mockResolvedValue(undefined);
-    usePageEditorMock.mockReturnValue(loadedEditor(reloadAfterConflict));
-
-    render(<Diurnal />);
     const reload = screen.getByRole("button", { name: "Reload conflict" });
     expect(reload).toHaveAttribute("data-revision", "rev-b");
     await user.click(reload);

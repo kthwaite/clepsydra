@@ -23,7 +23,6 @@ export const queryKeys = {
   journal: {
     all: ["journal"] as const,
     today: ["journal", "today"] as const,
-    byDate: (date: string) => ["journal", date] as const,
     recent: (days: number) => ["journal", "recent", days] as const,
   },
 
