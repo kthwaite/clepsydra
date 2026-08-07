@@ -13,4 +13,5 @@ a bespoke personal knowledge management system.
 - UI migration plan: [docs/plans/2026-04-09-react-aria-ui-migration.md](docs/plans/2026-04-09-react-aria-ui-migration.md)
 - CLI reference: [docs/cli.md](docs/cli.md)
 - Configuration reference: [docs/configuration.md](docs/configuration.md)
+- Encrypted notes and security model: [docs/encrypted-notes.md](docs/encrypted-notes.md)
 - Browser extension install/dev guide: [extension/README.md](extension/README.md)

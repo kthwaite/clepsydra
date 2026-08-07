@@ -209,6 +209,34 @@ Notes:
 - `cas_path` supports `~/...` (expanded to your home directory).
 - Archive request size limits are enforced at ingest time.
 
+### Encrypted-note files and lock behavior
+
+Encrypted-note key material is stored under the vault's excluded internal
+directory:
+
+```text
+<vault-root>/.clepsydra/crypto/
+├── keyring.toml
+└── <key-id>.identity.age   # present for password-based setup
+```
+
+- `keyring.toml` contains the keyring version, active key ID, public age
+  recipient, and optional wrapped-identity filename.
+- `<key-id>.identity.age` contains the password-wrapped age identity. It is
+  sensitive ciphertext: include it in protected backups, do not publish it,
+  and keep a separate recovery identity.
+- On Unix, Clepsydra requests mode `0700` for the directory and `0600` for its
+  files. Filesystem or platform policy may provide additional controls.
+
+There is no encrypted-note password or plaintext identity in `config.toml`.
+There is also no user-facing idle-lock key in v1: inactivity locking is disabled
+by default. The production frontend clears its in-memory identity on reload or
+close and provides coordinated manual locking. Custom frontend hosts can supply
+an in-memory idle timeout to `EncryptionProvider`; it is not a server setting.
+
+See [encrypted-notes.md](encrypted-notes.md) for setup, recovery, limitations,
+and the complete security boundary.
+
 ---
 
 ## Full vault config example
@@ -248,5 +276,6 @@ gc_min_age_days = 30
 
 - `docs/getting-started.md`
 - `docs/cli.md`
+- `docs/encrypted-notes.md`
 - `ui/README.md`
 - `extension/README.md`
