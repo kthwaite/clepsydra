@@ -911,6 +911,27 @@ async fn page_detail_mapping_matches_get_for_every_page_endpoint() {
 }
 
 #[tokio::test]
+async fn newly_created_pages_report_unencrypted_in_detail_and_listing() {
+    let (server, _tmp) = setup_server();
+    let created: serde_json::Value = server
+        .post("/api/vault/pages/encryption-state.md")
+        .json(&serde_json::json!({ "title": "Encryption state", "body": "Plain" }))
+        .await
+        .json();
+    assert_eq!(created["encrypted"], false);
+    assert!(created["encryption"].is_null());
+
+    let listing: serde_json::Value = server.get("/api/vault/pages").await.json();
+    let summary = listing["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "encryption-state.md")
+        .unwrap();
+    assert_eq!(summary["encrypted"], false);
+}
+
+#[tokio::test]
 async fn page_detail_mapping_matches_get_for_journal_and_link_endpoints() {
     let fixture = ApiFixture::builder()
         .pre_index_seed(|root| {
@@ -1341,6 +1362,7 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
             "canonical_name": "filesystem-only",
             "kind": "NOTE",
             "inferred": true,
+            "encrypted": false,
             "tags": []
         }),
         "filesystem-only pages should use the deterministic fallback summary"
