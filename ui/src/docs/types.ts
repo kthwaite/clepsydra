@@ -18,3 +18,19 @@ export interface DocGroup {
   label: string;
   pages: readonly DocPage[];
 }
+
+export interface DocSearchSection {
+  page: DocPage;
+  heading?: string;
+  headingId?: string;
+  text: string;
+  order: number;
+}
+
+export interface DocSearchResult {
+  page: DocPage;
+  heading?: string;
+  headingId?: string;
+  excerpt: string;
+  score: number;
+}
