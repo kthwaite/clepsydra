@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Descendant, Editor } from "slate";
 import { usePage, useUpdatePage } from "#/api/pages";
 import type { ApiError } from "#/api/types";
+import {
+  useOptionalEncryptionActions,
+  useOptionalEncryptionStatus,
+} from "#/crypto/EncryptionProvider";
 import { markdownToSlate, slateToMarkdown } from "./convert";
+import {
+  type DecryptedBodyState,
+  useDecryptedPageBody,
+} from "./useDecryptedPageBody";
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "error";
 
@@ -84,6 +92,7 @@ interface PageEditorState {
   kind: string | null;
   inferred: boolean;
   project: string | null;
+  encryptionState: DecryptedBodyState;
 }
 
 export function usePageEditor(
@@ -91,6 +100,16 @@ export function usePageEditor(
   options?: PageEditorOptions,
 ): PageEditorState {
   const { data: page, isLoading, error, refetch: refetchPage } = usePage(path);
+  const encryptionStatus = useOptionalEncryptionStatus();
+  const encryptionActions = useOptionalEncryptionActions();
+  const lockEpoch = encryptionStatus?.lockEpoch ?? 0;
+  const encryptionState = useDecryptedPageBody(
+    page,
+    encryptionActions,
+    lockEpoch,
+  );
+  const plainBody =
+    encryptionState.status === "plain" ? encryptionState.body : null;
   const pageNotFound = isApiError(error) && error.status === 404;
   const canDraft = Boolean(options?.ensure);
   const [ensured, setEnsured] = useState(false);
@@ -164,10 +183,10 @@ export function usePageEditor(
   const doSaveRef = useRef<() => void>(() => undefined);
 
   const initialValue = useMemo(() => {
-    if (!page)
+    if (!page || plainBody === null)
       return [{ type: "paragraph" as const, children: [{ text: "" }] }];
-    return markdownToSlate(page.body);
-  }, [page]);
+    return markdownToSlate(plainBody);
+  }, [page, plainBody]);
 
   // A new path is a new page lifecycle: discard the previous page's local
   // baseline before the sync effect below gets a chance to adopt the new
@@ -213,6 +232,22 @@ export function usePageEditor(
     setEditorRevision((revision) => revision + 1);
   }, [path]);
 
+  const previousLockEpochRef = useRef(lockEpoch);
+  useEffect(() => {
+    if (!page?.encrypted) {
+      previousLockEpochRef.current = lockEpoch;
+      return;
+    }
+    if (previousLockEpochRef.current === lockEpoch) return;
+    previousLockEpochRef.current = lockEpoch;
+    lifecycleRef.current += 1;
+    editorValueRef.current = [];
+    savedRef.current = { ...savedRef.current, body: "" };
+    bodyEditGenRef.current = 0;
+    savedBodyGenRef.current = 0;
+    setEditorRevision((revision) => revision + 1);
+  }, [lockEpoch, page?.encrypted]);
+
   // Sync server data → local state on initial load and genuine external changes.
   // Skip when we have unsaved local edits (dirty), to prevent refetches
   // triggered by our own saves from overwriting in-flight user work.
@@ -229,18 +264,19 @@ export function usePageEditor(
     setTitleState(t);
     setTagsState(tg);
     setAliasesState(al);
+    if (plainBody === null) return;
     const shouldResetEditor =
       editorValueRef.current.length === 0 ||
-      savedRef.current.body !== page.body;
-    const nextValue = markdownToSlate(page.body);
-    savedRef.current = { title: t, tags: tg, aliases: al, body: page.body };
+      savedRef.current.body !== plainBody;
+    const nextValue = initialValue;
+    savedRef.current = { title: t, tags: tg, aliases: al, body: plainBody };
     revisionRef.current = page.revision;
     editorValueRef.current = nextValue;
     if (shouldResetEditor) {
       setEditorRevision((revision) => revision + 1);
     }
     setSaveStatus("saved");
-  }, [page]);
+  }, [initialValue, page, plainBody]);
 
   const doSave = useCallback(() => {
     if (timerRef.current) {
@@ -570,9 +606,10 @@ export function usePageEditor(
     saveNow: doSave,
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
-    bodyMarkdown: page?.body ?? "",
+    bodyMarkdown: plainBody ?? "",
     kind: page?.kind ?? null,
     inferred: page?.inferred ?? true,
     project: page?.project ?? null,
+    encryptionState,
   };
 }

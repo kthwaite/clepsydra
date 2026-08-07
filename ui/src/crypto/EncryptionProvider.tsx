@@ -45,6 +45,10 @@ export function useEncryptionStatus(): EncryptionStatus {
   return status;
 }
 
+export function useOptionalEncryptionStatus(): EncryptionStatus | null {
+  return useContext(StatusContext);
+}
+
 export function useEncryptionActions(): EncryptionActions {
   const actions = useContext(ActionsContext);
   if (!actions) {
@@ -53,6 +57,10 @@ export function useEncryptionActions(): EncryptionActions {
     );
   }
   return actions;
+}
+
+export function useOptionalEncryptionActions(): EncryptionActions | null {
+  return useContext(ActionsContext);
 }
 
 export function EncryptionProvider({
