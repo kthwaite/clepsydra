@@ -20,6 +20,9 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use crate::vault::path::VaultPath;
+use crate::vault::sync::ChangeEvent;
+
 /// LSP backend holding the per-document data and late-initialized vault state.
 ///
 /// `vault_state` is empty until `initialize` resolves the workspace root and
@@ -30,10 +33,15 @@ pub struct LspBackend {
     pub client: Client,
     /// Vault + index, opened during `initialize` once the workspace root is known.
     pub vault_state: tokio::sync::OnceCell<Arc<state::LspState>>,
-    /// Open documents keyed by URI.
-    pub documents: Mutex<HashMap<Url, document::Document>>,
+    /// Open documents keyed by URI. `Arc`-wrapped so the spawned watcher task
+    /// (see `spawn_vault_watcher`) can share ownership with the backend.
+    pub documents: Arc<Mutex<HashMap<Url, document::Document>>>,
     /// Cached snapshot of canonical names → page paths for diagnostic checks.
     pub canonical_names: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// The debounced filesystem watcher keeping the read-only index fresh
+    /// (`spawn_vault_watcher`, started from `initialized`). `None` before
+    /// `initialized` runs and in tests that don't exercise the watcher.
+    pub watcher: std::sync::Mutex<Option<crate::vault::sync::watcher::VaultWatcher>>,
 }
 
 impl LspBackend {
@@ -118,6 +126,12 @@ impl LanguageServer for LspBackend {
 
     async fn initialized(&self, _params: InitializedParams) {
         self.refresh_canonical_names().await;
+        if let Some(state) = self.state_opt() {
+            match self.spawn_vault_watcher(Arc::clone(&state)) {
+                Ok(w) => *self.watcher.lock().unwrap() = Some(w),
+                Err(e) => tracing::warn!("lsp watcher failed to start: {e}"),
+            }
+        }
         self.client
             .log_message(MessageType::INFO, "clepsydra LSP initialized")
             .await;
@@ -211,9 +225,6 @@ impl LanguageServer for LspBackend {
             Err(e) => tracing::warn!("did_save reindex failed for {reconcile_path}: {e}"),
         }
 
-        // Refresh canonical name snapshot
-        self.refresh_canonical_names().await;
-
         // Mark document as clean
         {
             let mut docs = self.documents.lock().await;
@@ -222,17 +233,11 @@ impl LanguageServer for LspBackend {
             }
         }
 
-        // Re-publish diagnostics for all open documents (snapshot changed)
-        let doc_uris: Vec<Url> = {
-            let docs = self.documents.lock().await;
-            docs.keys().cloned().collect()
-        };
-        for doc_uri in doc_uris {
-            let docs = self.documents.lock().await;
-            if let Some(doc) = docs.get(&doc_uri) {
-                self.publish_diagnostics_for(&doc_uri, doc).await;
-            }
-        }
+        // Refresh canonical name snapshot and re-publish diagnostics for all
+        // open documents (snapshot changed). Shared with the watch-resync
+        // path (`resync_from_watch_batch`) so the two flows cannot drift.
+        refresh_names_and_republish(&self.client, &state, &self.documents, &self.canonical_names)
+            .await;
     }
 
     async fn goto_definition(
@@ -885,12 +890,9 @@ impl LspBackend {
     ///
     /// Returns `None` before `initialize` opens the vault (no root to strip
     /// against), matching the "not part of the vault" case.
-    pub(crate) fn uri_to_vault_path(&self, uri: &Url) -> Option<crate::vault::path::VaultPath> {
+    pub(crate) fn uri_to_vault_path(&self, uri: &Url) -> Option<VaultPath> {
         let state = self.state_opt()?;
-        let file_path = uri.to_file_path().ok()?;
-        let rel = file_path.strip_prefix(state.vault.root()).ok()?;
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
-        crate::vault::path::VaultPath::new(&rel_str).ok()
+        vault_path_for_uri(&state, uri)
     }
 
     /// Reload the canonical name snapshot from the index.
@@ -902,33 +904,51 @@ impl LspBackend {
         let Some(state) = self.state_opt() else {
             return;
         };
-        let result = state
-            .index
-            .with_index(
-                |index, _| -> std::result::Result<HashMap<String, Vec<String>>, rusqlite::Error> {
-                    let mut stmt = index.connection().prepare(
-                        "SELECT cn.canonical_name, p.path \
-                         FROM canonical_names cn \
-                         JOIN pages p ON p.id = cn.page_id \
-                         ORDER BY cn.canonical_name",
-                    )?;
-                    let mut map: HashMap<String, Vec<String>> = HashMap::new();
-                    let rows = stmt.query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?;
-                    for row in rows.flatten() {
-                        map.entry(row.0).or_default().push(row.1);
-                    }
-                    Ok(map)
-                },
-            )
-            .await;
+        refresh_canonical_names(&state, &self.canonical_names).await;
+    }
 
-        match result {
-            Ok(Ok(names)) => *self.canonical_names.write().await = names,
-            Ok(Err(e)) => tracing::error!("failed to load canonical names: {e}"),
-            Err(e) => tracing::error!("index thread error loading canonical names: {e}"),
-        }
+    /// Start the debounced vault watcher and spawn the resync loop that
+    /// consumes its batches.
+    ///
+    /// The returned `VaultWatcher` must be kept alive (stored on
+    /// `self.watcher`) for the process lifetime — dropping it stops the
+    /// underlying `notify` watch. Each drained batch is handed to
+    /// `resync_from_watch_batch`, which reindexes, refreshes the canonical
+    /// snapshot, republishes diagnostics, and notifies on external moves of
+    /// open documents.
+    fn spawn_vault_watcher(
+        &self,
+        state: Arc<state::LspState>,
+    ) -> std::result::Result<
+        crate::vault::sync::watcher::VaultWatcher,
+        notify_debouncer_mini::notify::Error,
+    > {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let watcher = crate::vault::sync::watcher::VaultWatcher::start(
+            state.vault.root().to_path_buf(),
+            std::time::Duration::from_millis(500),
+            tx,
+        )?;
+        let client = self.client.clone();
+        let documents = Arc::clone(&self.documents);
+        let canonical_names = Arc::clone(&self.canonical_names);
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                let mut batch = vec![event];
+                while let Ok(next) = rx.try_recv() {
+                    batch.push(next);
+                }
+                resync_from_watch_batch(
+                    client.clone(),
+                    Arc::clone(&state),
+                    Arc::clone(&documents),
+                    Arc::clone(&canonical_names),
+                    batch,
+                )
+                .await;
+            }
+        });
+        Ok(watcher)
     }
 
     // -----------------------------------------------------------------------
@@ -1355,23 +1375,167 @@ impl LspBackend {
         let Some(state) = self.state_opt() else {
             return;
         };
-        let names = self.canonical_names.read().await;
-        let mut diagnostics =
-            crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
+        publish_diagnostics_for(&self.client, &state, &self.canonical_names, uri, doc).await;
+    }
+}
 
-        // Frontmatter property diagnostics against the base registry.
-        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
-        let path = self
-            .uri_to_vault_path(uri)
-            .map(|vp| vp.as_str().to_string())
-            .unwrap_or_default();
-        diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
-            doc, &registry, &path, &names,
-        ));
-        drop(names);
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
-            .await;
+/// Convert an LSP URI to a vault-relative path, given an already-resolved
+/// `LspState`. Shared core of `LspBackend::uri_to_vault_path` and the
+/// free-function diagnostics path (`publish_diagnostics_for` below), which
+/// run without a `&self` to call the method on.
+fn vault_path_for_uri(state: &state::LspState, uri: &Url) -> Option<VaultPath> {
+    let file_path = uri.to_file_path().ok()?;
+    let rel = file_path.strip_prefix(state.vault.root()).ok()?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    VaultPath::new(&rel_str).ok()
+}
+
+/// Free-function core of `LspBackend::refresh_canonical_names` — reloads the
+/// canonical name snapshot from the index. Shared with the watch-resync path
+/// (via `refresh_names_and_republish`) so the two flows cannot drift.
+async fn refresh_canonical_names(
+    state: &state::LspState,
+    canonical_names: &RwLock<HashMap<String, Vec<String>>>,
+) {
+    let result = state
+        .index
+        .with_index(
+            |index, _| -> std::result::Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+                let mut stmt = index.connection().prepare(
+                    "SELECT cn.canonical_name, p.path \
+                     FROM canonical_names cn \
+                     JOIN pages p ON p.id = cn.page_id \
+                     ORDER BY cn.canonical_name",
+                )?;
+                let mut map: HashMap<String, Vec<String>> = HashMap::new();
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows.flatten() {
+                    map.entry(row.0).or_default().push(row.1);
+                }
+                Ok(map)
+            },
+        )
+        .await;
+
+    match result {
+        Ok(Ok(names)) => *canonical_names.write().await = names,
+        Ok(Err(e)) => tracing::error!("failed to load canonical names: {e}"),
+        Err(e) => tracing::error!("index thread error loading canonical names: {e}"),
+    }
+}
+
+/// Free-function core of `LspBackend::publish_diagnostics_for`. Shared with
+/// the watch-resync path (via `refresh_names_and_republish`) so the two
+/// flows cannot drift.
+async fn publish_diagnostics_for(
+    client: &Client,
+    state: &state::LspState,
+    canonical_names: &RwLock<HashMap<String, Vec<String>>>,
+    uri: &Url,
+    doc: &document::Document,
+) {
+    let names = canonical_names.read().await;
+    let mut diagnostics =
+        crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
+
+    // Frontmatter property diagnostics against the base registry.
+    let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
+    let path = vault_path_for_uri(state, uri)
+        .map(|vp| vp.as_str().to_string())
+        .unwrap_or_default();
+    diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
+        doc, &registry, &path, &names,
+    ));
+    drop(names);
+    client
+        .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
+        .await;
+}
+
+/// Refresh the canonical name snapshot and republish diagnostics for every
+/// open document. This is the exact tail of `did_save`'s post-write flow,
+/// extracted so the watch-resync path (`resync_from_watch_batch`) drives the
+/// identical sequence — the two paths cannot drift apart.
+async fn refresh_names_and_republish(
+    client: &Client,
+    state: &state::LspState,
+    documents: &Arc<Mutex<HashMap<Url, document::Document>>>,
+    canonical_names: &Arc<RwLock<HashMap<String, Vec<String>>>>,
+) {
+    refresh_canonical_names(state, canonical_names).await;
+
+    let doc_uris: Vec<Url> = {
+        let docs = documents.lock().await;
+        docs.keys().cloned().collect()
+    };
+    for doc_uri in doc_uris {
+        let docs = documents.lock().await;
+        if let Some(doc) = docs.get(&doc_uri) {
+            publish_diagnostics_for(client, state, canonical_names, &doc_uri, doc).await;
+        }
+    }
+}
+
+/// Pair Remove/Upsert events sharing a filename: a folder-projection move
+/// (server-side reconcile) shows up as exactly such a pair in one batch.
+fn pair_moves_by_filename(batch: &[ChangeEvent]) -> Vec<(VaultPath, VaultPath)> {
+    let mut moves = Vec::new();
+    for removed in batch {
+        let ChangeEvent::Remove(old) = removed else {
+            continue;
+        };
+        let old_name = old.as_str().rsplit('/').next().unwrap_or(old.as_str());
+        for added in batch {
+            let ChangeEvent::Upsert(new) = added else {
+                continue;
+            };
+            let new_name = new.as_str().rsplit('/').next().unwrap_or(new.as_str());
+            if old_name == new_name && old.as_str() != new.as_str() {
+                moves.push((old.clone(), new.clone()));
+            }
+        }
+    }
+    moves
+}
+
+/// Process one drained batch from the vault watcher: reindex, refresh the
+/// canonical snapshot, republish diagnostics for open docs, and log a
+/// message for any open document that the batch shows was moved externally
+/// (e.g. `clep serve`'s folder-follows-metadata reconcile).
+///
+/// Free function (not a method) so the spawned loop in `spawn_vault_watcher`
+/// can own clones of the backend's shared state independent of `&self`.
+async fn resync_from_watch_batch(
+    client: Client,
+    state: Arc<state::LspState>,
+    documents: Arc<Mutex<HashMap<Url, document::Document>>>,
+    canonical_names: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    batch: Vec<ChangeEvent>,
+) {
+    let moves = pair_moves_by_filename(&batch);
+    if let Err(e) = state.index.process_sync_events(batch).await {
+        tracing::warn!("lsp watch resync failed: {e}");
+        return;
+    }
+    // Refresh snapshot + republish, mirroring the existing post-save flow.
+    refresh_names_and_republish(&client, &state, &documents, &canonical_names).await;
+
+    for (old, new) in moves {
+        let abs_old = state.vault.root().join(old.as_str());
+        if let Ok(uri) = Url::from_file_path(&abs_old)
+            && documents.lock().await.contains_key(&uri)
+        {
+            client
+                .log_message(
+                    MessageType::INFO,
+                    format!(
+                        "clepsydra: {old} moved to {new} (folder follows kind/project); reopen the file"
+                    ),
+                )
+                .await;
+        }
     }
 }
 
@@ -1384,8 +1548,9 @@ pub async fn run_lsp() {
     let (service, socket) = LspService::new(|client| LspBackend {
         client,
         vault_state: tokio::sync::OnceCell::new(),
-        documents: Mutex::new(HashMap::new()),
+        documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
+        watcher: std::sync::Mutex::new(None),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -1395,6 +1560,8 @@ pub async fn run_lsp() {
 mod tests {
     use super::LspBackend;
     use super::test_support::*;
+    use super::{ChangeEvent, VaultPath, pair_moves_by_filename, resync_from_watch_batch};
+    use std::sync::Arc;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -1929,5 +2096,40 @@ mod tests {
             fm_labels.iter().any(|l| l.contains("Solar Cycle")),
             "{fm_labels:?}"
         );
+    }
+
+    // -- Phase 6: watcher-driven resync -------------------------------------
+
+    #[tokio::test]
+    async fn watch_batch_refreshes_canonical_names() {
+        let (backend, _tmp) = make_backend(&[("Note.md", "# Note\n")]);
+        backend.refresh_canonical_names().await;
+        let state = backend.state().unwrap();
+        // Simulate an external creation: write the file, then feed the batch.
+        std::fs::write(state.vault.root().join("Fresh.md"), "# Fresh\n").unwrap();
+        resync_from_watch_batch(
+            backend.client.clone(),
+            Arc::clone(&state),
+            Arc::clone(&backend.documents),
+            Arc::clone(&backend.canonical_names),
+            vec![crate::vault::sync::ChangeEvent::Upsert(
+                crate::vault::path::VaultPath::new("Fresh.md").unwrap(),
+            )],
+        )
+        .await;
+        let names = backend.canonical_names.read().await;
+        assert!(names.keys().any(|k| k.eq_ignore_ascii_case("fresh")));
+    }
+
+    #[test]
+    fn pairs_remove_and_upsert_by_filename() {
+        let batch = vec![
+            ChangeEvent::Remove(VaultPath::new("notes/20260807.a.abc123.md").unwrap()),
+            ChangeEvent::Upsert(VaultPath::new("projects/x/20260807.a.abc123.md").unwrap()),
+        ];
+        let moves = pair_moves_by_filename(&batch);
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].0.as_str(), "notes/20260807.a.abc123.md");
+        assert_eq!(moves[0].1.as_str(), "projects/x/20260807.a.abc123.md");
     }
 }

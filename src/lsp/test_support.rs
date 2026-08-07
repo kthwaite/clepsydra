@@ -76,8 +76,9 @@ pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
     let backend = LspBackend {
         client: test_client(),
         vault_state: tokio::sync::OnceCell::new_with(Some(Arc::clone(&state))),
-        documents: Mutex::new(HashMap::new()),
+        documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
+        watcher: std::sync::Mutex::new(None),
     };
     (backend, tmp)
 }
@@ -88,8 +89,9 @@ pub(crate) fn make_uninitialized_backend() -> LspBackend {
     LspBackend {
         client: test_client(),
         vault_state: tokio::sync::OnceCell::new(),
-        documents: Mutex::new(HashMap::new()),
+        documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
+        watcher: std::sync::Mutex::new(None),
     }
 }
 
