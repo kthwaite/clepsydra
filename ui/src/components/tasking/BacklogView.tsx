@@ -15,6 +15,7 @@
 
 import { useMemo } from "react";
 import type { BoardTask } from "#/api/board";
+import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
   COL_LABEL,
@@ -151,7 +152,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
               {PRI_LABEL[g.pri]}
             </span>
             <span className="cl-mono ml-auto text-[var(--fs-xs)] tracking-[0.14em] text-[var(--ink-3)] [font-variant-numeric:tabular-nums]">
-              {String(g.items.length).padStart(2, "0")} ITEMS
+              {pad2(g.items.length)} ITEMS
             </span>
           </div>
 

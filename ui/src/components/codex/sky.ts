@@ -1,4 +1,5 @@
 import SunCalc from "suncalc";
+import { formatDurationHM, formatTimeHM } from "#/lib/time";
 
 export const MOON_NAMES = [
   "New",
@@ -38,7 +39,7 @@ export function describeMoon(illum: {
   };
 }
 
-export function moonPhase(now: Date): MoonInfo {
+function moonPhase(now: Date): MoonInfo {
   return describeMoon(SunCalc.getMoonIllumination(now));
 }
 
@@ -86,4 +87,70 @@ export function sunArcPosition(now: Date, sunrise: Date, sunset: Date): SunArc {
   const raw = span > 0 ? (now.getTime() - sunrise.getTime()) / span : 0;
   const t = Math.min(1, Math.max(0, raw));
   return { t, ...bezierPoint(t) };
+}
+
+/** The derived sky telemetry rendered by the Atrium Sky card. */
+export interface SkyData {
+  moon: MoonInfo;
+  sunrise: string;
+  sunriseIsTomorrow: boolean;
+  sunset: string;
+  lightLeft: string;
+  arc: SunArc;
+  place: string | null;
+}
+
+interface SkyLocation {
+  latitude?: number | null;
+  longitude?: number | null;
+  label?: string | null;
+}
+
+export function hasCoords(location: SkyLocation | undefined): boolean {
+  return (
+    (location?.latitude ?? null) !== null &&
+    (location?.longitude ?? null) !== null
+  );
+}
+
+/** Fixed 06:00–20:00 local sun times used when no vault location is set. */
+export function fallbackSunTimes(date: Date): { sunrise: Date; sunset: Date } {
+  const at = (h: number) => {
+    const d = new Date(date);
+    d.setHours(h, 0, 0, 0);
+    return d;
+  };
+  return { sunrise: at(6), sunset: at(20) };
+}
+
+/** Full sky telemetry for the Atrium Sky card. */
+export function deriveSky(
+  now: Date,
+  location: SkyLocation | undefined,
+): SkyData {
+  const lat = location?.latitude ?? null;
+  const lon = location?.longitude ?? null;
+  const hasLoc = lat !== null && lon !== null;
+  const getSunTimes = (date: Date) =>
+    hasLoc ? SunCalc.getTimes(date, lat, lon) : fallbackSunTimes(date);
+  const times = getSunTimes(now);
+  const displayedSunrise = selectDisplayedSunrise(
+    now,
+    times.sunrise,
+    times.sunset,
+    () => getSunTimes(nextLocalDate(now)).sunrise,
+  );
+  const remSec = Math.max(
+    0,
+    Math.floor((times.sunset.getTime() - now.getTime()) / 1000),
+  );
+  return {
+    moon: moonPhase(now),
+    sunrise: formatTimeHM(displayedSunrise.time),
+    sunriseIsTomorrow: displayedSunrise.isTomorrow,
+    sunset: formatTimeHM(times.sunset),
+    lightLeft: formatDurationHM(remSec),
+    arc: sunArcPosition(now, times.sunrise, times.sunset),
+    place: location?.label ?? null,
+  };
 }

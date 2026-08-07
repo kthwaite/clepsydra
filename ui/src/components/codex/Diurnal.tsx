@@ -13,32 +13,20 @@ import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
 import { cn } from "#/lib/cn";
-
-function fmtDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function parseDate(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function shiftDate(s: string, delta: number): string {
-  const d = parseDate(s);
-  d.setDate(d.getDate() + delta);
-  return fmtDate(d);
-}
+import {
+  dayOfYear,
+  isoAddDays,
+  localDateKey,
+  parseLocalDate,
+} from "#/lib/time";
 
 function shortDate(s: string): string {
-  const d = parseDate(s);
+  const d = parseLocalDate(s);
   return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
 export function Diurnal() {
-  const today = useMemo(() => fmtDate(new Date()), []);
+  const today = useMemo(() => localDateKey(new Date()), []);
   const [selectedDate, setSelectedDate] = useState(today);
 
   const isToday = selectedDate === today;
@@ -67,14 +55,20 @@ export function Diurnal() {
   );
 
   const goPrev = useCallback(
-    () => setSelectedDate((d) => shiftDate(d, -1)),
+    () => setSelectedDate((d) => isoAddDays(d, -1)),
     [],
   );
-  const goNext = useCallback(() => setSelectedDate((d) => shiftDate(d, 1)), []);
-  const goToday = useCallback(() => setSelectedDate(fmtDate(new Date())), []);
+  const goNext = useCallback(
+    () => setSelectedDate((d) => isoAddDays(d, 1)),
+    [],
+  );
+  const goToday = useCallback(
+    () => setSelectedDate(localDateKey(new Date())),
+    [],
+  );
 
   const dayLabel = useMemo(() => {
-    const d = parseDate(selectedDate);
+    const d = parseLocalDate(selectedDate);
     return d.toLocaleDateString(undefined, {
       weekday: "long",
       day: "numeric",
@@ -148,8 +142,8 @@ export function Diurnal() {
             {dayLabel}
           </div>
           <div className="cl-mono text-[11px]">
-            {parseDate(selectedDate).getFullYear()} · day{" "}
-            {dayOfYear(parseDate(selectedDate))}
+            {parseLocalDate(selectedDate).getFullYear()} · day{" "}
+            {dayOfYear(parseLocalDate(selectedDate))}
           </div>
         </div>
 
@@ -245,7 +239,7 @@ export function Diurnal() {
               Day
             </span>
             <span className="text-ink-2">
-              {dayOfYear(parseDate(selectedDate))} / 365
+              {dayOfYear(parseLocalDate(selectedDate))} / 365
             </span>
           </div>
           <div className="flex justify-between">
@@ -291,15 +285,9 @@ function romanLower(n: number): string {
 
 function relativeDays(dateStr: string, today: string): string {
   if (dateStr === today) return "today";
-  const d1 = parseDate(today).getTime();
-  const d2 = parseDate(dateStr).getTime();
+  const d1 = parseLocalDate(today).getTime();
+  const d2 = parseLocalDate(dateStr).getTime();
   const diff = Math.round((d1 - d2) / (1000 * 60 * 60 * 24));
   if (diff > 0) return `${diff}d`;
   return "—";
-}
-
-function dayOfYear(d: Date): number {
-  const start = new Date(d.getFullYear(), 0, 0);
-  const diff = d.getTime() - start.getTime();
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }

@@ -1,20 +1,49 @@
 import { describe, expect, it } from "vitest";
 import {
+  aphorismForDay,
   buildHeatmap,
-  dayOfYear,
+  daystampLabel,
   deriveInventory,
-  julianDay,
+  formatBclDate,
+  formatBclDuration,
+  formatDotDate,
+  greeting,
   type RecentItem,
   sortRecents,
 } from "./atrium-data";
 
-describe("dayOfYear / julianDay", () => {
-  it("computes day-of-year (1-based)", () => {
-    expect(dayOfYear(new Date(Date.UTC(2026, 0, 1)))).toBe(1);
-    expect(dayOfYear(new Date(Date.UTC(2026, 4, 2)))).toBe(122);
+describe("daystart presentation", () => {
+  it("formats the diegetic dot-date and daystamp", () => {
+    const d = new Date(2026, 7, 7); // a Friday
+    expect(formatDotDate(d)).toBe("2026.08.07");
+    expect(daystampLabel(d)).toBe("2026.08.07 (FRI)");
   });
-  it("computes the Julian Day Number", () => {
-    expect(julianDay(new Date(Date.UTC(2026, 4, 2)))).toBe(2461163);
+
+  it("greets by local time of day", () => {
+    expect(greeting(new Date(2026, 0, 1, 3))).toBe("Still awake?!");
+    expect(greeting(new Date(2026, 0, 1, 9))).toBe("Good morning");
+    expect(greeting(new Date(2026, 0, 1, 14))).toBe("Good afternoon");
+    expect(greeting(new Date(2026, 0, 1, 20))).toBe("Good evening");
+    expect(greeting(new Date(2026, 0, 1, 23))).toBe("Good night");
+  });
+
+  it("rotates the aphorism by day and stays stable within a day", () => {
+    const a = aphorismForDay(new Date(2026, 7, 7, 1));
+    const b = aphorismForDay(new Date(2026, 7, 7, 23));
+    expect(a).toEqual(b);
+    expect(a.text).toBeTruthy();
+    expect(a.who).toBeTruthy();
+  });
+
+  it("formats BCL countdowns with sign and locale separators", () => {
+    expect(formatBclDuration(90_000)).toBe("1d · 1h");
+    expect(formatBclDuration(-90_000)).toBe("+1d · 1h");
+    expect(formatBclDuration(1_234 * 86_400)).toBe("1,234d · 0h");
+  });
+
+  it("formats BCL dates and echoes malformed input", () => {
+    expect(formatBclDate("2054-03-15")).toMatch(/2054/);
+    expect(formatBclDate("not-a-date")).toBe("not-a-date");
   });
 });
 

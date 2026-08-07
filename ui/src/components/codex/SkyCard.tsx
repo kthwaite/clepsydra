@@ -3,18 +3,7 @@ import { cn } from "#/lib/cn";
 import { Card } from "./Card";
 import { DayArc } from "./DayArc";
 import { MoonDisc } from "./MoonDisc";
-import type { MoonInfo, SunArc } from "./sky";
-
-/** The derived sky telemetry rendered by {@link SkyCard}. */
-export interface SkyData {
-  moon: MoonInfo;
-  sunrise: string;
-  sunriseIsTomorrow: boolean;
-  sunset: string;
-  lightLeft: string;
-  arc: SunArc;
-  place: string | null;
-}
+import type { SkyData } from "./sky";
 
 /**
  * The Atrium "Sky" card. The moon phase is accurate regardless of location, but

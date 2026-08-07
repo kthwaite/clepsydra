@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { SkyCard, type SkyData } from "#/components/codex/SkyCard";
+import type { SkyData } from "#/components/codex/sky";
+import { SkyCard } from "#/components/codex/SkyCard";
 
 function makeSky(overrides: Partial<SkyData> = {}): SkyData {
   return {

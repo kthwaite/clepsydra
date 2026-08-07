@@ -13,6 +13,7 @@
 import { useState } from "react";
 import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
+import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { PRI_ORDER } from "./board-constants";
 import { TaskCard } from "./TaskCard";
@@ -167,7 +168,7 @@ export function KanbanView({
                 }
                 data-testid={`kb-cnt-${col.id}`}
               >
-                {String(items.length).padStart(2, "0")}
+                {pad2(items.length)}
                 {col.wip > 0 ? `/${col.wip}` : ""}
               </span>
             </div>

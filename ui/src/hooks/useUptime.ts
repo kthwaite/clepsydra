@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { $api } from "#/api/client";
-
-function format(totalSeconds: number): string {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  return `${h}h ${String(m).padStart(2, "0")}m`;
-}
+import { formatDurationHM } from "#/lib/time";
 
 /**
  * True server uptime, sourced from the backend `/api/vault/uptime` endpoint.
@@ -49,5 +44,5 @@ export function useUptime(): string {
     return () => window.clearInterval(id);
   }, []);
 
-  return format(seconds);
+  return formatDurationHM(seconds);
 }

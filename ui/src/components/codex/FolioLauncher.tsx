@@ -1,7 +1,7 @@
-import { formatRelativeTime } from "#/components/codex/codex-time";
 import { folioDisplayName, shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { kindColorVar, resolveKind } from "#/lib/kind";
+import { formatRelativeTime } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 

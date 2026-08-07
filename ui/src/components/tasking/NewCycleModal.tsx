@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardCycle } from "#/api/board";
 import { useCreateCycle } from "#/api/board";
+import { isoAddDays } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { BoardModalFrame } from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
@@ -65,17 +66,6 @@ export function newCyclePrefill(
     start,
     end,
   };
-}
-
-/** ISO date arithmetic — returns "YYYY-MM-DD" for `iso + days` days. */
-export function isoAddDays(iso: string, days: number): string {
-  // Parse by splitting — avoids timezone-shift issues from `new Date(isoString)`
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(y, m - 1, d + days);
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, "0");
-  const dd = String(dt.getDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
 }
 
 /** "YYYY-MM-DD" → "MM.DD" display string. */

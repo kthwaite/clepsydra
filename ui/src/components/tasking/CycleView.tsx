@@ -16,6 +16,7 @@
 import { useMemo } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { Spark } from "#/components/ui/spark";
+import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
   COL_LABEL,
@@ -260,7 +261,7 @@ export function CycleView({
                 COMMITTED
               </span>
               <b className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]">
-                {String(stats.committed).padStart(2, "0")}
+                {pad2(stats.committed)}
               </b>
             </div>
             <div className="flex flex-col items-end gap-[1px]">
@@ -271,7 +272,7 @@ export function CycleView({
                 className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]"
                 style={{ color: "var(--cool)" }}
               >
-                {String(stats.sealed).padStart(2, "0")}
+                {pad2(stats.sealed)}
               </b>
             </div>
             <div className="flex flex-col items-end gap-[1px]">
@@ -279,7 +280,7 @@ export function CycleView({
                 IN-FIELD
               </span>
               <b className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]">
-                {String(stats.field).padStart(2, "0")}
+                {pad2(stats.field)}
               </b>
             </div>
             <div className="flex flex-col items-end gap-[1px]">
@@ -291,7 +292,7 @@ export function CycleView({
                 data-hot={stats.hold > 0 ? "true" : undefined}
                 style={stats.hold > 0 ? { color: "var(--hot)" } : undefined}
               >
-                {String(stats.hold).padStart(2, "0")}
+                {pad2(stats.hold)}
               </b>
             </div>
           </div>
@@ -354,7 +355,7 @@ export function CycleView({
                   className="ml-auto text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]"
                   data-testid={`cv-lane-count-${g.cid}`}
                 >
-                  {String(g.items.length).padStart(2, "0")}
+                  {pad2(g.items.length)}
                 </span>
               </div>
 

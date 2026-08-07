@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { useStats } from "#/api/index";
 import { useLocation } from "#/api/location";
-import { formatRelativeTime } from "#/components/codex/codex-time";
 import { LocationForm } from "#/components/codex/LocationForm";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
 import { useTheme } from "#/components/ThemeProvider";
@@ -11,6 +10,7 @@ import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
 import { cn } from "#/lib/cn";
 import { ACCENTS, DENSITIES } from "#/lib/theme";
+import { formatRelativeTime } from "#/lib/time";
 import { type SettingsSection, useUiStore } from "#/store/ui";
 
 const sections: { id: SettingsSection; label: string }[] = [

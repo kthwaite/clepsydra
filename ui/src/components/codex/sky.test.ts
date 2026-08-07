@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bezierPoint,
+  deriveSky,
   describeMoon,
+  fallbackSunTimes,
+  hasCoords,
   nextLocalDate,
   selectDisplayedSunrise,
   sunArcPosition,
@@ -92,6 +95,45 @@ describe("selectDisplayedSunrise", () => {
         () => new Date("2026-05-04T05:50:00Z"),
       ),
     ).toEqual({ time: currentSunrise, isTomorrow: false });
+  });
+});
+
+describe("hasCoords", () => {
+  it("requires both coordinates", () => {
+    expect(hasCoords(undefined)).toBe(false);
+    expect(hasCoords({ latitude: 51.5 })).toBe(false);
+    expect(hasCoords({ latitude: 51.5, longitude: null })).toBe(false);
+    expect(hasCoords({ latitude: 51.5, longitude: -0.1 })).toBe(true);
+    expect(hasCoords({ latitude: 0, longitude: 0 })).toBe(true);
+  });
+});
+
+describe("deriveSky (fallback, no location)", () => {
+  it("uses the fixed 06:00–20:00 day and formats telemetry", () => {
+    const noon = new Date(2026, 7, 7, 12, 0, 0);
+    const sky = deriveSky(noon, undefined);
+    expect(sky.sunrise).toBe("06:00");
+    expect(sky.sunset).toBe("20:00");
+    expect(sky.sunriseIsTomorrow).toBe(false);
+    expect(sky.lightLeft).toBe("8h 00m");
+    expect(sky.arc.t).toBeCloseTo((12 - 6) / 14, 5);
+    expect(sky.place).toBeNull();
+    expect(sky.moon.phaseName).toBeTruthy();
+  });
+
+  it("clamps light-left at zero and points at tomorrow's sunrise after sunset", () => {
+    const night = new Date(2026, 7, 7, 21, 30, 0);
+    const sky = deriveSky(night, undefined);
+    expect(sky.lightLeft).toBe("0h 00m");
+    expect(sky.sunriseIsTomorrow).toBe(true);
+    expect(sky.arc.t).toBe(1);
+  });
+
+  it("fallbackSunTimes pins hours on the given local day", () => {
+    const { sunrise, sunset } = fallbackSunTimes(new Date(2026, 7, 7, 15));
+    expect(sunrise.getHours()).toBe(6);
+    expect(sunset.getHours()).toBe(20);
+    expect(sunrise.getDate()).toBe(7);
   });
 });
 
