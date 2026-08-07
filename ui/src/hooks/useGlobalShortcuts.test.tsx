@@ -27,6 +27,7 @@ vi.mock("#/hooks/useOpenTab", () => ({
 }));
 
 import { useGlobalShortcuts } from "#/hooks/useGlobalShortcuts";
+import { todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -87,7 +88,11 @@ describe("useGlobalShortcuts", () => {
     press("h", { metaKey: true });
     expect(navigateMock).toHaveBeenCalledWith({ to: "/" });
     press("d", { metaKey: true });
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/journal" });
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      todayJournalPath(),
+      expect.any(String),
+    );
     press("i", { metaKey: true });
     expect(navigateMock).toHaveBeenCalledWith({ to: "/gazetteer" });
     press("g", { metaKey: true });
@@ -107,7 +112,7 @@ describe("useGlobalShortcuts", () => {
   it("yields to already-handled events (editor conflict policy)", () => {
     renderHook(() => useGlobalShortcuts());
     press("d", { metaKey: true }, { prevented: true });
-    expect(navigateMock).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
   });
 
   it("cycles and closes tabs only in the workspace view", () => {

@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import { useTheme } from "#/components/ThemeProvider";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import {
   GLOBAL_SHORTCUT_IDS,
   type GlobalShortcutId,
@@ -43,6 +44,7 @@ export function useGlobalShortcuts() {
   const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const { toggle: toggleTheme } = useTheme();
   const openTab = useOpenTab();
+  const openTodayJournal = useOpenTodayJournal();
 
   // Exhaustive over GlobalShortcutId: adding a `scope: "global"` registry
   // entry without a binding here is a compile error.
@@ -50,7 +52,7 @@ export function useGlobalShortcuts() {
     () => ({
       "palette.toggle": { run: toggleSearch },
       "nav.atrium": { run: () => navigate({ to: "/" }) },
-      "nav.diurnal": { run: () => navigate({ to: "/journal" }) },
+      "journal.today": { run: openTodayJournal },
       "nav.constellation": { run: () => openTab("graph") },
       "nav.gazetteer": { run: () => navigate({ to: "/gazetteer" }) },
       "nav.tasking": { run: () => navigate({ to: "/tasking" }) },
@@ -76,6 +78,7 @@ export function useGlobalShortcuts() {
       openShortcutHelp,
       toggleTheme,
       openTab,
+      openTodayJournal,
     ],
   );
 

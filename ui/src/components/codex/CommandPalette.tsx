@@ -12,6 +12,7 @@ import { shortFolio } from "#/components/codex/folio-utils";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 import { deriveQuireName } from "#/store/quires";
@@ -45,6 +46,7 @@ export function CommandPalette() {
   const runBoot = useUiStore((s) => s.runBoot);
   const navigate = useNavigate();
   const openTab = useOpenTab();
+  const openTodayJournal = useOpenTodayJournal();
   const { toggle: toggleTheme, diegetic, setDiegetic } = useTheme();
 
   const [q, setQ] = useState("");
@@ -80,9 +82,9 @@ export function CommandPalette() {
       },
       {
         kind: "cmd",
-        id: formatChord(SHORTCUTS["nav.diurnal"].chord),
-        title: "Open Diurnal",
-        action: () => navigate({ to: "/journal" }),
+        id: formatChord(SHORTCUTS["journal.today"].chord),
+        title: "Today's journal",
+        action: () => openTodayJournal(),
       },
       {
         kind: "cmd",
@@ -138,6 +140,7 @@ export function CommandPalette() {
     [
       navigate,
       openTab,
+      openTodayJournal,
       toggleTheme,
       openInscribe,
       openSettings,

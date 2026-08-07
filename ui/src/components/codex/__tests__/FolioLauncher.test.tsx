@@ -9,6 +9,7 @@ vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
 
+import { todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import { FolioLauncher } from "../FolioLauncher";
@@ -48,6 +49,17 @@ describe("FolioLauncher", () => {
       screen.getByRole("button", { name: /open constellation/i }),
     );
     expect(openTabMock).toHaveBeenCalledWith("graph");
+  });
+
+  it("opens today's journal from the launcher", async () => {
+    const user = userEvent.setup();
+    render(<FolioLauncher />);
+    await user.click(screen.getByText("Today's journal"));
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      todayJournalPath(),
+      expect.any(String),
+    );
   });
 
   it("opens a recent folio when its row is clicked", async () => {

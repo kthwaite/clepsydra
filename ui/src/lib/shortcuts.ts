@@ -49,9 +49,9 @@ export const SHORTCUTS = {
     group: "Navigate",
     scope: "global",
   },
-  "nav.diurnal": {
-    chord: { key: "d", mod: true },
-    label: "Open Diurnal",
+  "journal.today": {
+    chord: { key: "d", mod: true, shift: false },
+    label: "Today's journal",
     group: "Navigate",
     scope: "global",
     note: "outside the editor",

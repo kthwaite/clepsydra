@@ -1,5 +1,6 @@
 import { folioDisplayName, shortFolio } from "#/components/codex/folio-utils";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { kindColorVar, resolveKind } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
@@ -15,6 +16,7 @@ const RECENT_LIMIT = 8;
  */
 export function FolioLauncher() {
   const openTab = useOpenTab();
+  const openTodayJournal = useOpenTodayJournal();
   const openSearch = useUiStore((s) => s.openSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const history = useWorkspaceStore((s) => s.openHistory);
@@ -46,6 +48,11 @@ export function FolioLauncher() {
               label="Inscribe new folio"
               hint="⌘N"
               onClick={openInscribe}
+            />
+            <LauncherAction
+              label="Today's journal"
+              hint="⌘D"
+              onClick={openTodayJournal}
             />
             <LauncherAction
               label="Open Constellation"

@@ -6,6 +6,7 @@ import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
 import {
@@ -52,6 +53,7 @@ export function Atrium() {
   const now = useClock();
 
   const openTab = useOpenTab();
+  const openTodayJournal = useOpenTodayJournal();
   const openHistory = useWorkspaceStore((s) => s.openHistory);
   const [recentTab, setRecentTab] = useState<"edited" | "created" | "opened">(
     "edited",
@@ -132,7 +134,7 @@ export function Atrium() {
         <div className="flex min-w-[280px] flex-col gap-2">
           <button
             type="button"
-            onClick={() => navigate({ to: "/journal" })}
+            onClick={openTodayJournal}
             className="group grid grid-cols-[1fr_auto] items-center gap-4 border border-ink bg-ink px-4 py-3.5 text-left text-paper transition-colors hover:border-accent hover:bg-accent"
           >
             <div>

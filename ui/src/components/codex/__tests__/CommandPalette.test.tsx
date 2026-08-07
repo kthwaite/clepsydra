@@ -2,7 +2,10 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
+const { navigateMock, openTabMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn(),
+  openTabMock: vi.fn(),
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
@@ -19,7 +22,7 @@ vi.mock("#/components/ThemeProvider", () => ({
   }),
 }));
 vi.mock("#/hooks/useOpenTab", () => ({
-  useOpenTab: () => vi.fn(),
+  useOpenTab: () => openTabMock,
 }));
 vi.mock("#/store/workspace", () => ({
   useWorkspaceStore: (selector: (state: unknown) => unknown) =>
@@ -27,6 +30,7 @@ vi.mock("#/store/workspace", () => ({
 }));
 
 import { CommandPalette } from "#/components/codex/CommandPalette";
+import { todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
 
 describe("CommandPalette keyboard navigation", () => {
@@ -42,7 +46,11 @@ describe("CommandPalette keyboard navigation", () => {
     await user.click(screen.getByRole("textbox"));
     await user.keyboard("{ArrowDown}{Enter}");
 
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/journal" });
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      todayJournalPath(),
+      expect.any(String),
+    );
     expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
 
@@ -55,5 +63,12 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(navigateMock).not.toHaveBeenCalled();
     expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("lists Today's journal and not Open Diurnal", () => {
+    render(<CommandPalette />);
+
+    expect(screen.getByText("Today's journal")).toBeInTheDocument();
+    expect(screen.queryByText("Open Diurnal")).not.toBeInTheDocument();
   });
 });
