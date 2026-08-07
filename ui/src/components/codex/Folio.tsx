@@ -16,6 +16,7 @@ import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
+import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { cn } from "#/lib/cn";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
@@ -310,12 +311,14 @@ export function Folio({ tabId, path }: FolioProps) {
 
             {/* body — Slate editor styled as dossier prose */}
             <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
-              <SlateEditor
-                key={`${path}:${editor.editorRevision}`}
-                initialValue={editor.initialValue}
-                onChange={editor.onSlateChange}
-                onSaveNow={editor.saveNow}
-              />
+              <WikilinkResolutionProvider path={path}>
+                <SlateEditor
+                  key={`${path}:${editor.editorRevision}`}
+                  initialValue={editor.initialValue}
+                  onChange={editor.onSlateChange}
+                  onSaveNow={editor.saveNow}
+                />
+              </WikilinkResolutionProvider>
             </article>
 
             {/* end of file */}
