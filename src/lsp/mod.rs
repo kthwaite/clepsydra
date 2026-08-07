@@ -1385,7 +1385,28 @@ impl LspBackend {
 /// run without a `&self` to call the method on.
 fn vault_path_for_uri(state: &state::LspState, uri: &Url) -> Option<VaultPath> {
     let file_path = uri.to_file_path().ok()?;
-    let rel = file_path.strip_prefix(state.vault.root()).ok()?;
+    let root = state.vault.root();
+    // `Vault::open` canonicalizes the root, but the editor's URI is whatever
+    // path the user opened — often through a symlink (macOS `/tmp` →
+    // `/private/tmp`, an iCloud or dotfiles symlink to the vault). Try the
+    // canonicalized path first, then the raw one, so neither a symlinked root
+    // nor a not-yet-created file (canonicalize fails on those) silently
+    // detaches the document from the vault.
+    let rel = file_path
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .strip_prefix(root)
+                .map(std::path::Path::to_path_buf)
+                .ok()
+        })
+        .or_else(|| {
+            file_path
+                .strip_prefix(root)
+                .map(std::path::Path::to_path_buf)
+                .ok()
+        })?;
     let rel_str = rel.to_string_lossy().replace('\\', "/");
     VaultPath::new(&rel_str).ok()
 }
@@ -1523,10 +1544,16 @@ async fn resync_from_watch_batch(
     refresh_names_and_republish(&client, &state, &documents, &canonical_names).await;
 
     for (old, new) in moves {
-        let abs_old = state.vault.root().join(old.as_str());
-        if let Ok(uri) = Url::from_file_path(&abs_old)
-            && documents.lock().await.contains_key(&uri)
-        {
+        // Match on the resolved vault path rather than on a reconstructed URI:
+        // the editor's document URIs may run through a symlinked workspace
+        // root, so they need not be string-equal to `root.join(old)`.
+        let is_open = {
+            let documents = documents.lock().await;
+            documents
+                .keys()
+                .any(|uri| vault_path_for_uri(&state, uri).as_ref() == Some(&old))
+        };
+        if is_open {
             client
                 .log_message(
                     MessageType::INFO,
@@ -1819,6 +1846,51 @@ mod tests {
         assert!(
             results.iter().any(|r| r.path == "Loose.md"),
             "frontmatter-less page must still be indexed: {results:?}"
+        );
+    }
+
+    /// A workspace opened through a symlink (macOS `/tmp` → `/private/tmp`, an
+    /// iCloud or dotfiles link) still resolves to vault paths: `Vault::open`
+    /// canonicalizes the root, so a raw `strip_prefix` would fail for every
+    /// document and silently disable didSave, diagnostics, and references.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resolves_documents_opened_through_a_symlinked_root() {
+        let initial = "# Note\n\nneedlebefore\n";
+        let (backend, tmp) = make_backend(&[("Note.md", initial)]);
+        let root = tmp.path().join("vault");
+        let linked_root = tmp.path().join("linked-vault");
+        std::os::unix::fs::symlink(&root, &linked_root).unwrap();
+
+        // The editor's URI travels through the symlink, not the canonical root.
+        let uri = Url::from_file_path(linked_root.join("Note.md")).unwrap();
+        assert_ne!(uri, uri_for(&backend, "Note.md"));
+        open_doc(&backend, &uri, initial).await;
+
+        std::fs::write(root.join("Note.md"), "# Note\n\nneedleafter\n").unwrap();
+        backend
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                text: None,
+            })
+            .await;
+
+        let results = backend
+            .state()
+            .unwrap()
+            .index
+            .search("needleafter".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|r| r.path == "Note.md"),
+            "didSave through a symlinked root must reindex the page: {results:?}"
+        );
+
+        let docs = backend.documents.lock().await;
+        assert!(
+            !docs.get(&uri).unwrap().dirty,
+            "didSave through a symlinked root must clear the dirty flag"
         );
     }
 
