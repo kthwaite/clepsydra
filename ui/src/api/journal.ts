@@ -1,4 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import type { PageEditorOptions } from "#/editor/usePageEditor";
+import { todayJournalPath } from "#/lib/journal";
 import { invalidatePageContent, queryKeys } from "./keys";
 
 const API_BASE = "/api/vault/journal";
@@ -59,6 +62,20 @@ export function useEnsureJournalToday() {
     },
     onSuccess: ({ page }) => invalidatePageContent(qc, page.path),
   });
+}
+
+/** FOLIO's journal wiring: today's journal binds before the file exists and
+ *  is created on first write; every other path edits normally. */
+export function useJournalEditorOptions(
+  path: string,
+): PageEditorOptions | undefined {
+  const ensureToday = useEnsureJournalToday();
+  const mutateAsync = ensureToday.mutateAsync;
+  const isToday = path === todayJournalPath();
+  return useMemo(
+    () => (isToday ? { ensure: () => mutateAsync() } : undefined),
+    [isToday, mutateAsync],
+  );
 }
 
 export function useJournalByDate(date: string) {

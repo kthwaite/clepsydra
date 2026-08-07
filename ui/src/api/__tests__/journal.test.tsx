@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useEnsureJournalToday, useJournalToday } from "../journal";
+import { todayJournalPath } from "#/lib/journal";
+import {
+  useEnsureJournalToday,
+  useJournalEditorOptions,
+  useJournalToday,
+} from "../journal";
 
 function wrapper() {
   const qc = new QueryClient({
@@ -90,5 +95,33 @@ describe("useEnsureJournalToday", () => {
     });
     const out = await result.current.mutateAsync();
     expect(out.created).toBe(false);
+  });
+});
+
+describe("useJournalEditorOptions", () => {
+  it("returns an ensure option for today's journal path", () => {
+    const { result } = renderHook(
+      () => useJournalEditorOptions(todayJournalPath()),
+      { wrapper: wrapper() },
+    );
+    expect(result.current?.ensure).toBeTypeOf("function");
+  });
+
+  it("returns undefined for any other path", () => {
+    const { result } = renderHook(
+      () => useJournalEditorOptions("journals/1999-01-01.md"),
+      { wrapper: wrapper() },
+    );
+    expect(result.current).toBeUndefined();
+  });
+
+  it("is referentially stable across rerenders", () => {
+    const { result, rerender } = renderHook(
+      () => useJournalEditorOptions(todayJournalPath()),
+      { wrapper: wrapper() },
+    );
+    const first = result.current;
+    rerender();
+    expect(result.current).toBe(first);
   });
 });

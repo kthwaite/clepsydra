@@ -47,6 +47,7 @@ vi.mock("#/api/journal", () => ({
   useJournalRecent: () => ({ data: [] }),
   useQuickCapture: () => ({ mutate: vi.fn(), isPending: false }),
   useEnsureJournalToday: () => ({ mutateAsync: vi.fn() }),
+  useJournalEditorOptions: () => undefined,
 }));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],

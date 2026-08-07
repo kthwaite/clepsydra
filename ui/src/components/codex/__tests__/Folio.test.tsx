@@ -20,6 +20,9 @@ vi.mock("#/api/index", () => ({
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
+vi.mock("#/api/journal", () => ({
+  useJournalEditorOptions: () => undefined,
+}));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],
 }));

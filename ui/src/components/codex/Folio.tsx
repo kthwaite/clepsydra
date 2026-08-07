@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
+import { useJournalEditorOptions } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
@@ -33,7 +34,7 @@ const R_TAB_KEY = "clp.folio.r.tab";
 type RTab = "backlinks" | "links" | "tags";
 
 export function Folio({ tabId, path }: FolioProps) {
-  const editor = usePageEditor(path);
+  const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
   const { data: outlinks } = useOutlinks(path);
   const { data: similar } = useSimilar(path);
@@ -139,7 +140,7 @@ export function Folio({ tabId, path }: FolioProps) {
   if (editor.isLoading) {
     return <div className="cl-marg p-6">… fetching folio {path} …</div>;
   }
-  if (editor.error) {
+  if (editor.error && !editor.isDraft) {
     return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
   }
 
