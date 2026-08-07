@@ -82,6 +82,9 @@ every instance of `clep lsp` resolves its own root independently — no
 | Workspace symbols | Page lookup by title across the vault |
 | Code lens | An `N references` lens on each page, resolving to find-references |
 
+See [the Bases guide](bases.md) for base schemas, matching, property
+completions, and diagnostics.
+
 ## Save behavior
 
 On save, `did_save` reindexes the page in the LSP's own in-memory index —
