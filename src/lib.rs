@@ -26,6 +26,7 @@ use app_config::{config_candidates, find_config_path};
 use vault::Vault;
 use vault::index::VaultIndex;
 use vault::index_handle::IndexHandle;
+use vault::path::VaultPath;
 use vault::sync::ChangeEvent;
 use vault::sync::watcher::VaultWatcher;
 
@@ -486,6 +487,35 @@ async fn process_sync_batch(
     }
 }
 
+/// Reconcile pages the watcher just saw change: folder-follows-metadata
+/// (ADR 0001 layer 2). Runs after the batch is indexed so projection sees
+/// fresh frontmatter. A move produces new watch events; reconciling an
+/// already-correct page is a no-op, so the loop terminates.
+async fn reconcile_upserts(
+    index: &IndexHandle,
+    hooks: &Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>>,
+    upserts: Vec<VaultPath>,
+) {
+    for vp in upserts {
+        let hooks = Arc::clone(hooks);
+        let target = vp.as_str().to_string();
+        let result = index
+            .with_index(move |index, vault| {
+                crate::vault::reconcile::reconcile_page(vault, index, &target, &hooks)
+            })
+            .await;
+        match result {
+            Err(e) | Ok(Err(e)) => tracing::warn!("watcher reconcile failed for {vp}: {e}"),
+            Ok(Ok(Some(new_path))) => {
+                tracing::info!(
+                    "watcher reconcile moved {vp} → {new_path} (folder follows kind/project)"
+                );
+            }
+            Ok(Ok(None)) => {}
+        }
+    }
+}
+
 /// Start the file watcher and spawn the sync loop. Returns the watcher, which the
 /// caller MUST keep alive for the server's lifetime.
 fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std::error::Error>> {
@@ -493,6 +523,7 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
     let sync_index = state.index.clone();
     let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
     let sync_change_tx = state.change_tx.clone();
+    let hooks = Arc::clone(&state.hooks);
 
     let watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
 
@@ -502,7 +533,15 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
                 Some(event) => drain_change_batch(event, &mut change_rx),
                 None => break,
             };
+            let upserts: Vec<VaultPath> = batch
+                .iter()
+                .filter_map(|e| match e {
+                    ChangeEvent::Upsert(vp) => Some(vp.clone()),
+                    _ => None,
+                })
+                .collect();
             process_sync_batch(&sync_index, batch, &sync_change_tx).await;
+            reconcile_upserts(&sync_index, &hooks, upserts).await;
         }
     });
 
@@ -915,6 +954,80 @@ mod startup_reconcile_tests {
         assert!(
             !root.join("notes").join("q.md").exists(),
             "source notes/q.md should be gone after the sweep"
+        );
+    }
+}
+
+#[cfg(test)]
+mod watcher_reconcile_tests {
+    use super::*;
+
+    /// The watcher's per-batch reconcile must heal folder drift after indexing:
+    /// a page declaring `type: quote` that still lives under `notes/` is moved
+    /// to `quotes/`. Mirrors `serve_startup_reconciles_drifted_pages`'s fixture,
+    /// but drives the batch path (`process_sync_events` + `reconcile_upserts`)
+    /// instead of the startup sweep.
+    #[tokio::test]
+    async fn watcher_batch_reconciles_drifted_upsert() {
+        let (state, tmp) = state_test_support::make_state().await;
+        let root = tmp.path().join("vault");
+
+        // A drifted page: declares `type: quote` but lives under notes/.
+        let drifted = root.join("notes").join("q.md");
+        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
+        std::fs::write(
+            &drifted,
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nbody",
+        )
+        .unwrap();
+
+        let vp = VaultPath::new("notes/q.md").unwrap();
+        state
+            .index
+            .process_sync_events(vec![ChangeEvent::Upsert(vp.clone())])
+            .await
+            .unwrap();
+
+        reconcile_upserts(&state.index, &state.hooks, vec![vp.clone()]).await;
+
+        assert!(
+            root.join("quotes").join("q.md").exists(),
+            "drifted page should have moved to quotes/q.md"
+        );
+        assert!(
+            !root.join("notes").join("q.md").exists(),
+            "source notes/q.md should be gone after reconcile"
+        );
+    }
+
+    /// A page whose folder already matches its declared kind must be left
+    /// alone: reconcile is a no-op, not a rewrite.
+    #[tokio::test]
+    async fn reconcile_upserts_leaves_clean_pages_alone() {
+        let (state, tmp) = state_test_support::make_state().await;
+        let root = tmp.path().join("vault");
+
+        // A clean page: declares `type: quote` and already lives under quotes/.
+        let clean = root.join("quotes").join("q.md");
+        std::fs::create_dir_all(clean.parent().unwrap()).unwrap();
+        std::fs::write(
+            &clean,
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a2\ntype: quote\n---\nbody",
+        )
+        .unwrap();
+
+        let vp = VaultPath::new("quotes/q.md").unwrap();
+        state
+            .index
+            .process_sync_events(vec![ChangeEvent::Upsert(vp.clone())])
+            .await
+            .unwrap();
+
+        reconcile_upserts(&state.index, &state.hooks, vec![vp.clone()]).await;
+
+        assert!(
+            root.join("quotes").join("q.md").exists(),
+            "clean page should not have moved"
         );
     }
 }
