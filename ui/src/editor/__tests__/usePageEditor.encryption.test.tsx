@@ -1,22 +1,29 @@
 import { QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Descendant, Editor } from "slate";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePageEditor } from "../usePageEditor";
 
 const {
   decryptMarkdownMock,
+  encryptMarkdownMock,
   getIdentityMock,
   markdownToSlateMock,
+  recipientForIdentityMock,
+  registerFlusherMock,
   usePageMock,
   useUpdatePageMock,
   encryptionState,
 } = vi.hoisted(() => ({
   decryptMarkdownMock: vi.fn(),
+  encryptMarkdownMock: vi.fn(),
   getIdentityMock: vi.fn<() => string | null>(),
   markdownToSlateMock: vi.fn((body: string) => [
     { type: "paragraph", children: [{ text: body }] },
   ]),
+  recipientForIdentityMock: vi.fn(),
+  registerFlusherMock: vi.fn(),
   usePageMock: vi.fn(),
   useUpdatePageMock: vi.fn(),
   encryptionState: {
@@ -34,20 +41,29 @@ vi.mock("#/api/pages", () => ({
   useUpdatePage: useUpdatePageMock,
 }));
 
-vi.mock("#/crypto/EncryptionProvider", () => ({
-  useOptionalEncryptionActions: () => ({
+vi.mock("#/crypto/EncryptionProvider", () => {
+  const actions = {
     getIdentity: getIdentityMock,
-  }),
-  useOptionalEncryptionStatus: () => encryptionState.value,
-}));
+    registerFlusher: registerFlusherMock,
+  };
+  return {
+    useOptionalEncryptionActions: () => actions,
+    useOptionalEncryptionStatus: () => encryptionState.value,
+  };
+});
 
 vi.mock("#/crypto/age", () => ({
   decryptMarkdown: decryptMarkdownMock,
+  encryptMarkdown: encryptMarkdownMock,
+  recipientForIdentity: recipientForIdentityMock,
 }));
 
 vi.mock("../convert", () => ({
   markdownToSlate: markdownToSlateMock,
-  slateToMarkdown: vi.fn(() => ""),
+  slateToMarkdown: vi.fn(
+    (value: Array<{ children?: Array<{ text?: string }> }>) =>
+      `${value[0]?.children?.[0]?.text ?? ""}\n`,
+  ),
 }));
 
 const ARMOR_A = `-----BEGIN AGE ENCRYPTED FILE-----
@@ -96,6 +112,28 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function paragraph(text: string): Descendant[] {
+  return [{ type: "paragraph", children: [{ text }] }] as Descendant[];
+}
+
+function astChangeEditor(): Editor {
+  return {
+    operations: [{ type: "insert_text", path: [0, 0], offset: 0, text: "x" }],
+  } as unknown as Editor;
+}
+
+function revisionConflict(currentRevision = "rev-b") {
+  return {
+    status: 409,
+    error: "page changed since it was loaded",
+    detail: {
+      code: "revision_conflict",
+      current_revision: currentRevision,
+    },
+    hint: null,
+  };
+}
+
 describe("usePageEditor encrypted loads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,6 +144,8 @@ describe("usePageEditor encrypted loads", () => {
       lockEpoch: 0,
     };
     getIdentityMock.mockReturnValue(null);
+    recipientForIdentityMock.mockResolvedValue("age1testrecipient");
+    registerFlusherMock.mockReturnValue(vi.fn());
     const page = makePage();
     usePageMock.mockImplementation((path: string) => ({
       data: path === page.path ? page : { ...page, path },
@@ -114,10 +154,6 @@ describe("usePageEditor encrypted loads", () => {
       refetch: vi.fn(),
     }));
     useUpdatePageMock.mockReturnValue({ mutateAsync: vi.fn() });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it("returns a locked state without parsing ciphertext", () => {
@@ -161,6 +197,7 @@ describe("usePageEditor encrypted loads", () => {
         JSON.stringify(call).includes("# mounted plaintext"),
       ),
     ).toBe(false);
+    setQueryData.mockRestore();
   });
 
   it("ignores a stale load after switching paths during decryption", async () => {
@@ -273,5 +310,328 @@ describe("usePageEditor encrypted loads", () => {
       expect(result.current.encryptionState.status).toBe("plain"),
     );
     expect(decryptMarkdownMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("usePageEditor encrypted saves", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    encryptionState.value = {
+      status: "unlocked",
+      keyId: "019fd000-0000-7000-8000-000000000504",
+      error: null,
+      lockEpoch: 0,
+    };
+    getIdentityMock.mockReturnValue("AGE-SECRET-KEY-TEST");
+    recipientForIdentityMock.mockResolvedValue("age1testrecipient");
+    registerFlusherMock.mockReturnValue(vi.fn());
+    decryptMarkdownMock.mockResolvedValue("initial plaintext\n");
+    const page = makePage();
+    usePageMock.mockReturnValue({
+      data: page,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  });
+
+  it("encrypts a body save as canonical armor without sending plaintext", async () => {
+    const actualAge =
+      await vi.importActual<typeof import("#/crypto/age")>("#/crypto/age");
+    const vault = await actualAge.createVaultIdentity();
+    getIdentityMock.mockReturnValue(vault.identity);
+    recipientForIdentityMock.mockImplementation(actualAge.recipientForIdentity);
+    encryptMarkdownMock.mockImplementation(actualAge.encryptMarkdown);
+    const mutateAsync = vi.fn(async (request) => ({
+      ...makePage(),
+      body: request.body.body,
+      revision: "rev-b",
+    }));
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+
+    const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() =>
+      result.current.onSlateChange(
+        paragraph("edited secret plaintext"),
+        astChangeEditor(),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    const request = mutateAsync.mock.calls[0]?.[0];
+    const sentBody = request.body.body as string;
+    expect(sentBody).toMatch(/^-----BEGIN AGE ENCRYPTED FILE-----/);
+    expect(sentBody).toMatch(/-----END AGE ENCRYPTED FILE-----\n$/);
+    expect(JSON.stringify(request)).not.toContain("edited secret plaintext");
+    await expect(
+      actualAge.decryptMarkdown(sentBody, vault.identity),
+    ).resolves.toBe("edited secret plaintext\n");
+  });
+
+  it("omits the body for a metadata-only protected save", async () => {
+    encryptMarkdownMock.mockResolvedValue(ARMOR_B);
+    const mutateAsync = vi.fn(
+      async (_request: { body: Record<string, unknown> }) => ({
+        ...makePage(),
+        body: ARMOR_A,
+        revision: "rev-b",
+        meta: { ...makePage().meta, title: "Renamed" },
+      }),
+    );
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+
+    const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() => result.current.setTitle("Renamed"));
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    expect(mutateAsync.mock.calls[0]?.[0].body).not.toHaveProperty("body");
+    expect(encryptMarkdownMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the successful plaintext as its baseline after a ciphertext response", async () => {
+    encryptMarkdownMock.mockResolvedValue(ARMOR_B);
+    const mutateAsync = vi.fn(async () => ({
+      ...makePage(),
+      body: ARMOR_B,
+      revision: "rev-b",
+    }));
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+
+    const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() =>
+      result.current.onSlateChange(
+        paragraph("saved plaintext"),
+        astChangeEditor(),
+      ),
+    );
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    act(() =>
+      result.current.onSlateChange(
+        paragraph("saved plaintext"),
+        astChangeEditor(),
+      ),
+    );
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    expect(mutateAsync).toHaveBeenCalledOnce();
+    expect(encryptMarkdownMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns one awaitable flight that drains an edit queued during encryption", async () => {
+    const firstEncryption = deferred<string>();
+    const secondEncryption = deferred<string>();
+    encryptMarkdownMock
+      .mockReturnValueOnce(firstEncryption.promise)
+      .mockReturnValueOnce(secondEncryption.promise);
+    const mutateAsync = vi
+      .fn()
+      .mockImplementationOnce(async () => ({
+        ...makePage(),
+        body: ARMOR_A,
+        revision: "rev-b",
+      }))
+      .mockImplementationOnce(async () => ({
+        ...makePage(),
+        body: ARMOR_B,
+        revision: "rev-c",
+      }));
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+
+    const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() =>
+      result.current.onSlateChange(paragraph("first edit"), astChangeEditor()),
+    );
+    let firstSave!: Promise<void>;
+    act(() => {
+      firstSave = result.current.saveNow();
+    });
+    await waitFor(() => expect(encryptMarkdownMock).toHaveBeenCalledOnce());
+
+    act(() =>
+      result.current.onSlateChange(paragraph("queued edit"), astChangeEditor()),
+    );
+    const queuedSave = result.current.saveNow();
+    expect(queuedSave).toBe(firstSave);
+    firstEncryption.resolve(ARMOR_A);
+    await waitFor(() => expect(encryptMarkdownMock).toHaveBeenCalledTimes(2));
+    expect(encryptMarkdownMock.mock.calls[1]?.[0]).toBe("queued edit\n");
+
+    await act(async () => {
+      secondEncryption.resolve(ARMOR_B);
+      await queuedSave;
+    });
+    expect(mutateAsync).toHaveBeenCalledTimes(2);
+    expect(result.current.saveStatus).toBe("saved");
+  });
+
+  it("registers an awaitable save flusher only for the encrypted mount", async () => {
+    const unregister = vi.fn();
+    registerFlusherMock.mockReturnValue(unregister);
+    const encryption = deferred<string>();
+    encryptMarkdownMock.mockReturnValue(encryption.promise);
+    const mutateAsync = vi.fn(async () => ({
+      ...makePage(),
+      body: ARMOR_B,
+      revision: "rev-b",
+    }));
+    useUpdatePageMock.mockReturnValue({ mutateAsync });
+
+    const { result, unmount } = renderHook(() =>
+      usePageEditor("notes/protected-a.md"),
+    );
+    await waitFor(() => expect(registerFlusherMock).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() =>
+      result.current.onSlateChange(paragraph("flush me"), astChangeEditor()),
+    );
+
+    const flusher = registerFlusherMock.mock.calls[0]?.[0];
+    const flushing = flusher();
+    let settled = false;
+    void flushing.then(() => {
+      settled = true;
+    });
+    await waitFor(() => expect(encryptMarkdownMock).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+
+    await act(async () => {
+      encryption.resolve(ARMOR_B);
+      await flushing;
+    });
+    expect(settled).toBe(true);
+    unmount();
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it("decrypts a ciphertext conflict reload and resets the plaintext baseline", async () => {
+    let currentPage = makePage();
+    const latest = makePage("notes/protected-a.md", ARMOR_B, "rev-b");
+    const refetch = vi.fn(async () => {
+      currentPage = latest;
+      return { data: latest };
+    });
+    usePageMock.mockImplementation(() => ({
+      data: currentPage,
+      isLoading: false,
+      error: null,
+      refetch,
+    }));
+    decryptMarkdownMock.mockImplementation(async (armor: string) =>
+      armor === ARMOR_B ? "reloaded plaintext\n" : "initial plaintext\n",
+    );
+    useUpdatePageMock.mockReturnValue({
+      mutateAsync: vi.fn().mockRejectedValue(revisionConflict()),
+    });
+
+    const { result, rerender } = renderHook(() =>
+      usePageEditor("notes/protected-a.md"),
+    );
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() =>
+      result.current.onSlateChange(paragraph("local edit"), astChangeEditor()),
+    );
+    await act(async () => {
+      await expect(result.current.saveNow()).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+
+    await act(async () => {
+      await result.current.reloadAfterConflict();
+    });
+    rerender();
+    await waitFor(() =>
+      expect(result.current.encryptionState).toEqual({
+        status: "plain",
+        body: "reloaded plaintext\n",
+      }),
+    );
+
+    expect(markdownToSlateMock).not.toHaveBeenCalledWith(ARMOR_B);
+    expect(markdownToSlateMock).toHaveBeenCalledWith("reloaded plaintext\n");
+    expect(result.current.revisionConflict).toBeNull();
+    expect(result.current.saveStatus).toBe("saved");
+  });
+
+  it("keeps a wrong-key conflict reload non-editable", async () => {
+    let currentPage = makePage();
+    const latest = makePage("notes/protected-a.md", ARMOR_B, "rev-b");
+    const refetch = vi.fn(async () => {
+      currentPage = latest;
+      return { data: latest };
+    });
+    usePageMock.mockImplementation(() => ({
+      data: currentPage,
+      isLoading: false,
+      error: null,
+      refetch,
+    }));
+    decryptMarkdownMock.mockImplementation(async (armor: string) => {
+      if (armor === ARMOR_B) throw new Error("SENSITIVE AUTH DETAIL");
+      return "initial plaintext\n";
+    });
+    useUpdatePageMock.mockReturnValue({
+      mutateAsync: vi.fn().mockRejectedValue(revisionConflict()),
+    });
+
+    const { result, rerender } = renderHook(() =>
+      usePageEditor("notes/protected-a.md"),
+    );
+    await waitFor(() =>
+      expect(result.current.encryptionState.status).toBe("plain"),
+    );
+    act(() =>
+      result.current.onSlateChange(paragraph("local edit"), astChangeEditor()),
+    );
+    await act(async () => {
+      await expect(result.current.saveNow()).rejects.toMatchObject({
+        status: 409,
+      });
+    });
+    await act(async () => {
+      await result.current.reloadAfterConflict();
+    });
+    rerender();
+
+    await waitFor(() =>
+      expect(result.current.encryptionState).toEqual({
+        status: "error",
+        error: "Unable to authenticate encrypted note.",
+      }),
+    );
+    expect(result.current.revisionConflict).toEqual({
+      currentRevision: "rev-b",
+    });
+    expect(result.current.saveStatus).toBe("error");
+    expect(markdownToSlateMock).not.toHaveBeenCalledWith(ARMOR_B);
+    expect(JSON.stringify(result.current)).not.toContain(
+      "SENSITIVE AUTH DETAIL",
+    );
   });
 });

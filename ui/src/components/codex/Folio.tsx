@@ -103,7 +103,7 @@ export function Folio({ tabId, path }: FolioProps) {
       if (e.defaultPrevented) return;
       if (matchesChord(e, SHORTCUTS["folio.save"].chord)) {
         e.preventDefault();
-        saveNow();
+        void saveNow().catch(() => undefined);
       }
     };
     window.addEventListener("keydown", onKeyDown);
