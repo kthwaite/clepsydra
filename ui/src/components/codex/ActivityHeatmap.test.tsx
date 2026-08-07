@@ -117,6 +117,51 @@ describe("ActivityHeatmap", () => {
     expect(dialog).toBeVisible();
   });
 
+  it("stays open when focus remains inside after the pointer leaves", async () => {
+    const user = userEvent.setup();
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+
+    const activeDay = screen.getByRole("button", {
+      name: /2 May 2026, 6 captures/i,
+    });
+    await user.hover(activeDay);
+    const dialog = await screen.findByRole("dialog");
+    await user.unhover(activeDay);
+    await user.hover(dialog);
+    act(() =>
+      screen.getByRole("button", { name: "Open Page 2" }).focus(),
+    );
+    await user.unhover(dialog);
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+    window.setTimeout(resolve, 150);
+    await promise;
+    expect(dialog).toBeVisible();
+  });
+
+  it("exposes native dialog disclosure state on day buttons", async () => {
+    const user = userEvent.setup();
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+
+    const emptyDay = screen.getByRole("button", {
+      name: /1 May 2026, 0 captures/i,
+    });
+    const activeDay = screen.getByRole("button", {
+      name: /2 May 2026, 6 captures/i,
+    });
+    expect(activeDay).toHaveAttribute("aria-haspopup", "dialog");
+    expect(activeDay).toHaveAttribute("aria-expanded", "false");
+    expect(activeDay).not.toHaveAttribute("aria-controls");
+
+    await user.hover(activeDay);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.id).not.toBe("");
+    expect(activeDay).toHaveAttribute("aria-expanded", "true");
+    expect(activeDay).toHaveAttribute("aria-controls", dialog.id);
+    expect(emptyDay).toHaveAttribute("aria-expanded", "false");
+    expect(emptyDay).not.toHaveAttribute("aria-controls");
+  });
+
   it("opens on click, dismisses outside, and falls back to a page path", async () => {
     const user = userEvent.setup();
     const onOpenPage = vi.fn();

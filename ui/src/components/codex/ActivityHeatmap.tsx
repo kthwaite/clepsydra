@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Dialog, Heading, Popover } from "react-aria-components";
 import { cn } from "#/lib/cn";
 import type { HeatmapDay } from "./atrium-data";
@@ -47,6 +47,7 @@ export function ActivityHeatmap({
   current,
   onOpenPage,
 }: ActivityHeatmapProps): React.JSX.Element {
+  const dialogId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const [activeDay, setActiveDay] = useState<HeatmapDay | null>(null);
@@ -131,6 +132,11 @@ export function ActivityHeatmap({
                       key={day.date}
                       type="button"
                       aria-label={`${date}, ${captureCount(day.count)}`}
+                      aria-haspopup="dialog"
+                      aria-expanded={activeDay?.date === day.date}
+                      aria-controls={
+                        activeDay?.date === day.date ? dialogId : undefined
+                      }
                       className={cn(
                         cellClassName,
                         "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1",
@@ -187,14 +193,21 @@ export function ActivityHeatmap({
         placement="top"
         className="z-50 w-72 border border-rule bg-paper outline-none"
         onPointerEnter={cancelClose}
-        onPointerLeave={scheduleClose}
+        onPointerLeave={(event) => {
+          if (!event.currentTarget.contains(document.activeElement)) {
+            scheduleClose();
+          }
+        }}
         onFocusCapture={cancelClose}
         onBlurCapture={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget)) scheduleClose();
         }}
       >
         {activeDay ? (
-          <Dialog className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1">
+          <Dialog
+            id={dialogId}
+            className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1"
+          >
             <div className="border-b border-rule bg-paper-2 px-3 py-2">
               <Heading
                 slot="title"
