@@ -91,6 +91,11 @@ export function buildDocsIndex(pages: readonly DocPage[]): readonly DocSearchSec
 
     const tree = mdxParser.parse(page.source) as Root;
     for (const node of tree.children) {
+      // MDX parses CommonMark-indented code as a paragraph at its source column.
+      if ((node.position?.start.column ?? 1) > 4) {
+        continue;
+      }
+
       if (node.type === "heading") {
         if (node.depth === 1) {
           continue;
