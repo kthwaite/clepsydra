@@ -20,6 +20,9 @@ vi.mock("#/editor/SlateEditor", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
+  // Diurnal now mounts WikilinkResolutionProvider, which reads the outlinks
+  // query for the journal page.
+  useOutlinks: () => ({ data: [], refetch: vi.fn() }),
 }));
 vi.mock("#/api/journal", () => ({
   useJournalByDate: () => ({ data: undefined, isLoading: false, error: null }),

@@ -12,6 +12,7 @@ import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
+import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { cn } from "#/lib/cn";
 import {
   dayOfYear,
@@ -186,12 +187,14 @@ export function Diurnal() {
               onAliasesChange={editor.setAliases}
             />
             <article className="mt-4">
-              <SlateEditor
-                key={`${journalPath}:${editor.editorRevision}`}
-                initialValue={editor.initialValue}
-                onChange={editor.onSlateChange}
-                onSaveNow={editor.saveNow}
-              />
+              <WikilinkResolutionProvider path={journalPath}>
+                <SlateEditor
+                  key={`${journalPath}:${editor.editorRevision}`}
+                  initialValue={editor.initialValue}
+                  onChange={editor.onSlateChange}
+                  onSaveNow={editor.saveNow}
+                />
+              </WikilinkResolutionProvider>
             </article>
             {backlinks && backlinks.length > 0 && (
               <>
