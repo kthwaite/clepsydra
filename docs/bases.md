@@ -91,7 +91,7 @@ The built-in system fields are:
 id, path, title, kind, project, tags, aliases, created_at, updated_at, journal_date, word_count
 ```
 
-They can be used in filters, sorting, and columns without property declarations. A bare field name resolves system-first, so `kind` means the resolved page kind and `prop.kind` means a raw page property named `kind`. Use `sys.kind` to make the system-field intent explicit. The same `sys.` and `prop.` prefixes work for other field references.
+They can all be used in columns and with their supported filter operators without property declarations. Scalar system fields can also be used for sorting; `tags` and `aliases` cannot be sorted because they are multi-valued. A bare field name resolves system-first, so `kind` means the resolved page kind and `prop.kind` means a raw page property named `kind`. Use `sys.kind` to make the system-field intent explicit. The same `sys.` and `prop.` prefixes work for other field references.
 
 A base may not declare a property whose name shadows a system field. If a page already has such an extra key, it can still be addressed with `prop.<name>`, but the base loader reports an undeclared-property diagnostic because it cannot appear in `[properties]`.
 
@@ -186,7 +186,7 @@ columns = ["title", "author", "rating", "started"]
 
 Open `/bases/<slug>` to use the base. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. Clicking a title opens that page.
 
-System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. A successful edit patches the page's TOML frontmatter and updates `updated_at`, preserving untouched keys and comments. A stale edit is rejected rather than overwriting a newer page revision.
+System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. For a page that already uses TOML `+++` frontmatter, a successful edit surgically patches the frontmatter and updates `updated_at`, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision.
 
 The UI does not author base definitions. Edit the `.base.toml` file to change membership, schemas, or saved views.
 
