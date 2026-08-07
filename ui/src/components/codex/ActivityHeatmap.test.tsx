@@ -119,9 +119,7 @@ describe("ActivityHeatmap", () => {
     });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    const { promise, resolve } = Promise.withResolvers<void>();
-    window.setTimeout(resolve, 250);
-    await act(async () => promise);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(activeDay).toHaveFocus();
   });
@@ -137,9 +135,7 @@ describe("ActivityHeatmap", () => {
     const dialog = await screen.findByRole("dialog");
     await user.unhover(activeDay);
     await user.hover(dialog);
-    const { promise, resolve } = Promise.withResolvers<void>();
-    window.setTimeout(resolve, 150);
-    await promise;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
     expect(dialog).toBeVisible();
   });
 
@@ -159,9 +155,7 @@ describe("ActivityHeatmap", () => {
     );
     await user.unhover(dialog);
 
-    const { promise, resolve } = Promise.withResolvers<void>();
-    window.setTimeout(resolve, 150);
-    await promise;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
     expect(dialog).toBeVisible();
   });
 

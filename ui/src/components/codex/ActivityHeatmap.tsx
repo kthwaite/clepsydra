@@ -196,7 +196,6 @@ export function ActivityHeatmap({
         onOpenChange={(isOpen) => {
           if (!isOpen) closeDay();
         }}
-        isDismissable
         shouldCloseOnInteractOutside={(element) =>
           !triggerRef.current?.contains(element)
         }
@@ -208,16 +207,20 @@ export function ActivityHeatmap({
             scheduleClose();
           }
         }}
-        onFocusCapture={cancelClose}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) scheduleClose();
-        }}
       >
         {activeDay ? (
-          <Dialog
-            id={dialogId}
-            className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1"
+          <div
+            onFocusCapture={cancelClose}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                scheduleClose();
+              }
+            }}
           >
+            <Dialog
+              id={dialogId}
+              className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1"
+            >
             <div className="border-b border-rule bg-paper-2 px-3 py-2">
               <Heading
                 slot="title"
@@ -255,7 +258,8 @@ export function ActivityHeatmap({
                 ) : null}
               </div>
             ) : null}
-          </Dialog>
+            </Dialog>
+          </div>
         ) : null}
       </Popover>
     </>
