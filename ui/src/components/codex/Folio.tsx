@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { useJournalEditorOptions } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
@@ -9,10 +9,12 @@ import {
   shortFolio,
 } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
+import { LockedFolio } from "#/components/codex/LockedFolio";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
+import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
@@ -33,6 +35,13 @@ type FolioProps = {
 
 const R_TAB_KEY = "clp.folio.r.tab";
 type RTab = "backlinks" | "links" | "tags";
+const EMPTY_EDITOR_VALUE: [] = [];
+
+const NoteProtectionDialog = lazy(() =>
+  import("#/components/codex/NoteProtectionDialog").then((module) => ({
+    default: module.NoteProtectionDialog,
+  })),
+);
 
 export function Folio({ tabId, path }: FolioProps) {
   const editor = usePageEditor(path, useJournalEditorOptions(path));
@@ -45,7 +54,11 @@ export function Folio({ tabId, path }: FolioProps) {
   const assign = useAssignPage();
   const projects = useProjects();
   const { setProgress } = useReadingProgress();
+  const encryptionActions = useOptionalEncryptionActions();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [protectionDialog, setProtectionDialog] = useState<
+    "protect" | "unprotect" | null
+  >(null);
 
   // Assigning a kind/project writes frontmatter AND moves the file, so the
   // page path changes. Repoint the open tab to the new path; because FOLIO is
@@ -125,14 +138,20 @@ export function Folio({ tabId, path }: FolioProps) {
   const presentation = presentationFor(kind);
   const inferred = editor.inferred;
   const project = editor.project;
+  const encrypted = editor.encrypted === true;
+  const encryptionState = editor.encryptionState ?? {
+    status: "plain" as const,
+    body: editor.bodyMarkdown,
+  };
+  const visibleEditorValue =
+    encrypted && encryptionState.status !== "plain"
+      ? EMPTY_EDITOR_VALUE
+      : editor.initialValue;
   const wordCount = useMemo(
-    () => countWordsFromSlate(editor.initialValue),
-    [editor.initialValue],
+    () => countWordsFromSlate(visibleEditorValue),
+    [visibleEditorValue],
   );
-  const toc = useMemo(
-    () => buildToc(editor.initialValue),
-    [editor.initialValue],
-  );
+  const toc = useMemo(() => buildToc(visibleEditorValue), [visibleEditorValue]);
   const { activeIndex, scrollTo } = useScrollSpy(
     bodyRef,
     editor.editorRevision,
@@ -143,6 +162,16 @@ export function Folio({ tabId, path }: FolioProps) {
   }
   if (editor.error && !editor.isDraft) {
     return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
+  }
+  if (encrypted && encryptionState.status !== "plain") {
+    return (
+      <LockedFolio
+        path={path}
+        title={editor.title}
+        tags={editor.tags ?? []}
+        state={encryptionState}
+      />
+    );
   }
 
   const lw = left.collapsed ? 34 : left.width;
@@ -205,6 +234,21 @@ export function Folio({ tabId, path }: FolioProps) {
             <KV
               k="Path"
               v={<span className="break-all text-ink-mute">{path}</span>}
+            />
+            <KV
+              k="Protection"
+              v={
+                <button
+                  type="button"
+                  className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
+                  disabled={!editor.pageId}
+                  onClick={() =>
+                    setProtectionDialog(encrypted ? "unprotect" : "protect")
+                  }
+                >
+                  {encrypted ? "encrypted · remove" : "plaintext · protect"}
+                </button>
+              }
             />
           </Block>
 
@@ -307,6 +351,8 @@ export function Folio({ tabId, path }: FolioProps) {
                 aliases={editor.aliases}
                 onAliasesChange={editor.setAliases}
                 onSaveNow={editor.saveNow}
+                encrypted={encrypted}
+                onRequestLock={encryptionActions?.lock}
               />
             </div>
 
@@ -430,6 +476,24 @@ export function Folio({ tabId, path }: FolioProps) {
           </div>
         </aside>
       )}
+      {protectionDialog && editor.pageId ? (
+        <Suspense fallback={null}>
+          <NoteProtectionDialog
+            mode={protectionDialog}
+            page={{
+              id: editor.pageId,
+              path,
+              title: editor.title,
+              tags: editor.tags ?? [],
+            }}
+            saveNow={editor.saveNow}
+            getPlaintext={editor.getPlaintext}
+            getRevision={editor.getRevision}
+            onComplete={() => setProtectionDialog(null)}
+            onDismiss={() => setProtectionDialog(null)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

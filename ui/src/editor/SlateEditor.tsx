@@ -101,7 +101,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 interface SlateEditorProps {
   initialValue: Descendant[];
   onChange: (value: Descendant[], editor: Editor) => void;
-  onSaveNow: () => void;
+  onSaveNow: () => void | Promise<void>;
 }
 
 interface ComboboxTrigger {
@@ -397,7 +397,7 @@ export function SlateEditor({
     // --- Save ---
     if (matchesChord(event, SHORTCUTS["folio.save"].chord)) {
       event.preventDefault();
-      onSaveNow();
+      void Promise.resolve(onSaveNow()).catch(() => undefined);
       return;
     }
 

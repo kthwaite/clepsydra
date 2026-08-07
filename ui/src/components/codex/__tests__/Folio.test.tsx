@@ -20,6 +20,23 @@ vi.mock("#/api/index", () => ({
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
+vi.mock("#/api/encryption", () => ({
+  useEncryptionConfig: () => ({
+    data: { initialized: true, wrapped_identity: "wrapped" },
+    isPending: false,
+    error: null,
+  }),
+}));
+vi.mock("#/crypto/EncryptionProvider", () => ({
+  useOptionalEncryptionActions: () => ({ lock: vi.fn() }),
+  useEncryptionActions: () => ({
+    unlockWithPassword: vi.fn(),
+    unlockWithImportedIdentity: vi.fn(),
+  }),
+}));
+vi.mock("#/editor/SlateEditor", () => ({
+  SlateEditor: () => <div data-testid="slate-editor">Slate editor</div>,
+}));
 vi.mock("#/api/journal", () => ({
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
@@ -66,5 +83,34 @@ describe("Folio invalid-tab recovery", () => {
     render(<Folio tabId="t1" path="notes/gone.md" />);
     await user.click(screen.getByRole("button", { name: /close tab/i }));
     expect(useWorkspaceStore.getState().tabs).toHaveLength(0);
+  });
+
+  it("renders a locked folio without mounting Slate or exposing armor", () => {
+    const armor = "-----BEGIN AGE ENCRYPTED FILE----- SECRET ARMOR";
+    usePageEditorMock.mockReturnValue({
+      isLoading: false,
+      error: null,
+      isDraft: false,
+      title: "Private plans",
+      tags: ["private"],
+      saveNow: vi.fn(),
+      kind: "NOTE",
+      bodyMarkdown: "",
+      inferred: true,
+      project: null,
+      initialValue: [{ type: "paragraph", children: [{ text: armor }] }],
+      editorRevision: 1,
+      encrypted: true,
+      encryptionState: { status: "locked" },
+    });
+
+    render(<Folio tabId="t1" path="notes/private.md" />);
+
+    expect(
+      screen.getByRole("heading", { name: "Private plans" }),
+    ).toBeVisible();
+    expect(screen.queryByTestId("slate-editor")).toBeNull();
+    expect(document.body.textContent).not.toContain(armor);
+    expect(screen.queryByText(/END OF FILE/)).toBeNull();
   });
 });

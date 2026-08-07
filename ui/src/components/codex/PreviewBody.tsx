@@ -24,6 +24,7 @@ export type PreviewBodyProps = {
   page?: {
     meta: { title?: string | null; tags?: string[] | null };
     body: string;
+    encrypted?: boolean;
   };
   /** Backlink rows as returned by `useBacklinks`; undefined while loading. */
   backlinks?: unknown[];
@@ -43,9 +44,10 @@ export function PreviewBody({
   showTags = true,
 }: PreviewBodyProps) {
   const title = page?.meta.title || path;
-  const kind = resolveKind({ path, body: page?.body });
-  const markdown = page ? previewMarkdownSource(page.body) : "";
-  const words = page ? countWords(page.body) : 0;
+  const encrypted = page?.encrypted === true;
+  const kind = resolveKind({ path, body: encrypted ? undefined : page?.body });
+  const markdown = page && !encrypted ? previewMarkdownSource(page.body) : "";
+  const words = page && !encrypted ? countWords(page.body) : 0;
   const tags = page?.meta.tags ?? [];
 
   return (
@@ -55,12 +57,17 @@ export function PreviewBody({
           {kindLabel(kind)}
         </span>
         <span className="cl-mono text-[9px] text-ink-mute">
-          {words} wd · ↘{backlinks?.length ?? 0}
+          {encrypted ? "locked" : `${words} wd`} · ↘{backlinks?.length ?? 0}
         </span>
       </div>
       <div className="mb-[3px] font-sans text-[14px] font-bold leading-[1.2]">
         {title}
       </div>
+      {encrypted ? (
+        <div className="cl-mono my-3 border border-rule-soft bg-paper-2 px-2 py-3 text-center text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+          Protected note · open to unlock
+        </div>
+      ) : null}
       {markdown && (
         <div
           className="max-h-[160px] overflow-hidden"

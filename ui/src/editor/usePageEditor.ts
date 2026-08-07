@@ -98,6 +98,10 @@ interface PageEditorState {
   inferred: boolean;
   project: string | null;
   encryptionState: DecryptedBodyState;
+  pageId: string | null;
+  encrypted: boolean;
+  getPlaintext: () => string;
+  getRevision: () => string;
 }
 
 export function usePageEditor(
@@ -638,6 +642,15 @@ export function usePageEditor(
     };
   }, [doSave]);
 
+  const getPlaintext = useCallback(() => {
+    const bodyDirty = bodyEditGenRef.current > savedBodyGenRef.current;
+    return bodyDirty
+      ? slateToMarkdown(editorValueRef.current)
+      : savedRef.current.body;
+  }, []);
+
+  const getRevision = useCallback(() => revisionRef.current, []);
+
   return {
     isLoading,
     error: pageNotFound && canDraft ? null : error,
@@ -663,5 +676,9 @@ export function usePageEditor(
     inferred: page?.inferred ?? true,
     project: page?.project ?? null,
     encryptionState,
+    pageId: page?.meta.id ?? null,
+    encrypted: page?.encrypted ?? false,
+    getPlaintext,
+    getRevision,
   };
 }
