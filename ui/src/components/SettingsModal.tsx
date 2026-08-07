@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
+import { useEncryptionConfig } from "#/api/encryption";
 import { useStats } from "#/api/index";
 import { useLocation } from "#/api/location";
 import { LocationForm } from "#/components/codex/LocationForm";
@@ -21,6 +22,12 @@ const sections: { id: SettingsSection; label: string }[] = [
   { id: "editor", label: "Editor" },
   { id: "advanced", label: "Advanced" },
 ];
+
+const EncryptionSetupDialog = lazy(() =>
+  import("#/components/codex/EncryptionSetupDialog").then((module) => ({
+    default: module.EncryptionSetupDialog,
+  })),
+);
 
 export function SettingsModal() {
   const isOpen = useUiStore((s) => s.isSettingsOpen);
@@ -139,6 +146,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
 
   return (
     <>
+      <EncryptionSettings />
       <SettingsCard
         title="Diagnostics"
         description="Performance and debugging controls will be available here."
@@ -149,6 +157,62 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
         description="Import/export and maintenance actions are planned for this section."
         trailing={<ComingSoonBadge />}
       />
+    </>
+  );
+}
+
+function EncryptionSettings() {
+  const config = useEncryptionConfig();
+  const [dialogMode, setDialogMode] = useState<
+    "setup" | "change-password" | null
+  >(null);
+  const initialized = config.data?.initialized === true;
+  const canChangePassword =
+    initialized && Boolean(config.data?.wrapped_identity);
+
+  return (
+    <>
+      <SettingsCard
+        title="Encrypted notes"
+        description={
+          initialized
+            ? `Vault key configured${config.data?.key_id ? ` · ${config.data.key_id}` : ""}. Decrypted identities remain only in the current session.`
+            : "Configure an age identity before protecting notes. Exporting the recovery identity is essential: encrypted notes cannot be recovered without it or the password-wrapped copy."
+        }
+        trailing={
+          config.isPending ? (
+            <span className="text-xs text-muted-foreground">loading…</span>
+          ) : initialized ? (
+            canChangePassword ? (
+              <button
+                type="button"
+                className="cl-btn"
+                onClick={() => setDialogMode("change-password")}
+              >
+                Change password
+              </button>
+            ) : (
+              <Badge>recovery identity only</Badge>
+            )
+          ) : (
+            <button
+              type="button"
+              className="cl-btn cl-btn-hot"
+              onClick={() => setDialogMode("setup")}
+            >
+              Set up encryption
+            </button>
+          )
+        }
+      />
+      {dialogMode ? (
+        <Suspense fallback={null}>
+          <EncryptionSetupDialog
+            mode={dialogMode}
+            onDismiss={() => setDialogMode(null)}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }
