@@ -48,6 +48,11 @@ kind presentation inside FOLIO.
 - **Asides are timestamped server-side.** The capture endpoint prepends the
   capture time, so every client (palette, browser extension, MCP
   `vault_journal_capture`) produces a consistent journal timeline.
+  Exemption: content whose first line already opens a markdown block
+  construct (list item, task, ordered item, heading, blockquote, code fence)
+  is appended verbatim — captured tasks (`- [ ] … [due:: …]`) must keep
+  their syntax at line start for the task deriver, as existing capture
+  usage and tests rely on.
 
 ## Behavior contract
 
@@ -79,18 +84,24 @@ kind presentation inside FOLIO.
   (chord ⌘⇧D): a one-line prompt that appends to today's journal via the
   capture endpoint, creating the journal if needed. Success clears and closes
   the prompt; failure shows the error inline in the prompt.
-- Captured asides land as `- HH:MM — <content>` (server-local 24-hour time)
-  at the end of today's journal body. Multi-line capture content keeps the
-  stamp on its first line; subsequent lines append unchanged.
+- Captured plain-prose asides land as `- HH:MM — <content>` (24-hour time
+  from the server clock — the same clock that defines "today") at the end of
+  today's journal body. Multi-line capture content keeps the stamp on its
+  first line; subsequent lines append unchanged. Captures that already open
+  a block construct (task/list/heading/quote/fence lines) append verbatim,
+  unstamped.
 
 ## Backend changes (`src/api/journal.rs`)
 
-`capture_today` prepends the stamp before appending:
+`capture_today` stamps plain prose before appending:
 
-- Formats `now` (already obtained from `state.clock`) as `%H:%M` and writes
-  `- {stamp} — {content}\n` instead of `{content}\n`. The
-  ensure-then-append flow, conflict handling, and response shape are
-  untouched. No OpenAPI change (journal routes carry no utoipa annotations).
+- A helper (`format_capture_entry`) formats `now` (already obtained from
+  `state.clock`) as `%H:%M` and writes `- {stamp} — {content}\n` when the
+  content's first line is plain prose; content already opening a block
+  construct (`- `, `* `, `+ `, `> `, `#`, code fence, `1. `/`1) ` ordered
+  items) passes through verbatim. The ensure-then-append flow, conflict
+  handling, and response shape are untouched. No OpenAPI change (journal
+  routes carry no utoipa annotations).
 
 ## Frontend changes
 
