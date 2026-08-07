@@ -38,6 +38,10 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::pages::move_page,
         crate::api::pages::assign_page,
         crate::api::pages::assign_bulk,
+        // Encryption keyring
+        crate::api::encryption::get_encryption_config,
+        crate::api::encryption::setup_encryption,
+        crate::api::encryption::rewrap_wrapped_identity,
         // Folders
         crate::api::folders::list_folders,
         crate::api::folders::list_folder_tree,
@@ -143,6 +147,9 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::api::pages::AssignRequest,
             crate::api::pages::BulkAssignRequest,
             crate::api::pages::BulkAssignResponse,
+            crate::api::encryption::EncryptionConfigResponse,
+            crate::api::encryption::SetupEncryptionRequest,
+            crate::api::encryption::RewrapIdentityRequest,
             // Folders
             crate::api::folders::FolderInfo,
             crate::api::folders::FolderListing,

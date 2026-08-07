@@ -7,6 +7,7 @@ pub mod bcl;
 pub mod blocks;
 pub mod board;
 pub mod deeplink;
+pub mod encryption;
 pub mod error;
 pub mod events;
 pub mod folders;
@@ -107,6 +108,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
 pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<AppState>> {
     Router::new()
         .route("/events", axum::routing::get(events::event_stream))
+        .nest("/encryption", encryption::router())
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())
         .nest("/pages-assign", pages::assign_router())

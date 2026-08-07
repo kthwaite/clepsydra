@@ -4,16 +4,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use axum::http::StatusCode;
+use base64::prelude::{BASE64_STANDARD, Engine as _};
+use clepsydra::api::openapi::ApiDoc;
+use clepsydra::vault::keyring::MAX_WRAPPED_IDENTITY_BYTES;
 use clepsydra::vault::page::{Page, page_revision};
 use clepsydra::vault::path::VaultPath;
 use serde_json::{Value, json};
 use support::ApiFixture;
+use utoipa::OpenApi;
 
 const PLAIN_ID: &str = "019fd000-0000-7000-8000-000000000401";
 const PROTECTED_ID: &str = "019fd000-0000-7000-8000-000000000402";
 const INVALID_ARMOR_ID: &str = "019fd000-0000-7000-8000-000000000403";
 const KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
 const UNKNOWN_ID: &str = "019fd000-0000-7000-8000-000000000499";
+const KEYRING_ID: &str = "019fd000-0000-7000-8000-000000000504";
 const ARMOR: &str = include_str!("support/fixtures/private-note.age");
 
 fn plain_page(id: &str, title: &str, body: &str) -> String {
@@ -30,6 +35,23 @@ fn protected_page(id: &str, title: &str) -> String {
 
 fn encryption_descriptor() -> Value {
     json!({ "format": "age", "version": 1, "key_id": KEY_ID })
+}
+
+fn keyring_recipient() -> String {
+    format!("age1{}", "q".repeat(58))
+}
+
+fn armor_variant(marker: &[u8]) -> String {
+    let mut decoded = b"age-encryption.org/v1\n".to_vec();
+    decoded.extend_from_slice(marker);
+    let encoded = BASE64_STANDARD.encode(decoded);
+    let payload = encoded
+        .as_bytes()
+        .chunks(64)
+        .map(|line| std::str::from_utf8(line).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("-----BEGIN AGE ENCRYPTED FILE-----\n{payload}\n-----END AGE ENCRYPTED FILE-----\n")
 }
 
 fn cache_artifacts(db_path: &Path) -> [PathBuf; 3] {
@@ -419,4 +441,205 @@ async fn regular_updates_fail_closed_for_protected_bodies_but_allow_metadata() {
     .unwrap();
     assert_eq!(page.meta.title.as_deref(), Some("Metadata changed"));
     assert_eq!(page.body, ARMOR);
+}
+
+#[tokio::test]
+async fn keyring_setup_read_duplicate_and_revision_locked_rewrap_contract() {
+    let fixture = ApiFixture::builder().build();
+    let recipient = keyring_recipient();
+
+    let initial = get_json(&fixture, "/api/vault/encryption").await;
+    assert_eq!(
+        initial,
+        json!({
+            "initialized": false,
+            "key_id": null,
+            "recipient": null,
+            "wrapped_identity": null,
+            "revision": null,
+        })
+    );
+
+    let response = fixture
+        .server
+        .post("/api/vault/encryption/setup")
+        .json(&json!({
+            "key_id": KEYRING_ID,
+            "recipient": recipient,
+            "wrapped_identity": ARMOR,
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: Value = response.json();
+    assert_eq!(created["initialized"], true);
+    assert_eq!(created["key_id"], KEYRING_ID);
+    assert_eq!(created["recipient"], keyring_recipient());
+    assert_eq!(created["wrapped_identity"], ARMOR);
+    assert_eq!(created["revision"].as_str().unwrap().len(), 64);
+    assert!(created.get("keys").is_none());
+    assert!(created.get("wrapped_identity_file").is_none());
+    assert_eq!(get_json(&fixture, "/api/vault/encryption").await, created);
+
+    fixture
+        .server
+        .post("/api/vault/encryption/setup")
+        .json(&json!({
+            "key_id": KEYRING_ID,
+            "recipient": keyring_recipient(),
+            "wrapped_identity": ARMOR,
+        }))
+        .await
+        .assert_status(StatusCode::CONFLICT);
+
+    let replacement = armor_variant(b"password changed");
+    let stale = fixture
+        .server
+        .put("/api/vault/encryption/wrapped-identity")
+        .json(&json!({
+            "expected_revision": "0".repeat(64),
+            "wrapped_identity": replacement,
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let stale_error: Value = stale.json();
+    assert_eq!(
+        stale_error["detail"]["current_revision"],
+        created["revision"]
+    );
+    assert_eq!(get_json(&fixture, "/api/vault/encryption").await, created);
+
+    let response = fixture
+        .server
+        .put("/api/vault/encryption/wrapped-identity")
+        .json(&json!({
+            "expected_revision": created["revision"],
+            "wrapped_identity": replacement,
+        }))
+        .await;
+    response.assert_status_ok();
+    let rewrapped: Value = response.json();
+    assert_eq!(rewrapped["initialized"], true);
+    assert_eq!(rewrapped["key_id"], KEYRING_ID);
+    assert_eq!(rewrapped["recipient"], keyring_recipient());
+    assert_eq!(rewrapped["wrapped_identity"], replacement);
+    assert_ne!(rewrapped["revision"], created["revision"]);
+}
+
+#[tokio::test]
+async fn keyring_endpoints_validate_public_inputs_and_wrapped_armor() {
+    let fixture = ApiFixture::builder().build();
+
+    fixture
+        .server
+        .put("/api/vault/encryption/wrapped-identity")
+        .json(&json!({
+            "expected_revision": "0".repeat(64),
+            "wrapped_identity": ARMOR,
+        }))
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+
+    for request in [
+        json!({
+            "key_id": "../escape",
+            "recipient": keyring_recipient(),
+            "wrapped_identity": ARMOR,
+        }),
+        json!({
+            "key_id": KEYRING_ID,
+            "recipient": "not-an-age-recipient",
+            "wrapped_identity": ARMOR,
+        }),
+        json!({
+            "key_id": KEYRING_ID,
+            "recipient": keyring_recipient(),
+            "wrapped_identity": "SENSITIVE_INVALID_ARMOR",
+        }),
+    ] {
+        fixture
+            .server
+            .post("/api/vault/encryption/setup")
+            .json(&request)
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    fixture
+        .server
+        .post("/api/vault/encryption/setup")
+        .json(&json!({
+            "key_id": KEYRING_ID,
+            "recipient": keyring_recipient(),
+            "wrapped_identity": "x".repeat(MAX_WRAPPED_IDENTITY_BYTES + 1),
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    fixture
+        .server
+        .post("/api/vault/encryption/setup")
+        .json(&json!({
+            "key_id": KEYRING_ID,
+            "recipient": keyring_recipient(),
+            "wrapped_identity": ARMOR,
+            "password": "must never be accepted",
+        }))
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("escape.identity.age")
+            .exists()
+    );
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join(".clepsydra/crypto/keyring.toml")
+            .exists()
+    );
+}
+
+#[test]
+fn keyring_openapi_has_only_wrapped_identity_not_unlock_secrets() {
+    let spec = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    for path in [
+        "/api/vault/encryption",
+        "/api/vault/encryption/setup",
+        "/api/vault/encryption/wrapped-identity",
+    ] {
+        assert!(spec["paths"].get(path).is_some(), "missing {path}");
+    }
+
+    let schemas = &spec["components"]["schemas"];
+    let setup = &schemas["SetupEncryptionRequest"]["properties"];
+    assert!(setup.get("key_id").is_some());
+    assert!(setup.get("recipient").is_some());
+    assert!(setup.get("wrapped_identity").is_some());
+    let rewrap = &schemas["RewrapIdentityRequest"]["properties"];
+    assert!(rewrap.get("expected_revision").is_some());
+    assert!(rewrap.get("wrapped_identity").is_some());
+
+    let request_schema_text = format!("{setup}{rewrap}").to_lowercase();
+    for forbidden in [
+        "password",
+        "passphrase",
+        "identity",
+        "private_key",
+        "plaintext",
+    ] {
+        assert!(setup.get(forbidden).is_none());
+        assert!(rewrap.get(forbidden).is_none());
+    }
+    for forbidden in ["password", "passphrase", "private_key", "plaintext"] {
+        assert!(
+            !request_schema_text.contains(forbidden),
+            "request schema exposed forbidden field: {forbidden}"
+        );
+    }
 }
