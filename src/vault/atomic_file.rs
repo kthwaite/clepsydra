@@ -59,6 +59,35 @@ pub fn atomic_create(path: &Path, content: &[u8]) -> Result<(), AtomicPublicatio
     )
 }
 
+/// Publish a newly created sensitive file with owner-only permissions.
+///
+/// On Unix the temporary file is set to `0600` before any bytes are written or
+/// the destination becomes visible, avoiding an umask-dependent exposure
+/// window. Other platforms retain [`atomic_create`] semantics; callers may
+/// apply their platform-specific access controls after publication.
+#[cfg(unix)]
+pub fn atomic_create_owner_only(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    atomic_write_with(
+        path,
+        content,
+        Some(fs::Permissions::from_mode(0o600)),
+        |file, content| {
+            file.write_all(content)?;
+            file.sync_all()
+        },
+        install_noreplace,
+        sync_parent,
+        remove_temporary,
+    )
+}
+
+#[cfg(not(unix))]
+pub fn atomic_create_owner_only(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
+    atomic_create(path, content)
+}
+
 /// Replace a file without exposing a partial write while retaining the
 /// destination's permissions.
 ///

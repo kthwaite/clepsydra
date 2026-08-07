@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
 import type { Descendant, Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useBoardStore } from "#/store/board";
+import { useWorkspaceStore } from "#/store/workspace";
 import { usePageEditor } from "../usePageEditor";
 
 const {
@@ -72,6 +74,25 @@ YWdlLWVuY3J5cHRlZC1ib2R5LWE=
 const ARMOR_B = `-----BEGIN AGE ENCRYPTED FILE-----
 YWdlLWVuY3J5cHRlZC1ib2R5LWI=
 -----END AGE ENCRYPTED FILE-----`;
+const KNOWN_SECRET = "CLEPSYDRA_UI_SECRET_4a2ec791_日本語_🔐";
+
+function persistedBrowserState(): string {
+  return JSON.stringify({
+    localStorage: Array.from({ length: window.localStorage.length }, (_, index) => {
+      const key = window.localStorage.key(index);
+      return key === null ? null : [key, window.localStorage.getItem(key)];
+    }),
+    sessionStorage: Array.from(
+      { length: window.sessionStorage.length },
+      (_, index) => {
+        const key = window.sessionStorage.key(index);
+        return key === null ? null : [key, window.sessionStorage.getItem(key)];
+      },
+    ),
+    workspace: useWorkspaceStore.getState(),
+    board: useBoardStore.getState(),
+  });
+}
 
 function makePage(
   path = "notes/protected-a.md",
@@ -335,7 +356,7 @@ describe("usePageEditor encrypted saves", () => {
     });
   });
 
-  it("encrypts a body save as canonical armor without sending plaintext", async () => {
+  it("encrypts a body save without leaking plaintext to requests or persisted UI state", async () => {
     const actualAge =
       await vi.importActual<typeof import("#/crypto/age")>("#/crypto/age");
     const vault = await actualAge.createVaultIdentity();
@@ -349,13 +370,15 @@ describe("usePageEditor encrypted saves", () => {
     }));
     useUpdatePageMock.mockReturnValue({ mutateAsync });
 
-    const { result } = renderHook(() => usePageEditor("notes/protected-a.md"));
+    const { result, rerender } = renderHook(() =>
+      usePageEditor("notes/protected-a.md"),
+    );
     await waitFor(() =>
       expect(result.current.encryptionState.status).toBe("plain"),
     );
     act(() =>
       result.current.onSlateChange(
-        paragraph("edited secret plaintext"),
+        paragraph(KNOWN_SECRET),
         astChangeEditor(),
       ),
     );
@@ -368,10 +391,24 @@ describe("usePageEditor encrypted saves", () => {
     const sentBody = request.body.body as string;
     expect(sentBody).toMatch(/^-----BEGIN AGE ENCRYPTED FILE-----/);
     expect(sentBody).toMatch(/-----END AGE ENCRYPTED FILE-----\n$/);
-    expect(JSON.stringify(request)).not.toContain("edited secret plaintext");
+    expect(JSON.stringify(request)).not.toContain(KNOWN_SECRET);
     await expect(
       actualAge.decryptMarkdown(sentBody, vault.identity),
-    ).resolves.toBe("edited secret plaintext\n");
+    ).resolves.toBe(`${KNOWN_SECRET}\n`);
+    expect(persistedBrowserState()).not.toContain(KNOWN_SECRET);
+
+    getIdentityMock.mockReturnValue(null);
+    encryptionState.value = {
+      ...encryptionState.value,
+      status: "locked",
+      lockEpoch: 1,
+    };
+    rerender();
+    await waitFor(() =>
+      expect(result.current.encryptionState).toEqual({ status: "locked" }),
+    );
+    expect(result.current.bodyMarkdown).toBe("");
+    expect(persistedBrowserState()).not.toContain(KNOWN_SECRET);
   });
 
   it("omits the body for a metadata-only protected save", async () => {

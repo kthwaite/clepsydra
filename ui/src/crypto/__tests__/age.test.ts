@@ -9,6 +9,7 @@ import {
 import cliArmor from "./fixtures/cli-note.age?raw";
 import fixtureIdentityFile from "./fixtures/interop.identity.txt?raw";
 import typescriptArmor from "./fixtures/typescript-note.age?raw";
+import wrappedIdentityArmor from "./fixtures/wrapped-identity.age?raw";
 
 const fixtureIdentity = fixtureIdentityFile
   .split("\n")
@@ -111,5 +112,11 @@ describe("age adapter", () => {
     await expect(
       decryptMarkdown(typescriptArmor, fixtureIdentity),
     ).resolves.toBe("TypeScript interoperability: こんにちは 🔐\n");
+  });
+
+  it("unwraps the password fixture independently verified by the CLI", async () => {
+    await expect(
+      unwrapIdentity(wrappedIdentityArmor, "fixture-password-v1"),
+    ).resolves.toBe(fixtureIdentity);
   });
 });

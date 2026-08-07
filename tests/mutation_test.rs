@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use clepsydra::vault::Vault;
 use clepsydra::vault::atomic_file::{
-    AtomicPublicationError, atomic_create, atomic_replace, atomic_replace_with,
+    AtomicPublicationError, atomic_create, atomic_create_owner_only, atomic_replace,
+    atomic_replace_with,
 };
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
@@ -1063,6 +1064,22 @@ fn mutation_coordinator_atomic_create_publishes_complete_content() {
     atomic_create(&path, b"complete new content").unwrap();
 
     assert_eq!(fs::read(path).unwrap(), b"complete new content");
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_owner_only_create_publishes_with_private_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("wrapped-identity.age");
+
+    atomic_create_owner_only(&path, b"sensitive ciphertext").unwrap();
+
+    assert_eq!(
+        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 #[cfg(windows)]

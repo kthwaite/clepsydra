@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::atomic_file::{AtomicPublicationError, atomic_create, atomic_replace};
+use super::atomic_file::{AtomicPublicationError, atomic_create_owner_only, atomic_replace};
 use super::encryption::{MAX_AGE_ARMOR_BYTES, validate_age_armor};
 
 const KEYRING_VERSION: u8 = 1;
@@ -111,12 +111,13 @@ pub fn setup_keyring(
     let identity_path = identity_path(vault_root, key_id);
     let mut identity_created = false;
     if let Some(armor) = wrapped_identity {
-        atomic_create(&identity_path, armor.as_bytes()).map_err(KeyringError::Publication)?;
+        atomic_create_owner_only(&identity_path, armor.as_bytes())
+            .map_err(KeyringError::Publication)?;
         identity_created = true;
         set_owner_only_file(&identity_path)?;
     }
 
-    match atomic_create(&keyring_path, metadata.as_bytes()) {
+    match atomic_create_owner_only(&keyring_path, metadata.as_bytes()) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             if identity_created {
@@ -173,7 +174,8 @@ pub fn rewrap_identity(
             set_owner_only_file(&identity_path)?;
         }
         (false, Some(armor)) => {
-            atomic_create(&identity_path, armor.as_bytes()).map_err(KeyringError::Publication)?;
+            atomic_create_owner_only(&identity_path, armor.as_bytes())
+                .map_err(KeyringError::Publication)?;
             set_owner_only_file(&identity_path)?;
             keyring.keys[active_index].wrapped_identity_file = Some(identity_file_name(&key_id));
             let metadata = serialize_keyring(&keyring)?;
