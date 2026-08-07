@@ -164,6 +164,42 @@ export function usePageEditor(
     return markdownToSlate(page.body);
   }, [page]);
 
+  // A new path is a new page lifecycle: discard the previous page's local
+  // baseline before the sync effect below gets a chance to adopt the new
+  // page, so it never leaks into the next page while its data loads — most
+  // importantly into a 404 draft, whose masked error would otherwise render
+  // a live editor over stale values from the page just left. Declared above
+  // the sync effect so that within one commit (e.g. a cache-hit path change
+  // that delivers the new page synchronously) the order is reset-then-adopt,
+  // not adopt-then-reset. previousPathRef distinguishes an actual path
+  // change from the initial mount (where resetting would clobber the sync
+  // effect's result).
+  const previousPathRef = useRef(path);
+  useEffect(() => {
+    if (previousPathRef.current === path) return;
+    previousPathRef.current = path;
+
+    setEnsured(false);
+    titleRef.current = "";
+    tagsRef.current = [];
+    aliasesRef.current = [];
+    setTitleState("");
+    setTagsState([]);
+    setAliasesState([]);
+    savedRef.current = { title: "", tags: [], aliases: [], body: "" };
+    editorValueRef.current = [];
+    revisionRef.current = "";
+    bodyEditGenRef.current = 0;
+    metaEditGenRef.current = 0;
+    savedBodyGenRef.current = 0;
+    savedMetaGenRef.current = 0;
+    conflictRef.current = null;
+    setRevisionConflict(null);
+    setSaveError(null);
+    setSaveStatus("saved");
+    setEditorRevision((revision) => revision + 1);
+  }, [path]);
+
   // Sync server data → local state on initial load and genuine external changes.
   // Skip when we have unsaved local edits (dirty), to prevent refetches
   // triggered by our own saves from overwriting in-flight user work.
@@ -192,38 +228,6 @@ export function usePageEditor(
     }
     setSaveStatus("saved");
   }, [page]);
-
-  // A new path is a new page lifecycle: discard the previous page's local
-  // baseline so it never leaks into the next page while its data loads —
-  // most importantly into a 404 draft, whose masked error would otherwise
-  // render a live editor over stale values from the page just left.
-  // previousPathRef distinguishes an actual path change from the initial
-  // mount (where resetting would clobber the [page] sync effect's result).
-  const previousPathRef = useRef(path);
-  useEffect(() => {
-    if (previousPathRef.current === path) return;
-    previousPathRef.current = path;
-
-    setEnsured(false);
-    titleRef.current = "";
-    tagsRef.current = [];
-    aliasesRef.current = [];
-    setTitleState("");
-    setTagsState([]);
-    setAliasesState([]);
-    savedRef.current = { title: "", tags: [], aliases: [], body: "" };
-    editorValueRef.current = [];
-    revisionRef.current = "";
-    bodyEditGenRef.current = 0;
-    metaEditGenRef.current = 0;
-    savedBodyGenRef.current = 0;
-    savedMetaGenRef.current = 0;
-    conflictRef.current = null;
-    setRevisionConflict(null);
-    setSaveError(null);
-    setSaveStatus("saved");
-    setEditorRevision((revision) => revision + 1);
-  }, [path]);
 
   const doSave = useCallback(() => {
     if (timerRef.current) {

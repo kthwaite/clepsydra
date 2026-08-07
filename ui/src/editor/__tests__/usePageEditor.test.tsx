@@ -472,4 +472,40 @@ describe("usePageEditor draft mode", () => {
     expect(request.body.title).toBeUndefined();
     expect(result.current.title).toBe("2026-08-06");
   });
+
+  it("adopts a cached page that arrives in the same render as a path change", () => {
+    const pageA = {
+      ...makePage("Old body"),
+      path: "journals/2026-08-05.md",
+      revision: "rev-a2",
+      meta: { ...makePage("Old body").meta, title: "2026-08-05" },
+    };
+    const pageB = {
+      ...makePage("Today body"),
+      path: "journals/2026-08-06.md",
+      revision: "rev-b",
+      meta: { ...makePage("Today body").meta, title: "2026-08-06" },
+    };
+    usePageMock.mockImplementation((path: string) => ({
+      data: path === "journals/2026-08-05.md" ? pageA : pageB,
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    }));
+    const ensure = vi.fn();
+
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => usePageEditor(path, { ensure }),
+      { initialProps: { path: "journals/2026-08-05.md" } },
+    );
+
+    expect(result.current.title).toBe("2026-08-05");
+
+    rerender({ path: "journals/2026-08-06.md" });
+
+    expect(result.current.title).toBe("2026-08-06");
+    expect(result.current.isDraft).toBe(false);
+    expect(result.current.bodyMarkdown).toBe("Today body\n");
+    expect(ensure).not.toHaveBeenCalled();
+  });
 });
