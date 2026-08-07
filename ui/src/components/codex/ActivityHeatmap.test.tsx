@@ -100,6 +100,32 @@ describe("ActivityHeatmap", () => {
     );
   });
 
+  it("stays closed after Escape restores focus to the day button", async () => {
+    const user = userEvent.setup();
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+
+    const activeDay = screen.getByRole("button", {
+      name: /2 May 2026, 6 captures/i,
+    });
+    act(() => activeDay.focus());
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    act(() => {
+      activeDay.blur();
+      activeDay.focus();
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+    window.setTimeout(resolve, 250);
+    await act(async () => promise);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(activeDay).toHaveFocus();
+  });
+
   it("keeps the popover open while the pointer moves into it", async () => {
     const user = userEvent.setup();
     render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);

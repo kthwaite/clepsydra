@@ -50,6 +50,7 @@ export function ActivityHeatmap({
   const dialogId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const suppressedFocusTargetRef = useRef<HTMLButtonElement | null>(null);
   const [activeDay, setActiveDay] = useState<HeatmapDay | null>(null);
 
   function cancelClose() {
@@ -64,14 +65,23 @@ export function ActivityHeatmap({
     setActiveDay(day);
   }
 
+  function focusDay(day: HeatmapDay, trigger: HTMLButtonElement) {
+    if (suppressedFocusTargetRef.current === trigger) {
+      suppressedFocusTargetRef.current = null;
+      return;
+    }
+    openDay(day, trigger);
+  }
+
   function closeDay() {
     cancelClose();
+    suppressedFocusTargetRef.current = triggerRef.current;
     setActiveDay(null);
   }
 
   function scheduleClose() {
     cancelClose();
-    closeTimerRef.current = window.setTimeout(() => setActiveDay(null), 100);
+    closeTimerRef.current = window.setTimeout(closeDay, 100);
   }
 
   useEffect(() => cancelClose, []);
@@ -147,7 +157,7 @@ export function ActivityHeatmap({
                           scheduleClose();
                         }
                       }}
-                      onFocus={(event) => openDay(day, event.currentTarget)}
+                      onFocus={(event) => focusDay(day, event.currentTarget)}
                       onBlur={scheduleClose}
                       onClick={(event) => openDay(day, event.currentTarget)}
                     />
