@@ -6,6 +6,7 @@ pub mod hover;
 pub mod queries;
 pub mod references;
 pub mod rename;
+pub mod state;
 pub mod symbols;
 
 #[cfg(test)]
