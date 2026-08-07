@@ -1756,6 +1756,72 @@ mod tests {
         );
     }
 
+    /// The Global Constraint (ADR 0001): the standalone LSP process must never
+    /// write vault files. Frontmatter repair is the sharpest edge — a page with
+    /// no frontmatter at all, and a page whose frontmatter lacks `created_at`,
+    /// both make `parse_or_repair_frontmatter` ask for a rewrite. Under
+    /// `clep serve` that rewrite lands on disk; under `clep lsp` it must stay
+    /// in memory, at `initialize` (`open_lsp_state`) and on `didSave` alike.
+    #[tokio::test]
+    async fn lsp_never_rewrites_vault_files_to_repair_frontmatter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+
+        // No frontmatter fences at all.
+        let loose = "# Loose\n\nneedleloose\n";
+        std::fs::write(root.join("Loose.md"), loose).unwrap();
+        // Valid frontmatter, but missing created_at/updated_at.
+        let partial = "+++\nid = \"0190f8a0-0000-7000-8000-0000000000b1\"\n+++\n\nneedlepartial\n";
+        std::fs::write(root.join("Partial.md"), partial).unwrap();
+
+        let before = snapshot_tree(&root);
+
+        // initialize: full index build over both pages.
+        let backend = backend_for_root(&root);
+        assert_eq!(
+            snapshot_tree(&root),
+            before,
+            "open_lsp_state must leave every vault file byte-identical"
+        );
+
+        // didSave on each page: index_page runs the same repair path.
+        for rel in ["Loose.md", "Partial.md"] {
+            let uri = uri_for(&backend, rel);
+            open_doc(
+                &backend,
+                &uri,
+                &String::from_utf8(before[rel].clone()).unwrap(),
+            )
+            .await;
+            backend
+                .did_save(DidSaveTextDocumentParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    text: None,
+                })
+                .await;
+        }
+        assert_eq!(
+            snapshot_tree(&root),
+            before,
+            "did_save must leave every vault file byte-identical"
+        );
+
+        // The repaired metadata is still indexed in memory — read-only does not
+        // mean "unindexed".
+        let results = backend
+            .state()
+            .unwrap()
+            .index
+            .search("needleloose".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|r| r.path == "Loose.md"),
+            "frontmatter-less page must still be indexed: {results:?}"
+        );
+    }
+
     #[tokio::test]
     async fn backlink_to_range_used_in_references() {
         let (backend, _tmp) = make_backend(&[
