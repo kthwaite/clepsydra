@@ -353,6 +353,30 @@ pub(crate) fn init_logging() {
         .try_init();
 }
 
+/// Initialize tracing/logging to stderr only.
+///
+/// `clep lsp` speaks the LSP protocol on stdout, so tracing output must never
+/// land there. `init_logging` defaults to stdout, which is exactly right for
+/// `clep serve` and exactly wrong here — hence a separate initializer rather
+/// than a flag on the shared one. Uses try_init so repeated calls (e.g. in
+/// tests) don't panic.
+pub(crate) fn init_logging_stderr() {
+    let _ = fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(Level::INFO.to_string())),
+        )
+        .with_writer(std::io::stderr)
+        .try_init();
+}
+
+/// Entry point for `clep lsp`: LSP on stdio, logging strictly to stderr
+/// (stdout carries the LSP protocol).
+pub async fn run_lsp_standalone() {
+    init_logging_stderr();
+    lsp::run_lsp().await;
+}
+
 /// Parse a host + port into a SocketAddr for IP-literal hosts (127.0.0.1, 0.0.0.0, ::1).
 /// Returns None for names that need DNS resolution.
 pub(crate) fn parse_bind_addr(host: &str, port: u16) -> Option<std::net::SocketAddr> {
@@ -548,23 +572,6 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
     Ok(watcher)
 }
 
-/// Optionally start the LSP server on stdio.
-///
-/// Interim wiring: this still spawns the standalone LSP inside `clep serve`
-/// (Task 6 replaces it with a dedicated `clep lsp` subcommand and removes
-/// `--lsp`). The LSP now opens its own read-only vault state during
-/// `initialize` rather than sharing the server's `AppState` (Task 4).
-fn maybe_spawn_lsp(enable_lsp: bool) {
-    if enable_lsp {
-        info!("starting LSP server on stdio");
-        tokio::spawn(async move {
-            lsp::run_lsp().await;
-            tracing::info!("LSP disconnected, shutting down");
-            std::process::exit(0);
-        });
-    }
-}
-
 /// Resolve config + vault root the same way the server does, then open the vault
 /// and build a fully-derived [`VaultIndex`] (full deriver chain, links resolved).
 ///
@@ -706,14 +713,10 @@ pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
     }
 }
 
-pub async fn run_server(
-    enable_lsp: bool,
-    overrides: ServeOverrides,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (state, settings) = build_server_state(overrides).await?;
     run_startup_reconcile(&state).await;
-    maybe_spawn_lsp(enable_lsp);
     let _watcher = spawn_sync_watcher(&state)?;
     let archive_body_limit =
         (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;

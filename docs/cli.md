@@ -19,6 +19,7 @@ Examples in this doc use `clepsydra ...`; replace with `cargo run -- ...` if nee
 | `clepsydra config show` | Print the selected application config verbatim | ✅ implemented |
 | `clepsydra config create` | Create an empty user application config | ✅ implemented |
 | `clepsydra serve` | Start the API server (HTTP, or HTTPS with `--tls`) | ✅ implemented |
+| `clepsydra lsp` | Standalone LSP server on stdio | ✅ implemented |
 | `clepsydra mcp` | MCP server on stdio (proxies the running API server) | ✅ implemented |
 | `clepsydra version` | Print version | ✅ implemented |
 | `clepsydra env` | Environment/config diagnostics | ⚠️ placeholder |
@@ -136,7 +137,6 @@ Useful endpoints once running:
 
 | Flag | Effect |
 |---|---|
-| `--lsp` | Also start the LSP server on stdio |
 | `--tls` | Serve over HTTPS |
 | `--port PORT` | Listen on `PORT` instead of the configured port |
 
@@ -166,6 +166,22 @@ scripts/trust-simulator-ca.sh
 ```
 
 Run `clepsydra doctor` to check cert state and `mkcert` availability.
+
+---
+
+## `lsp`
+
+Start the standalone LSP server on stdio:
+
+```bash
+clepsydra lsp
+```
+
+Read-only, and independent of `clepsydra serve` — it opens its own vault
+state (resolved from the editor's workspace root, falling back to
+`config.toml`) rather than talking to a running server. All tracing output
+goes to stderr; stdout carries only the LSP protocol. See
+[lsp.md](lsp.md) for editor setup.
 
 ---
 
