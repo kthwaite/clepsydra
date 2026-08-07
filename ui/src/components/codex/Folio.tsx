@@ -254,8 +254,8 @@ export function Folio({ tabId, path }: FolioProps) {
           {(() => {
             const Extras = presentation.metaExtras;
             return Extras ? (
-              <Block label="Details">
-                <Extras path={path} tabId={tabId} isDraft={false} />
+              <Block label={presentation.metaExtrasLabel ?? "Details"}>
+                <Extras path={path} tabId={tabId} isDraft={editor.isDraft} />
               </Block>
             ) : null;
           })()}

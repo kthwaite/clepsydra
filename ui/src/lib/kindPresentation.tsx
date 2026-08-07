@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { JournalMeta } from "#/components/codex/JournalMeta";
 import { journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
@@ -26,7 +27,11 @@ const GENERIC: KindPresentation = { metaExtras: null };
 
 /** Bespoke registry. JOURNAL's metaExtras lands with the JournalMeta block. */
 const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
-  JOURNAL: { metaExtras: null, readOnlyTitle: journalDayLabel },
+  JOURNAL: {
+    metaExtras: JournalMeta,
+    metaExtrasLabel: "Journal",
+    readOnlyTitle: journalDayLabel,
+  },
 };
 
 export function presentationFor(kind: Kind): KindPresentation {
