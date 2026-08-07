@@ -91,6 +91,7 @@ describe("buildHeatmap", () => {
     expect(heatDay(heat, "2026-05-02")).toMatchObject({
       date: "2026-05-02",
       isFuture: false,
+      count: 2,
       level: 2,
       pages: [
         { path: "newer.md", title: "Newer", activityAt: "2026-05-02T09:00:00Z" },
@@ -105,9 +106,24 @@ describe("buildHeatmap", () => {
     expect(heatDay(heat, "2026-05-02")).toMatchObject({ count: 1, pages: [] });
   });
 
-  it("marks dates after today as future placeholders", () => {
-    const heat = buildHeatmap([], now);
-    expect(heat.weeks.flat().filter((day) => day.isFuture).every((day) => day.count === 0)).toBe(true);
+  it("marks dates after today as inert future placeholders", () => {
+    const heat = buildHeatmap(
+      [
+        {
+          path: "future.md",
+          title: "Future",
+          updated_at: "2026-05-03T09:00:00Z",
+        },
+      ],
+      now,
+    );
+    expect(heatDay(heat, "2026-05-03")).toEqual({
+      date: "2026-05-03",
+      isFuture: true,
+      count: 0,
+      level: 0,
+      pages: [],
+    });
   });
 
   it("counts entries by UTC day and totals them", () => {

@@ -234,23 +234,25 @@ export function ActivityHeatmap({
             </div>
             {activeDay.pages.length > 0 ? (
               <div className="flex flex-col py-1">
-                {activeDay.pages.slice(0, VISIBLE_PAGES).map((page) => {
-                  const title = page.title || page.path;
-                  return (
-                    <button
-                      key={page.path}
-                      type="button"
-                      aria-label={`Open ${title}`}
-                      className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
-                      onClick={() => {
-                        closeDay();
-                        onOpenPage(page.path, title);
-                      }}
-                    >
-                      {title}
-                    </button>
-                  );
-                })}
+                {activeDay.pages
+                  .slice(0, VISIBLE_PAGES)
+                  .map((page, occurrenceIndex) => {
+                    const title = page.title || page.path;
+                    return (
+                      <button
+                        key={`${page.path}:${page.activityAt}:${occurrenceIndex}`}
+                        type="button"
+                        aria-label={`Open ${title}`}
+                        className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
+                        onClick={() => {
+                          closeDay();
+                          onOpenPage(page.path, title);
+                        }}
+                      >
+                        {title}
+                      </button>
+                    );
+                  })}
                 {activeDay.pages.length > VISIBLE_PAGES ? (
                   <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                     +{activeDay.pages.length - VISIBLE_PAGES} more

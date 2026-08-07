@@ -182,6 +182,69 @@ describe("ActivityHeatmap", () => {
     expect(emptyDay).not.toHaveAttribute("aria-controls");
   });
 
+  it("renders duplicate page paths as distinct controls without key warnings", async () => {
+    const user = userEvent.setup();
+    const onOpenPage = vi.fn();
+    const duplicateWeeks = fixtureProps.weeks.map((week) =>
+      week.map((candidate) =>
+        candidate.date === "2026-05-02"
+          ? {
+              ...candidate,
+              count: 2,
+              level: 2,
+              pages: [
+                {
+                  path: "same.md",
+                  title: "Earlier copy",
+                  activityAt: "2026-05-02T08:00:00Z",
+                },
+                {
+                  path: "same.md",
+                  title: "Later copy",
+                  activityAt: "2026-05-02T09:00:00Z",
+                },
+              ],
+            }
+          : candidate,
+      ),
+    );
+    const errors: unknown[][] = [];
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args) => errors.push(args));
+
+    try {
+      render(
+        <ActivityHeatmap
+          {...fixtureProps}
+          weeks={duplicateWeeks}
+          onOpenPage={onOpenPage}
+        />,
+      );
+      const activeDay = screen.getByRole("button", {
+        name: /2 May 2026, 2 captures/i,
+      });
+      await user.hover(activeDay);
+      await user.click(
+        await screen.findByRole("button", { name: "Open Earlier copy" }),
+      );
+      expect(onOpenPage).toHaveBeenNthCalledWith(1, "same.md", "Earlier copy");
+
+      await user.hover(activeDay);
+      await user.click(
+        await screen.findByRole("button", { name: "Open Later copy" }),
+      );
+      expect(onOpenPage).toHaveBeenNthCalledWith(2, "same.md", "Later copy");
+
+      const duplicateKeyErrors = errors.filter((args) =>
+        args.some((part) => String(part).includes("same key")),
+      );
+      expect(duplicateKeyErrors).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("opens on click, dismisses outside, and falls back to a page path", async () => {
     const user = userEvent.setup();
     const onOpenPage = vi.fn();
