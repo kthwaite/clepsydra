@@ -119,10 +119,18 @@ describe("DocsSidebar", () => {
     expect(hrefs).toContain("/docs/lsp#setup-neovim-011");
   });
 
-  it("calls onNavigate only after accepted unmodified selections", async () => {
+  it("calls onNavigate only after accepted pathname and hash navigation", async () => {
     const user = userEvent.setup();
-    const onNavigate = vi.fn();
+    const locationsAtNavigate: Array<{ pathname: string; hash: string }> = [];
+    let readLocation = () => ({ pathname: "/", hash: "" });
+    const onNavigate = vi.fn(() => {
+      locationsAtNavigate.push(readLocation());
+    });
     const router = renderSidebar({ onNavigate });
+    readLocation = () => ({
+      pathname: router.state.location.pathname,
+      hash: router.state.location.hash,
+    });
     const gettingStarted = await screen.findByRole("link", {
       name: "Getting Started",
     });
@@ -131,18 +139,34 @@ describe("DocsSidebar", () => {
     expect(onNavigate).not.toHaveBeenCalled();
     expect(router.state.location.pathname).toBe("/");
 
-    await user.click(gettingStarted);
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search documentation" }),
+      "setup neovim",
+    );
+    await user.click(
+      screen.getByRole("link", { name: /LSP.*Setup \(Neovim 0\.11\+\)/ }),
+    );
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/docs/getting-started");
       expect(onNavigate).toHaveBeenCalledTimes(1);
     });
+    expect(locationsAtNavigate[0]).toEqual({
+      pathname: "/docs/lsp",
+      hash: "setup-neovim-011",
+    });
 
+    await user.type(
+      await screen.findByRole("searchbox", {
+        name: "Search documentation",
+      }),
+      "setup neovim",
+    );
     await user.click(
-      await screen.findByRole("link", { name: "Getting Started" }),
+      screen.getByRole("link", { name: /LSP.*Setup \(Neovim 0\.11\+\)/ }),
     );
     await waitFor(() => {
       expect(onNavigate).toHaveBeenCalledTimes(2);
     });
+    expect(locationsAtNavigate[1]).toEqual(locationsAtNavigate[0]);
   });
 
   it("marks at most the exact pathname and hash result current", async () => {

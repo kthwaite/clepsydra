@@ -26,7 +26,7 @@ function setDesktop(matches: boolean) {
   for (const listener of desktopListeners) listener(event);
 }
 
-function renderLayout() {
+function renderLayout(docsLoadGate?: Promise<void>) {
   function RootLayout() {
     return (
       <DocsLayout>
@@ -47,6 +47,7 @@ function renderLayout() {
   const docsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/docs/$slug",
+    beforeLoad: () => docsLoadGate,
     component: () => <p>Guide destination</p>,
   });
   const router = createRouter({
@@ -138,9 +139,13 @@ describe("DocsLayout", () => {
     expect(screen.getByTestId("stable-article-child")).toBe(child);
   });
 
-  it("navigates a real heading result, preserves its hash, and closes the drawer", async () => {
+  it("transitions the route before a real heading result closes the drawer", async () => {
     const user = userEvent.setup();
-    const { router } = renderLayout();
+    let releaseNavigation!: () => void;
+    const navigationGate = new Promise<void>((resolve) => {
+      releaseNavigation = resolve;
+    });
+    const { router } = renderLayout(navigationGate);
     const child = await screen.findByTestId("stable-article-child");
 
     await user.click(
@@ -161,15 +166,33 @@ describe("DocsLayout", () => {
       .getAllByRole("link")
       .find((link) => link.getAttribute("href") === "/docs/lsp#setup-neovim-011");
     expect(headingResult).toBeDefined();
-    await user.click(headingResult as HTMLAnchorElement);
 
+    let locationAtClose: { pathname: string; hash: string } | undefined;
+    const closeObserver = new MutationObserver(() => {
+      if (!dialog.isConnected && !locationAtClose) {
+        locationAtClose = {
+          pathname: router.state.location.pathname,
+          hash: router.state.location.hash,
+        };
+      }
+    });
+    closeObserver.observe(document.body, { childList: true, subtree: true });
+
+    await user.click(headingResult as HTMLAnchorElement);
+    expect(dialog).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+
+    releaseNavigation();
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/docs/lsp");
-      expect(router.state.location.hash).toBe("setup-neovim-011");
       expect(
         screen.queryByRole("dialog", { name: "Documentation navigation" }),
       ).not.toBeInTheDocument();
+      expect(locationAtClose).toEqual({
+        pathname: "/docs/lsp",
+        hash: "setup-neovim-011",
+      });
     });
+    closeObserver.disconnect();
     expect(screen.getByTestId("stable-article-child")).toBe(child);
   });
 
