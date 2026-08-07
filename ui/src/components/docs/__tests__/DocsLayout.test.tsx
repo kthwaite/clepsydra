@@ -180,7 +180,8 @@ describe("DocsLayout", () => {
 
     await user.click(headingResult as HTMLAnchorElement);
     expect(dialog).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/");
+    expect(router.state.location.pathname).toBe("/docs/lsp");
+    expect(router.state.location.hash).toBe("setup-neovim-011");
 
     releaseNavigation();
     await waitFor(() => {
