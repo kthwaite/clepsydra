@@ -3,13 +3,29 @@
 import { dayOfYear, pad2 } from "#/lib/time";
 
 export interface HeatItem {
+  path?: string | null;
+  title?: string | null;
   updated_at?: string | null;
   created_at?: string | null;
 }
 
+export interface HeatmapPage {
+  path: string;
+  title?: string | null;
+  activityAt: string;
+}
+
+export interface HeatmapDay {
+  date: string;
+  isFuture: boolean;
+  count: number;
+  level: number;
+  pages: HeatmapPage[];
+}
+
 export interface Heatmap {
-  /** Week columns, each 7 entries Mon..Sun, values are levels 0..5. */
-  weeks: number[][];
+  /** Week columns, each 7 entries Mon..Sun. */
+  weeks: HeatmapDay[][];
   /** Month label per week column ("" when same month as the column before). */
   monthLabels: string[];
   total: number;
@@ -97,13 +113,24 @@ export function buildHeatmap(
   now: Date = new Date(),
 ): Heatmap {
   const counts = new Map<string, number>();
+  const pagesByDay = new Map<string, HeatmapPage[]>();
   let total = 0;
-  for (const it of items) {
-    const ts = it.updated_at ?? it.created_at;
-    if (!ts) continue;
-    const key = dayKeyOf(ts);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+  for (const item of items) {
+    const activityAt = item.updated_at ?? item.created_at;
+    if (!activityAt) continue;
+    const date = dayKeyOf(activityAt);
+    counts.set(date, (counts.get(date) ?? 0) + 1);
     total += 1;
+    if (!item.path) continue;
+    const pages = pagesByDay.get(date) ?? [];
+    pages.push({ path: item.path, title: item.title, activityAt });
+    pagesByDay.set(date, pages);
+  }
+  for (const pages of pagesByDay.values()) {
+    pages.sort(
+      (a, b) =>
+        b.activityAt.localeCompare(a.activityAt) || a.path.localeCompare(b.path),
+    );
   }
 
   // Today at UTC midnight; walk back to the Monday on/before (today - 181d).
@@ -115,17 +142,25 @@ export function buildHeatmap(
   // Monday-first columns: 0=Sun..6=Sat → days back to Monday = (dow + 6) % 7.
   start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
 
-  const weeks: number[][] = [];
+  const weeks: HeatmapDay[][] = [];
   const monthLabels: string[] = [];
   let prevMonth = -1;
   const cursor = new Date(start);
 
   while (cursor <= today) {
-    const week: number[] = [];
+    const week: HeatmapDay[] = [];
     const colMonth = cursor.getUTCMonth();
     for (let d = 0; d < 7; d++) {
-      const key = dayKey(cursor);
-      week.push(cursor <= today ? level(counts.get(key) ?? 0) : 0);
+      const date = dayKey(cursor);
+      const isFuture = cursor > today;
+      const count = isFuture ? 0 : (counts.get(date) ?? 0);
+      week.push({
+        date,
+        isFuture,
+        count,
+        level: level(count),
+        pages: isFuture ? [] : (pagesByDay.get(date) ?? []),
+      });
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
     weeks.push(week);

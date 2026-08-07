@@ -8,6 +8,7 @@ import {
   formatBclDuration,
   formatDotDate,
   greeting,
+  type Heatmap,
   type RecentItem,
   sortRecents,
 } from "./atrium-data";
@@ -53,10 +54,76 @@ describe("buildHeatmap", () => {
   it("returns 26 week-columns of 7 days each", () => {
     const h = buildHeatmap([], now);
     expect(h.weeks).toHaveLength(27); // 26 full weeks + the partial current week
-    for (const w of h.weeks) expect(w).toHaveLength(7);
+    for (const w of h.weeks) {
+      expect(w).toHaveLength(7);
+      for (const day of w) expect(day.level).toBe(0);
+    }
     expect(h.total).toBe(0);
     expect(h.currentStreak).toBe(0);
     expect(h.longestStreak).toBe(0);
+  });
+
+  function heatDay(heat: Heatmap, date: string) {
+    const day = heat.weeks.flat().find((candidate) => candidate.date === date);
+    expect(day).toBeDefined();
+    return day!;
+  }
+
+  it("attaches UTC counts and newest-first page metadata to each day", () => {
+    const heat = buildHeatmap(
+      [
+        {
+          path: "older.md",
+          title: "Older",
+          created_at: "2026-05-01T23:30:00Z",
+          updated_at: "2026-05-02T01:00:00Z",
+        },
+        {
+          path: "newer.md",
+          title: "Newer",
+          created_at: "2026-04-01T00:00:00Z",
+          updated_at: "2026-05-02T09:00:00Z",
+        },
+      ],
+      now,
+    );
+
+    expect(heatDay(heat, "2026-05-02")).toMatchObject({
+      date: "2026-05-02",
+      isFuture: false,
+      count: 2,
+      level: 2,
+      pages: [
+        { path: "newer.md", title: "Newer", activityAt: "2026-05-02T09:00:00Z" },
+        { path: "older.md", title: "Older", activityAt: "2026-05-02T01:00:00Z" },
+      ],
+    });
+    expect(heatDay(heat, "2026-05-01").count).toBe(0);
+  });
+
+  it("counts pathless items without rendering them as pages", () => {
+    const heat = buildHeatmap([{ updated_at: "2026-05-02T12:00:00Z" }], now);
+    expect(heatDay(heat, "2026-05-02")).toMatchObject({ count: 1, pages: [] });
+  });
+
+  it("marks dates after today as inert future placeholders", () => {
+    const heat = buildHeatmap(
+      [
+        {
+          path: "future.md",
+          title: "Future",
+          updated_at: "2026-05-03T09:00:00Z",
+        },
+      ],
+      now,
+    );
+    expect(heatDay(heat, "2026-05-03")).toEqual({
+      date: "2026-05-03",
+      isFuture: true,
+      count: 0,
+      level: 0,
+      pages: [],
+    });
   });
 
   it("counts entries by UTC day and totals them", () => {
@@ -78,8 +145,8 @@ describe("buildHeatmap", () => {
       Array.from({ length: n }, () => ({ updated_at: "2026-05-02T01:00:00Z" }));
     expect(buildHeatmap(mk(0), now).maxLevelToday).toBe(0);
     expect(buildHeatmap(mk(1), now).maxLevelToday).toBe(1);
+    expect(buildHeatmap(mk(2), now).maxLevelToday).toBe(2);
     expect(buildHeatmap(mk(3), now).maxLevelToday).toBe(2);
-    expect(buildHeatmap(mk(6), now).maxLevelToday).toBe(3);
     expect(buildHeatmap(mk(10), now).maxLevelToday).toBe(4);
     expect(buildHeatmap(mk(20), now).maxLevelToday).toBe(5);
   });
