@@ -261,9 +261,12 @@ function notFoundError() {
   return { status: 404, error: "page not found", detail: null, hint: null };
 }
 
+const TODAY_PATH = "journals/2026-08-06.md";
+const PAST_PATH = "journals/2026-08-05.md";
+
 function ensuredPage(body = "") {
   return {
-    path: "journals/2026-08-06.md",
+    path: TODAY_PATH,
     revision: "rev-e",
     body,
     meta: { title: "2026-08-06", tags: ["journal"], aliases: [] },
@@ -471,6 +474,167 @@ describe("usePageEditor draft mode", () => {
     expect(request.body.expected_revision).toBe("rev-e");
     expect(request.body.title).toBeUndefined();
     expect(result.current.title).toBe("2026-08-06");
+  });
+
+  it("drops a save that lands after the path changed into a draft", async () => {
+    const pastPage = {
+      ...makePage("Past body"),
+      path: PAST_PATH,
+      revision: "rev-past",
+      meta: {
+        ...makePage("Past body").meta,
+        title: "2026-08-05",
+        tags: ["diary"],
+      },
+    };
+    usePageMock.mockImplementation((path: string) =>
+      path === PAST_PATH
+        ? {
+            data: pastPage,
+            isLoading: false,
+            error: null,
+            refetch: refetchPageMock,
+          }
+        : {
+            data: undefined,
+            isLoading: false,
+            error: notFoundError(),
+            refetch: refetchPageMock,
+          },
+    );
+    const pending: Array<{
+      request: { body: Record<string, unknown> };
+      resolve: (page: MockPage) => void;
+    }> = [];
+    const mutateAsync = vi.fn(
+      (request: { body: Record<string, unknown> }) =>
+        new Promise<MockPage>((resolve) => {
+          pending.push({ request, resolve });
+        }),
+    );
+    useUpdatePageMock.mockImplementation(() => ({ mutateAsync }));
+    const ensure = vi
+      .fn()
+      .mockResolvedValue({ page: ensuredPage(), created: true });
+
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) =>
+        usePageEditor(path, path === TODAY_PATH ? { ensure } : undefined),
+      { initialProps: { path: PAST_PATH } },
+    );
+
+    act(() =>
+      result.current.onSlateChange(paragraph("Past edit"), astChangeEditor()),
+    );
+    act(() => vi.advanceTimersByTime(1500));
+    expect(pending).toHaveLength(1);
+
+    // Move to the unwritten day while the past page's save is still in flight.
+    rerender({ path: TODAY_PATH });
+    expect(result.current.isDraft).toBe(true);
+
+    await act(async () => {
+      pending[0].resolve({
+        ...pastPage,
+        body: "Past edit\n",
+        revision: "rev-past2",
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The draft's lifecycle must be intact: its first save carries the typed
+    // body and no metadata, so the template ensure just wrote is not wiped.
+    act(() =>
+      result.current.onSlateChange(paragraph("Today"), astChangeEditor()),
+    );
+    await flushDraftSave();
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(2);
+    const request = pending[1].request;
+    expect(request.body.expected_revision).toBe("rev-e");
+    expect(request.body.body).toBe("Today\n");
+    expect(request.body.title).toBeUndefined();
+    expect(request.body.tags).toBeUndefined();
+    expect(result.current.title).toBe("2026-08-06");
+    expect(result.current.tags).toEqual(["journal"]);
+  });
+
+  it("flushes a pending draft save to the page it was typed on", async () => {
+    const pastPage = {
+      ...makePage("Past body"),
+      path: PAST_PATH,
+      revision: "rev-past",
+      meta: {
+        ...makePage("Past body").meta,
+        title: "2026-08-05",
+        tags: ["diary"],
+      },
+    };
+    usePageMock.mockImplementation((path: string) =>
+      path === PAST_PATH
+        ? {
+            data: pastPage,
+            isLoading: false,
+            error: null,
+            refetch: refetchPageMock,
+          }
+        : {
+            data: undefined,
+            isLoading: false,
+            error: notFoundError(),
+            refetch: refetchPageMock,
+          },
+    );
+    const ensure = vi
+      .fn()
+      .mockResolvedValue({ page: ensuredPage(), created: true });
+    mutateAsyncMock.mockResolvedValue({
+      ...makePage("Today"),
+      revision: "rev-f",
+    });
+
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) =>
+        usePageEditor(path, path === TODAY_PATH ? { ensure } : undefined),
+      { initialProps: { path: TODAY_PATH } },
+    );
+    expect(result.current.isDraft).toBe(true);
+
+    act(() =>
+      result.current.onSlateChange(paragraph("Today"), astChangeEditor()),
+    );
+    // Leave for a past date inside the debounce window. The flush belongs to
+    // the draft, so it must still ensure and write to today's path.
+    rerender({ path: PAST_PATH });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    const flushed = mutateAsyncMock.mock.calls[0][0];
+    expect(flushed.params.path.path).toBe(TODAY_PATH);
+    expect(flushed.body.expected_revision).toBe("rev-e");
+    expect(flushed.body.body).toBe("Today\n");
+
+    // That completion must leave the past page's baseline alone.
+    expect(result.current.title).toBe("2026-08-05");
+    act(() =>
+      result.current.onSlateChange(paragraph("Past edit"), astChangeEditor()),
+    );
+    act(() => vi.advanceTimersByTime(1500));
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(2);
+    const second = mutateAsyncMock.mock.calls[1][0];
+    expect(second.params.path.path).toBe(PAST_PATH);
+    expect(second.body.expected_revision).toBe("rev-past");
+    expect(second.body.body).toBe("Past edit\n");
+    expect(second.body.title).toBeUndefined();
   });
 
   it("adopts a cached page that arrives in the same render as a path change", () => {

@@ -95,12 +95,17 @@ export function usePageEditor(
   const canDraft = Boolean(options?.ensure);
   const [ensured, setEnsured] = useState(false);
   const isDraft = pageNotFound && canDraft && !ensured && !page;
-  // Render-assigned refs so doSave reads current values without new deps
-  // (same pattern as doSaveRef below).
+  // Mirrored into refs so doSave reads current values without new deps (same
+  // pattern as doSaveRef below). Assigned in an effect rather than during
+  // render: React runs every cleanup in a commit before any setup, so the
+  // [doSave] cleanup that flushes a pending save on a path change still sees
+  // the draft state and ensure callback of the page it was typed on.
   const ensureRef = useRef(options?.ensure);
-  ensureRef.current = options?.ensure;
   const isDraftRef = useRef(false);
-  isDraftRef.current = isDraft;
+  useEffect(() => {
+    ensureRef.current = options?.ensure;
+    isDraftRef.current = isDraft;
+  });
   const updatePage = useUpdatePage();
   // The mutation result object is recreated on every render; mutateAsync is
   // referentially stable and keeps doSave/effect cleanup stable as well.
@@ -175,9 +180,17 @@ export function usePageEditor(
   // change from the initial mount (where resetting would clobber the sync
   // effect's result).
   const previousPathRef = useRef(path);
+  // Bumped by the reset below, so each page gets its own lifecycle epoch. A
+  // save captures the epoch it started in and drops every baseline write once
+  // the epoch no longer matches: without that, a request issued for the page
+  // just left resolves into the freshly reset lifecycle and installs a foreign
+  // baseline (leaked revision, saved-generation watermarks and metadata),
+  // which silently suppresses later saves and re-sends the old page's fields.
+  const lifecycleRef = useRef(0);
   useEffect(() => {
     if (previousPathRef.current === path) return;
     previousPathRef.current = path;
+    lifecycleRef.current += 1;
 
     setEnsured(false);
     titleRef.current = "";
@@ -252,6 +265,16 @@ export function usePageEditor(
     const saveMetaGen = metaEditGenRef.current;
     const bodyDirty = saveBodyGen > savedBodyGenRef.current;
 
+    // Everything below this point may resolve after the editor has moved to
+    // another page. `isStale` gates the writes that belong to *this* page's
+    // lifecycle; the request itself still completes, since the flush on a path
+    // change exists precisely to persist the outgoing page's last edit.
+    const saveEpoch = lifecycleRef.current;
+    const isStale = () => lifecycleRef.current !== saveEpoch;
+    // Read synchronously: the reset effect clears revisionRef, so the request
+    // must not re-read it across an await.
+    let expectedRevision = revisionRef.current;
+
     const currentTitle = titleRef.current;
     const currentTags = tagsRef.current;
     const currentAliases = aliasesRef.current;
@@ -283,6 +306,7 @@ export function usePageEditor(
       try {
         if (isDraftRef.current && ensureRef.current) {
           const result = await ensureRef.current();
+          expectedRevision = result.page.revision;
           const serverTitle = result.page.meta.title ?? "";
           const serverTags = result.page.meta.tags ?? [];
           const serverAliases = result.page.meta.aliases ?? [];
@@ -292,6 +316,7 @@ export function usePageEditor(
             // save. Surface the conflict-reload flow instead of overwriting.
             savingRef.current = false;
             saveRequestedRef.current = false;
+            if (isStale()) return;
             const conflict = { currentRevision: result.page.revision };
             conflictRef.current = conflict;
             setRevisionConflict(conflict);
@@ -300,41 +325,54 @@ export function usePageEditor(
             return;
           }
 
-          revisionRef.current = result.page.revision;
-          savedRef.current = {
-            title: serverTitle,
-            tags: serverTags,
-            aliases: serverAliases,
-            body: result.page.body,
-          };
-          // Adopt template metadata the user did not touch while drafting;
-          // fields they edited diff against the new baseline instead.
-          if (titleRef.current === "") {
-            titleRef.current = serverTitle;
-            setTitleState(serverTitle);
+          // Adopt the created page as the local baseline — unless the editor
+          // has moved on, where the drafted body is still written to the page
+          // it was typed on (via expectedRevision) but the now-current page's
+          // lifecycle must stay untouched.
+          if (!isStale()) {
+            revisionRef.current = result.page.revision;
+            savedRef.current = {
+              title: serverTitle,
+              tags: serverTags,
+              aliases: serverAliases,
+              body: result.page.body,
+            };
+            // Adopt template metadata the user did not touch while drafting;
+            // fields they edited diff against the new baseline instead.
+            if (titleRef.current === "") {
+              titleRef.current = serverTitle;
+              setTitleState(serverTitle);
+            }
+            if (tagsRef.current.length === 0) {
+              tagsRef.current = serverTags;
+              setTagsState(serverTags);
+            }
+            if (aliasesRef.current.length === 0) {
+              aliasesRef.current = serverAliases;
+              setAliasesState(serverAliases);
+            }
+            isDraftRef.current = false;
+            setEnsured(true);
           }
-          if (tagsRef.current.length === 0) {
-            tagsRef.current = serverTags;
-            setTagsState(serverTags);
-          }
-          if (aliasesRef.current.length === 0) {
-            aliasesRef.current = serverAliases;
-            setAliasesState(serverAliases);
-          }
-          isDraftRef.current = false;
-          setEnsured(true);
         }
 
         const response = await updatePageMutateAsync({
           params: { path: { path } },
           body: {
-            expected_revision: revisionRef.current,
+            expected_revision: expectedRevision,
             ...(titleChanged ? { title: currentTitle || null } : {}),
             ...(tagsChanged ? { tags: currentTags } : {}),
             ...(aliasesChanged ? { aliases: currentAliases } : {}),
             ...(bodyChanged ? { body } : {}),
           },
         });
+
+        savingRef.current = false;
+        const shouldDrain = saveRequestedRef.current;
+        saveRequestedRef.current = false;
+        // A queued save belonged to the page just left; it is not drained into
+        // the current one, whose own edits schedule their own save.
+        if (isStale()) return;
 
         revisionRef.current = response.revision;
         savedRef.current = {
@@ -345,11 +383,8 @@ export function usePageEditor(
         };
         savedBodyGenRef.current = saveBodyGen;
         savedMetaGenRef.current = saveMetaGen;
-        savingRef.current = false;
         setSaveError(null);
 
-        const shouldDrain = saveRequestedRef.current;
-        saveRequestedRef.current = false;
         if (shouldDrain) {
           doSaveRef.current();
           return;
@@ -362,6 +397,7 @@ export function usePageEditor(
       } catch (err) {
         savingRef.current = false;
         saveRequestedRef.current = false;
+        if (isStale()) return;
         if (timerRef.current) {
           clearTimeout(timerRef.current);
           timerRef.current = null;

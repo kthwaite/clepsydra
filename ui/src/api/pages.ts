@@ -11,15 +11,33 @@ export function usePages() {
   return $api.useQuery("get", "/api/vault/pages");
 }
 
+/** Local shape check — the api layer must not depend on editor-side helpers. */
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 404
+  );
+}
+
 export function usePage(path: string) {
   return $api.useQuery(
     "get",
     "/api/vault/pages/{path}",
     { params: { path: { path } } },
-    // Opt out of the global throwOnError so a missing-file 404 surfaces as
-    // query `error` state and the folio can render a recovery panel instead of
-    // unmounting the whole app.
-    { enabled: !!path, throwOnError: false },
+    {
+      enabled: !!path,
+      // Opt out of the global throwOnError so a missing-file 404 surfaces as
+      // query `error` state and the folio can render a recovery panel instead
+      // of unmounting the whole app.
+      throwOnError: false,
+      // A 404 is a settled answer — the page does not exist — not a transient
+      // failure. Retrying it holds the editor on its loading state for the
+      // whole backoff window before draft mode can render. Other failures keep
+      // the library default of three attempts.
+      retry: (failureCount, error) => !isNotFound(error) && failureCount < 3,
+    },
   );
 }
 
