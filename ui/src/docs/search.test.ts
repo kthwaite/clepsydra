@@ -117,6 +117,10 @@ Visible body.
 
     indentedcodesecret
 
+## ![Icon](icon.svg) Setup
+
+Image heading body.
+
 [docs]: https://example.com
 `,
     );
@@ -125,6 +129,7 @@ Visible body.
     expect(index.map(({ heading, headingId }) => [heading, headingId])).toEqual([
       [undefined, undefined],
       ["Use foo_bar & Docs", "use-foo_bar--docs"],
+      ["Setup", "setup"],
     ]);
     expect(searchDocs(index, "prosevisible")).toHaveLength(1);
     expect(searchDocs(index, "esmsecret")).toEqual([]);
