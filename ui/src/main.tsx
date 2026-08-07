@@ -3,6 +3,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "#/components/ThemeProvider";
+import { EncryptionProvider } from "#/crypto/EncryptionProvider";
 import { queryClient } from "#/lib/queryClient";
 import { routeTree } from "./routeTree.gen";
 import "./main.css";
@@ -27,9 +28,11 @@ if (!rootElement.innerHTML) {
   root.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <RouterProvider router={router} />
-        </ThemeProvider>
+        <EncryptionProvider>
+          <ThemeProvider>
+            <RouterProvider router={router} />
+          </ThemeProvider>
+        </EncryptionProvider>
       </QueryClientProvider>
     </StrictMode>,
   );

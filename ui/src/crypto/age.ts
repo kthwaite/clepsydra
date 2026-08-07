@@ -23,6 +23,15 @@ export async function createVaultIdentity(): Promise<{
   }
 }
 
+export async function recipientForIdentity(identity: string): Promise<string> {
+  try {
+    const age = await loadAge();
+    return await age.identityToRecipient(identity);
+  } catch {
+    throw safeFailure("read the vault identity");
+  }
+}
+
 export async function wrapIdentity(
   identity: string,
   password: string,
