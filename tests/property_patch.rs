@@ -229,6 +229,44 @@ async fn reserved_system_keys_are_rejected() {
 }
 
 #[tokio::test]
+async fn encryption_system_key_is_reserved() {
+    let (server, tmp) = ApiFixture::builder()
+        .pre_index_seed(seed)
+        .build()
+        .into_server_and_temp();
+    let revision = revision_of(&server, "book.md").await;
+    let before = fs::read_to_string(tmp.path().join("vault/book.md")).unwrap();
+
+    for body in [
+        serde_json::json!({
+            "set": {
+                "encryption": {
+                    "format": "age",
+                    "version": 1,
+                    "key_id": "019fd000-0000-7000-8000-000000000002"
+                }
+            },
+            "expected_revision": revision,
+        }),
+        serde_json::json!({
+            "clear": ["encryption"],
+            "expected_revision": revision,
+        }),
+    ] {
+        let res = server
+            .patch(&format!("/api/vault/pages/by-id/{PAGE_ID}/properties"))
+            .json(&body)
+            .await;
+        res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("vault/book.md")).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
 async fn unknown_page_is_404() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(seed)

@@ -314,6 +314,54 @@ export interface paths {
     patch: operations["patch_task"];
     trace?: never;
   };
+  "/api/vault/encryption": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_encryption_config"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/encryption/setup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["setup_encryption"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/encryption/wrapped-identity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put: operations["rewrap_wrapped_identity"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/events": {
     parameters: {
       query?: never;
@@ -756,6 +804,38 @@ export interface paths {
     patch: operations["patch_properties"];
     trace?: never;
   };
+  "/api/vault/pages/by-id/{uuid}/protect": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["protect_page_by_id"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/pages/by-id/{uuid}/unprotect": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["unprotect_page_by_id"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/pages/{path}": {
     parameters: {
       query?: never;
@@ -1094,6 +1174,12 @@ export interface components {
     CreatePageRequest: {
       aliases?: string[] | null;
       body?: string | null;
+      kind?: null | components["schemas"]["Kind"];
+      /**
+       * @description Declared project slug, written to the page's `project:` frontmatter as
+       *     part of the same create mutation.
+       */
+      project?: string | null;
       tags?: string[] | null;
       title?: string | null;
     };
@@ -1128,6 +1214,19 @@ export interface components {
       work_type: components["schemas"]["WorkType"];
       /** Format: int32 */
       year?: number | null;
+    };
+    EncryptionConfigResponse: {
+      initialized: boolean;
+      key_id?: string | null;
+      recipient?: string | null;
+      revision?: string | null;
+      wrapped_identity?: string | null;
+    };
+    EncryptionMetaResponse: {
+      format: string;
+      key_id: string;
+      /** Format: int32 */
+      version: number;
     };
     /** @description External identifiers for an academic work (DOI, ISBN, arXiv). */
     ExternalIds: {
@@ -1298,6 +1397,8 @@ export interface components {
     PageDetailResponse: {
       body: string;
       canonical_name: string;
+      encrypted: boolean;
+      encryption?: null | components["schemas"]["EncryptionMetaResponse"];
       inferred: boolean;
       kind: components["schemas"]["Kind"];
       meta: components["schemas"]["PageMetaResponse"];
@@ -1316,6 +1417,7 @@ export interface components {
     };
     PageSummary: {
       canonical_name: string;
+      encrypted: boolean;
       id: string;
       inferred: boolean;
       kind: components["schemas"]["Kind"];
@@ -1449,6 +1551,11 @@ export interface components {
       | "multi_select"
       | "url"
       | "relation";
+    ProtectPageRequest: {
+      body: string;
+      encryption: components["schemas"]["EncryptionMetaResponse"];
+      expected_revision: string;
+    };
     QueryOutput:
       | {
           rows: components["schemas"]["QueryRow"][];
@@ -1508,11 +1615,20 @@ export interface components {
       /** @description Vault-relative path of the resolved page. */
       path: string;
     };
+    RewrapIdentityRequest: {
+      expected_revision: string;
+      wrapped_identity: string;
+    };
     SearchResultEntry: {
       page_id: string;
       path: string;
       snippet: string;
       title?: string | null;
+    };
+    SetupEncryptionRequest: {
+      key_id: string;
+      recipient: string;
+      wrapped_identity?: string | null;
     };
     SimilarEntry: {
       path: string;
@@ -1554,6 +1670,10 @@ export interface components {
       /** Format: int64 */
       count: number;
       tag: string;
+    };
+    UnprotectPageRequest: {
+      body: string;
+      expected_revision: string;
     };
     UnresolvedLink: {
       candidates: components["schemas"]["CandidateEntry"][];
@@ -2724,6 +2844,146 @@ export interface operations {
       };
     };
   };
+  get_encryption_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Vault encryption configuration */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EncryptionConfigResponse"];
+        };
+      };
+      /** @description Invalid or unreadable keyring */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  setup_encryption: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetupEncryptionRequest"];
+      };
+    };
+    responses: {
+      /** @description Vault encryption initialized */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EncryptionConfigResponse"];
+        };
+      };
+      /** @description Invalid public key or wrapped identity */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Vault encryption already initialized */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Keyring persistence failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  rewrap_wrapped_identity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RewrapIdentityRequest"];
+      };
+    };
+    responses: {
+      /** @description Wrapped identity replaced */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EncryptionConfigResponse"];
+        };
+      };
+      /** @description Invalid wrapped identity */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Vault encryption is not initialized */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Keyring revision conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Keyring persistence failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
   event_stream: {
     parameters: {
       query?: never;
@@ -3616,6 +3876,12 @@ export interface operations {
         limit?: number;
         /** @description Page offset for pagination */
         offset?: number;
+        /** @description Only pages of this resolved kind token (e.g. QUOTE) */
+        kind?: string;
+        /** @description Only pages carrying this tag */
+        tag?: string;
+        /** @description Only pages declaring this project */
+        project?: string;
       };
       header?: never;
       path?: never;
@@ -3630,6 +3896,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PageSummaryListResponse"];
+        };
+      };
+      /** @description Unknown kind token */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
         };
       };
       /** @description Internal server error */
@@ -3981,7 +4256,7 @@ export interface operations {
           "application/json": components["schemas"]["PropertyPatchResponse"];
         };
       };
-      /** @description Unrepresentable value */
+      /** @description Reserved key or unrepresentable value */
       400: {
         headers: {
           [name: string]: unknown;
@@ -4001,6 +4276,132 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  protect_page_by_id: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Page UUID */
+        uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProtectPageRequest"];
+      };
+    };
+    responses: {
+      /** @description Protected page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Invalid encryption descriptor or body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page changed since it was loaded */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page protected but cache maintenance failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  unprotect_page_by_id: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Page UUID */
+        uuid: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UnprotectPageRequest"];
+      };
+    };
+    responses: {
+      /** @description Unprotected page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PageDetailResponse"];
+        };
+      };
+      /** @description Page is not protected */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Page changed since it was loaded */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
       };
     };
   };

@@ -169,6 +169,49 @@ mod tests {
         assert!(results.is_empty());
     }
 
+    #[test]
+    fn encrypted_note_matches_title_only_without_ciphertext_or_prior_plaintext_snippet() {
+        const ID: &str = "019fd000-0000-7000-8000-000000000601";
+        const ARMOR: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAuLi4K\n-----END AGE ENCRYPTED FILE-----\n";
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(
+            root.join("Secret.md"),
+            format!("+++\nid = \"{ID}\"\ntitle = \"Secret title\"\n+++\nprior plaintext marker\n"),
+        )
+        .unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        index.build(&vault).unwrap();
+        assert_eq!(run(&index, "prior plaintext", 20, false).unwrap().len(), 1);
+
+        std::fs::write(
+            root.join("Secret.md"),
+            format!(
+                "+++\nid = \"{ID}\"\ntitle = \"Secret title\"\nencryption = {{ format = \"age\", version = 1, key_id = \"key-1\" }}\n+++\n{ARMOR}"
+            ),
+        )
+        .unwrap();
+        index
+            .index_page(
+                &vault,
+                &crate::vault::path::VaultPath::new("Secret.md").unwrap(),
+            )
+            .unwrap();
+
+        assert!(
+            run(&index, "prior plaintext", 20, false)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(run(&index, "encrypted file", 20, false).unwrap().is_empty());
+        let title_match = run(&index, "secret title", 20, false).unwrap();
+        assert_eq!(title_match.len(), 1);
+        assert_eq!(title_match[0].path, "Secret.md");
+        assert_eq!(title_match[0].snippet, "");
+    }
+
     use crate::vault::index::SearchResult as SR;
 
     fn sample() -> Vec<SR> {

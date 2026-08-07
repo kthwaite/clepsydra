@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 
@@ -29,5 +30,25 @@ describe("PageEditorHeader read-only title", () => {
     const input = screen.getByDisplayValue("2026-08-07");
     fireEvent.change(input, { target: { value: "renamed" } });
     expect(onTitleChange).toHaveBeenCalledWith("renamed");
+  });
+
+  it("awaits coordinated manual locking and reports a refused lock", async () => {
+    const user = userEvent.setup();
+    const onRequestLock = vi.fn().mockResolvedValue(false);
+    render(
+      <PageEditorHeader
+        {...baseProps}
+        encrypted
+        onRequestLock={onRequestLock}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Lock encrypted notes" }),
+    );
+    expect(onRequestLock).toHaveBeenCalledOnce();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unable to lock while an editor has unsaved changes",
+    );
   });
 });

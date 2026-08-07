@@ -106,3 +106,27 @@ fn existing_index_tests_still_pass() {
     let stats = index.build(&vault).unwrap();
     assert_eq!(stats.pages_indexed, 1);
 }
+
+#[test]
+fn encrypted_page_suppresses_blocks_and_word_count_even_when_armor_is_invalid() {
+    let page = "+++\nid = \"019fd000-0000-7000-8000-000000000021\"\ntitle = \"Corrupt protected note\"\nencryption = { format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }\n+++\n- [ ] plaintext must not be indexed ^abc123DEF0\n";
+    let (_tmp, vault) = setup_vault(&[("corrupt.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let (encrypted, word_count): (i64, Option<i64>) = index
+        .connection()
+        .query_row(
+            "SELECT encrypted, word_count FROM pages WHERE path = 'corrupt.md'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((encrypted, word_count), (1, None));
+    let block_count: i64 = index
+        .connection()
+        .query_row("SELECT COUNT(*) FROM blocks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(block_count, 0);
+}

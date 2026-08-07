@@ -75,7 +75,10 @@ function PreviewWindow({ win }: { win: PW }) {
   };
 
   const title = page?.meta.title || win.path;
-  const kind = resolveKind({ path: win.path, body: page?.body });
+  const kind = resolveKind({
+    path: win.path,
+    body: page?.encrypted ? undefined : page?.body,
+  });
 
   return (
     <div

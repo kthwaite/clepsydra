@@ -940,11 +940,15 @@ pub async fn content_index(
                 let (created_at, updated_at, description, word_count) = if abs_path.exists() {
                     match Page::from_file(&abs_path, vault_path) {
                         Ok(page) => {
-                            let desc = page.body.chars().take(200).collect::<String>();
                             let created = page.meta.created_at.map(|d| d.to_rfc3339());
                             let updated = page.meta.updated_at.map(|d| d.to_rfc3339());
-                            let words = page.body.split_whitespace().count() as i64;
-                            (created, updated, desc, Some(words))
+                            if page.is_encrypted() {
+                                (created, updated, String::new(), None)
+                            } else {
+                                let desc = page.body.chars().take(200).collect::<String>();
+                                let words = page.body.split_whitespace().count() as i64;
+                                (created, updated, desc, Some(words))
+                            }
                         }
                         Err(_) => (None, None, String::new(), None),
                     }

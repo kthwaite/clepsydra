@@ -1,0 +1,2 @@
+# Disposable interoperability fixture only. Never use this identity for real data.
+AGE-SECRET-KEY-193MNSJX9WN0Q5DM86EWUCHNJ9A0695SX6DLVEEGUF5HPUSSSHN9SGJYEA0

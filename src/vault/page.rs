@@ -10,6 +10,7 @@ use uuid::Uuid;
 use super::legacy_yaml;
 use super::path::VaultPath;
 use super::toml_json::toml_value_to_json;
+use crate::vault::encryption::{EncryptionMeta, validate_age_armor};
 use crate::vault::kind::Kind;
 
 /// Frontmatter extras: every key that is not a system field, holding native
@@ -42,6 +43,7 @@ pub struct PageMeta {
     pub project: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
+    pub encryption: Option<EncryptionMeta>,
     pub extra: ExtraMap,
 }
 
@@ -58,6 +60,7 @@ impl PageMeta {
             project: None,
             created_at: Some(now),
             updated_at: Some(now),
+            encryption: None,
             extra: ExtraMap::new(),
         }
     }
@@ -96,6 +99,9 @@ impl Serialize for PageMeta {
         }
         if let Some(updated_at) = &self.updated_at {
             map.serialize_entry("updated_at", updated_at)?;
+        }
+        if let Some(encryption) = &self.encryption {
+            map.serialize_entry("encryption", encryption)?;
         }
         for (key, value) in &self.extra {
             map.serialize_entry(key, &toml_value_to_json(value))?;
@@ -272,6 +278,30 @@ fn take_timestamp(
     }
 }
 
+fn take_encryption(table: &mut toml::Table) -> Result<Option<EncryptionMeta>, FrontmatterError> {
+    let Some(value) = table.remove("encryption") else {
+        return Ok(None);
+    };
+    if !value.is_table() {
+        return Err(FrontmatterError::InvalidField(
+            "encryption must be a table or inline table".into(),
+        ));
+    }
+    let meta: EncryptionMeta = value.try_into().map_err(|_| {
+        FrontmatterError::InvalidField("encryption must contain format, version, and key_id".into())
+    })?;
+    meta.validate()
+        .map_err(|e| FrontmatterError::InvalidField(e.to_string()))?;
+    Ok(Some(meta))
+}
+
+fn validate_encrypted_body(meta: &PageMeta, body: &str) -> Result<(), FrontmatterError> {
+    if meta.encryption.is_some() {
+        validate_age_armor(body).map_err(|e| FrontmatterError::InvalidField(e.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Extract a [`PageMeta`] from a parsed TOML table. Returns the meta and
 /// whether the `id` was absent (and therefore freshly generated).
 ///
@@ -306,6 +336,7 @@ fn meta_from_table(mut table: toml::Table) -> Result<(PageMeta, bool), Frontmatt
     let aliases = take_string_array(&mut table, "aliases")?;
     let created_at = take_timestamp(&mut table, "created_at")?;
     let updated_at = take_timestamp(&mut table, "updated_at")?;
+    let encryption = take_encryption(&mut table)?;
 
     Ok((
         PageMeta {
@@ -317,6 +348,7 @@ fn meta_from_table(mut table: toml::Table) -> Result<(PageMeta, bool), Frontmatt
             project,
             created_at,
             updated_at,
+            encryption,
             extra: table,
         },
         id_generated,
@@ -361,6 +393,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
         if id_generated {
             return Err(FrontmatterError::MissingId);
         }
+        validate_encrypted_body(&meta, body)?;
         Ok((meta, body.to_string()))
     } else if content.starts_with("---") {
         legacy_yaml::parse_frontmatter(content)
@@ -381,6 +414,16 @@ pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Op
             Ok((toml_str, body)) => match toml_str.parse::<toml::Table>() {
                 Ok(table) => match meta_from_table(table) {
                     Ok((mut meta, id_generated)) => {
+                        if let Err(e) = validate_encrypted_body(&meta, body) {
+                            return (
+                                meta,
+                                body.to_string(),
+                                false,
+                                Some(format!(
+                                    "encrypted body is invalid ({e}); indexing as protected with parsed metadata (file not modified)"
+                                )),
+                            );
+                        }
                         let mut rewrote = id_generated;
                         rewrote |= ensure_populated_meta(&mut meta);
                         (meta, body.to_string(), rewrote, None)
@@ -429,32 +472,32 @@ fn chrono_to_toml_datetime(dt: &DateTime<Utc>) -> toml::Value {
 /// TOML frontmatter fences.
 ///
 /// Canonical key order: `id`, `title`, `type`, `project`, `tags`, `aliases`,
-/// `created_at`, `updated_at`, then extras in first-seen order. Used where no
-/// prior formatting exists to preserve; surgical edits go through
-/// `toml_patch` instead.
+/// `created_at`, `updated_at`, `encryption`, then extras in first-seen order.
+/// Used where no prior formatting exists to preserve; surgical edits go
+/// through `toml_patch` instead.
 pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
-    let mut table = toml::Table::new();
-    table.insert("id".into(), toml::Value::String(meta.id.to_string()));
+    let mut system = toml::Table::new();
+    system.insert("id".into(), toml::Value::String(meta.id.to_string()));
     if let Some(title) = &meta.title {
-        table.insert("title".into(), toml::Value::String(title.clone()));
+        system.insert("title".into(), toml::Value::String(title.clone()));
     }
     if let Some(kind) = &meta.kind {
-        table.insert(
+        system.insert(
             "type".into(),
             toml::Value::String(kind.as_str().to_string()),
         );
     }
     if let Some(project) = &meta.project {
-        table.insert("project".into(), toml::Value::String(project.clone()));
+        system.insert("project".into(), toml::Value::String(project.clone()));
     }
     if !meta.tags.is_empty() {
-        table.insert(
+        system.insert(
             "tags".into(),
             toml::Value::Array(meta.tags.iter().cloned().map(toml::Value::String).collect()),
         );
     }
     if !meta.aliases.is_empty() {
-        table.insert(
+        system.insert(
             "aliases".into(),
             toml::Value::Array(
                 meta.aliases
@@ -466,18 +509,27 @@ pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
         );
     }
     if let Some(created_at) = &meta.created_at {
-        table.insert("created_at".into(), chrono_to_toml_datetime(created_at));
+        system.insert("created_at".into(), chrono_to_toml_datetime(created_at));
     }
     if let Some(updated_at) = &meta.updated_at {
-        table.insert("updated_at".into(), chrono_to_toml_datetime(updated_at));
-    }
-    for (key, value) in &meta.extra {
-        if !table.contains_key(key) {
-            table.insert(key.clone(), value.clone());
-        }
+        system.insert("updated_at".into(), chrono_to_toml_datetime(updated_at));
     }
 
-    let toml = toml::to_string(&table).expect("PageMeta should always serialize");
+    let mut toml = toml::to_string(&system).expect("PageMeta system fields should serialize");
+    if let Some(encryption) = &meta.encryption {
+        let value = toml::Value::try_from(encryption)
+            .expect("validated encryption metadata should serialize");
+        toml.push_str(&format!("encryption = {value}\n"));
+    }
+
+    let mut extras = toml::Table::new();
+    for (key, value) in &meta.extra {
+        if !system.contains_key(key) && key != "encryption" {
+            extras.insert(key.clone(), value.clone());
+        }
+    }
+    toml.push_str(&toml::to_string(&extras).expect("PageMeta extras should serialize"));
+
     format!("+++\n{toml}+++\n{body}")
 }
 
@@ -500,6 +552,10 @@ pub struct Page {
 }
 
 impl Page {
+    pub fn is_encrypted(&self) -> bool {
+        self.meta.encryption.is_some()
+    }
+
     /// Read a file and parse its frontmatter.
     ///
     /// Returns an error if the file cannot be read or the frontmatter is

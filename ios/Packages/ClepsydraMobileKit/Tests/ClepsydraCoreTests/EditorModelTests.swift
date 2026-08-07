@@ -70,6 +70,33 @@ final class EditorModelTests: XCTestCase {
         XCTAssertEqual(api.updateRequests.count, 0)
     }
 
+    func testProtectedPageStartsLockedAndNeverSubmitsArmorAsMarkdown() async {
+        let armor = "-----BEGIN AGE ENCRYPTED FILE-----\n...\n-----END AGE ENCRYPTED FILE-----\n"
+        let protected = makePage(
+            path: "notes/protected.md",
+            title: "Visible title",
+            body: armor,
+            revision: "r1",
+            encrypted: true,
+            encryption: PageEncryptionDescriptor(format: "age", version: 1, keyID: "key-1")
+        )
+        let api = EditorTestAPI()
+        let model = EditorViewModel(mode: .edit(protected), api: api)
+
+        XCTAssertEqual(model.phase, .unsupportedEncrypted)
+        XCTAssertEqual(model.title, "Visible title")
+        XCTAssertEqual(model.body, "")
+        XCTAssertEqual(model.previewMarkdown, "")
+        XCTAssertFalse(model.canSave)
+        XCTAssertFalse(model.isDirty)
+
+        model.save()
+        await Task.yield()
+
+        XCTAssertEqual(api.updateRequests.count, 0)
+        XCTAssertEqual(api.createRequests.count, 0)
+    }
+
     func testUpdateSendsOriginalUUIDRevisionAndExactDraft() async {
         let pageID = UUID()
         let initial = makePage(id: pageID, path: "notes/old.md", title: "Old", body: "Old body", revision: "original-r1")
@@ -219,7 +246,9 @@ final class EditorModelTests: XCTestCase {
         path: String,
         title: String? = nil,
         body: String,
-        revision: String
+        revision: String,
+        encrypted: Bool = false,
+        encryption: PageEncryptionDescriptor? = nil
     ) -> PageDetail {
         PageDetail(
             path: path,
@@ -229,7 +258,9 @@ final class EditorModelTests: XCTestCase {
             revision: revision,
             kind: "markdown",
             inferred: false,
-            project: nil
+            project: nil,
+            encrypted: encrypted,
+            encryption: encryption
         )
     }
 

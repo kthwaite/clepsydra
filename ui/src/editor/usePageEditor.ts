@@ -2,7 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Descendant, Editor } from "slate";
 import { usePage, useUpdatePage } from "#/api/pages";
 import type { ApiError } from "#/api/types";
+import {
+  decryptMarkdown,
+  encryptMarkdown,
+  recipientForIdentity,
+} from "#/crypto/age";
+import {
+  useOptionalEncryptionActions,
+  useOptionalEncryptionStatus,
+} from "#/crypto/EncryptionProvider";
 import { markdownToSlate, slateToMarkdown } from "./convert";
+import {
+  type DecryptedBodyState,
+  useDecryptedPageBody,
+} from "./useDecryptedPageBody";
 
 export type SaveStatus = "saved" | "saving" | "unsaved" | "error";
 
@@ -75,7 +88,7 @@ interface PageEditorState {
   saveStatus: SaveStatus;
   saveError: string | null;
   onSlateChange: (value: Descendant[], editor: Editor) => void;
-  saveNow: () => void;
+  saveNow: () => Promise<void>;
   revisionConflict: RevisionConflict | null;
   reloadAfterConflict: () => Promise<void>;
   createdAt: string | null;
@@ -84,6 +97,11 @@ interface PageEditorState {
   kind: string | null;
   inferred: boolean;
   project: string | null;
+  encryptionState: DecryptedBodyState;
+  pageId: string | null;
+  encrypted: boolean;
+  getPlaintext: () => string;
+  getRevision: () => string;
 }
 
 export function usePageEditor(
@@ -91,6 +109,16 @@ export function usePageEditor(
   options?: PageEditorOptions,
 ): PageEditorState {
   const { data: page, isLoading, error, refetch: refetchPage } = usePage(path);
+  const encryptionStatus = useOptionalEncryptionStatus();
+  const encryptionActions = useOptionalEncryptionActions();
+  const lockEpoch = encryptionStatus?.lockEpoch ?? 0;
+  const encryptionState = useDecryptedPageBody(
+    page,
+    encryptionActions,
+    lockEpoch,
+  );
+  const plainBody =
+    encryptionState.status === "plain" ? encryptionState.body : null;
   const pageNotFound = isApiError(error) && error.status === 404;
   const canDraft = Boolean(options?.ensure);
   const [ensured, setEnsured] = useState(false);
@@ -150,8 +178,11 @@ export function usePageEditor(
   const savedMetaGenRef = useRef(0);
 
   const revisionRef = useRef("");
-  const savingRef = useRef(false);
   const saveRequestedRef = useRef(false);
+  const saveFlightRef = useRef<{
+    epoch: number;
+    promise: Promise<void>;
+  } | null>(null);
   const conflictRef = useRef<RevisionConflict | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -161,13 +192,13 @@ export function usePageEditor(
   const [editorRevision, setEditorRevision] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const doSaveRef = useRef<() => void>(() => undefined);
+  const doSaveRef = useRef<() => Promise<void>>(async () => undefined);
 
   const initialValue = useMemo(() => {
-    if (!page)
+    if (!page || plainBody === null)
       return [{ type: "paragraph" as const, children: [{ text: "" }] }];
-    return markdownToSlate(page.body);
-  }, [page]);
+    return markdownToSlate(plainBody);
+  }, [page, plainBody]);
 
   // A new path is a new page lifecycle: discard the previous page's local
   // baseline before the sync effect below gets a chance to adopt the new
@@ -213,6 +244,22 @@ export function usePageEditor(
     setEditorRevision((revision) => revision + 1);
   }, [path]);
 
+  const previousLockEpochRef = useRef(lockEpoch);
+  useEffect(() => {
+    if (!page?.encrypted) {
+      previousLockEpochRef.current = lockEpoch;
+      return;
+    }
+    if (previousLockEpochRef.current === lockEpoch) return;
+    previousLockEpochRef.current = lockEpoch;
+    lifecycleRef.current += 1;
+    editorValueRef.current = [];
+    savedRef.current = { ...savedRef.current, body: "" };
+    bodyEditGenRef.current = 0;
+    savedBodyGenRef.current = 0;
+    setEditorRevision((revision) => revision + 1);
+  }, [lockEpoch, page?.encrypted]);
+
   // Sync server data → local state on initial load and genuine external changes.
   // Skip when we have unsaved local edits (dirty), to prevent refetches
   // triggered by our own saves from overwriting in-flight user work.
@@ -229,20 +276,21 @@ export function usePageEditor(
     setTitleState(t);
     setTagsState(tg);
     setAliasesState(al);
+    if (plainBody === null) return;
     const shouldResetEditor =
       editorValueRef.current.length === 0 ||
-      savedRef.current.body !== page.body;
-    const nextValue = markdownToSlate(page.body);
-    savedRef.current = { title: t, tags: tg, aliases: al, body: page.body };
+      savedRef.current.body !== plainBody;
+    const nextValue = initialValue;
+    savedRef.current = { title: t, tags: tg, aliases: al, body: plainBody };
     revisionRef.current = page.revision;
     editorValueRef.current = nextValue;
     if (shouldResetEditor) {
       setEditorRevision((revision) => revision + 1);
     }
     setSaveStatus("saved");
-  }, [page]);
+  }, [initialValue, page, plainBody]);
 
-  const doSave = useCallback(() => {
+  const doSave = useCallback((): Promise<void> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -250,59 +298,64 @@ export function usePageEditor(
 
     if (conflictRef.current) {
       setSaveStatus("error");
-      return;
+      return Promise.reject(new Error("Resolve the revision conflict first."));
     }
 
-    if (savingRef.current) {
-      saveRequestedRef.current = true;
-      return;
+    const requestedEpoch = lifecycleRef.current;
+    const currentFlight = saveFlightRef.current;
+    if (currentFlight) {
+      if (currentFlight.epoch === requestedEpoch) {
+        saveRequestedRef.current = true;
+        return currentFlight.promise;
+      }
+      return currentFlight.promise.then(() => {
+        if (lifecycleRef.current !== requestedEpoch) return;
+        return doSaveRef.current();
+      });
     }
-
-    // Snapshot generation counters at save start. A successful save advances
-    // only these watermarks, so edits made while the request is in flight stay
-    // dirty and are serialized by the next queued request.
-    const saveBodyGen = bodyEditGenRef.current;
-    const saveMetaGen = metaEditGenRef.current;
-    const bodyDirty = saveBodyGen > savedBodyGenRef.current;
 
     // Everything below this point may resolve after the editor has moved to
     // another page. `isStale` gates the writes that belong to *this* page's
     // lifecycle; the request itself still completes, since the flush on a path
     // change exists precisely to persist the outgoing page's last edit.
-    const saveEpoch = lifecycleRef.current;
+    const saveEpoch = requestedEpoch;
     const isStale = () => lifecycleRef.current !== saveEpoch;
-    // Read synchronously: the reset effect clears revisionRef, so the request
-    // must not re-read it across an await.
-    let expectedRevision = revisionRef.current;
+    const encrypted = page?.encrypted === true;
 
-    const currentTitle = titleRef.current;
-    const currentTags = tagsRef.current;
-    const currentAliases = aliasesRef.current;
+    const savePass = async (): Promise<void> => {
+      // Snapshot generation counters at save start. A successful save advances
+      // only these watermarks, so edits made while the request is in flight stay
+      // dirty and are serialized by the next queued request.
+      const saveBodyGen = bodyEditGenRef.current;
+      const saveMetaGen = metaEditGenRef.current;
+      const bodyDirty = saveBodyGen > savedBodyGenRef.current;
+      // Read synchronously: the reset effect clears revisionRef, so the request
+      // must not re-read it across an await.
+      let expectedRevision = revisionRef.current;
+      const currentTitle = titleRef.current;
+      const currentTags = tagsRef.current;
+      const currentAliases = aliasesRef.current;
+      // Only serialize the Slate tree when the user actually edited body content.
+      // This prevents metadata-only edits from losing unsupported markdown nodes.
+      const body = bodyDirty
+        ? slateToMarkdown(editorValueRef.current)
+        : savedRef.current.body;
+      const bodyChanged = bodyDirty && body !== savedRef.current.body;
+      const titleChanged = currentTitle !== savedRef.current.title;
+      const tagsChanged =
+        JSON.stringify(currentTags) !== JSON.stringify(savedRef.current.tags);
+      const aliasesChanged =
+        JSON.stringify(currentAliases) !==
+        JSON.stringify(savedRef.current.aliases);
 
-    // Only serialize the Slate tree when the user actually edited body content.
-    // This prevents metadata-only edits from losing unsupported markdown nodes.
-    const body = bodyDirty
-      ? slateToMarkdown(editorValueRef.current)
-      : savedRef.current.body;
-    const bodyChanged = bodyDirty && body !== savedRef.current.body;
-    const titleChanged = currentTitle !== savedRef.current.title;
-    const tagsChanged =
-      JSON.stringify(currentTags) !== JSON.stringify(savedRef.current.tags);
-    const aliasesChanged =
-      JSON.stringify(currentAliases) !==
-      JSON.stringify(savedRef.current.aliases);
+      if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
+        savedBodyGenRef.current = saveBodyGen;
+        savedMetaGenRef.current = saveMetaGen;
+        setSaveStatus("saved");
+        return;
+      }
 
-    if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
-      savedBodyGenRef.current = saveBodyGen;
-      savedMetaGenRef.current = saveMetaGen;
-      setSaveStatus("saved");
-      return;
-    }
-
-    savingRef.current = true;
-    setSaveStatus("saving");
-
-    void (async () => {
+      setSaveStatus("saving");
       try {
         if (isDraftRef.current && ensureRef.current) {
           const result = await ensureRef.current();
@@ -314,7 +367,6 @@ export function usePageEditor(
           if (!result.created && result.page.body.trim() !== "") {
             // The page was created and written elsewhere between load and
             // save. Surface the conflict-reload flow instead of overwriting.
-            savingRef.current = false;
             saveRequestedRef.current = false;
             if (isStale()) return;
             const conflict = { currentRevision: result.page.revision };
@@ -322,7 +374,7 @@ export function usePageEditor(
             setRevisionConflict(conflict);
             setSaveStatus("error");
             setSaveError("page already has content");
-            return;
+            throw new Error("page already has content");
           }
 
           // Adopt the created page as the local baseline — unless the editor
@@ -356,6 +408,18 @@ export function usePageEditor(
           }
         }
 
+        let requestBody: string | undefined;
+        if (bodyChanged) {
+          if (encrypted) {
+            const identity = encryptionActions?.getIdentity();
+            if (!identity) throw new Error("Vault is locked.");
+            const recipient = await recipientForIdentity(identity);
+            requestBody = await encryptMarkdown(body, recipient);
+          } else {
+            requestBody = body;
+          }
+        }
+
         const response = await updatePageMutateAsync({
           params: { path: { path } },
           body: {
@@ -363,13 +427,10 @@ export function usePageEditor(
             ...(titleChanged ? { title: currentTitle || null } : {}),
             ...(tagsChanged ? { tags: currentTags } : {}),
             ...(aliasesChanged ? { aliases: currentAliases } : {}),
-            ...(bodyChanged ? { body } : {}),
+            ...(requestBody !== undefined ? { body: requestBody } : {}),
           },
         });
 
-        savingRef.current = false;
-        const shouldDrain = saveRequestedRef.current;
-        saveRequestedRef.current = false;
         // A queued save belonged to the page just left; it is not drained into
         // the current one, whose own edits schedule their own save.
         if (isStale()) return;
@@ -379,23 +440,21 @@ export function usePageEditor(
           title: response.meta.title ?? "",
           tags: response.meta.tags ?? [],
           aliases: response.meta.aliases ?? [],
-          body: response.body,
+          body: encrypted
+            ? bodyChanged
+              ? body
+              : savedRef.current.body
+            : response.body,
         };
         savedBodyGenRef.current = saveBodyGen;
         savedMetaGenRef.current = saveMetaGen;
         setSaveError(null);
-
-        if (shouldDrain) {
-          doSaveRef.current();
-          return;
-        }
 
         const stillDirty =
           bodyEditGenRef.current > savedBodyGenRef.current ||
           metaEditGenRef.current > savedMetaGenRef.current;
         setSaveStatus(stillDirty ? "unsaved" : "saved");
       } catch (err) {
-        savingRef.current = false;
         saveRequestedRef.current = false;
         if (isStale()) return;
         if (timerRef.current) {
@@ -415,9 +474,24 @@ export function usePageEditor(
               ? err.message
               : "Save failed",
         );
+        throw err;
       }
-    })();
-  }, [path, updatePageMutateAsync]);
+    };
+
+    let flightPromise!: Promise<void>;
+    flightPromise = (async () => {
+      do {
+        saveRequestedRef.current = false;
+        await savePass();
+      } while (saveRequestedRef.current && !isStale());
+    })().finally(() => {
+      if (saveFlightRef.current?.promise === flightPromise) {
+        saveFlightRef.current = null;
+      }
+    });
+    saveFlightRef.current = { epoch: saveEpoch, promise: flightPromise };
+    return flightPromise;
+  }, [encryptionActions, page?.encrypted, path, updatePageMutateAsync]);
 
   doSaveRef.current = doSave;
 
@@ -440,7 +514,17 @@ export function usePageEditor(
       const nextTitle = latest.meta.title ?? "";
       const nextTags = latest.meta.tags ?? [];
       const nextAliases = latest.meta.aliases ?? [];
-      const nextValue = markdownToSlate(latest.body);
+      let latestBody = latest.body;
+      if (latest.encrypted) {
+        const identity = encryptionActions?.getIdentity();
+        if (!identity) throw new Error("Vault is locked.");
+        try {
+          latestBody = await decryptMarkdown(latest.body, identity);
+        } catch {
+          throw new Error("Unable to authenticate encrypted note.");
+        }
+      }
+      const nextValue = markdownToSlate(latestBody);
       titleRef.current = nextTitle;
       tagsRef.current = nextTags;
       aliasesRef.current = nextAliases;
@@ -452,7 +536,7 @@ export function usePageEditor(
         title: nextTitle,
         tags: nextTags,
         aliases: nextAliases,
-        body: latest.body,
+        body: latestBody,
       };
       savedBodyGenRef.current = bodyEditGenRef.current;
       savedMetaGenRef.current = metaEditGenRef.current;
@@ -473,7 +557,7 @@ export function usePageEditor(
             : "Save failed",
       );
     }
-  }, [refetchPage]);
+  }, [encryptionActions, refetchPage]);
 
   const scheduleSave = useCallback(() => {
     clearTimeout(timerRef.current ?? undefined);
@@ -482,7 +566,9 @@ export function usePageEditor(
       return;
     }
     setSaveStatus("unsaved");
-    timerRef.current = setTimeout(doSave, DEBOUNCE_MS);
+    timerRef.current = setTimeout(() => {
+      void doSave().catch(() => undefined);
+    }, DEBOUNCE_MS);
   }, [doSave]);
 
   const onSlateChange = useCallback(
@@ -535,10 +621,16 @@ export function usePageEditor(
     [scheduleSave],
   );
 
+  const encrypted = page?.encrypted === true;
+  useEffect(() => {
+    if (!encrypted || !encryptionActions) return;
+    return encryptionActions.registerFlusher(doSave);
+  }, [doSave, encrypted, encryptionActions]);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden" && timerRef.current) {
-        doSave();
+        void doSave().catch(() => undefined);
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -546,9 +638,18 @@ export function usePageEditor(
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       // Flush rather than drop: a cleared timer would silently lose the last
       // unsaved edit when the editor unmounts (navigation, page switch).
-      if (timerRef.current) doSave();
+      if (timerRef.current) void doSave().catch(() => undefined);
     };
   }, [doSave]);
+
+  const getPlaintext = useCallback(() => {
+    const bodyDirty = bodyEditGenRef.current > savedBodyGenRef.current;
+    return bodyDirty
+      ? slateToMarkdown(editorValueRef.current)
+      : savedRef.current.body;
+  }, []);
+
+  const getRevision = useCallback(() => revisionRef.current, []);
 
   return {
     isLoading,
@@ -570,9 +671,14 @@ export function usePageEditor(
     saveNow: doSave,
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
-    bodyMarkdown: page?.body ?? "",
+    bodyMarkdown: plainBody ?? "",
     kind: page?.kind ?? null,
     inferred: page?.inferred ?? true,
     project: page?.project ?? null,
+    encryptionState,
+    pageId: page?.meta.id ?? null,
+    encrypted: page?.encrypted ?? false,
+    getPlaintext,
+    getRevision,
   };
 }

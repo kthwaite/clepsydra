@@ -17,6 +17,7 @@ use super::error::ApiError;
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
+use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
@@ -41,6 +42,7 @@ pub struct PageSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     pub tags: Vec<String>,
+    pub encrypted: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,6 +56,15 @@ pub struct PageDetail {
     pub inferred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    pub encrypted: bool,
+    pub encryption: Option<EncryptionMetaResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EncryptionMetaResponse {
+    pub format: String,
+    pub version: u8,
+    pub key_id: String,
 }
 
 /// OpenAPI schema for page metadata exposed in `PageDetail`.
@@ -85,6 +96,8 @@ pub struct PageDetailResponse {
     pub inferred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    pub encrypted: bool,
+    pub encryption: Option<EncryptionMetaResponse>,
 }
 
 /// OpenAPI schema for paginated page listing.
@@ -125,6 +138,49 @@ pub struct UpdatePageRequest {
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
     pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ProtectPageRequest {
+    pub expected_revision: String,
+    pub encryption: EncryptionMetaResponse,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UnprotectPageRequest {
+    pub expected_revision: String,
+    pub body: String,
+}
+
+impl From<&EncryptionMeta> for EncryptionMetaResponse {
+    fn from(meta: &EncryptionMeta) -> Self {
+        let format = match meta.format {
+            EncryptionFormat::Age => "age",
+        };
+        Self {
+            format: format.to_string(),
+            version: meta.version,
+            key_id: meta.key_id.clone(),
+        }
+    }
+}
+
+impl EncryptionMetaResponse {
+    fn into_meta(self) -> Result<EncryptionMeta, ApiError> {
+        let format = match self.format.as_str() {
+            "age" => EncryptionFormat::Age,
+            _ => return Err(ApiError::bad_request("unsupported encryption format")),
+        };
+        let meta = EncryptionMeta {
+            format,
+            version: self.version,
+            key_id: self.key_id,
+        };
+        meta.validate()
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        Ok(meta)
+    }
 }
 
 /// Query parameters for `GET /pages`: pagination plus optional filters.
@@ -204,6 +260,8 @@ pub struct BulkAssignResponse {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_pages).post(create_default_page))
+        .route("/by-id/{uuid}/protect", post(protect_page_by_id))
+        .route("/by-id/{uuid}/unprotect", post(unprotect_page_by_id))
         .route("/by-id/{uuid}", get(get_page_by_id).put(update_page_by_id))
         .route(
             "/by-id/{uuid}/properties",
@@ -248,6 +306,12 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         .unwrap_or_else(|| CanonicalName::from_filename(page.path.filename()));
     let (kind, inferred) = crate::vault::kind::resolve(page.path.as_str(), page.meta.kind);
     let project = page.meta.project.clone();
+    let encryption = page
+        .meta
+        .encryption
+        .as_ref()
+        .map(EncryptionMetaResponse::from);
+    let encrypted = encryption.is_some();
     PageDetail {
         path: page.path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
@@ -257,6 +321,8 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         kind: kind.as_str().to_string(),
         inferred,
         project,
+        encrypted,
+        encryption,
     }
 }
 
@@ -267,11 +333,12 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
 /// Map a `pages` row to a `PageSummary`. Both `list_pages` and the folder
 /// listing query rely on this shared mapper, so their SELECT statements MUST
 /// use the same column order:
-/// `id, path, title, canonical_name, kind, kind_inferred, project, <tags subquery>`.
+/// `id, path, title, canonical_name, kind, kind_inferred, project, encrypted,
+/// <tags subquery>`.
 /// The tags subquery is a `group_concat` joined by the unit separator (`char(31)`)
 /// so commas in tag text don't fragment the split.
 pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageSummary> {
-    let tags_raw: String = row.get(7)?;
+    let tags_raw: String = row.get(8)?;
     let tags = if tags_raw.is_empty() {
         Vec::new()
     } else {
@@ -285,6 +352,7 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
         kind: row.get(4)?,
         inferred: row.get::<_, i64>(5)? != 0,
         project: row.get(6)?,
+        encrypted: row.get::<_, i64>(7)? != 0,
         tags,
     })
 }
@@ -330,7 +398,7 @@ pub async fn list_pages(
         .with_index(move |index, _vault| {
             let mut sql = String::from(
                 "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
-                        p.project,
+                        p.project, p.encrypted,
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t WHERE t.page_id = p.id), '')
                    FROM pages p",
@@ -685,6 +753,241 @@ pub async fn update_page_by_id(
     )))
 }
 
+#[utoipa::path(
+    post,
+    path = "/pages/by-id/{uuid}/protect",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("uuid" = String, Path, description = "Page UUID")),
+    request_body = ProtectPageRequest,
+    responses(
+        (status = 200, description = "Protected page", body = PageDetailResponse),
+        (status = 400, description = "Invalid encryption descriptor or body", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Page changed since it was loaded", body = ApiError),
+        (status = 500, description = "Page protected but cache maintenance failed", body = ApiError)
+    )
+)]
+pub async fn protect_page_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+    Json(body): Json<ProtectPageRequest>,
+) -> Result<Json<PageDetail>, ApiError> {
+    let encryption = body.encryption.into_meta()?;
+    validate_age_armor(&body.body)
+        .map_err(|error| ApiError::bad_request(format!("invalid encrypted body: {error}")))?;
+    transition_page_by_id(
+        state,
+        &uuid,
+        EncryptionTransition::Protect {
+            expected_revision: body.expected_revision,
+            encryption,
+            body: body.body,
+        },
+    )
+    .await
+}
+
+#[utoipa::path(
+    post,
+    path = "/pages/by-id/{uuid}/unprotect",
+    context_path = "/api/vault",
+    tag = "Pages",
+    params(("uuid" = String, Path, description = "Page UUID")),
+    request_body = UnprotectPageRequest,
+    responses(
+        (status = 200, description = "Unprotected page", body = PageDetailResponse),
+        (status = 400, description = "Page is not protected", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Page changed since it was loaded", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn unprotect_page_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+    Json(body): Json<UnprotectPageRequest>,
+) -> Result<Json<PageDetail>, ApiError> {
+    transition_page_by_id(
+        state,
+        &uuid,
+        EncryptionTransition::Unprotect {
+            expected_revision: body.expected_revision,
+            body: body.body,
+        },
+    )
+    .await
+}
+
+#[derive(Clone)]
+enum EncryptionTransition {
+    Protect {
+        expected_revision: String,
+        encryption: EncryptionMeta,
+        body: String,
+    },
+    Unprotect {
+        expected_revision: String,
+        body: String,
+    },
+}
+
+impl EncryptionTransition {
+    fn expected_revision(&self) -> &str {
+        match self {
+            Self::Protect {
+                expected_revision, ..
+            }
+            | Self::Unprotect {
+                expected_revision, ..
+            } => expected_revision,
+        }
+    }
+
+    fn is_protection(&self) -> bool {
+        matches!(self, Self::Protect { .. })
+    }
+}
+
+async fn transition_page_by_id(
+    state: Arc<AppState>,
+    uuid: &str,
+    transition: EncryptionTransition,
+) -> Result<Json<PageDetail>, ApiError> {
+    for _ in 0..BY_ID_PATH_ATTEMPTS {
+        let candidate = indexed_page_path_by_id(&state, uuid).await?;
+        state
+            .mutation_coordinator
+            .observe_page_id_lookup(&candidate);
+        let attempted = candidate.clone();
+        match transition_page_at_path(Arc::clone(&state), candidate, uuid, transition.clone()).await
+        {
+            Ok(updated) => return Ok(updated),
+            Err(error) if error.status == StatusCode::NOT_FOUND.as_u16() => {
+                let current = indexed_page_path_by_id(&state, uuid).await?;
+                if current != attempted {
+                    continue;
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(ApiError::internal(format!(
+        "page path did not stabilize for id: {uuid}"
+    )))
+}
+
+async fn transition_page_at_path(
+    state: Arc<AppState>,
+    vault_path: VaultPath,
+    expected_uuid: &str,
+    transition: EncryptionTransition,
+) -> Result<Json<PageDetail>, ApiError> {
+    let page_path = vault_path.as_str().to_string();
+    let abs_path = state.vault.resolve(&vault_path);
+    let page = Page::from_file(&abs_path, vault_path.clone()).map_err(|error| match error {
+        crate::vault::page::FrontmatterError::Io(error)
+            if error.kind() == std::io::ErrorKind::NotFound =>
+        {
+            ApiError::not_found(format!("page not found: {page_path}"))
+        }
+        error => ApiError::internal(format!("failed to read page: {error}")),
+    })?;
+    if page.meta.id.to_string() != expected_uuid {
+        return Err(ApiError::not_found(format!(
+            "page moved while resolving id: {expected_uuid}"
+        )));
+    }
+
+    let current_revision = page_revision(&page.raw_content);
+    if current_revision != transition.expected_revision() {
+        return Err(ApiError::revision_conflict(current_revision));
+    }
+    match &transition {
+        EncryptionTransition::Protect { .. } if page.is_encrypted() => {
+            return Err(ApiError::bad_request("page is already protected"));
+        }
+        EncryptionTransition::Unprotect { .. } if !page.is_encrypted() => {
+            return Err(ApiError::bad_request("page is not protected"));
+        }
+        _ => {}
+    }
+
+    let expected_content = page.raw_content;
+    let mut meta = page.meta;
+    let page_body = match transition.clone() {
+        EncryptionTransition::Protect {
+            encryption, body, ..
+        } => {
+            meta.encryption = Some(encryption);
+            body
+        }
+        EncryptionTransition::Unprotect { body, .. } => {
+            meta.encryption = None;
+            body
+        }
+    };
+    meta.updated_at = Some(Utc::now());
+
+    let notify = |notification: MutationNotification| {
+        let _ = state.change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    };
+    let result = match state
+        .mutation_coordinator
+        .update_page(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            UpdatePageCommand {
+                path: vault_path,
+                expected_content,
+                meta,
+                body: page_body,
+                project: ProjectAssignment::Unchanged,
+                reconcile: false,
+            },
+            &notify,
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(MutationError::Stale(_)) => match fs::read_to_string(&abs_path) {
+            Ok(content) => {
+                if let Ok((current_meta, _)) = crate::vault::page::parse_frontmatter(&content)
+                    && current_meta.id.to_string() != expected_uuid
+                {
+                    return Err(ApiError::not_found(format!(
+                        "page moved while resolving id: {expected_uuid}"
+                    )));
+                }
+                return Err(ApiError::revision_conflict(page_revision(&content)));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ApiError::not_found(format!("page not found: {page_path}")));
+            }
+            Err(error) => {
+                return Err(ApiError::internal(format!("failed to read page: {error}")));
+            }
+        },
+        Err(error) => return Err(super::mutation_error(error)),
+    };
+
+    if transition.is_protection() {
+        state
+            .index
+            .scrub_deleted_content()
+            .await
+            .map_err(|_| ApiError::internal("note is protected but the cache scrub failed"))?;
+    }
+
+    Ok(Json(page_detail(result)))
+}
+
 async fn update_page_at_path(
     state: Arc<AppState>,
     vault_path: VaultPath,
@@ -712,6 +1015,16 @@ async fn update_page_at_path(
     let current_revision = page_revision(&page.raw_content);
     if current_revision != body.expected_revision {
         return Err(ApiError::revision_conflict(current_revision));
+    }
+
+    if page.is_encrypted()
+        && let Some(new_body) = body.body.as_deref()
+    {
+        validate_age_armor(new_body).map_err(|error| {
+            ApiError::bad_request(format!(
+                "protected page body must remain canonical age armor: {error}"
+            ))
+        })?;
     }
 
     let expected_content = page.raw_content;

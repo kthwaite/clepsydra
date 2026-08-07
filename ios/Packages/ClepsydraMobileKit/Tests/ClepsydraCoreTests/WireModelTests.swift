@@ -42,6 +42,33 @@ final class WireModelTests: XCTestCase {
         XCTAssertEqual(page.kind, "NOTE")
         XCTAssertFalse(page.inferred)
         XCTAssertEqual(page.project, "clepsydra")
+        XCTAssertFalse(page.encrypted)
+        XCTAssertNil(page.encryption)
+    }
+
+    func testDecodesProtectedPageEncryptionDescriptor() throws {
+        let payload = """
+        {
+          "path": "notes/protected.md",
+          "canonical_name": "protected",
+          "meta": { "id": "01900000-0000-7000-8000-000000000004", "title": "Visible title" },
+          "body": "-----BEGIN AGE ENCRYPTED FILE-----\\n...\\n-----END AGE ENCRYPTED FILE-----\\n",
+          "revision": "\(String(repeating: "e", count: 64))",
+          "kind": "NOTE",
+          "inferred": false,
+          "encrypted": true,
+          "encryption": { "format": "age", "version": 1, "key_id": "key-1" }
+        }
+        """
+
+        let page = try VaultAPIJSON.decoder().decode(PageDetail.self, from: Data(payload.utf8))
+
+        XCTAssertTrue(page.encrypted)
+        XCTAssertEqual(
+            page.encryption,
+            PageEncryptionDescriptor(format: "age", version: 1, keyID: "key-1")
+        )
+        XCTAssertEqual(page.meta.title, "Visible title")
     }
 
     func testDecodesMissingOrNullTagAndAliasArraysAsEmpty() throws {

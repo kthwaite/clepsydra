@@ -266,7 +266,7 @@ fn filesystem_authoritative_page_summaries(
         .map(|(name, vault_path)| {
             match index.connection().query_row(
                 "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
-                        p.project,
+                        p.project, p.encrypted,
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t WHERE t.page_id = p.id), '')
                    FROM pages p WHERE p.path = ?1",
@@ -294,6 +294,7 @@ fn build_page_summary_fallback(name: &str, vp: &VaultPath) -> PageSummary {
         inferred: true,
         project: None,
         tags: Vec::new(),
+        encrypted: false,
     }
 }
 
@@ -403,6 +404,7 @@ mod tests {
                 inferred: true,
                 project: None,
                 tags: Vec::new(),
+                encrypted: false,
             },
             PageSummary {
                 id: String::new(),
@@ -413,6 +415,7 @@ mod tests {
                 inferred: true,
                 project: None,
                 tags: Vec::new(),
+                encrypted: false,
             },
         ];
         sort_folder_listing(&mut folders, &mut pages);

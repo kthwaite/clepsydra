@@ -20,6 +20,10 @@ pub struct IndexedPage {
     pub meta: PageMeta,
     /// Markdown body (after frontmatter).
     pub body: String,
+    /// Whether body-derived projections must be suppressed.
+    pub encrypted: bool,
+    /// Original body bytes, retained only for full-file frontmatter rewrites.
+    pub(crate) raw_body: String,
     /// blake3 hash of the full file content.
     pub content_hash: String,
     /// Links extracted from the markdown body.

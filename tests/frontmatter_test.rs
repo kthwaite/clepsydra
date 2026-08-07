@@ -1,11 +1,20 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use clepsydra::vault::encryption::{EncryptionFormat, EncryptionMeta};
 use clepsydra::vault::page::{
     ExtraMap, FrontmatterError, Page, PageMeta, parse_frontmatter, parse_or_repair_frontmatter,
     write_page_content,
 };
 use clepsydra::vault::path::VaultPath;
+
+const ENCRYPTION_KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
+
+fn encrypted_page(frontmatter_encryption: &str, body: &str) -> String {
+    format!(
+        "+++\nid = \"019578a1-c234-7000-8000-000000000001\"\ntitle = \"Private note\"\n{frontmatter_encryption}\n+++\n{body}"
+    )
+}
 
 // ---------------------------------------------------------------------------
 // PageMeta parsing (legacy YAML dual-read)
@@ -60,6 +69,110 @@ fn deserialize_minimal_frontmatter() {
 }
 
 #[test]
+fn encryption_inline_table_parses_as_typed_metadata_and_preserves_armor() {
+    let armor = include_str!("support/fixtures/private-note.age");
+    let content = encrypted_page(
+        &format!(
+            "encryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}"
+        ),
+        armor,
+    );
+
+    let (meta, body) = parse_frontmatter(&content).unwrap();
+
+    assert_eq!(
+        meta.encryption,
+        Some(EncryptionMeta {
+            format: EncryptionFormat::Age,
+            version: 1,
+            key_id: ENCRYPTION_KEY_ID.into(),
+        })
+    );
+    assert!(!meta.extra.contains_key("encryption"));
+    assert_eq!(body, armor);
+
+    let page = Page {
+        path: VaultPath::new("private.md").unwrap(),
+        meta,
+        body,
+        raw_content: content,
+    };
+    assert!(page.is_encrypted());
+}
+
+#[test]
+fn encryption_standard_table_parses_and_writes_as_canonical_inline_table() {
+    let armor = include_str!("support/fixtures/private-note.age");
+    let content = encrypted_page(
+        &format!("[encryption]\nformat = \"age\"\nversion = 1\nkey_id = \"{ENCRYPTION_KEY_ID}\""),
+        armor,
+    );
+    let (meta, body) = parse_frontmatter(&content).unwrap();
+
+    let written = write_page_content(&meta, &body);
+
+    assert!(written.contains(&format!(
+        "encryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}\n"
+    )));
+    assert!(!written.contains("[encryption]"));
+    let (round_tripped, round_tripped_body) = parse_frontmatter(&written).unwrap();
+    assert_eq!(round_tripped.encryption, meta.encryption);
+    assert_eq!(round_tripped_body, armor);
+}
+
+#[test]
+fn encryption_metadata_rejects_unsupported_versions_and_empty_key_ids() {
+    let armor = include_str!("support/fixtures/private-note.age");
+    let unsupported = encrypted_page(
+        &format!(
+            "encryption = {{ format = \"age\", version = 2, key_id = \"{ENCRYPTION_KEY_ID}\" }}"
+        ),
+        armor,
+    );
+    let empty_key = encrypted_page(
+        "encryption = { format = \"age\", version = 1, key_id = \"\" }",
+        armor,
+    );
+
+    assert!(parse_frontmatter(&unsupported).is_err());
+    assert!(parse_frontmatter(&empty_key).is_err());
+}
+
+#[test]
+fn encryption_marker_requires_canonical_armor_but_unmarked_armor_is_plain() {
+    let marked_plaintext = encrypted_page(
+        &format!(
+            "encryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}"
+        ),
+        "# plaintext must not pass\n",
+    );
+    assert!(parse_frontmatter(&marked_plaintext).is_err());
+
+    let armor = include_str!("support/fixtures/private-note.age");
+    let unmarked = format!("+++\nid = \"019578a1-c234-7000-8000-000000000001\"\n+++\n{armor}");
+    let (meta, body) = parse_frontmatter(&unmarked).unwrap();
+    assert!(meta.encryption.is_none());
+    assert_eq!(body, armor);
+}
+
+#[test]
+fn encryption_marker_survives_tolerant_parse_when_armor_is_invalid() {
+    let content = encrypted_page(
+        &format!(
+            "encryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}"
+        ),
+        "# plaintext must remain classified as protected\n",
+    );
+
+    let (meta, body, rewrote, warning) = parse_or_repair_frontmatter(&content);
+
+    assert!(meta.encryption.is_some());
+    assert_eq!(body, "# plaintext must remain classified as protected\n");
+    assert!(!rewrote);
+    assert!(warning.is_some());
+}
+
+#[test]
 fn round_trip_preserves_fields() {
     let now: DateTime<Utc> = "2025-06-01T12:00:00Z".parse().unwrap();
     let id = Uuid::parse_str("019578a1-c234-7000-8000-000000000001").unwrap();
@@ -70,6 +183,7 @@ fn round_trip_preserves_fields() {
         aliases: vec!["rt".into()],
         created_at: Some(now),
         updated_at: Some(now),
+        encryption: None,
         extra: ExtraMap::new(),
         kind: None,
         project: None,
@@ -96,6 +210,7 @@ fn skip_serializing_empty_fields() {
         aliases: Vec::new(),
         created_at: None,
         updated_at: None,
+        encryption: None,
         extra: ExtraMap::new(),
         kind: None,
         project: None,
@@ -147,6 +262,7 @@ fn write_page_content_round_trip() {
         aliases: Vec::new(),
         created_at: None,
         updated_at: None,
+        encryption: None,
         extra: ExtraMap::new(),
         kind: None,
         project: None,
@@ -258,6 +374,7 @@ fn page_to_file_writes_correctly() {
         aliases: Vec::new(),
         created_at: None,
         updated_at: None,
+        encryption: None,
         extra: ExtraMap::new(),
         kind: None,
         project: None,

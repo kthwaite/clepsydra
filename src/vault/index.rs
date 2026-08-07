@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS pages (
     kind            TEXT NOT NULL DEFAULT 'NOTE',
     kind_inferred   INTEGER NOT NULL DEFAULT 1,
     project         TEXT,
+    encrypted       INTEGER NOT NULL DEFAULT 0,
     word_count      INTEGER
 );
 
@@ -297,11 +298,13 @@ impl VaultIndex {
     /// This is the shared post-connection initialization used by all constructors.
     fn setup_connection(conn: &Connection) -> Result<(), IndexError> {
         // 1. Pragmas
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;",
+        )?;
 
         // 2. Run pre-schema migrations (column additions required before index creation)
         migrate_links_add_target_block_id(conn)?;
-        migrate_pages_add_kind_columns(conn)?;
+        migrate_pages_add_projection_columns(conn)?;
 
         // 3. Execute schema
         conn.execute_batch(SCHEMA)?;
@@ -384,6 +387,17 @@ impl VaultIndex {
     /// Mutably borrow the underlying connection for internal transactional work.
     pub(crate) fn connection_mut(&mut self) -> &mut Connection {
         &mut self.conn
+    }
+
+    /// Remove deleted content from SQLite pages and truncate the WAL.
+    ///
+    /// Call this after replacing plaintext projections with encrypted-page
+    /// projections so prior content is not recoverable from cache artifacts.
+    pub fn scrub_deleted_content(&mut self) -> Result<(), IndexError> {
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        self.conn.execute_batch("VACUUM;")?;
+        Ok(())
     }
 
     /// Register an additional deriver to run during index builds.
@@ -619,6 +633,13 @@ impl VaultIndex {
             CanonicalName::from_filename(vault_path.filename())
         };
 
+        let encrypted = meta.encryption.is_some();
+        let raw_body = body;
+        let body = if encrypted {
+            String::new()
+        } else {
+            raw_body.clone()
+        };
         let body_links = extract_links(&body);
         let blocks = crate::vault::block::parse_blocks(&body);
 
@@ -629,6 +650,8 @@ impl VaultIndex {
             abs_path: abs_path.clone(),
             meta,
             body,
+            encrypted,
+            raw_body,
             content_hash,
             body_links,
             prop_links,
@@ -646,7 +669,7 @@ impl VaultIndex {
             crate::vault::kind::resolve(page.vault_path.as_str(), page.meta.kind);
         let kind_str = kind.as_str();
         let project = page.meta.project.clone();
-        let word_count = page.body.split_whitespace().count() as i64;
+        let word_count = (!page.encrypted).then(|| page.body.split_whitespace().count() as i64);
 
         // `pages.path` is unique independently of the page ID. If frontmatter
         // repair changed the ID in place, remove the old identity and every
@@ -663,8 +686,8 @@ impl VaultIndex {
         }
 
         tx.execute(
-            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, word_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, encrypted, word_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                path = excluded.path,
                title = excluded.title,
@@ -677,6 +700,7 @@ impl VaultIndex {
                kind = excluded.kind,
                kind_inferred = excluded.kind_inferred,
                project = excluded.project,
+               encrypted = excluded.encrypted,
                word_count = excluded.word_count",
             params![
                 page_id,
@@ -691,6 +715,7 @@ impl VaultIndex {
                 kind_str,
                 kind_inferred as i64,
                 project,
+                page.encrypted as i64,
                 word_count,
             ],
         )?;
@@ -1513,11 +1538,11 @@ pub(crate) fn find_body_start(content: &str) -> usize {
     crate::vault::page::body_offset(content)
 }
 
-/// Add `kind`, `kind_inferred`, and `project` columns to `pages` if they don't exist.
+/// Add page projection columns to `pages` if they do not exist.
 ///
 /// Must run BEFORE the main SCHEMA batch, since SCHEMA creates indexes on `kind`
 /// and `project` and will fail if the columns are missing on pre-existing DBs.
-fn migrate_pages_add_kind_columns(conn: &Connection) -> Result<(), IndexError> {
+fn migrate_pages_add_projection_columns(conn: &Connection) -> Result<(), IndexError> {
     // If the pages table doesn't exist yet, nothing to migrate — SCHEMA will create it.
     let table_exists: bool = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pages'",
@@ -1553,6 +1578,11 @@ fn migrate_pages_add_kind_columns(conn: &Connection) -> Result<(), IndexError> {
     let has_word_count: bool = conn.prepare("SELECT word_count FROM pages LIMIT 0").is_ok();
     if !has_word_count {
         conn.execute_batch("ALTER TABLE pages ADD COLUMN word_count INTEGER;")?;
+    }
+
+    let has_encrypted: bool = conn.prepare("SELECT encrypted FROM pages LIMIT 0").is_ok();
+    if !has_encrypted {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0;")?;
     }
 
     Ok(())
@@ -1786,6 +1816,14 @@ fn collect_indexed_pages(
             CanonicalName::from_filename(vault_path.filename())
         };
 
+        let encrypted = meta.encryption.is_some();
+        let raw_body = body;
+        let body = if encrypted {
+            String::new()
+        } else {
+            raw_body.clone()
+        };
+
         // Extract body links
         let body_links = extract_links(&body);
 
@@ -1800,6 +1838,8 @@ fn collect_indexed_pages(
             abs_path: abs_path.to_path_buf(),
             meta,
             body,
+            encrypted,
+            raw_body,
             content_hash,
             body_links,
             prop_links,
@@ -1868,7 +1908,7 @@ fn resolve_duplicate_uuids(
 
             // Write the updated frontmatter back to disk (owning indexes only).
             if repair_frontmatter {
-                let new_content = write_page_content(&loser.meta, &loser.body);
+                let new_content = write_page_content(&loser.meta, &loser.raw_body);
                 fs::write(&loser.abs_path, &new_content)?;
 
                 // Recompute content hash after rewrite
@@ -1898,12 +1938,12 @@ fn upsert_indexed_page(
     let (kind, kind_inferred) = crate::vault::kind::resolve(pf.vault_path.as_str(), pf.meta.kind);
     let kind_str = kind.as_str();
     let project = pf.meta.project.clone();
-    let word_count = pf.body.split_whitespace().count() as i64;
+    let word_count = (!pf.encrypted).then(|| pf.body.split_whitespace().count() as i64);
 
     // Upsert into pages table
     tx.execute(
-        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, word_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        "INSERT INTO pages (id, path, title, canonical_name, created_at, updated_at, meta_json, content_hash, journal_date, kind, kind_inferred, project, encrypted, word_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
            path = excluded.path,
            title = excluded.title,
@@ -1916,6 +1956,7 @@ fn upsert_indexed_page(
            kind = excluded.kind,
            kind_inferred = excluded.kind_inferred,
            project = excluded.project,
+           encrypted = excluded.encrypted,
            word_count = excluded.word_count",
         params![
             page_id,
@@ -1930,6 +1971,7 @@ fn upsert_indexed_page(
             kind_str,
             kind_inferred as i64,
             project,
+            pf.encrypted as i64,
             word_count,
         ],
     )?;

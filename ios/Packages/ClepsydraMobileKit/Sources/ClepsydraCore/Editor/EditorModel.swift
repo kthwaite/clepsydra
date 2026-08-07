@@ -20,6 +20,7 @@ public final class EditorViewModel {
         case failed(String)
         case conflict(currentRevision: String)
         case deleted
+        case unsupportedEncrypted
     }
 
     private enum RetryAction {
@@ -65,7 +66,12 @@ public final class EditorViewModel {
         case let .edit(page):
             sourcePage = page
             title = Self.title(for: page)
-            body = page.body
+            if page.encrypted {
+                body = ""
+                phase = .unsupportedEncrypted
+            } else {
+                body = page.body
+            }
         }
     }
 
@@ -86,6 +92,8 @@ public final class EditorViewModel {
 
     public var initialPage: PageDetail? { sourcePage }
 
+    public var isProtected: Bool { sourcePage?.encrypted == true }
+
     public var isSaving: Bool {
         if case .saving = phase { return true }
         if case .reloading = phase { return true }
@@ -98,10 +106,12 @@ public final class EditorViewModel {
     }
 
     public var canSave: Bool {
-        !isSaving && !isInConflict && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isProtected && !isSaving && !isInConflict
+            && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     public var isDirty: Bool {
+        if isProtected { return false }
         guard let sourcePage else {
             return !title.isEmpty || !body.isEmpty
         }
@@ -113,6 +123,7 @@ public final class EditorViewModel {
         case let .failed(message): return message
         case .deleted: return "This page was deleted on the server."
         case .conflict: return VaultAPIError.revisionConflict(currentRevision: conflictRevision ?? "").userMessage
+        case .unsupportedEncrypted: return "Protected notes can only be opened in the web frontend."
         case .idle, .saving, .reloading: return nil
         }
     }
@@ -125,7 +136,7 @@ public final class EditorViewModel {
     }
 
     public func save() {
-        guard !isSaving, !isInConflict else { return }
+        guard !isProtected, !isSaving, !isInConflict else { return }
 
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {
@@ -205,8 +216,13 @@ public final class EditorViewModel {
                 guard let self, self.operationGeneration == generation else { return }
                 self.sourcePage = currentPage
                 self.title = Self.title(for: currentPage)
-                self.body = currentPage.body
-                self.phase = .idle
+                if currentPage.encrypted {
+                    self.body = ""
+                    self.phase = .unsupportedEncrypted
+                } else {
+                    self.body = currentPage.body
+                    self.phase = .idle
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 guard let self, self.operationGeneration == generation else { return }

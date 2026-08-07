@@ -67,7 +67,7 @@ fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
 
 /// Frontmatter keys owned by the system serializer; patching them as
 /// properties would corrupt page identity or bypass typed update paths.
-const RESERVED_KEYS: [&str; 8] = [
+const RESERVED_KEYS: [&str; 9] = [
     "id",
     "title",
     "type",
@@ -76,6 +76,7 @@ const RESERVED_KEYS: [&str; 8] = [
     "aliases",
     "created_at",
     "updated_at",
+    "encryption",
 ];
 
 /// Apply a property patch to the page with the given id.

@@ -15,6 +15,7 @@ use super::events::SyncNotification;
 use crate::vault::block::parse_blocks;
 use crate::vault::block_id::BlockId;
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
+use crate::vault::page::Page;
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -220,6 +221,13 @@ async fn assign_block_id(
     let span_start = req.span_start;
     let page_path = req.page_path.clone();
 
+    let abs_path = state.vault.resolve(&vault_path);
+    if Page::from_file(&abs_path, vault_path.clone()).is_ok_and(|page| page.is_encrypted()) {
+        return Err(ApiError::conflict(
+            "cannot assign a block ID inside a protected page",
+        ));
+    }
+
     let lookup_path = page_path.clone();
     let indexed_block = state
         .index
@@ -255,7 +263,6 @@ async fn assign_block_id(
         ))
     })?;
 
-    let abs_path = state.vault.resolve(&vault_path);
     let mut content = std::fs::read_to_string(&abs_path)
         .map_err(|e| ApiError::internal(format!("Failed to read file: {}", e)))?;
     let expected_content = content.clone();

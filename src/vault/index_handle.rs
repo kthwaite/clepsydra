@@ -98,6 +98,12 @@ impl IndexHandle {
             .await?
     }
 
+    /// Scrub deleted projections and truncate the cache WAL on the index thread.
+    pub async fn scrub_deleted_content(&self) -> Result<(), IndexError> {
+        self.with_index(|index, _vault| index.scrub_deleted_content())
+            .await?
+    }
+
     /// Apply one intent-level mutation policy as a single serialized index operation.
     pub async fn apply_mutation(
         &self,

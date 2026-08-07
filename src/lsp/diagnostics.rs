@@ -16,6 +16,21 @@ pub fn compute_link_diagnostics(
     canonical_names: &HashMap<String, Vec<String>>,
     vault_root: &Path,
 ) -> Vec<Diagnostic> {
+    if doc.encrypted {
+        let position = doc.byte_offset_to_position(0);
+        return vec![Diagnostic {
+            range: Range {
+                start: position,
+                end: position,
+            },
+            severity: Some(DiagnosticSeverity::INFORMATION),
+            code: Some(NumberOrString::String("encrypted-body-unavailable".into())),
+            source: Some("clepsydra".into()),
+            message: "Encrypted note body is unavailable to the LSP".into(),
+            ..Default::default()
+        }];
+    }
+
     let mut diagnostics = Vec::new();
 
     for link in &doc.links {

@@ -112,7 +112,10 @@ describe("usePageEditor save sequencing", () => {
     expect(pending[0].request.body.expected_revision).toBe("rev-a");
 
     act(() => result.current.onSlateChange(paragraph("C"), astChangeEditor()));
-    act(() => result.current.saveNow());
+    let saveFlight!: Promise<void>;
+    act(() => {
+      saveFlight = result.current.saveNow();
+    });
     expect(pending).toHaveLength(1);
 
     await act(async () => {
@@ -123,6 +126,10 @@ describe("usePageEditor save sequencing", () => {
     expect(pending).toHaveLength(2);
     expect(pending[1].request.body.expected_revision).toBe("rev-b");
     expect(pending[1].request.body.body).toBe("C\n");
+    await act(async () => {
+      pending[1].resolve({ ...makePage("C"), revision: "rev-c" });
+      await saveFlight;
+    });
     unmount();
   });
 
@@ -165,7 +172,11 @@ describe("usePageEditor save sequencing", () => {
     });
 
     act(() => result.current.onSlateChange(paragraph("A"), astChangeEditor()));
-    act(() => result.current.saveNow());
+    await act(async () => {
+      await expect(result.current.saveNow()).rejects.toThrow(
+        "Resolve the revision conflict first.",
+      );
+    });
 
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
     expect(result.current.saveStatus).toBe("error");

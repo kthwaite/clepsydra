@@ -12,6 +12,8 @@ pub struct Document {
     pub rope: ropey::Rope,
     /// Parsed frontmatter metadata.
     pub meta: PageMeta,
+    /// Whether encryption metadata makes the Markdown body unavailable.
+    pub encrypted: bool,
     /// The markdown body (everything after the frontmatter).
     pub body: String,
     /// Byte offset where the body begins in the original document text.
@@ -30,8 +32,14 @@ impl Document {
     /// Extracts frontmatter metadata, computes the body byte offset,
     /// builds a rope, and extracts links from the body.
     pub fn from_text(text: &str, version: i32) -> Self {
-        let (meta, body, _rewrote, _warning) = parse_or_repair_frontmatter(text);
-        let body_byte_offset = text.len() - body.len();
+        let (meta, parsed_body, _rewrote, _warning) = parse_or_repair_frontmatter(text);
+        let body_byte_offset = text.len() - parsed_body.len();
+        let encrypted = meta.encryption.is_some();
+        let body = if encrypted {
+            String::new()
+        } else {
+            parsed_body
+        };
 
         let rope = ropey::Rope::from_str(text);
         let links = extract_links(&body);
@@ -39,6 +47,7 @@ impl Document {
         Self {
             rope,
             meta,
+            encrypted,
             body,
             body_byte_offset,
             links,
@@ -73,6 +82,9 @@ impl Document {
     /// Returns `None` if the position falls within the frontmatter
     /// (i.e. before `body_byte_offset`).
     pub fn position_to_body_byte_offset(&self, pos: Position) -> Option<usize> {
+        if self.encrypted {
+            return None;
+        }
         let line = pos.line as usize;
         if line >= self.rope.len_lines() {
             return None;
