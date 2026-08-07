@@ -515,15 +515,31 @@ async fn process_sync_batch(
 /// (ADR 0001 layer 2). Runs after the batch is indexed so projection sees
 /// fresh frontmatter. A move produces new watch events; reconciling an
 /// already-correct page is a no-op, so the loop terminates.
-async fn reconcile_upserts(
-    index: &IndexHandle,
-    hooks: &Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>>,
-    upserts: Vec<VaultPath>,
-) {
+///
+/// Excluded paths are skipped, matching `process_sync_batch`: a subtree the
+/// vault does not index must not be relocated (or warned about) either.
+///
+/// Each reconcile runs under the [`MutationCoordinator`] path guard, the same
+/// lock the API write path holds across read → write → index. Without it, an
+/// in-flight `atomic_replace` can recreate the source file the watcher just
+/// renamed, leaving two files carrying one page id. The guard covers the
+/// source path only — `reconcile_page` derives its destination internally —
+/// which is exactly the path the racing writer holds.
+///
+/// [`MutationCoordinator`]: crate::vault::mutation_coordinator::MutationCoordinator
+async fn reconcile_upserts(state: &AppState, upserts: Vec<VaultPath>) {
     for vp in upserts {
-        let hooks = Arc::clone(hooks);
+        if state.vault.is_excluded(&vp) {
+            continue;
+        }
+        let hooks = Arc::clone(&state.hooks);
         let target = vp.as_str().to_string();
-        let result = index
+        let _guard = state
+            .mutation_coordinator
+            .lock_paths(std::slice::from_ref(&vp))
+            .await;
+        let result = state
+            .index
             .with_index(move |index, vault| {
                 crate::vault::reconcile::reconcile_page(vault, index, &target, &hooks)
             })
@@ -547,7 +563,9 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
     let sync_index = state.index.clone();
     let (change_tx, mut change_rx) = tokio::sync::mpsc::unbounded_channel::<ChangeEvent>();
     let sync_change_tx = state.change_tx.clone();
-    let hooks = Arc::clone(&state.hooks);
+    // The reconcile pass needs the vault (exclusions) and the mutation
+    // coordinator (path locks), so the loop holds the whole state.
+    let reconcile_state = Arc::clone(state);
 
     let watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
 
@@ -565,7 +583,7 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
                 })
                 .collect();
             process_sync_batch(&sync_index, batch, &sync_change_tx).await;
-            reconcile_upserts(&sync_index, &hooks, upserts).await;
+            reconcile_upserts(&reconcile_state, upserts).await;
         }
     });
 
@@ -995,7 +1013,7 @@ mod watcher_reconcile_tests {
             .await
             .unwrap();
 
-        reconcile_upserts(&state.index, &state.hooks, vec![vp.clone()]).await;
+        reconcile_upserts(&state, vec![vp.clone()]).await;
 
         assert!(
             root.join("quotes").join("q.md").exists(),
@@ -1030,11 +1048,100 @@ mod watcher_reconcile_tests {
             .await
             .unwrap();
 
-        reconcile_upserts(&state.index, &state.hooks, vec![vp.clone()]).await;
+        reconcile_upserts(&state, vec![vp.clone()]).await;
 
         assert!(
             root.join("quotes").join("q.md").exists(),
             "clean page should not have moved"
+        );
+    }
+
+    /// Exclusions bound the reconcile the same way they bound indexing
+    /// (`process_sync_batch` skips excluded paths): a drifted page inside an
+    /// excluded subtree is neither indexed nor physically relocated.
+    #[tokio::test]
+    async fn reconcile_upserts_skips_excluded_paths() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(
+            root.join(".clepsydra/config.toml"),
+            "[vault]\nexcluded_patterns = [\".clepsydra\", \".clepsydra/**\", \
+             \"_attachments\", \"_attachments/**\", \"private\", \"private/**\"]\n",
+        )
+        .unwrap();
+        let state = build_app_state(&root).await.unwrap();
+
+        // Same drift as `watcher_batch_reconciles_drifted_upsert`, but inside
+        // an excluded folder.
+        let drifted = root.join("private").join("q.md");
+        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
+        std::fs::write(
+            &drifted,
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a3\ntype: quote\n---\nbody",
+        )
+        .unwrap();
+
+        let vp = VaultPath::new("private/q.md").unwrap();
+        reconcile_upserts(&state, vec![vp]).await;
+
+        assert!(
+            drifted.exists(),
+            "excluded page must stay where the user put it"
+        );
+        assert!(
+            !root.join("quotes").join("q.md").exists(),
+            "excluded page must not be projected into a canonical folder"
+        );
+    }
+
+    /// The reconcile takes the same `MutationCoordinator` path guard the API
+    /// write path holds across read → write → index, so a watcher move cannot
+    /// interleave with an in-flight page write on that path.
+    #[tokio::test]
+    async fn reconcile_upserts_waits_for_the_mutation_coordinator_lock() {
+        let (state, tmp) = state_test_support::make_state().await;
+        let root = tmp.path().join("vault");
+
+        let drifted = root.join("notes").join("q.md");
+        std::fs::create_dir_all(drifted.parent().unwrap()).unwrap();
+        std::fs::write(
+            &drifted,
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a4\ntype: quote\n---\nbody",
+        )
+        .unwrap();
+
+        let vp = VaultPath::new("notes/q.md").unwrap();
+        state
+            .index
+            .process_sync_events(vec![ChangeEvent::Upsert(vp.clone())])
+            .await
+            .unwrap();
+
+        // Hold the path guard, as a concurrent API write would.
+        let guard = state
+            .mutation_coordinator
+            .lock_paths(std::slice::from_ref(&vp))
+            .await;
+
+        let reconcile = tokio::spawn({
+            let state = Arc::clone(&state);
+            let vp = vp.clone();
+            async move { reconcile_upserts(&state, vec![vp]).await }
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            drifted.exists() && !root.join("quotes").join("q.md").exists(),
+            "reconcile must not move the page while the path guard is held"
+        );
+
+        drop(guard);
+        reconcile.await.unwrap();
+
+        assert!(
+            root.join("quotes").join("q.md").exists(),
+            "reconcile must proceed once the guard is released"
         );
     }
 }
