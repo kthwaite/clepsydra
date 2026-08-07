@@ -42,8 +42,9 @@ export function DocsArticle({ page }: { page: DocPage }) {
           className="mt-12 grid grid-cols-1 gap-4 border-t border-rule pt-6 font-mono sm:grid-cols-2"
         >
           {previous ? (
+            // Task 7 removes these boundaries after /docs/$slug is generated.
             <Link
-              to={`/docs/${previous.slug}`}
+              to={`/docs/${previous.slug}` as never}
               aria-label={`Previous: ${previous.title}`}
               className="group border border-rule bg-paper-2 px-4 py-3 text-left outline-none transition-colors hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
@@ -60,7 +61,7 @@ export function DocsArticle({ page }: { page: DocPage }) {
           )}
           {next ? (
             <Link
-              to={`/docs/${next.slug}`}
+              to={`/docs/${next.slug}` as never}
               aria-label={`Next: ${next.title}`}
               className="group border border-rule bg-paper-2 px-4 py-3 text-right outline-none transition-colors hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >

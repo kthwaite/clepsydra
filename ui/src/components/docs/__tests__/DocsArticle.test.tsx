@@ -7,20 +7,37 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
+import type { ComponentPropsWithoutRef, ElementType } from "react";
 import type { MDXComponents } from "mdx/types";
 import { describe, expect, it } from "vitest";
 import { DocsArticle } from "#/components/docs/DocsArticle";
 import type { DocPage } from "#/docs/types";
 
 function FixtureGuide({ components = {} }: { components?: MDXComponents }) {
-  const H2 = components.h2 ?? "h2";
-  const Anchor = components.a ?? "a";
-  const Paragraph = components.p ?? "p";
-  const Pre = components.pre ?? "pre";
-  const Code = components.code ?? "code";
-  const Table = components.table ?? "table";
-  const Th = components.th ?? "th";
-  const Td = components.td ?? "td";
+  const H2 = (components.h2 ?? "h2") as ElementType<
+    ComponentPropsWithoutRef<"h2">
+  >;
+  const Anchor = (components.a ?? "a") as ElementType<
+    ComponentPropsWithoutRef<"a">
+  >;
+  const Paragraph = (components.p ?? "p") as ElementType<
+    ComponentPropsWithoutRef<"p">
+  >;
+  const Pre = (components.pre ?? "pre") as ElementType<
+    ComponentPropsWithoutRef<"pre">
+  >;
+  const Code = (components.code ?? "code") as ElementType<
+    ComponentPropsWithoutRef<"code">
+  >;
+  const Table = (components.table ?? "table") as ElementType<
+    ComponentPropsWithoutRef<"table">
+  >;
+  const Th = (components.th ?? "th") as ElementType<
+    ComponentPropsWithoutRef<"th">
+  >;
+  const Td = (components.td ?? "td") as ElementType<
+    ComponentPropsWithoutRef<"td">
+  >;
 
   return (
     <>

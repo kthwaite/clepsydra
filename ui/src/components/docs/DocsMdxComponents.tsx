@@ -71,8 +71,9 @@ function DocsLink({
   }
 
   if (href === "/docs" || href.startsWith("/docs/")) {
+    // Task 7 removes this boundary once /docs/$slug is in generated route types.
     return (
-      <Link {...props} to={href} className={classes}>
+      <Link {...props} to={href as never} className={classes}>
         {children}
       </Link>
     );
