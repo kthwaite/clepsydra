@@ -283,31 +283,31 @@ pub struct VaultIndex {
 }
 
 impl VaultIndex {
-    /// Open (or create) the index database at `db_path`.
+    /// Set up the pragmas, schema, and migrations for a SQLite connection.
     ///
-    /// Creates parent directories if needed, sets WAL journal mode and enables
-    /// foreign keys, then ensures the schema tables and indexes exist.
-    pub fn open(db_path: &Path) -> Result<Self, IndexError> {
-        // 1. Create parent directory if needed
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // 2. Open SQLite connection
-        let conn = Connection::open(db_path)?;
-
-        // 3. Pragmas
+    /// This is the shared post-connection initialization used by all constructors.
+    fn setup_connection(conn: &Connection) -> Result<(), IndexError> {
+        // 1. Pragmas
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
 
-        // 4. Run pre-schema migrations (column additions required before index creation)
-        migrate_links_add_target_block_id(&conn)?;
-        migrate_pages_add_kind_columns(&conn)?;
+        // 2. Run pre-schema migrations (column additions required before index creation)
+        migrate_links_add_target_block_id(conn)?;
+        migrate_pages_add_kind_columns(conn)?;
 
-        // 5. Execute schema
+        // 3. Execute schema
         conn.execute_batch(SCHEMA)?;
 
-        // 6. Migration: ensure links.target_id has ON DELETE SET NULL
-        migrate_links_fk(&conn)?;
+        // 4. Migration: ensure links.target_id has ON DELETE SET NULL
+        migrate_links_fk(conn)?;
+
+        Ok(())
+    }
+
+    /// Initialize an index from a ready SQLite connection with all derivers.
+    ///
+    /// Used internally by constructors that need a fully-setup connection.
+    fn from_connection(conn: Connection) -> Result<Self, IndexError> {
+        Self::setup_connection(&conn)?;
 
         Ok(Self {
             conn,
@@ -322,6 +322,21 @@ impl VaultIndex {
         })
     }
 
+    /// Open (or create) the index database at `db_path`.
+    ///
+    /// Creates parent directories if needed, sets WAL journal mode and enables
+    /// foreign keys, then ensures the schema tables and indexes exist.
+    pub fn open(db_path: &Path) -> Result<Self, IndexError> {
+        // 1. Create parent directory if needed
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // 2. Open SQLite connection and initialize
+        let conn = Connection::open(db_path)?;
+        Self::from_connection(conn)
+    }
+
     /// Open the index database with NO derivers registered.
     ///
     /// Useful for testing or for callers who want to register a custom set
@@ -331,18 +346,19 @@ impl VaultIndex {
             fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(db_path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        migrate_links_add_target_block_id(&conn)?;
-        migrate_pages_add_kind_columns(&conn)?;
-        conn.execute_batch(SCHEMA)?;
-
-        // Migration: ensure links.target_id has ON DELETE SET NULL
-        migrate_links_fk(&conn)?;
+        Self::setup_connection(&conn)?;
 
         Ok(Self {
             conn,
             derivers: Vec::new(),
         })
+    }
+
+    /// Open an index backed by an in-memory SQLite database. Used by the
+    /// standalone LSP process, which must never write inside the vault.
+    pub fn open_in_memory() -> Result<Self, IndexError> {
+        let conn = Connection::open_in_memory()?;
+        Self::from_connection(conn)
     }
 
     /// Borrow the underlying connection (primarily for test inspection).
@@ -2181,6 +2197,28 @@ mod kind_index_tests {
             )
             .unwrap();
         assert_eq!(wc, Some(5));
+    }
+
+    #[test]
+    fn open_in_memory_builds_and_queries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(root.join("Note.md"), "# Note\n\nbody\n").unwrap();
+
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+
+        // Assert that the page was indexed by checking its path in the pages table
+        let page_path: String = index
+            .connection()
+            .query_row("SELECT path FROM pages WHERE path = 'Note.md'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(page_path, "Note.md");
     }
 }
 
