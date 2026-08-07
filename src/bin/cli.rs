@@ -222,10 +222,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 let config = clepsydra::config_command::read_existing(&cwd)?;
                 if origin {
                     let mut stderr = anstream::AutoStream::auto(std::io::stderr().lock());
-                    clepsydra::config_command::render_origin(
-                        &config.resolution.path,
-                        &mut stderr,
-                    )?;
+                    clepsydra::config_command::render_origin(&config.resolution.path, &mut stderr)?;
                 }
                 std::io::stdout().lock().write_all(&config.contents)?;
                 Ok(0)
@@ -488,9 +485,7 @@ mod cli_tests {
 
     #[test]
     fn config_show_accepts_origin() {
-        assert!(config_show_origin(&[
-            "clep", "config", "show", "--origin",
-        ]));
+        assert!(config_show_origin(&["clep", "config", "show", "--origin",]));
     }
 
     #[test]
@@ -500,9 +495,7 @@ mod cli_tests {
 
     #[test]
     fn config_path_accepts_trace() {
-        assert!(config_path_trace(&[
-            "clep", "config", "path", "--trace",
-        ]));
+        assert!(config_path_trace(&["clep", "config", "path", "--trace",]));
     }
 
     #[test]

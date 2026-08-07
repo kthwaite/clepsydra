@@ -133,10 +133,7 @@ pub fn render_origin(path: &Path, writer: &mut impl Write) -> io::Result<()> {
     )
 }
 
-pub fn render_trace(
-    resolution: &ConfigResolution,
-    writer: &mut impl Write,
-) -> io::Result<()> {
+pub fn render_trace(resolution: &ConfigResolution, writer: &mut impl Write) -> io::Result<()> {
     for candidate in &resolution.considered {
         if candidate == &resolution.path {
             writeln!(
@@ -233,9 +230,7 @@ mod tests {
         let styled = String::from_utf8(styled).unwrap();
         assert!(styled.contains("\u{1b}[2m/cwd/config.toml\u{1b}[0m"));
         assert!(styled.contains("\u{1b}[38;2;238;119;51m→"));
-        assert!(styled.contains(
-            "\u{1b}[38;2;238;119;51m→ /xdg/clepsydra/config.toml\u{1b}[39m"
-        ));
+        assert!(styled.contains("\u{1b}[38;2;238;119;51m→ /xdg/clepsydra/config.toml\u{1b}[39m"));
 
         let mut plain = Vec::new();
         {
