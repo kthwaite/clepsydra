@@ -1,9 +1,9 @@
 import { type FormEvent, useCallback, useMemo, useState } from "react";
 import { useBacklinks } from "#/api/index";
 import {
+  useEnsureJournalToday,
   useJournalByDate,
   useJournalRecent,
-  useJournalToday,
   useQuickCapture,
 } from "#/api/journal";
 import { CLink } from "#/components/codex/CLink";
@@ -42,14 +42,23 @@ export function Diurnal() {
   const [selectedDate, setSelectedDate] = useState(today);
 
   const isToday = selectedDate === today;
-  const todayQuery = useJournalToday();
   const dateQuery = useJournalByDate(isToday ? "" : selectedDate);
-  const journal = isToday ? todayQuery.data : dateQuery.data;
-  const isLoading = isToday ? todayQuery.isLoading : dateQuery.isLoading;
-  const fetchError = isToday ? todayQuery.error : dateQuery.error;
+  // Today's editor binds to the deterministic journal path before the file
+  // exists; the vault's journal layout is fixed server-side in journal_path().
+  const journalPath = isToday
+    ? `journals/${today}.md`
+    : (dateQuery.data?.path ?? "");
 
-  const journalPath = journal?.path ?? "";
-  const editor = usePageEditor(journalPath);
+  const ensureToday = useEnsureJournalToday();
+  const ensureMutateAsync = ensureToday.mutateAsync;
+  const editorOptions = useMemo(
+    () => (isToday ? { ensure: () => ensureMutateAsync() } : undefined),
+    [isToday, ensureMutateAsync],
+  );
+  const editor = usePageEditor(journalPath, editorOptions);
+
+  const isLoading = isToday ? editor.isLoading : dateQuery.isLoading;
+  const fetchError = isToday ? null : dateQuery.error;
   const { data: backlinks } = useBacklinks(journalPath);
   const { data: recentJournals } = useJournalRecent(14);
 
@@ -259,7 +268,9 @@ export function Diurnal() {
               State
             </span>
             <span className="text-ink-2">
-              {journalPath ? "written" : "unwritten"}
+              {(isToday ? !editor.isDraft : Boolean(journalPath))
+                ? "written"
+                : "unwritten"}
             </span>
           </div>
         </div>

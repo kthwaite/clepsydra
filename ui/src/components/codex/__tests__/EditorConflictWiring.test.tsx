@@ -43,14 +43,10 @@ vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("#/api/journal", () => ({
-  useJournalToday: () => ({
-    data: { path: "journals/today.md" },
-    isLoading: false,
-    error: null,
-  }),
   useJournalByDate: () => ({ data: undefined, isLoading: false, error: null }),
   useJournalRecent: () => ({ data: [] }),
   useQuickCapture: () => ({ mutate: vi.fn(), isPending: false }),
+  useEnsureJournalToday: () => ({ mutateAsync: vi.fn() }),
 }));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],
@@ -74,6 +70,7 @@ function loadedEditor(reloadAfterConflict: () => Promise<void>) {
   return {
     isLoading: false,
     error: null,
+    isDraft: false,
     initialValue: [{ type: "paragraph", children: [{ text: "Draft" }] }],
     editorRevision: 1,
     title: "Draft",
