@@ -1,7 +1,15 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use base64::prelude::{BASE64_STANDARD, Engine as _};
+use clepsydra::vault::Vault;
 use clepsydra::vault::encryption::{
     EncryptionFormat, EncryptionMeta, canonicalize_age_armor, validate_age_armor,
 };
+use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::init::init_vault;
+use clepsydra::vault::path::VaultPath;
+use tempfile::TempDir;
 
 const BEGIN_FENCE: &str = "-----BEGIN AGE ENCRYPTED FILE-----";
 const END_FENCE: &str = "-----END AGE ENCRYPTED FILE-----";
@@ -24,6 +32,20 @@ fn age_payload_with_len(len: usize) -> Vec<u8> {
     let mut decoded = vec![b'x'; len];
     decoded[..AGE_HEADER.len()].copy_from_slice(AGE_HEADER);
     decoded
+}
+
+fn cache_artifacts(db_path: &Path) -> [PathBuf; 3] {
+    [
+        db_path.to_path_buf(),
+        PathBuf::from(format!("{}-wal", db_path.display())),
+        PathBuf::from(format!("{}-shm", db_path.display())),
+    ]
+}
+
+fn file_contains(path: &Path, needle: &[u8]) -> bool {
+    fs::read(path)
+        .map(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
+        .unwrap_or(false)
 }
 
 #[test]
@@ -159,4 +181,65 @@ fn encryption_meta_supports_only_age_v1() {
         ..meta
     };
     assert!(empty_key.validate().is_err());
+}
+
+#[test]
+fn scrub_removes_plaintext_from_cache_files() {
+    const MARKER: &str = "CLEPSYDRA_SCRUB_SECRET_019FDD0F15DB72A2";
+
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    let page_path = root.join("private.md");
+    fs::write(
+        &page_path,
+        format!(
+            r#"---
+id: 00000000-0000-0000-0000-000000000301
+title: Private
+---
+- {MARKER} ^secretblock
+"#,
+        ),
+    )
+    .unwrap();
+
+    let vault = Vault::open(&root).unwrap();
+    let db_path = root.join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    assert!(
+        cache_artifacts(&db_path)
+            .iter()
+            .any(|path| file_contains(path, MARKER.as_bytes())),
+        "the test marker must reach a cache artifact before protection"
+    );
+
+    fs::write(
+        &page_path,
+        format!(
+            r#"+++
+id = "00000000-0000-0000-0000-000000000301"
+title = "Private"
+encryption = {{ format = "age", version = 1, key_id = "019fd000-0000-7000-8000-000000000002" }}
++++
+{}"#,
+            include_str!("support/fixtures/private-note.age")
+        ),
+    )
+    .unwrap();
+    index
+        .index_page(&vault, &VaultPath::new("private.md").unwrap())
+        .unwrap();
+    index.scrub_deleted_content().unwrap();
+    drop(index);
+
+    for path in cache_artifacts(&db_path) {
+        assert!(
+            !file_contains(&path, MARKER.as_bytes()),
+            "plaintext marker remained in {}",
+            path.display()
+        );
+    }
 }

@@ -298,7 +298,9 @@ impl VaultIndex {
     /// This is the shared post-connection initialization used by all constructors.
     fn setup_connection(conn: &Connection) -> Result<(), IndexError> {
         // 1. Pragmas
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;",
+        )?;
 
         // 2. Run pre-schema migrations (column additions required before index creation)
         migrate_links_add_target_block_id(conn)?;
@@ -385,6 +387,17 @@ impl VaultIndex {
     /// Mutably borrow the underlying connection for internal transactional work.
     pub(crate) fn connection_mut(&mut self) -> &mut Connection {
         &mut self.conn
+    }
+
+    /// Remove deleted content from SQLite pages and truncate the WAL.
+    ///
+    /// Call this after replacing plaintext projections with encrypted-page
+    /// projections so prior content is not recoverable from cache artifacts.
+    pub fn scrub_deleted_content(&mut self) -> Result<(), IndexError> {
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        self.conn.execute_batch("VACUUM;")?;
+        Ok(())
     }
 
     /// Register an additional deriver to run during index builds.

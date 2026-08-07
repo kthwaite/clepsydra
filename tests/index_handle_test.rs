@@ -875,3 +875,64 @@ Content.
         other => panic!("expected a typed SQLite decoding error, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn scrub_runs_on_index_thread_after_protection_reindex() {
+    const MARKER: &str = "HANDLE_SCRUB_SECRET_019FDD0F15DB72A2";
+    let plaintext = format!(
+        r#"---
+id: 00000000-0000-0000-0000-000000000302
+title: Serialized Scrub
+---
+{MARKER}
+"#,
+    );
+    let (_tmp, vault) = setup_vault(&[("private.md", &plaintext)]);
+    let handle = build_handle(&vault);
+    handle.build().await.unwrap();
+
+    fs::write(
+        vault.root().join("private.md"),
+        format!(
+            r#"+++
+id = "00000000-0000-0000-0000-000000000302"
+title = "Serialized Scrub"
+encryption = {{ format = "age", version = 1, key_id = "019fd000-0000-7000-8000-000000000002" }}
++++
+{}"#,
+            include_str!("support/fixtures/private-note.age")
+        ),
+    )
+    .unwrap();
+
+    handle
+        .index_page(VaultPath::new("private.md").unwrap())
+        .await
+        .unwrap();
+    handle.scrub_deleted_content().await.unwrap();
+
+    let (encrypted, search_hits): (i64, i64) = handle
+        .with_index(|index, _vault| {
+            let encrypted = index
+                .connection()
+                .query_row(
+                    "SELECT encrypted FROM pages WHERE path = 'private.md'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let search_hits = index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pages_fts WHERE pages_fts MATCH ?1",
+                    [MARKER],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (encrypted, search_hits)
+        })
+        .await
+        .unwrap();
+    assert_eq!(encrypted, 1);
+    assert_eq!(search_hits, 0);
+}
