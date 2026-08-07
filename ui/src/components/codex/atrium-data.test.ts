@@ -91,8 +91,7 @@ describe("buildHeatmap", () => {
     expect(heatDay(heat, "2026-05-02")).toMatchObject({
       date: "2026-05-02",
       isFuture: false,
-      count: 2,
-      level: 1,
+      level: 2,
       pages: [
         { path: "newer.md", title: "Newer", activityAt: "2026-05-02T09:00:00Z" },
         { path: "older.md", title: "Older", activityAt: "2026-05-02T01:00:00Z" },
@@ -130,8 +129,8 @@ describe("buildHeatmap", () => {
       Array.from({ length: n }, () => ({ updated_at: "2026-05-02T01:00:00Z" }));
     expect(buildHeatmap(mk(0), now).maxLevelToday).toBe(0);
     expect(buildHeatmap(mk(1), now).maxLevelToday).toBe(1);
+    expect(buildHeatmap(mk(2), now).maxLevelToday).toBe(2);
     expect(buildHeatmap(mk(3), now).maxLevelToday).toBe(2);
-    expect(buildHeatmap(mk(6), now).maxLevelToday).toBe(3);
     expect(buildHeatmap(mk(10), now).maxLevelToday).toBe(4);
     expect(buildHeatmap(mk(20), now).maxLevelToday).toBe(5);
   });
