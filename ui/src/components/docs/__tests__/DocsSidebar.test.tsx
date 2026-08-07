@@ -6,7 +6,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DocsSidebar } from "#/components/docs/DocsSidebar";
@@ -15,6 +15,7 @@ import { buildDocsIndex, searchDocs } from "#/docs/search";
 
 function renderSidebar(
   props: { activeSlug?: string; onNavigate?: () => void } = {},
+  initialEntry = "/",
 ) {
   const rootRoute = createRootRoute({ component: Outlet });
   const indexRoute = createRoute({
@@ -25,11 +26,11 @@ function renderSidebar(
   const docsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/docs/$slug",
-    component: () => <p>Guide destination</p>,
+    component: () => <DocsSidebar {...props} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([indexRoute, docsRoute]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
 
   render(<RouterProvider router={router} />);
@@ -118,27 +119,54 @@ describe("DocsSidebar", () => {
     expect(hrefs).toContain("/docs/lsp#setup-neovim-011");
   });
 
-  it("calls onNavigate after grouped and search-result selections", async () => {
+  it("calls onNavigate only after accepted unmodified selections", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
     const router = renderSidebar({ onNavigate });
+    const gettingStarted = await screen.findByRole("link", {
+      name: "Getting Started",
+    });
+
+    fireEvent.click(gettingStarted, { ctrlKey: true });
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(router.state.location.pathname).toBe("/");
+
+    await user.click(gettingStarted);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/docs/getting-started");
+      expect(onNavigate).toHaveBeenCalledTimes(1);
+    });
 
     await user.click(
       await screen.findByRole("link", { name: "Getting Started" }),
     );
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/docs/getting-started");
+      expect(onNavigate).toHaveBeenCalledTimes(2);
     });
-    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
 
-    await router.navigate({ to: "/" });
+  it("marks at most the exact pathname and hash result current", async () => {
+    const user = userEvent.setup();
+    renderSidebar(
+      { activeSlug: "lsp" },
+      "/docs/lsp#setup-neovim-011",
+    );
+
     await user.type(
       await screen.findByRole("searchbox", {
         name: "Search documentation",
       }),
-      "typed fields",
+      "setup",
     );
-    await user.click(screen.getByRole("link", { name: /Bases/ }));
-    expect(onNavigate).toHaveBeenCalledTimes(2);
+    const results = screen.getByRole("list", { name: "Search results" });
+    const currentResults = within(results)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page");
+
+    expect(currentResults).toHaveLength(1);
+    expect(currentResults[0]).toHaveAttribute(
+      "href",
+      "/docs/lsp#setup-neovim-011",
+    );
   });
 });

@@ -1,6 +1,6 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { type MouseEvent, type ReactNode, useId, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { SearchField } from "#/components/ui/search-field";
 import { DOC_GROUPS, DOC_PAGES } from "#/docs/registry";
@@ -17,7 +17,8 @@ export interface DocsSidebarProps {
 
 interface DocsLinkProps {
   page: DocPage;
-  activeSlug?: string;
+  isCurrent?: boolean;
+  includeHashInCurrent?: boolean;
   hash?: string;
   onNavigate?: () => void;
   children: ReactNode;
@@ -26,20 +27,52 @@ interface DocsLinkProps {
 
 function DocsLink({
   page,
-  activeSlug,
+  isCurrent,
+  includeHashInCurrent = false,
   hash,
   onNavigate,
   children,
   className,
 }: DocsLinkProps) {
+  const router = useRouter();
+
+  async function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    await router.navigate({
+      // Task 7 adds the generated /docs/$slug route type and removes these casts.
+      to: "/docs/$slug" as never,
+      params: { slug: page.slug } as never,
+      hash,
+    });
+
+    if (
+      router.state.location.pathname === `/docs/${page.slug}` &&
+      router.state.location.hash === (hash ?? "")
+    ) {
+      onNavigate?.();
+    }
+  }
+
   return (
     <Link
       // Task 7 adds the generated /docs/$slug route type and removes these casts.
       to={"/docs/$slug" as never}
       params={{ slug: page.slug } as never}
       hash={hash}
-      aria-current={activeSlug === page.slug ? "page" : undefined}
-      onClick={onNavigate}
+      activeOptions={{ exact: true, includeHash: includeHashInCurrent }}
+      aria-current={isCurrent ? "page" : undefined}
+      onClick={onNavigate ? handleClick : undefined}
       className={className}
     >
       {children}
@@ -61,7 +94,7 @@ function PageLink({
   return (
     <DocsLink
       page={page}
-      activeSlug={activeSlug}
+      isCurrent={active}
       onNavigate={onNavigate}
       className={cn(
         "block border-l-2 px-4 py-2 font-sans text-sm text-ink-2 outline-none transition-colors hover:bg-paper-edge hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
@@ -77,23 +110,18 @@ function PageLink({
 
 function SearchResultLink({
   result,
-  activeSlug,
   onNavigate,
 }: {
   result: DocSearchResult;
-  activeSlug?: string;
   onNavigate?: () => void;
 }) {
   return (
     <DocsLink
       page={result.page}
-      activeSlug={activeSlug}
+      includeHashInCurrent
       hash={result.headingId}
       onNavigate={onNavigate}
-      className={cn(
-        "group block border-l-2 border-transparent px-4 py-3 outline-none transition-colors hover:border-accent hover:bg-paper-edge focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-        result.page.slug === activeSlug && "border-accent bg-highlight",
-      )}
+      className="group block border-l-2 border-transparent px-4 py-3 outline-none transition-colors hover:border-accent hover:bg-paper-edge focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
       <span className="block font-sans text-sm font-semibold text-ink">
         {result.page.title}
@@ -157,7 +185,6 @@ export function DocsSidebar({ activeSlug, onNavigate }: DocsSidebarProps) {
                 >
                   <SearchResultLink
                     result={result}
-                    activeSlug={activeSlug}
                     onNavigate={onNavigate}
                   />
                 </li>

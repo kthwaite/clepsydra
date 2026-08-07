@@ -1,5 +1,5 @@
 import { Menu, X } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Dialog,
   Heading,
@@ -9,6 +9,8 @@ import {
 import { DocsSidebar } from "#/components/docs/DocsSidebar";
 import { IconButton } from "#/components/ui/icon-button";
 
+const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
+
 export interface DocsLayoutProps {
   activeSlug?: string;
   children: ReactNode;
@@ -17,8 +19,28 @@ export interface DocsLayoutProps {
 export function DocsLayout({ activeSlug, children }: DocsLayoutProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  const articleRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia?.(DESKTOP_MEDIA_QUERY);
+    if (!media) return;
+    const closeForDesktop = (event: MediaQueryListEvent) => {
+      if (!event.matches || !drawerOpen) return;
+      setDrawerOpen(false);
+      window.setTimeout(() => {
+        articleRef.current?.focus({ preventScroll: true });
+      });
+    };
+
+    media.addEventListener("change", closeForDesktop);
+    return () => media.removeEventListener("change", closeForDesktop);
+  }, [drawerOpen]);
+
   return (
-    <div className="flex h-full min-h-0 overflow-hidden bg-paper text-ink">
+    <div
+      data-testid="docs-layout"
+      className="flex h-full min-h-0 overflow-hidden bg-paper text-ink"
+    >
       <aside
         data-testid="docs-desktop-rail"
         className="hidden w-72 shrink-0 flex-col overflow-y-auto border-r border-rule bg-paper-2 md:flex"
@@ -41,7 +63,9 @@ export function DocsLayout({ activeSlug, children }: DocsLayoutProps) {
         </header>
 
         <main
+          ref={articleRef}
           aria-label="Documentation article"
+          tabIndex={-1}
           className="min-w-0 flex-1 overflow-y-auto"
         >
           {children}
@@ -49,6 +73,7 @@ export function DocsLayout({ activeSlug, children }: DocsLayoutProps) {
       </div>
 
       <ModalOverlay
+        data-testid="docs-drawer-overlay"
         isOpen={drawerOpen}
         isDismissable
         onOpenChange={setDrawerOpen}
