@@ -25,6 +25,7 @@ pub mod index;
 pub mod index_handle;
 pub mod index_policy;
 pub mod init;
+pub mod keyring;
 pub mod kind;
 pub mod legacy_yaml;
 pub mod link;
