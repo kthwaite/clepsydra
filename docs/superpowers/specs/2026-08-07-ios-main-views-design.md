@@ -140,7 +140,7 @@ Search is presented from root toolbars and Atrium. Creation remains a full-scree
 
 ### Atrium
 
-Atrium is a vertically scrolling card composition. Core delivery includes greeting and date context, today’s journal, quick capture, search, new note, inventory, top tags, recently edited/created pages, activity, partial loading, pull-to-refresh, and independent card errors.
+Atrium is a vertically scrolling card composition. Core delivery includes greeting and date context, a deterministic daily aphorism, today’s journal, quick capture, search, new note, inventory, top tags, recently edited/created pages, activity, partial loading, pull-to-refresh, and independent card errors.
 
 Later parity adds BCL, Sky/location, Reading Continues through `GET /bases/reading/views/continues` and UUID property patches, and session-local recently opened history. One optional-card failure never replaces the entire Atrium.
 
