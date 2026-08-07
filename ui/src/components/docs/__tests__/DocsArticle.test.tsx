@@ -6,7 +6,8 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ComponentPropsWithoutRef, ElementType } from "react";
 import type { MDXComponents } from "mdx/types";
 import { describe, expect, it } from "vitest";
@@ -84,8 +85,13 @@ function renderArticle(articlePage: DocPage = page) {
     path: "/",
     component: () => <DocsArticle page={articlePage} />,
   });
+  const docsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/docs/$slug",
+    component: () => <p>Destination guide</p>,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([articleRoute]),
+    routeTree: rootRoute.addChildren([articleRoute, docsRoute]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
 
@@ -113,7 +119,8 @@ describe("DocsArticle", () => {
   });
 
   it("routes docs links internally while preserving fragments and external safety", async () => {
-    renderArticle();
+    const user = userEvent.setup();
+    const router = renderArticle();
     await screen.findByRole("heading", { level: 1, name: page.title });
 
     expect(screen.getByRole("link", { name: "Jump to fields" })).toHaveAttribute(
@@ -132,6 +139,12 @@ describe("DocsArticle", () => {
       "rel",
       "noreferrer",
     );
+
+    await user.click(screen.getByRole("link", { name: "Bases" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/docs/bases");
+      expect(router.state.location.hash).toBe("fields");
+    });
   });
 
   it("renders copyable code, semantic tables, and registry navigation", async () => {
@@ -142,6 +155,9 @@ describe("DocsArticle", () => {
       screen.getByRole("button", { name: /copy code/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Scrollable table" }),
+    ).toHaveAttribute("tabindex", "0");
     expect(
       screen.getByRole("link", { name: /Next: Configuration/i }),
     ).toHaveAttribute("href", "/docs/configuration");

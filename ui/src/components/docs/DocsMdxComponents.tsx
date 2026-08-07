@@ -70,10 +70,23 @@ function DocsLink({
     );
   }
 
-  if (href === "/docs" || href.startsWith("/docs/")) {
+  if (
+    href === "/docs" ||
+    href.startsWith("/docs/") ||
+    href.startsWith("/docs#")
+  ) {
+    const hashIndex = href.indexOf("#");
+    const pathname = hashIndex < 0 ? href : href.slice(0, hashIndex);
+    const hash = hashIndex < 0 ? undefined : href.slice(hashIndex + 1);
+
     // Task 7 removes this boundary once /docs/$slug is in generated route types.
     return (
-      <Link {...props} to={href as never} className={classes}>
+      <Link
+        {...props}
+        to={pathname as never}
+        hash={hash}
+        className={classes}
+      >
         {children}
       </Link>
     );
@@ -151,7 +164,12 @@ function DocsTable({
   ...props
 }: ComponentPropsWithoutRef<"table">) {
   return (
-    <div className="my-6 overflow-x-auto border border-rule">
+    <div
+      role="region"
+      aria-label="Scrollable table"
+      tabIndex={0}
+      className="my-6 overflow-x-auto border border-rule focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
       <table
         {...props}
         className={cn(
