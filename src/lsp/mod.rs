@@ -20,23 +20,63 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::api::AppState;
-
-/// LSP backend holding the shared vault state and per-document data.
+/// LSP backend holding the per-document data and late-initialized vault state.
+///
+/// `vault_state` is empty until `initialize` resolves the workspace root and
+/// opens a read-only vault + in-memory index (see `state::open_lsp_state`).
+/// The LSP process never writes vault files (ADR 0001).
 pub struct LspBackend {
     /// The tower-lsp client handle for sending notifications/requests to the editor.
     pub client: Client,
-    /// Shared application state (vault, index, etc.).
-    pub state: Arc<AppState>,
+    /// Vault + index, opened during `initialize` once the workspace root is known.
+    pub vault_state: tokio::sync::OnceCell<Arc<state::LspState>>,
     /// Open documents keyed by URI.
     pub documents: Mutex<HashMap<Url, document::Document>>,
     /// Cached snapshot of canonical names → page paths for diagnostic checks.
     pub canonical_names: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
+impl LspBackend {
+    /// State accessor for request handlers (jsonrpc error before initialize).
+    fn state(&self) -> tower_lsp::jsonrpc::Result<Arc<state::LspState>> {
+        self.vault_state.get().cloned().ok_or_else(|| {
+            let mut e = tower_lsp::jsonrpc::Error::internal_error();
+            e.message = "clepsydra: vault not initialized".to_string().into();
+            e
+        })
+    }
+    /// State accessor for notification handlers (silently skip before initialize).
+    fn state_opt(&self) -> Option<Arc<state::LspState>> {
+        self.vault_state.get().cloned()
+    }
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for LspBackend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let cwd = std::env::current_dir().map_err(|e| {
+            let mut err = tower_lsp::jsonrpc::Error::internal_error();
+            err.message = format!("clepsydra: cannot read cwd: {e}").into();
+            err
+        })?;
+        let root = state::resolve_lsp_root(&params, &cwd).map_err(|msg| {
+            let mut err = tower_lsp::jsonrpc::Error::internal_error();
+            err.message = format!("clepsydra: {msg}").into();
+            err
+        })?;
+        let opened = tokio::task::spawn_blocking(move || state::open_lsp_state(&root))
+            .await
+            .map_err(|e| {
+                let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                err.message = format!("clepsydra: vault open task failed: {e}").into();
+                err
+            })?
+            .map_err(|e| {
+                let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                err.message = format!("clepsydra: cannot open vault: {e}").into();
+                err
+            })?;
+        let _ = self.vault_state.set(Arc::new(opened));
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 position_encoding: Some(PositionEncodingKind::UTF8),
@@ -137,6 +177,9 @@ impl LanguageServer for LspBackend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
+        let Some(state) = self.state_opt() else {
+            return;
+        };
 
         // Flush index update for this file
         let vault_path = match self.uri_to_vault_path(&uri) {
@@ -144,45 +187,28 @@ impl LanguageServer for LspBackend {
             None => return,
         };
 
-        if let Err(e) = self.state.index.index_page(vault_path.clone()).await {
+        if let Err(e) = state.index.index_page(vault_path.clone()).await {
             tracing::error!("index flush on save failed: {e}");
             return;
         }
         let path = vault_path.as_str().to_string();
-        if let Err(e) = self.state.index.resolve_links_for_page(vault_path).await {
+        if let Err(e) = state.index.resolve_links_for_page(vault_path).await {
             tracing::error!("link resolution on save failed: {e}");
         }
 
-        // Best-effort reconcile: a page whose declared kind/project points to a
-        // different folder is moved (and inbound links rewritten). Conservative
-        // (undeclared pages are untouched). A failure is logged, never fatal.
-        let hooks = self.state.hooks.clone();
+        // Reindex without reconciling folder placement: the standalone LSP is
+        // read-only (ADR 0001) — `clep serve`'s watcher owns healing folder
+        // drift (a page whose declared kind/project no longer matches its
+        // folder). This just keeps completion/diagnostics fresh.
         let reconcile_path = path.clone();
-        let reconcile = self
-            .state
-            .index
-            .with_index(move |index, vault| {
-                crate::vault::reconcile::reconcile_page(vault, index, &reconcile_path, &hooks)
-            })
-            .await;
-        match reconcile {
-            Err(e) | Ok(Err(e)) => {
-                tracing::warn!("did_save reconcile failed for {path}: {e}");
-            }
-            Ok(Ok(Some(new_path))) => {
-                // The file moved on disk; the editor's open buffer still points
-                // at the old URI. Full rename plumbing (workspace/didRenameFiles)
-                // is a v1 follow-up — for now just notify the operator. Best-effort.
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!(
-                            "clepsydra: moved {path} → {new_path} (folder follows kind/project)"
-                        ),
-                    )
+        match crate::vault::path::VaultPath::new(&reconcile_path) {
+            Ok(vp) => {
+                let _ = state
+                    .index
+                    .process_sync_events(vec![crate::vault::sync::ChangeEvent::Upsert(vp)])
                     .await;
             }
-            Ok(Ok(None)) => {}
+            Err(e) => tracing::warn!("did_save reindex failed for {reconcile_path}: {e}"),
         }
 
         // Refresh canonical name snapshot
@@ -230,17 +256,17 @@ impl LanguageServer for LspBackend {
             None => return Ok(None),
         };
 
+        let state = self.state()?;
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let target_path =
-            crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
-                .await;
+            crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
         let target_path = match target_path {
             Some(p) => p,
             None => return Ok(None),
         };
 
-        let abs_path = self.state.vault.resolve(
+        let abs_path = state.vault.resolve(
             &crate::vault::path::VaultPath::new(&target_path)
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
         );
@@ -269,16 +295,16 @@ impl LanguageServer for LspBackend {
             }
         };
 
+        let state = self.state()?;
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let path =
-            crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
-                .await;
+            crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
         let content = match path {
             Some(path) => {
                 let vault_path = crate::vault::path::VaultPath::new(&path)
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-                let abs_path = self.state.vault.resolve(&vault_path);
+                let abs_path = state.vault.resolve(&vault_path);
                 let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
                     Ok(file_content) => {
                         let (title, body) =
@@ -373,6 +399,7 @@ impl LanguageServer for LspBackend {
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
+        let state = self.state()?;
 
         // Determine target vault path: either link target or current file
         let target_vp = {
@@ -387,11 +414,9 @@ impl LanguageServer for LspBackend {
 
             if let Some(target_raw) = link_target {
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
-                let path = crate::lsp::queries::canonical_to_vault_path(
-                    &self.state.index,
-                    canonical.as_str(),
-                )
-                .await;
+                let path =
+                    crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str())
+                        .await;
 
                 match path {
                     Some(p) => match crate::vault::path::VaultPath::new(&p) {
@@ -408,14 +433,13 @@ impl LanguageServer for LspBackend {
             }
         };
 
-        let backlinks = self
-            .state
+        let backlinks = state
             .index
             .backlinks(target_vp, 0)
             .await
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-        let vault_root = self.state.vault.root();
+        let vault_root = state.vault.root();
         let mut locations = Vec::new();
         for bl in &backlinks {
             let source_vp = match crate::vault::path::VaultPath::new(&bl.source_path) {
@@ -446,11 +470,12 @@ impl LanguageServer for LspBackend {
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
         let query = params.query.trim().to_string();
-        let vault_root = self.state.vault.root().to_path_buf();
+        let state = self.state()?;
+        let vault_root = state.vault.root().to_path_buf();
 
         let results: Vec<(String, Option<String>)> = if query.is_empty() {
             // Empty query: return pages sorted by path
-            self.state
+            state
                 .index
                 .with_index(
                     move |index, _| -> std::result::Result<Vec<_>, rusqlite::Error> {
@@ -471,7 +496,7 @@ impl LanguageServer for LspBackend {
                 .unwrap_or_default()
         } else {
             // FTS5 search
-            self.state
+            state
                 .index
                 .search(query, 50)
                 .await
@@ -543,10 +568,11 @@ impl LanguageServer for LspBackend {
     }
 
     async fn code_lens_resolve(&self, lens: CodeLens) -> Result<CodeLens> {
+        let state = self.state()?;
         let vault_path_str = lens.data.as_ref().and_then(|v| v.as_str()).unwrap_or("");
 
         let count = if let Ok(vp) = crate::vault::path::VaultPath::new(vault_path_str) {
-            self.state
+            state
                 .index
                 .backlinks(vp, 0)
                 .await
@@ -625,6 +651,7 @@ impl LanguageServer for LspBackend {
             Some(vp) => vp,
             None => return Ok(None),
         };
+        let state = self.state()?;
 
         // ---------------------------------------------------------------
         // 2. Compute new VaultPath
@@ -636,7 +663,7 @@ impl LanguageServer for LspBackend {
         // 3. Check for conflicts
         // ---------------------------------------------------------------
         if new_vp.as_str() != old_vp.as_str() {
-            let new_abs = self.state.vault.resolve(&new_vp);
+            let new_abs = state.vault.resolve(&new_vp);
             if new_abs.exists() {
                 return Err(tower_lsp::jsonrpc::Error::new(
                     tower_lsp::jsonrpc::ErrorCode::InvalidParams,
@@ -650,7 +677,7 @@ impl LanguageServer for LspBackend {
         let old_canonical_names: Vec<String> = {
             let old_path = old_vp.as_str().to_string();
             flatten_index_result(
-                self.state
+                state
                     .index
                     .with_index(move |index, _| {
                         rename::fetch_canonical_names_for_path(index.connection(), &old_path)
@@ -670,7 +697,7 @@ impl LanguageServer for LspBackend {
             let old_path = old_vp.as_str().to_string();
             let cn_list = old_canonical_names.clone();
             flatten_index_result(
-                self.state
+                state
                     .index
                     .with_index(move |index, _| {
                         rename::find_referring_paths(index.connection(), &old_path, &cn_list)
@@ -686,7 +713,7 @@ impl LanguageServer for LspBackend {
 
         // 6a. TextDocumentEdit on the target page — update frontmatter title
         // (Must come BEFORE RenameFile so the edit targets a URI that still exists.)
-        let old_abs = self.state.vault.resolve(&old_vp);
+        let old_abs = state.vault.resolve(&old_vp);
         let old_uri = file_uri(&old_abs)?;
 
         match self
@@ -699,7 +726,7 @@ impl LanguageServer for LspBackend {
 
         // 6b. File rename operation (if path changes)
         if new_vp.as_str() != old_vp.as_str() {
-            let new_abs = self.state.vault.resolve(&new_vp);
+            let new_abs = state.vault.resolve(&new_vp);
             let new_uri = file_uri(&new_abs)?;
             ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
                 RenameFile {
@@ -730,6 +757,7 @@ impl LanguageServer for LspBackend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
+        let state = self.state()?;
         let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
         // Extract link data and body text in a single lock scope, then drop
@@ -768,7 +796,7 @@ impl LanguageServer for LspBackend {
                 "unresolved-link" => {
                     if let Some(action) = code_action::build_create_page_action(
                         &link.target_raw,
-                        self.state.vault.root(),
+                        state.vault.root(),
                         diag,
                     ) {
                         actions.push(action);
@@ -854,9 +882,13 @@ fn file_uri(abs: &std::path::Path) -> Result<Url> {
 
 impl LspBackend {
     /// Convert an LSP URI to a vault-relative path.
+    ///
+    /// Returns `None` before `initialize` opens the vault (no root to strip
+    /// against), matching the "not part of the vault" case.
     pub(crate) fn uri_to_vault_path(&self, uri: &Url) -> Option<crate::vault::path::VaultPath> {
+        let state = self.state_opt()?;
         let file_path = uri.to_file_path().ok()?;
-        let rel = file_path.strip_prefix(self.state.vault.root()).ok()?;
+        let rel = file_path.strip_prefix(state.vault.root()).ok()?;
         let rel_str = rel.to_string_lossy().replace('\\', "/");
         crate::vault::path::VaultPath::new(&rel_str).ok()
     }
@@ -864,10 +896,13 @@ impl LspBackend {
     /// Reload the canonical name snapshot from the index.
     ///
     /// Builds a map from canonical name to all page paths that share it,
-    /// enabling both unresolved-link and ambiguous-link diagnostics.
+    /// enabling both unresolved-link and ambiguous-link diagnostics. A no-op
+    /// before `initialize` opens the vault.
     pub(crate) async fn refresh_canonical_names(&self) {
-        let result = self
-            .state
+        let Some(state) = self.state_opt() else {
+            return;
+        };
+        let result = state
             .index
             .with_index(
                 |index, _| -> std::result::Result<HashMap<String, Vec<String>>, rusqlite::Error> {
@@ -925,7 +960,7 @@ impl LspBackend {
                 // Resolve target_raw to a VaultPath via canonical name lookup
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
                 let target_path: Option<String> = self
-                    .state
+                    .state()?
                     .index
                     .with_index({
                         let cn = canonical.as_str().to_string();
@@ -1015,13 +1050,16 @@ impl LspBackend {
         old_canonical_names: &[String],
         new_name: &str,
     ) -> Vec<DocumentChangeOperation> {
+        let Some(state) = self.state_opt() else {
+            return Vec::new();
+        };
         let mut ops: Vec<DocumentChangeOperation> = Vec::new();
         for ref_path_str in referring_paths {
             let ref_vp = match crate::vault::path::VaultPath::new(ref_path_str) {
                 Ok(vp) => vp,
                 Err(_) => continue,
             };
-            let ref_abs = self.state.vault.resolve(&ref_vp);
+            let ref_abs = state.vault.resolve(&ref_vp);
             let ref_uri = match Url::from_file_path(&ref_abs) {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -1064,7 +1102,7 @@ impl LspBackend {
     async fn complete_wikilinks(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
         let prefix = prefix.to_string();
         let results: Vec<(String, String, Option<String>)> = self
-            .state
+            .state()?
             .index
             .with_index({
                 let prefix = prefix.clone();
@@ -1119,7 +1157,7 @@ impl LspBackend {
     async fn complete_tags(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
         let prefix = prefix.to_string();
         let tags: Vec<String> = self
-            .state
+            .state()?
             .index
             .with_index({
                 let prefix = prefix.clone();
@@ -1162,7 +1200,10 @@ impl LspBackend {
         meta: &crate::vault::page::PageMeta,
         uri: &Url,
     ) -> Vec<CompletionItem> {
-        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let Some(state) = self.state_opt() else {
+            return Vec::new();
+        };
+        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
         let path = self
             .uri_to_vault_path(uri)
             .map(|vp| vp.as_str().to_string())
@@ -1211,7 +1252,8 @@ impl LspBackend {
         prefix: &str,
     ) -> Result<Vec<CompletionItem>> {
         use crate::vault::base::PropertyType;
-        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let state = self.state()?;
+        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
 
         let mut options: Vec<String> = Vec::new();
         let mut open_vocabulary = false;
@@ -1233,8 +1275,7 @@ impl LspBackend {
         if options.is_empty() && open_vocabulary {
             // Open vocabulary: offer values observed anywhere in the vault.
             let key = key.to_string();
-            options = self
-                .state
+            options = state
                 .index
                 .with_index(
                     move |index, _| -> std::result::Result<Vec<String>, rusqlite::Error> {
@@ -1293,8 +1334,10 @@ impl LspBackend {
             }
         }
         // Fall back: read from disk, build throwaway Document
-        if let Some(vp) = self.uri_to_vault_path(source_uri) {
-            let abs_path = self.state.vault.resolve(&vp);
+        if let Some(vp) = self.uri_to_vault_path(source_uri)
+            && let Some(state) = self.state_opt()
+        {
+            let abs_path = state.vault.resolve(&vp);
             if let Ok(content) = tokio::fs::read_to_string(&abs_path).await {
                 let doc = document::Document::from_text(&content, 0);
                 return doc.body_span_to_range(start, end);
@@ -1309,12 +1352,15 @@ impl LspBackend {
     /// Reports unresolved links (no match) as warnings and ambiguous links
     /// (multiple matches) as informational diagnostics with related locations.
     async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
+        let Some(state) = self.state_opt() else {
+            return;
+        };
         let names = self.canonical_names.read().await;
         let mut diagnostics =
-            crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, self.state.vault.root());
+            crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
 
         // Frontmatter property diagnostics against the base registry.
-        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
         let path = self
             .uri_to_vault_path(uri)
             .map(|vp| vp.as_str().to_string())
@@ -1329,16 +1375,15 @@ impl LspBackend {
     }
 }
 
-/// Start the LSP server on stdio, using the given shared state.
-///
-/// This function returns when the client disconnects (stdin EOF).
-pub async fn run_lsp(state: Arc<AppState>) {
+/// Start the LSP server on stdio. The vault opens during `initialize`
+/// (workspace root → config fallback). Returns on client disconnect.
+pub async fn run_lsp() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::new(|client| LspBackend {
         client,
-        state,
+        vault_state: tokio::sync::OnceCell::new(),
         documents: Mutex::new(HashMap::new()),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
     });
@@ -1360,6 +1405,24 @@ mod tests {
         open_doc(&backend, &uri, "# Note\n\nbody\n").await;
         let docs = backend.documents.lock().await;
         assert!(docs.contains_key(&uri));
+    }
+
+    #[tokio::test]
+    async fn initialize_opens_vault_from_root_uri() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(root.join("Note.md"), "# Note\n").unwrap();
+
+        let backend = make_uninitialized_backend();
+        #[allow(deprecated)]
+        let params = InitializeParams {
+            root_uri: Some(Url::from_file_path(&root).unwrap()),
+            ..Default::default()
+        };
+        let result = backend.initialize(params).await.unwrap();
+        assert!(result.capabilities.completion_provider.is_some());
+        assert!(backend.state().is_ok());
     }
 
     #[tokio::test]
@@ -1482,23 +1545,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn did_save_reconciles_declared_kind() {
-        let (backend, tmp) = make_backend(&[("notes/q.md", "---\ntype: quote\n---\nbody\n")]);
+    async fn did_save_reindexes_but_never_moves_files() {
+        // A page that declares `type: quote` while living under notes/ —
+        // declared kind mismatches its folder (mirrors lib.rs's
+        // serve_startup_reconciles_drifted_pages fixture). Only `clep
+        // serve`'s watcher reconciles folder drift (Task 3); the standalone
+        // LSP must never move vault files itself.
+        let initial = "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nbody\n";
+        let (backend, tmp) = make_backend(&[("notes/q.md", initial)]);
+        let root = tmp.path().join("vault");
         let uri = uri_for(&backend, "notes/q.md");
-        open_doc(&backend, &uri, "---\ntype: quote\n---\nbody\n").await;
+        open_doc(&backend, &uri, initial).await;
+
+        // The editor writes the saved content to disk before sending didSave.
+        let updated = "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nupdated needle body\n";
+        std::fs::write(root.join("notes/q.md"), updated).unwrap();
+
         let params = DidSaveTextDocumentParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             text: None,
         };
         backend.did_save(params).await;
-        let root = tmp.path().join("vault");
+
         assert!(
-            !root.join("notes/q.md").exists(),
-            "source path should be gone after reconcile"
+            root.join("notes/q.md").exists(),
+            "did_save must never move the file off its saved path"
         );
         assert!(
-            root.join("quotes/q.md").exists(),
-            "page should be moved to projected folder"
+            !root.join("quotes/q.md").exists(),
+            "did_save must not reconcile declared kind into a projected folder"
+        );
+
+        let results = backend
+            .state()
+            .unwrap()
+            .index
+            .search("needle".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|r| r.path == "notes/q.md"),
+            "index should reflect the saved content: {results:?}"
         );
     }
 
@@ -1694,7 +1781,7 @@ mod tests {
             crate::lsp::diagnostics::compute_link_diagnostics(
                 doc,
                 &names,
-                backend.state.vault.root(),
+                backend.state().unwrap().vault.root(),
             )
         };
         let params = CodeActionParams {

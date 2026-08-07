@@ -3,16 +3,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use tempfile::TempDir;
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
 
-use crate::api::AppState;
 use crate::lsp::LspBackend;
 use crate::lsp::document::Document;
+use crate::lsp::state::LspState;
 use crate::vault::Vault;
-use crate::vault::cas::ContentStore;
 use crate::vault::index::VaultIndex;
 use crate::vault::index_handle::IndexHandle;
 use crate::vault::init::init_vault;
@@ -64,43 +63,39 @@ pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
     }
 
     let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
+    let mut index = VaultIndex::open_in_memory().unwrap();
     index.build(&vault).unwrap();
     index.resolve_links().unwrap();
 
-    let cas = ContentStore::open(&tmp.path().join("cas")).unwrap();
     let index_handle = IndexHandle::spawn(index, vault.clone());
-    let (change_tx, _rx) = broadcast::channel(64);
-
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(crate::api::SystemClock),
+    let state = Arc::new(LspState {
         vault,
         index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: Arc::new(vec![]),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
     });
 
     let backend = LspBackend {
         client: test_client(),
-        state,
+        vault_state: tokio::sync::OnceCell::new_with(Some(Arc::clone(&state))),
         documents: Mutex::new(HashMap::new()),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
     };
     (backend, tmp)
 }
 
+/// Build an `LspBackend` with no vault state — as if `initialize` has not
+/// run yet. Only useful for exercising `initialize` itself.
+pub(crate) fn make_uninitialized_backend() -> LspBackend {
+    LspBackend {
+        client: test_client(),
+        vault_state: tokio::sync::OnceCell::new(),
+        documents: Mutex::new(HashMap::new()),
+        canonical_names: Arc::new(RwLock::new(HashMap::new())),
+    }
+}
+
 /// File URI for a vault-relative path under the backend's vault root.
 pub(crate) fn uri_for(backend: &LspBackend, rel: &str) -> Url {
-    Url::from_file_path(backend.state.vault.root().join(rel)).unwrap()
+    Url::from_file_path(backend.state().unwrap().vault.root().join(rel)).unwrap()
 }
 
 /// Open `text` as a document at `uri` (version 1) and refresh the

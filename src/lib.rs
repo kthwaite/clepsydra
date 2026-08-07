@@ -549,12 +549,16 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
 }
 
 /// Optionally start the LSP server on stdio.
-fn maybe_spawn_lsp(enable_lsp: bool, state: &Arc<AppState>) {
+///
+/// Interim wiring: this still spawns the standalone LSP inside `clep serve`
+/// (Task 6 replaces it with a dedicated `clep lsp` subcommand and removes
+/// `--lsp`). The LSP now opens its own read-only vault state during
+/// `initialize` rather than sharing the server's `AppState` (Task 4).
+fn maybe_spawn_lsp(enable_lsp: bool) {
     if enable_lsp {
         info!("starting LSP server on stdio");
-        let lsp_state = Arc::clone(state);
         tokio::spawn(async move {
-            lsp::run_lsp(lsp_state).await;
+            lsp::run_lsp().await;
             tracing::info!("LSP disconnected, shutting down");
             std::process::exit(0);
         });
@@ -709,7 +713,7 @@ pub async fn run_server(
     init_logging();
     let (state, settings) = build_server_state(overrides).await?;
     run_startup_reconcile(&state).await;
-    maybe_spawn_lsp(enable_lsp, &state);
+    maybe_spawn_lsp(enable_lsp);
     let _watcher = spawn_sync_watcher(&state)?;
     let archive_body_limit =
         (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;
