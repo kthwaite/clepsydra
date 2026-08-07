@@ -97,6 +97,10 @@ Every search result, content-index entry, journal summary, graph node, backlink,
 - Mobile page mutations continue using UUID and required revision.
 - Later kind/project assignment uses UUID-based endpoints before mobile assignment is enabled.
 
+### Inventory stats contract
+
+`GET /api/vault/index/stats` gains `pages_created_today`, `pages_updated_today`, `pages_created_last_7_days`, and `untagged_pages`. The server computes date windows from its clock in UTC and counts untagged pages with no tag rows. These bounded aggregates let Atrium reproduce desktop inventory without downloading the vault content index.
+
 ### Gazetteer query contract
 
 `GET /api/vault/index/content-index` retains `limit` and `offset` and gains optional filtering and sorting:
