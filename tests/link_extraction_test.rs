@@ -1,4 +1,21 @@
+use std::fs;
+
+use clepsydra::vault::Vault;
+use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::init::init_vault;
 use clepsydra::vault::link::{LinkKind, extract_links};
+use tempfile::TempDir;
+
+fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    for (rel_path, content) in files {
+        fs::write(root.join(rel_path), content).unwrap();
+    }
+    let vault = Vault::open(&root).unwrap();
+    (tmp, vault)
+}
 
 #[test]
 fn extract_wikilink() {
@@ -166,4 +183,38 @@ fn block_ref_and_wikilink_in_same_paragraph() {
     let bref = links.iter().find(|l| l.kind == LinkKind::BlockRef).unwrap();
     assert_eq!(wiki.target_raw, "Page A");
     assert_eq!(bref.target_raw, "abc123DEF0a");
+}
+
+#[test]
+fn encrypted_page_emits_no_body_links_while_plain_inbound_link_resolves() {
+    let protected = "+++\nid = \"019fd000-0000-7000-8000-000000000031\"\ntitle = \"Private note\"\nencryption = { format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }\n+++\n[[Leaked target]] must not become an outgoing link\n";
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000032\"\ntitle = \"Public source\"\n+++\nSee [[Private note]].\n";
+    let (_tmp, vault) = setup_vault(&[("private.md", protected), ("source.md", source)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let protected_outgoing: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE source_id = '019fd000-0000-7000-8000-000000000031'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(protected_outgoing, 0);
+
+    let inbound_target: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = '019fd000-0000-7000-8000-000000000032'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        inbound_target.as_deref(),
+        Some("019fd000-0000-7000-8000-000000000031")
+    );
 }

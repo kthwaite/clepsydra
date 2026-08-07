@@ -8,6 +8,7 @@ use clepsydra::vault::derivation::{Deriver, IndexedPage};
 use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_code_number};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
+use clepsydra::vault::tree::load_note_meta;
 use rusqlite::Transaction;
 use tempfile::TempDir;
 
@@ -26,6 +27,16 @@ fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
     }
     let vault = Vault::open(&root).unwrap();
     (tmp, vault)
+}
+
+const ENCRYPTED_PAGE_ID: &str = "019fd000-0000-7000-8000-000000000011";
+const ENCRYPTION_KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
+
+fn protected_page(id: &str, title: &str) -> String {
+    format!(
+        "+++\nid = \"{id}\"\ntitle = \"{title}\"\nstatus = \"private\"\nencryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}\n+++\n{}",
+        include_str!("support/fixtures/private-note.age")
+    )
 }
 
 // -----------------------------------------------------------------------
@@ -70,6 +81,190 @@ fn creates_parent_directories() {
     let db_path = tmp.path().join("deep/nested/cache.db");
     let _index = VaultIndex::open(&db_path).unwrap();
     assert!(db_path.exists());
+}
+
+#[test]
+fn encrypted_column_forward_migration_is_idempotent() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("old-cache.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE pages (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                title TEXT,
+                canonical_name TEXT NOT NULL,
+                created_at TEXT,
+                updated_at TEXT,
+                meta_json TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                journal_date TEXT
+            );
+            INSERT INTO pages (id, path, title, canonical_name, meta_json, content_hash)
+            VALUES ('old', 'old.md', 'Old', 'old', '{}', 'hash');",
+        )
+        .unwrap();
+    }
+
+    for _ in 0..2 {
+        let index = VaultIndex::open(&db_path).unwrap();
+        let column: (String, i64, Option<String>) = index
+            .connection()
+            .prepare("PRAGMA table_info(pages)")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .find_map(|(name, ty, not_null, default)| {
+                (name == "encrypted").then_some((ty, not_null, default))
+            })
+            .expect("encrypted column should exist");
+        assert_eq!(column, ("INTEGER".into(), 1, Some("0".into())));
+        let encrypted: i64 = index
+            .connection()
+            .query_row("SELECT encrypted FROM pages WHERE id = 'old'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(encrypted, 0);
+    }
+}
+
+#[test]
+fn encrypted_page_suppresses_body_derived_index_data() {
+    let page = protected_page(ENCRYPTED_PAGE_ID, "Private note");
+    let (_tmp, vault) = setup_vault(&[("private.md", &page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    index.build(&vault).unwrap();
+
+    let (encrypted, word_count): (i64, Option<i64>) = index
+        .connection()
+        .query_row(
+            "SELECT encrypted, word_count FROM pages WHERE id = ?1",
+            [ENCRYPTED_PAGE_ID],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(encrypted, 1);
+    assert_eq!(word_count, None);
+    for (table, id_column) in [("links", "source_id"), ("blocks", "page_id")] {
+        let count: i64 = index
+            .connection()
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE {id_column} = ?1"),
+                [ENCRYPTED_PAGE_ID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "{table} must have no body-derived rows");
+    }
+    let fts_body: String = index
+        .connection()
+        .query_row(
+            "SELECT body FROM pages_fts WHERE page_id = ?1",
+            [ENCRYPTED_PAGE_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(fts_body.is_empty());
+    assert!(index.search("unique-secret-term", 20).unwrap().is_empty());
+    assert!(
+        index
+            .search("YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0", 20)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(index.search("Private note", 20).unwrap().len(), 1);
+
+    let property_count: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM page_properties WHERE page_id = ?1 AND key = 'status'",
+            [ENCRYPTED_PAGE_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(property_count, 1, "clear properties remain indexable");
+
+    let tree_meta = load_note_meta(&index).unwrap();
+    let private = tree_meta.get("private.md").unwrap();
+    assert!(private.encrypted);
+    assert_eq!(private.word_count, None);
+}
+
+#[test]
+fn encrypted_transition_deletes_prior_body_derived_rows() {
+    let plain = format!(
+        "+++\nid = \"{ENCRYPTED_PAGE_ID}\"\ntitle = \"Private note\"\n+++\n# Hidden heading\nuniquesecretterm [[Target]]\n- secret task ^abc123DEF0\n"
+    );
+    let (_tmp, vault) = setup_vault(&[("private.md", &plain)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let body_links: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE source_id = ?1",
+            [ENCRYPTED_PAGE_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let blocks: i64 = index
+        .connection()
+        .query_row(
+            "SELECT COUNT(*) FROM blocks WHERE page_id = ?1",
+            [ENCRYPTED_PAGE_ID],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(body_links > 0);
+    assert!(blocks > 0);
+    assert_eq!(index.search("uniquesecretterm", 20).unwrap().len(), 1);
+
+    fs::write(
+        vault.root().join("private.md"),
+        protected_page(ENCRYPTED_PAGE_ID, "Private note"),
+    )
+    .unwrap();
+    assert!(
+        index
+            .index_page(&vault, &VaultPath::new("private.md").unwrap())
+            .unwrap()
+    );
+
+    let (encrypted, word_count): (i64, Option<i64>) = index
+        .connection()
+        .query_row(
+            "SELECT encrypted, word_count FROM pages WHERE id = ?1",
+            [ENCRYPTED_PAGE_ID],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((encrypted, word_count), (1, None));
+    for (table, id_column) in [("links", "source_id"), ("blocks", "page_id")] {
+        let count: i64 = index
+            .connection()
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE {id_column} = ?1"),
+                [ENCRYPTED_PAGE_ID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "stale {table} rows must be deleted");
+    }
+    assert!(index.search("uniquesecretterm", 20).unwrap().is_empty());
+    assert_eq!(index.search("Private note", 20).unwrap().len(), 1);
 }
 
 // -----------------------------------------------------------------------

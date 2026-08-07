@@ -21,6 +21,7 @@ pub struct NoteMeta {
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    pub encrypted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub word_count: Option<i64>,
 }
@@ -30,7 +31,8 @@ pub struct NoteMeta {
 /// sourced from the index — kind/title/dates/word-count from `pages`, tags from
 /// `tags` — so no note files are read. `created_at`/`updated_at`/`word_count`
 /// are populated during index build (`word_count` is NULL only for rows indexed
-/// before the column existed, until the next build re-upserts them).
+/// before the column existed, or for encrypted pages where body-derived data
+/// is intentionally unavailable).
 pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, rusqlite::Error> {
     let conn = index.connection();
 
@@ -46,8 +48,9 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
         }
     }
 
-    let mut stmt = conn
-        .prepare("SELECT id, path, title, kind, created_at, updated_at, word_count FROM pages")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, path, title, kind, created_at, updated_at, encrypted, word_count FROM pages",
+    )?;
     type Row = (
         String,
         String,
@@ -55,6 +58,7 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
         String,
         Option<String>,
         Option<String>,
+        bool,
         Option<i64>,
     );
     let rows: Vec<Row> = stmt
@@ -67,13 +71,14 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
                 row.get(4)?,
                 row.get(5)?,
                 row.get(6)?,
+                row.get(7)?,
             ))
         })?
         .filter_map(|r| r.ok())
         .collect();
 
     let mut out = HashMap::with_capacity(rows.len());
-    for (page_id, path, title, kind, created_at, updated_at, word_count) in rows {
+    for (page_id, path, title, kind, created_at, updated_at, encrypted, word_count) in rows {
         let tags = tags_by_page.remove(&page_id).unwrap_or_default();
         out.insert(
             path,
@@ -83,6 +88,7 @@ pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, r
                 tags,
                 created_at,
                 updated_at,
+                encrypted,
                 word_count,
             },
         );
