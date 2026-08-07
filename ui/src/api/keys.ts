@@ -38,6 +38,8 @@ export const queryKeys = {
     current: ["location"] as const,
   },
 
+  encryption: { pathPrefix: "/api/vault/encryption" },
+
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },
   index: { pathPrefix: "/api/vault/index" },
