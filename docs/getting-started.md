@@ -73,7 +73,7 @@ Open:
 
 - App: `http://localhost:3000/`
 - OpenAPI JSON: `http://localhost:3000/api/openapi.json`
-- Swagger UI: `http://localhost:3000/docs`
+- Swagger UI: `http://localhost:3000/api/docs`
 
 Unknown frontend routes automatically fall back to `index.html` (SPA routing support).
 

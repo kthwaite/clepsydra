@@ -228,12 +228,41 @@ pub fn router<S>() -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    Router::new().merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
+    Router::new().merge(
+        SwaggerUi::new("/api/docs").url("/api/openapi.json", ApiDoc::openapi()),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn swagger_is_scoped_under_api_docs() {
+        let response = router::<()>()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/docs/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status().is_success() || response.status().is_redirection());
+
+        let old = router::<()>()
+            .oneshot(
+                Request::builder()
+                    .uri("/docs/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(old.status(), axum::http::StatusCode::NOT_FOUND);
+    }
 
     #[test]
     fn kind_schema_is_the_full_uppercase_vocabulary() {

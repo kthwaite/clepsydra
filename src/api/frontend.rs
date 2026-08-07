@@ -65,7 +65,7 @@ fn with_security_headers(mut response: Response) -> Response {
 async fn index_html() -> Response {
     match Assets::get("index.html") {
         Some(content) => Response::builder()
-            .header(header::CONTENT_TYPE, "text/html")
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(content.data))
             .unwrap(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -115,6 +115,21 @@ mod tests {
             .expect("ASCII CSP");
         assert!(!csp.contains("'unsafe-eval'"));
         assert!(!csp.contains("script-src 'self' 'unsafe-inline'"));
+    }
+
+    #[tokio::test]
+    async fn docs_paths_use_the_spa_fallback() {
+        for uri in ["/docs", "/docs/getting-started", "/docs/bases"] {
+            let response = static_handler(Uri::from_static(uri)).await.into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok()),
+                Some("text/html; charset=utf-8")
+            );
+        }
     }
 
     #[tokio::test]
