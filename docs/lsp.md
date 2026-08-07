@@ -96,11 +96,11 @@ the reconcile pass that moves a drifted page to its projected folder. If
 `clep serve` is running alongside `clep lsp`, that move lands almost
 immediately — `clep lsp`'s independent watcher then notices the resulting
 remove/add pair, reindexes, and (for any open buffer at the old path) logs
-`moved <old> → <new> (folder follows kind/project); reopen the file` to
-`:LspLog`. The buffer itself keeps pointing at the old path; reopen the file
-at its new location. If `clep serve` is *not* running, drift is left alone
-until the next `clep serve` startup, which sweeps the whole vault and heals
-it then.
+`clepsydra: <old> moved to <new> (folder follows kind/project); reopen the
+file` to `:LspLog`. The buffer itself keeps pointing at the old path; reopen
+the file at its new location. If `clep serve` is *not* running, drift is
+left alone until the next `clep serve` startup, which sweeps the whole vault
+and heals it then.
 
 ## Troubleshooting
 
