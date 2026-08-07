@@ -80,13 +80,15 @@ pub struct TlsSettings {
     /// defaults. (Default: false)
     #[serde(default)]
     pub enabled: bool,
-    /// Path to the TLS certificate file. Must be set together with `key_path`. When both are unset,
-    /// the server will auto-generate certs for localhost using mkcert and store them in the app
-    /// data directory.
+    /// Path to the TLS certificate file. Can be absolute or relative to the config file location
+    /// (`~` is expanded). Must be set together with `key_path`. When both are unset, the server
+    /// will auto-generate certs for localhost using mkcert and store them in the app data
+    /// directory.
     pub cert_path: Option<PathBuf>,
-    /// Path to the TLS private key file. Must be set together with `cert_path`. When both are
-    /// unset, the server will auto-generate certs for localhost using mkcert and store them in the
-    /// app data directory.
+    /// Path to the TLS private key file. Can be absolute or relative to the config file location
+    /// (`~` is expanded). Must be set together with `cert_path`. When both are unset, the server
+    /// will auto-generate certs for localhost using mkcert and store them in the app data
+    /// directory.
     pub key_path: Option<PathBuf>,
 }
 
@@ -162,10 +164,15 @@ impl Settings {
 
     /// Load settings from a known `config.toml` path, layering defaults and
     /// environment variables on top.
+    ///
+    /// TLS cert/key paths are resolved to absolute paths here (tilde expansion,
+    /// then relative-to-config-dir, or relative-to-cwd when env-supplied) so
+    /// every consumer sees the same on-disk locations regardless of where the
+    /// process was launched from.
     pub fn load_from(config_path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         // Precedence (later wins): defaults < config file < env vars.
         // `serve` flags layer on top of this — see [`ServeOverrides`].
-        let settings = Config::builder()
+        let mut settings: Settings = Config::builder()
             .set_default("server.host", "localhost")?
             .set_default("server.port", 3000)?
             .set_default("server.dev_mode", false)?
@@ -175,6 +182,15 @@ impl Settings {
             .add_source(Environment::with_prefix("CLEPSYDRA").separator("__"))
             .build()?
             .try_deserialize()?;
+
+        let cwd = std::env::current_dir()?;
+        let tls = &mut settings.server.tls;
+        tls.cert_path = tls.cert_path.take().map(|p| {
+            resolve_config_path(&p, "CLEPSYDRA__SERVER__TLS__CERT_PATH", config_path, &cwd)
+        });
+        tls.key_path = tls.key_path.take().map(|p| {
+            resolve_config_path(&p, "CLEPSYDRA__SERVER__TLS__KEY_PATH", config_path, &cwd)
+        });
         Ok(settings)
     }
 }
@@ -192,34 +208,42 @@ pub fn expand_tilde(p: &str) -> Option<PathBuf> {
     }
 }
 
+/// Resolve a possibly-relative path from config into an absolute filesystem
+/// path, mirroring [`resolve_vault_root`]'s rules.
+///
+/// Order: tilde expansion, absolute passthrough, paths supplied via `env_var`
+/// resolved against `cwd`, and finally relative paths resolved against the
+/// config file's parent directory.
+fn resolve_config_path(p: &Path, env_var: &str, config_path: &Path, cwd: &Path) -> PathBuf {
+    if let Some(expanded) = p.to_str().and_then(expand_tilde) {
+        return expanded;
+    }
+
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+
+    // If the path was supplied via env, keep it relative to the process CWD.
+    if std::env::var_os(env_var).is_some() {
+        return cwd.join(p);
+    }
+
+    // Otherwise, resolve relative paths against the config file directory
+    // (important for XDG config usage).
+    if let Some(parent) = config_path.parent() {
+        return parent.join(p);
+    }
+
+    cwd.join(p)
+}
+
 /// Resolve the vault root string from config into an absolute filesystem path.
 ///
 /// Order: tilde expansion, absolute passthrough, env-supplied roots resolved
 /// against `cwd`, and finally relative roots resolved against the config file's
 /// parent directory.
 pub fn resolve_vault_root(root: &str, config_path: &Path, cwd: &Path) -> PathBuf {
-    if let Some(expanded) = expand_tilde(root) {
-        return expanded;
-    }
-
-    let root_path = PathBuf::from(root);
-
-    if root_path.is_absolute() {
-        return root_path;
-    }
-
-    // If vault root is supplied via env, keep it relative to the process CWD.
-    if std::env::var_os("CLEPSYDRA__VAULT__ROOT").is_some() {
-        return cwd.join(root_path);
-    }
-
-    // Otherwise, resolve relative roots against the config file directory
-    // (important for XDG config usage).
-    if let Some(parent) = config_path.parent() {
-        return parent.join(root_path);
-    }
-
-    cwd.join(root_path)
+    resolve_config_path(Path::new(root), "CLEPSYDRA__VAULT__ROOT", config_path, cwd)
 }
 
 fn drain_change_batch(
@@ -1158,6 +1182,121 @@ mod settings_tests {
         std::fs::write(&cfg, "[server]\nport = 9999\n").unwrap();
         let settings = Settings::load_from(&cfg).unwrap();
         assert_eq!(settings.server.port, 9999);
+    }
+
+    /// RAII guard that records the prior value of an env var on construction
+    /// and restores it on drop, so `#[serial]` tests can't leak state.
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prior = std::env::var_os(key);
+            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
+            // so no other thread is racing on the same variable.
+            unsafe { std::env::set_var(key, value) }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: see `set`.
+            unsafe {
+                match self.prior.take() {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn load_from_resolves_tls_paths_against_config_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(
+            &cfg,
+            "[server.tls]\nenabled = true\ncert_path = \"certs/localhost.pem\"\nkey_path = \"certs/localhost-key.pem\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(&cfg).unwrap();
+        assert_eq!(
+            settings.server.tls.cert_path,
+            Some(tmp.path().join("certs/localhost.pem"))
+        );
+        assert_eq!(
+            settings.server.tls.key_path,
+            Some(tmp.path().join("certs/localhost-key.pem"))
+        );
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn load_from_preserves_absolute_tls_paths() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(
+            &cfg,
+            "[server.tls]\nenabled = true\ncert_path = \"/etc/certs/vault.pem\"\nkey_path = \"/etc/certs/vault-key.pem\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(&cfg).unwrap();
+        assert_eq!(
+            settings.server.tls.cert_path,
+            Some(PathBuf::from("/etc/certs/vault.pem"))
+        );
+        assert_eq!(
+            settings.server.tls.key_path,
+            Some(PathBuf::from("/etc/certs/vault-key.pem"))
+        );
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn load_from_expands_tilde_in_tls_paths() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(
+            &cfg,
+            "[server.tls]\nenabled = true\ncert_path = \"~/certs/vault.pem\"\nkey_path = \"~/certs/vault-key.pem\"\n",
+        )
+        .unwrap();
+        let settings = Settings::load_from(&cfg).unwrap();
+        let home = dirs::home_dir().expect("home dir must exist for test");
+        assert_eq!(
+            settings.server.tls.cert_path,
+            Some(home.join("certs/vault.pem"))
+        );
+        assert_eq!(
+            settings.server.tls.key_path,
+            Some(home.join("certs/vault-key.pem"))
+        );
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn load_from_resolves_env_tls_paths_against_cwd() {
+        // Env-supplied paths are typed relative to the invoking shell's cwd,
+        // not the config file location — mirroring CLEPSYDRA__VAULT__ROOT.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "[server.tls]\nenabled = true\n").unwrap();
+        let _cert = EnvGuard::set("CLEPSYDRA__SERVER__TLS__CERT_PATH", "certs/env.pem");
+        let _key = EnvGuard::set("CLEPSYDRA__SERVER__TLS__KEY_PATH", "certs/env-key.pem");
+        let settings = Settings::load_from(&cfg).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            settings.server.tls.cert_path,
+            Some(cwd.join("certs/env.pem"))
+        );
+        assert_eq!(
+            settings.server.tls.key_path,
+            Some(cwd.join("certs/env-key.pem"))
+        );
     }
 
     fn settings_with(tls_enabled: bool, port: u16) -> Settings {

@@ -1628,31 +1628,37 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
-/// Extract a journal date from a vault path like `journals/YYYY-MM-DD.md` or
-/// `journals/YYYY-MM-DD` (stem without extension).
+/// Extract a journal date from either a legacy `journals/YYYY-MM-DD.md` path
+/// or a canonical `journals/<yyyymmdd>.YYYY-MM-DD.<shortid>.md` path.
 ///
 /// Returns `Some("YYYY-MM-DD")` if the path matches, `None` otherwise.
 /// Only matches top-level `journals/` — e.g. `other/journals/2026-02-17.md` is
 /// rejected.
 fn extract_journal_date(path: &str) -> Option<String> {
-    let rest = path.strip_prefix("journals/")?;
-    // Strip optional .md extension
-    let stem = rest.strip_suffix(".md").unwrap_or(rest);
-    // Validate YYYY-MM-DD format (exactly 10 chars, correct punctuation, all digits)
-    if stem.len() != 10 {
+    let filename = path.strip_prefix("journals/")?;
+    let stem = filename.strip_suffix(".md").unwrap_or(filename);
+    let candidate = if stem.len() == 10 {
+        stem
+    } else if crate::vault::path::is_canonical_page_filename(filename) {
+        stem.split('.').nth(1)?
+    } else {
+        return None;
+    };
+
+    // Validate YYYY-MM-DD shape (exactly 10 chars, correct punctuation, all digits).
+    if candidate.len() != 10 {
         return None;
     }
-    let bytes = stem.as_bytes();
+    let bytes = candidate.as_bytes();
     if bytes[4] != b'-' || bytes[7] != b'-' {
         return None;
     }
-    // Check that YYYY, MM, DD are all ASCII digits
     for &i in &[0, 1, 2, 3, 5, 6, 8, 9] {
         if !bytes[i].is_ascii_digit() {
             return None;
         }
     }
-    Some(stem.to_string())
+    Some(candidate.to_string())
 }
 
 // ---------------------------------------------------------------------------

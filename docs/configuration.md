@@ -138,8 +138,10 @@ Full precedence, later wins: defaults → config file → environment →
   - absolute → used as-is
   - relative in `config.toml` → resolved relative to that config file’s directory
   - relative from `CLEPSYDRA__VAULT__ROOT` → resolved relative to process working directory
-- `server.tls.cert_path` / `server.tls.key_path`:
-  - used as provided by runtime path resolution
+- `server.tls.cert_path` / `server.tls.key_path`: same rules as `vault.root`
+  (`~` expands to the home directory; relative paths in `config.toml` resolve
+  against the config file’s directory, env-supplied ones against the process
+  working directory)
 
 ---
 

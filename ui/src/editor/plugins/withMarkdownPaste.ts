@@ -1,4 +1,10 @@
-import { Editor, Element as SlateElement, Transforms } from "slate";
+import {
+  Editor,
+  Range,
+  Element as SlateElement,
+  Text,
+  Transforms,
+} from "slate";
 import { markdownToSlate } from "#/editor/convert";
 import type { CustomElement } from "#/editor/types";
 
@@ -34,17 +40,47 @@ export function withMarkdownPaste(editor: Editor): Editor {
       insertData(data);
       return;
     }
-    // 3. Plain text → markdown → Slate fragment.
+    // 3. A paste into the generated [label](|) scaffold must stay literal
+    // until the existing `)` autoformat path converts the complete link.
     const text = data.getData("text/plain");
+    if (text && tryCompleteLinkScaffold(editor, text)) return;
+
+    // 4. Plain text → markdown → Slate fragment.
     if (text) {
       Transforms.insertFragment(editor, markdownToSlate(text));
       return;
     }
-    // 4. Files / anything else → default behavior.
+    // 5. Files / anything else → default behavior.
     insertData(data);
   };
 
   return editor;
+}
+
+function tryCompleteLinkScaffold(editor: Editor, text: string): boolean {
+  const { selection } = editor;
+  if (
+    !selection ||
+    !Range.isCollapsed(selection) ||
+    text.includes("\n") ||
+    text.includes("\r")
+  ) {
+    return false;
+  }
+
+  const { anchor } = selection;
+  const [node] = Editor.node(editor, anchor.path);
+  if (
+    !Text.isText(node) ||
+    !node.text.slice(0, anchor.offset).endsWith("](") ||
+    node.text[anchor.offset] !== ")"
+  ) {
+    return false;
+  }
+
+  editor.insertText(text);
+  editor.insertText(")");
+  return true;
 }
 
 function isInCodeBlock(editor: Editor): boolean {

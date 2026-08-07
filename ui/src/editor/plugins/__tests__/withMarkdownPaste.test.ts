@@ -1,7 +1,9 @@
-import { createEditor, type Editor } from "slate";
+import { createEditor, type Editor, Element as SlateElement } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it, vi } from "vitest";
+import { slateToMarkdown } from "#/editor/convert";
 import { withSchema } from "#/editor/schema/withSchema";
+import { withAutoformat } from "../autoformat/withAutoformat";
 import { withMarkdownPaste } from "../withMarkdownPaste";
 
 /**
@@ -10,6 +12,14 @@ import { withMarkdownPaste } from "../withMarkdownPaste";
  */
 function makeEditor() {
   const editor = withSchema(withHistory(createEditor()));
+  const base = vi.fn();
+  editor.insertData = base;
+  withMarkdownPaste(editor);
+  return { editor, base };
+}
+
+function makeAutoformatEditor() {
+  const editor = withHistory(withAutoformat(withSchema(createEditor())));
   const base = vi.fn();
   editor.insertData = base;
   withMarkdownPaste(editor);
@@ -170,5 +180,36 @@ describe("withMarkdownPaste", () => {
     emptyParagraph(editor);
     editor.insertData(fakeData({}));
     expect(base).toHaveBeenCalledTimes(1);
+  });
+
+  it("MP-07: a URL pasted into a generated link scaffold persists as Markdown", () => {
+    const { editor } = makeAutoformatEditor();
+    const url = "https://github.com/PrimeIntellect-ai/prime-agent";
+    editor.children = [
+      { type: "paragraph", children: [{ text: "[prime agent]()" }] },
+    ];
+    editor.selection = {
+      anchor: { path: [0, 0], offset: "[prime agent](".length },
+      focus: { path: [0, 0], offset: "[prime agent](".length },
+    };
+
+    editor.insertData(fakeData({ "text/plain": url }));
+
+    expect(slateToMarkdown(editor.children).trim()).toBe(
+      `[prime agent](${url})`,
+    );
+    const paragraph = editor.children[0];
+    if (!SlateElement.isElement(paragraph)) {
+      throw new Error("expected a paragraph element");
+    }
+    expect(
+      paragraph.children.find(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      ),
+    ).toMatchObject({
+      type: "link",
+      url,
+      children: [{ text: "prime agent" }],
+    });
   });
 });

@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, http::StatusCode};
 use chrono::{DateTime, NaiveDate, Utc};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::AppState;
@@ -86,25 +86,61 @@ fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
     })
 }
 
-/// Build a VaultPath for a journal date.
-fn journal_path(date: &str) -> Result<VaultPath, ApiError> {
-    VaultPath::new(&format!("journals/{date}.md"))
-        .map_err(|e| ApiError::internal(format!("invalid journal path: {e}")))
+/// Serialize journal creation so concurrent captures cannot create two
+/// canonical pages for the same date.
+static JOURNAL_ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Find the indexed journal page for a date, independent of filename shape.
+async fn find_journal_path(
+    state: &Arc<AppState>,
+    date: &str,
+) -> Result<Option<VaultPath>, ApiError> {
+    let date = date.to_string();
+    let path = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT path FROM pages WHERE journal_date = ?1 ORDER BY path LIMIT 1",
+                    [date],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    path.map(|path| {
+        VaultPath::new(&path)
+            .map_err(|error| ApiError::internal(format!("invalid indexed journal path: {error}")))
+    })
+    .transpose()
+}
+
+/// Build a canonical VaultPath for a newly created journal.
+fn new_journal_path(date: &str, created: DateTime<Utc>) -> Result<VaultPath, ApiError> {
+    let short_id = crate::vault::block_id::generate_short_id();
+    let filename = crate::vault::page_filename::page_filename(created, date, &short_id);
+    VaultPath::new(&format!("journals/{filename}"))
+        .map_err(|error| ApiError::internal(format!("invalid journal path: {error}")))
 }
 
 /// Ensure a journal page exists for the given date. Returns the VaultPath and
 /// whether the page was newly created.
 async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath, bool), ApiError> {
-    let vault_path = journal_path(date)?;
-    let abs_path = state.vault.resolve(&vault_path);
-
-    if abs_path.exists() {
+    let _guard = JOURNAL_ENSURE_LOCK.lock().await;
+    if let Some(vault_path) = find_journal_path(state, date).await? {
         return Ok((vault_path, false));
     }
 
+    let now = state.clock.now();
+    let vault_path = new_journal_path(date, now)?;
+    let abs_path = state.vault.resolve(&vault_path);
+
     // Build template
     let mut meta = PageMeta::new();
-    let now = state.clock.now();
     meta.created_at = Some(now);
     meta.updated_at = Some(now);
     meta.title = Some(date.to_string());
@@ -150,11 +186,10 @@ async fn get_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<JournalTodayResponse>, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
-    let vault_path = journal_path(&date)?;
+    let vault_path = find_journal_path(&state, &date)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("journal not found: {date}")))?;
     let abs_path = state.vault.resolve(&vault_path);
-    if !abs_path.exists() {
-        return Err(ApiError::not_found(format!("journal not found: {date}")));
-    }
 
     let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
@@ -288,12 +323,10 @@ async fn get_by_date(
     // Validate date format
     let _ = parse_date(&date)?;
 
-    let vault_path = journal_path(&date)?;
+    let vault_path = find_journal_path(&state, &date)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("journal not found: {date}")))?;
     let abs_path = state.vault.resolve(&vault_path);
-
-    if !abs_path.exists() {
-        return Err(ApiError::not_found(format!("journal not found: {date}")));
-    }
 
     let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;

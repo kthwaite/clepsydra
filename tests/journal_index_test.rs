@@ -43,6 +43,26 @@ fn indexes_journal_date_from_path() {
 }
 
 #[test]
+fn indexes_journal_date_from_canonical_path() {
+    let page =
+        "---\nid: 00000000-0000-0000-0000-000000000004\ntitle: \"2026-02-17\"\n---\n- Notes\n";
+    let (_tmp, vault) = setup_vault(&[("journals/20260217.2026-02-17.aB3dE9xZ.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let date: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT journal_date FROM pages WHERE id = ?1",
+            ["00000000-0000-0000-0000-000000000004"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(date.as_deref(), Some("2026-02-17"));
+}
+
+#[test]
 fn non_journal_page_has_null_journal_date() {
     let page = "---\nid: 00000000-0000-0000-0000-000000000002\ntitle: Regular\n---\nHello\n";
     let (_tmp, vault) = setup_vault(&[("notes/regular.md", page)]);

@@ -66,14 +66,19 @@ fn today_str() -> String {
 
 #[tokio::test]
 async fn mutation_creation_emits_exact_coordinator_notification() {
-    let journal_path = format!("journals/{}.md", today_str());
+    let today = today_str();
     let (server, _tmp, state) = setup_server_with_state(|_| {});
     let mut changes = state.change_tx.subscribe();
 
-    server
-        .post("/api/vault/journal/today")
-        .await
-        .assert_status(StatusCode::CREATED);
+    let response = server.post("/api/vault/journal/today").await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let journal_path = body["path"].as_str().unwrap().to_string();
+    assert!(journal_path.starts_with(&format!(
+        "journals/{}.{}.",
+        fixed_now().format("%Y%m%d"),
+        today
+    )));
 
     let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
     else {
@@ -199,10 +204,18 @@ async fn post_today_creates_with_template() {
     let res = server.post("/api/vault/journal/today").await;
     res.assert_status(StatusCode::CREATED);
     let body: serde_json::Value = res.json();
-    assert_eq!(
-        body["path"].as_str().unwrap(),
-        format!("journals/{}.md", today_str())
+    let path = body["path"].as_str().unwrap();
+    assert!(
+        path.starts_with(&format!(
+            "journals/{}.{}.",
+            fixed_now().format("%Y%m%d"),
+            today_str()
+        )),
+        "journal path was: {path}"
     );
+    assert!(clepsydra::vault::path::is_canonical_page_filename(
+        path.rsplit('/').next().unwrap()
+    ));
     assert_eq!(body["meta"]["title"].as_str().unwrap(), today_str());
     assert!(
         body["meta"]["tags"]
@@ -258,10 +271,10 @@ async fn get_by_date_returns_existing() {
     let res = server.get(&format!("/api/vault/journal/{date}")).await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
-    assert_eq!(
-        body["path"].as_str().unwrap(),
-        format!("journals/{date}.md")
-    );
+    let path = body["path"].as_str().unwrap();
+    assert!(clepsydra::vault::path::is_canonical_page_filename(
+        path.rsplit('/').next().unwrap()
+    ));
 }
 
 #[tokio::test]

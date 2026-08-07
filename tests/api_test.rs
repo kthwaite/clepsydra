@@ -946,6 +946,7 @@ async fn page_detail_mapping_matches_get_for_journal_and_link_endpoints() {
     let response = server.get("/api/vault/journal/today").await;
     response.assert_status_ok();
     let mut today: serde_json::Value = response.json();
+    let date = today["meta"]["title"].as_str().unwrap().to_string();
     let today_path = today["path"].as_str().unwrap().to_string();
     today
         .as_object_mut()
@@ -960,10 +961,6 @@ async fn page_detail_mapping_matches_get_for_journal_and_link_endpoints() {
         "journal today and path GET detail mappings differ"
     );
 
-    let date = today_path
-        .strip_prefix("journals/")
-        .and_then(|path| path.strip_suffix(".md"))
-        .unwrap();
     let response = server.get(&format!("/api/vault/journal/{date}")).await;
     response.assert_status_ok();
     assert_eq!(

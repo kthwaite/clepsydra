@@ -8,210 +8,210 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as AgendaRouteImport } from "./routes/agenda";
-import { Route as BasesSlugRouteImport } from "./routes/bases.$slug";
-import { Route as GazetteerRouteImport } from "./routes/gazetteer";
-import { Route as GraphRouteImport } from "./routes/graph";
-import { Route as IndexRouteImport } from "./routes/index";
-import { Route as LinkMissRouteImport } from "./routes/link-miss";
-import { Route as PagesSplatRouteImport } from "./routes/pages/$";
-import { Route as TaskingRouteImport } from "./routes/tasking";
-import { Route as WorkspaceRouteImport } from "./routes/workspace";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as WorkspaceRouteImport } from './routes/workspace'
+import { Route as TaskingRouteImport } from './routes/tasking'
+import { Route as LinkMissRouteImport } from './routes/link-miss'
+import { Route as GraphRouteImport } from './routes/graph'
+import { Route as GazetteerRouteImport } from './routes/gazetteer'
+import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as PagesSplatRouteImport } from './routes/pages/$'
+import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
 
-const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AgendaRoute = AgendaRouteImport.update({
-  id: "/agenda",
-  path: "/agenda",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const GazetteerRoute = GazetteerRouteImport.update({
-  id: "/gazetteer",
-  path: "/gazetteer",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const GraphRoute = GraphRouteImport.update({
-  id: "/graph",
-  path: "/graph",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const LinkMissRoute = LinkMissRouteImport.update({
-  id: "/link-miss",
-  path: "/link-miss",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const TaskingRoute = TaskingRouteImport.update({
-  id: "/tasking",
-  path: "/tasking",
-  getParentRoute: () => rootRouteImport,
-} as any);
 const WorkspaceRoute = WorkspaceRouteImport.update({
-  id: "/workspace",
-  path: "/workspace",
+  id: '/workspace',
+  path: '/workspace',
   getParentRoute: () => rootRouteImport,
-} as any);
-const BasesSlugRoute = BasesSlugRouteImport.update({
-  id: "/bases/$slug",
-  path: "/bases/$slug",
+} as any)
+const TaskingRoute = TaskingRouteImport.update({
+  id: '/tasking',
+  path: '/tasking',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
+const LinkMissRoute = LinkMissRouteImport.update({
+  id: '/link-miss',
+  path: '/link-miss',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GraphRoute = GraphRouteImport.update({
+  id: '/graph',
+  path: '/graph',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GazetteerRoute = GazetteerRouteImport.update({
+  id: '/gazetteer',
+  path: '/gazetteer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgendaRoute = AgendaRouteImport.update({
+  id: '/agenda',
+  path: '/agenda',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PagesSplatRoute = PagesSplatRouteImport.update({
-  id: "/pages/$",
-  path: "/pages/$",
+  id: '/pages/$',
+  path: '/pages/$',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
+const BasesSlugRoute = BasesSlugRouteImport.update({
+  id: '/bases/$slug',
+  path: '/bases/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/agenda": typeof AgendaRoute;
-  "/gazetteer": typeof GazetteerRoute;
-  "/graph": typeof GraphRoute;
-  "/link-miss": typeof LinkMissRoute;
-  "/tasking": typeof TaskingRoute;
-  "/workspace": typeof WorkspaceRoute;
-  "/bases/$slug": typeof BasesSlugRoute;
-  "/pages/$": typeof PagesSplatRoute;
+  '/': typeof IndexRoute
+  '/agenda': typeof AgendaRoute
+  '/gazetteer': typeof GazetteerRoute
+  '/graph': typeof GraphRoute
+  '/link-miss': typeof LinkMissRoute
+  '/tasking': typeof TaskingRoute
+  '/workspace': typeof WorkspaceRoute
+  '/bases/$slug': typeof BasesSlugRoute
+  '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/agenda": typeof AgendaRoute;
-  "/gazetteer": typeof GazetteerRoute;
-  "/graph": typeof GraphRoute;
-  "/link-miss": typeof LinkMissRoute;
-  "/tasking": typeof TaskingRoute;
-  "/workspace": typeof WorkspaceRoute;
-  "/bases/$slug": typeof BasesSlugRoute;
-  "/pages/$": typeof PagesSplatRoute;
+  '/': typeof IndexRoute
+  '/agenda': typeof AgendaRoute
+  '/gazetteer': typeof GazetteerRoute
+  '/graph': typeof GraphRoute
+  '/link-miss': typeof LinkMissRoute
+  '/tasking': typeof TaskingRoute
+  '/workspace': typeof WorkspaceRoute
+  '/bases/$slug': typeof BasesSlugRoute
+  '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/agenda": typeof AgendaRoute;
-  "/gazetteer": typeof GazetteerRoute;
-  "/graph": typeof GraphRoute;
-  "/link-miss": typeof LinkMissRoute;
-  "/tasking": typeof TaskingRoute;
-  "/workspace": typeof WorkspaceRoute;
-  "/bases/$slug": typeof BasesSlugRoute;
-  "/pages/$": typeof PagesSplatRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/agenda': typeof AgendaRoute
+  '/gazetteer': typeof GazetteerRoute
+  '/graph': typeof GraphRoute
+  '/link-miss': typeof LinkMissRoute
+  '/tasking': typeof TaskingRoute
+  '/workspace': typeof WorkspaceRoute
+  '/bases/$slug': typeof BasesSlugRoute
+  '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/agenda"
-    | "/gazetteer"
-    | "/graph"
-    | "/link-miss"
-    | "/tasking"
-    | "/workspace"
-    | "/bases/$slug"
-    | "/pages/$";
-  fileRoutesByTo: FileRoutesByTo;
+    | '/'
+    | '/agenda'
+    | '/gazetteer'
+    | '/graph'
+    | '/link-miss'
+    | '/tasking'
+    | '/workspace'
+    | '/bases/$slug'
+    | '/pages/$'
+  fileRoutesByTo: FileRoutesByTo
   to:
-    | "/"
-    | "/agenda"
-    | "/gazetteer"
-    | "/graph"
-    | "/link-miss"
-    | "/tasking"
-    | "/workspace"
-    | "/bases/$slug"
-    | "/pages/$";
+    | '/'
+    | '/agenda'
+    | '/gazetteer'
+    | '/graph'
+    | '/link-miss'
+    | '/tasking'
+    | '/workspace'
+    | '/bases/$slug'
+    | '/pages/$'
   id:
-    | "__root__"
-    | "/"
-    | "/agenda"
-    | "/gazetteer"
-    | "/graph"
-    | "/link-miss"
-    | "/tasking"
-    | "/workspace"
-    | "/bases/$slug"
-    | "/pages/$";
-  fileRoutesById: FileRoutesById;
+    | '__root__'
+    | '/'
+    | '/agenda'
+    | '/gazetteer'
+    | '/graph'
+    | '/link-miss'
+    | '/tasking'
+    | '/workspace'
+    | '/bases/$slug'
+    | '/pages/$'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  AgendaRoute: typeof AgendaRoute;
-  GazetteerRoute: typeof GazetteerRoute;
-  GraphRoute: typeof GraphRoute;
-  LinkMissRoute: typeof LinkMissRoute;
-  TaskingRoute: typeof TaskingRoute;
-  WorkspaceRoute: typeof WorkspaceRoute;
-  BasesSlugRoute: typeof BasesSlugRoute;
-  PagesSplatRoute: typeof PagesSplatRoute;
+  IndexRoute: typeof IndexRoute
+  AgendaRoute: typeof AgendaRoute
+  GazetteerRoute: typeof GazetteerRoute
+  GraphRoute: typeof GraphRoute
+  LinkMissRoute: typeof LinkMissRoute
+  TaskingRoute: typeof TaskingRoute
+  WorkspaceRoute: typeof WorkspaceRoute
+  BasesSlugRoute: typeof BasesSlugRoute
+  PagesSplatRoute: typeof PagesSplatRoute
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/agenda": {
-      id: "/agenda";
-      path: "/agenda";
-      fullPath: "/agenda";
-      preLoaderRoute: typeof AgendaRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/gazetteer": {
-      id: "/gazetteer";
-      path: "/gazetteer";
-      fullPath: "/gazetteer";
-      preLoaderRoute: typeof GazetteerRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/graph": {
-      id: "/graph";
-      path: "/graph";
-      fullPath: "/graph";
-      preLoaderRoute: typeof GraphRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/link-miss": {
-      id: "/link-miss";
-      path: "/link-miss";
-      fullPath: "/link-miss";
-      preLoaderRoute: typeof LinkMissRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/tasking": {
-      id: "/tasking";
-      path: "/tasking";
-      fullPath: "/tasking";
-      preLoaderRoute: typeof TaskingRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/workspace": {
-      id: "/workspace";
-      path: "/workspace";
-      fullPath: "/workspace";
-      preLoaderRoute: typeof WorkspaceRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/bases/$slug": {
-      id: "/bases/$slug";
-      path: "/bases/$slug";
-      fullPath: "/bases/$slug";
-      preLoaderRoute: typeof BasesSlugRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/pages/$": {
-      id: "/pages/$";
-      path: "/pages/$";
-      fullPath: "/pages/$";
-      preLoaderRoute: typeof PagesSplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+    '/workspace': {
+      id: '/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tasking': {
+      id: '/tasking'
+      path: '/tasking'
+      fullPath: '/tasking'
+      preLoaderRoute: typeof TaskingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/link-miss': {
+      id: '/link-miss'
+      path: '/link-miss'
+      fullPath: '/link-miss'
+      preLoaderRoute: typeof LinkMissRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/graph': {
+      id: '/graph'
+      path: '/graph'
+      fullPath: '/graph'
+      preLoaderRoute: typeof GraphRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gazetteer': {
+      id: '/gazetteer'
+      path: '/gazetteer'
+      fullPath: '/gazetteer'
+      preLoaderRoute: typeof GazetteerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agenda': {
+      id: '/agenda'
+      path: '/agenda'
+      fullPath: '/agenda'
+      preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pages/$': {
+      id: '/pages/$'
+      path: '/pages/$'
+      fullPath: '/pages/$'
+      preLoaderRoute: typeof PagesSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bases/$slug': {
+      id: '/bases/$slug'
+      path: '/bases/$slug'
+      fullPath: '/bases/$slug'
+      preLoaderRoute: typeof BasesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -225,7 +225,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspaceRoute: WorkspaceRoute,
   BasesSlugRoute: BasesSlugRoute,
   PagesSplatRoute: PagesSplatRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()
