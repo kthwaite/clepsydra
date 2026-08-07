@@ -1,4 +1,10 @@
 import GithubSlugger from "github-slugger";
+import type { Nodes, Root } from "mdast";
+import { toString } from "mdast-util-to-string";
+import remarkGfm from "remark-gfm";
+import remarkMdx from "remark-mdx";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import type { DocPage, DocSearchResult, DocSearchSection } from "#/docs/types";
 
 const SCORE = {
@@ -17,6 +23,7 @@ type RankedSection = {
   section: DocSearchSection;
   score: number;
   scoreClass: number;
+  excerptText: string;
 };
 
 type NormalizedPage = {
@@ -33,29 +40,29 @@ function normalize(value: string): string {
     .trim();
 }
 
-function stripMarkdown(value: string): string {
-  return value
-    .replace(/^\s{0,3}(?:>|[-+*]|\d+[.)])\s+/, "")
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/!\[([^\]]*)\]\[[^\]]*\]/g, "$1")
-    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
-    .replace(/<[^>]*>/g, "")
-    .replace(/[*_~`]+/g, "")
-    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, "$1")
-    .trim();
-}
+const mdxParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx);
 
-function bracketDelta(value: string): number {
-  let delta = 0;
-  for (const character of value) {
-    if (character === "{" || character === "[" || character === "(") {
-      delta += 1;
-    } else if (character === "}" || character === "]" || character === ")") {
-      delta -= 1;
-    }
+function renderedBlockText(node: Nodes): string {
+  if (
+    node.type === "code" ||
+    node.type === "definition" ||
+    node.type === "html" ||
+    node.type === "mdxjsEsm" ||
+    node.type === "mdxFlowExpression" ||
+    node.type === "mdxTextExpression"
+  ) {
+    return "";
   }
-  return delta;
+
+  if (node.type === "paragraph") {
+    return toString(node, { includeHtml: false });
+  }
+
+  if ("children" in node) {
+    return node.children.map(renderedBlockText).filter(Boolean).join(" ");
+  }
+
+  return toString(node, { includeHtml: false });
 }
 
 export function buildDocsIndex(pages: readonly DocPage[]): readonly DocSearchSection[] {
@@ -68,75 +75,36 @@ export function buildDocsIndex(pages: readonly DocPage[]): readonly DocSearchSec
 
     let heading: string | undefined;
     let headingId: string | undefined;
-    let bodyLines: string[] = [];
-    let esmDepth = 0;
-    let inEsmBlock = false;
-    let fenceCharacter: string | undefined;
-    let fenceLength = 0;
+    let bodyParts: string[] = [];
 
     const emitSection = () => {
       sections.push({
         page,
         heading,
         headingId,
-        text: bodyLines.join(" ").replace(/\s+/g, " ").trim(),
+        text: bodyParts.join(" ").replace(/\s+/g, " ").trim(),
         order,
       });
       order += 1;
-      bodyLines = [];
+      bodyParts = [];
     };
 
-    for (const line of page.source.split(/\r?\n/)) {
-      if (inEsmBlock) {
-        esmDepth += bracketDelta(line);
-        if (esmDepth <= 0) {
-          inEsmBlock = false;
+    const tree = mdxParser.parse(page.source) as Root;
+    for (const node of tree.children) {
+      if (node.type === "heading") {
+        if (node.depth === 1) {
+          continue;
         }
-        continue;
-      }
 
-      const closingFence = line.match(/^\s{0,3}(`{3,}|~{3,})\s*$/)?.[1];
-      if (fenceCharacter !== undefined) {
-        if (
-          closingFence !== undefined &&
-          closingFence[0] === fenceCharacter &&
-          closingFence.length >= fenceLength
-        ) {
-          fenceCharacter = undefined;
-          fenceLength = 0;
-        }
-        continue;
-      }
-
-      const trimmedLine = line.trim();
-      if (/^(?:import|export)\b/.test(trimmedLine)) {
-        esmDepth = bracketDelta(line);
-        inEsmBlock = esmDepth > 0;
-        continue;
-      }
-
-      const openingFence = line.match(/^\s{0,3}(`{3,}|~{3,})/)?.[1];
-      if (openingFence !== undefined) {
-        fenceCharacter = openingFence[0];
-        fenceLength = openingFence.length;
-        continue;
-      }
-
-      const headingMatch = line.match(/^\s{0,3}#{2,6}[\t ]+(.+?)(?:[\t ]+#+[\t ]*)?$/);
-      if (headingMatch?.[1] !== undefined) {
         emitSection();
-        heading = stripMarkdown(headingMatch[1]);
+        heading = toString(node, { includeHtml: false }).replace(/\s+/g, " ").trim();
         headingId = slugger.slug(heading);
         continue;
       }
 
-      if (/^\s{0,3}#[\t ]+/.test(line)) {
-        continue;
-      }
-
-      const bodyLine = stripMarkdown(line);
-      if (bodyLine !== "") {
-        bodyLines.push(bodyLine);
+      const text = renderedBlockText(node);
+      if (text !== "") {
+        bodyParts.push(text);
       }
     }
 
@@ -154,9 +122,16 @@ function rankSection(
 ): RankedSection | undefined {
   const heading = normalize(section.heading ?? "");
   const body = normalize(section.text);
-  const fields = [page.title, page.description, heading, body];
 
-  if (!tokens.every((token) => fields.some((field) => field.includes(token)))) {
+  if (
+    !tokens.every(
+      (token) =>
+        page.title.includes(token) ||
+        page.description.includes(token) ||
+        heading.includes(token) ||
+        body.includes(token),
+    )
+  ) {
     return undefined;
   }
 
@@ -190,41 +165,70 @@ function rankSection(
     }
   }
 
-  return { section, score, scoreClass };
+  let excerptText = section.page.title;
+  if (tokens.some((token) => body.includes(token))) {
+    excerptText = section.text;
+  } else if (tokens.some((token) => page.description.includes(token))) {
+    excerptText = section.page.description;
+  } else if (tokens.some((token) => heading.includes(token))) {
+    excerptText = section.heading ?? "";
+  }
+
+  return { section, score, scoreClass, excerptText };
+}
+
+function transformedPositions(
+  value: string,
+  transform: (character: string) => string,
+): number[] {
+  const positions: number[] = [];
+  for (let sourceIndex = 0; sourceIndex < value.length; ) {
+    const character = String.fromCodePoint(value.codePointAt(sourceIndex) ?? 0);
+    const transformed = transform(character);
+    for (let offset = 0; offset < transformed.length; offset += 1) {
+      positions.push(sourceIndex);
+    }
+    sourceIndex += character.length;
+  }
+  return positions;
 }
 
 function normalizedWithPositions(value: string): { normalized: string; positions: number[] } {
-  let normalized = "";
+  const decomposed = value.normalize("NFKD");
+  const decomposedPositions = transformedPositions(value, (character) =>
+    character.normalize("NFKD"),
+  );
+  const folded = decomposed.toLocaleLowerCase();
+  const foldedPositions = transformedPositions(decomposed, (character) =>
+    character.toLocaleLowerCase(),
+  );
   const positions: number[] = [];
   let pendingSeparator: number | undefined;
 
-  for (let sourceIndex = 0; sourceIndex < value.length; ) {
-    const character = String.fromCodePoint(value.codePointAt(sourceIndex) ?? 0);
-    const folded = character.normalize("NFKD").toLocaleLowerCase();
+  for (let foldedIndex = 0; foldedIndex < folded.length; ) {
+    const character = String.fromCodePoint(folded.codePointAt(foldedIndex) ?? 0);
+    const decomposedIndex = foldedPositions[foldedIndex] ?? foldedIndex;
+    const sourceIndex = decomposedPositions[decomposedIndex] ?? 0;
 
-    for (const foldedCharacter of folded) {
-      if (LETTER_OR_NUMBER.test(foldedCharacter)) {
-        if (pendingSeparator !== undefined && normalized !== "") {
-          normalized += " ";
-          positions.push(pendingSeparator);
-        }
-        pendingSeparator = undefined;
-        normalized += foldedCharacter;
-        for (let offset = 0; offset < foldedCharacter.length; offset += 1) {
-          positions.push(sourceIndex);
-        }
-      } else if (normalized !== "" && pendingSeparator === undefined) {
-        pendingSeparator = sourceIndex;
+    if (LETTER_OR_NUMBER.test(character)) {
+      if (pendingSeparator !== undefined && positions.length > 0) {
+        positions.push(pendingSeparator);
       }
+      pendingSeparator = undefined;
+      for (let offset = 0; offset < character.length; offset += 1) {
+        positions.push(sourceIndex);
+      }
+    } else if (positions.length > 0 && pendingSeparator === undefined) {
+      pendingSeparator = sourceIndex;
     }
 
-    sourceIndex += character.length;
+    foldedIndex += character.length;
   }
 
-  return { normalized, positions };
+  return { normalized: normalize(value), positions };
 }
 
-function firstBodyMatch(text: string, tokens: readonly string[]): number {
+function firstTextMatch(text: string, tokens: readonly string[]): number {
   const { normalized, positions } = normalizedWithPositions(text);
   let firstNormalizedIndex = -1;
 
@@ -238,13 +242,12 @@ function firstBodyMatch(text: string, tokens: readonly string[]): number {
   return firstNormalizedIndex < 0 ? 0 : (positions[firstNormalizedIndex] ?? 0);
 }
 
-function buildExcerpt(section: DocSearchSection, tokens: readonly string[]): string {
-  const text = section.text || section.page.description;
+function buildExcerpt(text: string, tokens: readonly string[]): string {
   if (text.length <= MAX_EXCERPT_LENGTH) {
     return text;
   }
 
-  const matchIndex = firstBodyMatch(section.text, tokens);
+  const matchIndex = firstTextMatch(text, tokens);
   let start = Math.max(0, matchIndex - 60);
   let end = Math.min(text.length, start + MAX_EXCERPT_LENGTH - 2);
 
@@ -327,11 +330,11 @@ export function searchDocs(
         !specificClassesByPage.get(candidate.section.page)?.has(candidate.scoreClass),
     )
     .sort((left, right) => right.score - left.score || left.section.order - right.section.order)
-    .map(({ section, score }) => ({
+    .map(({ section, score, excerptText }) => ({
       page: section.page,
       heading: section.heading,
       headingId: section.headingId,
-      excerpt: buildExcerpt(section, tokens),
+      excerpt: buildExcerpt(excerptText, tokens),
       score,
     }));
 }

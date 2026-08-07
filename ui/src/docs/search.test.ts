@@ -95,6 +95,42 @@ describe("buildDocsIndex", () => {
     expect(index.some((section) => section.text.includes("hiddenfence"))).toBe(false);
     expect(index.some((section) => /\[|\]|\*\*/.test(section.text))).toBe(false);
   });
+
+  it("uses rendered heading text for slugs and excludes MDX ESM without dropping prose", () => {
+    const semantic = page(
+      "semantic",
+      "Semantic guide",
+      "Unrelated",
+      `export const metadata = {
+  delimiter: "}",
+  hidden: "esmsecret"
+}
+
+export const other =
+  "secondsecret"
+
+import: prosevisible remains searchable.
+
+## Use \`foo_bar\` &amp; [Docs][docs]
+
+Visible body.
+
+    indentedcodesecret
+
+[docs]: https://example.com
+`,
+    );
+    const index = buildDocsIndex([semantic]);
+
+    expect(index.map(({ heading, headingId }) => [heading, headingId])).toEqual([
+      [undefined, undefined],
+      ["Use foo_bar & Docs", "use-foo_bar--docs"],
+    ]);
+    expect(searchDocs(index, "prosevisible")).toHaveLength(1);
+    expect(searchDocs(index, "esmsecret")).toEqual([]);
+    expect(searchDocs(index, "secondsecret")).toEqual([]);
+    expect(searchDocs(index, "indentedcodesecret")).toEqual([]);
+  });
 });
 
 describe("searchDocs", () => {
@@ -192,5 +228,17 @@ describe("searchDocs", () => {
     expect(result?.excerpt.length).toBeLessThanOrEqual(140);
     expect(result?.excerpt.startsWith("…")).toBe(true);
     expect(result?.excerpt.endsWith("…")).toBe(true);
+  });
+
+  it("positions description excerpts with the same whole-string Unicode normalization used for ranking", () => {
+    const description = `${"Earlier description context ".repeat(8)}ΟΣ`;
+    const result = searchDocs(
+      buildDocsIndex([page("unicode", "Unicode guide", description, "")]),
+      "ΟΣ",
+    )[0];
+
+    expect(result?.excerpt).toContain("ΟΣ");
+    expect(result?.excerpt.length).toBeLessThanOrEqual(140);
+    expect(result?.excerpt.startsWith("…")).toBe(true);
   });
 });
