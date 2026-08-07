@@ -1,4 +1,8 @@
-# LSP server (`clep lsp`)
+export const meta = {
+  slug: "lsp",
+  title: "LSP",
+  description: "Use Clepsydra’s language server in Markdown editors."
+}
 
 `clep lsp` is a standalone language server on stdio. It opens its own
 read-only vault state — a private, in-memory index built once at startup and
@@ -82,7 +86,7 @@ every instance of `clep lsp` resolves its own root independently — no
 | Workspace symbols | Page lookup by title across the vault |
 | Code lens | An `N references` lens on each page, resolving to find-references |
 
-See [the Bases guide](bases.md) for base schemas, matching, property
+See [the Bases guide](/docs/bases) for base schemas, matching, property
 completions, and diagnostics.
 
 ## Save behavior

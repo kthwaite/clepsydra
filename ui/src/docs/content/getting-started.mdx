@@ -4,6 +4,217 @@ export const meta = {
   description: "Run Clepsydra with an initialized vault."
 }
 
-# Getting Started
+This guide gets Clepsydra running locally with an initialized vault.
 
-Create your first Clepsydra vault.
+By default, Clepsydra now runs as a **single binary** that serves both:
+- the API (`/api/...`), and
+- the built frontend (SPA).
+
+## Prerequisites
+
+- Rust toolchain (stable)
+- Bun (for `ui/` and `extension/`)
+- Optional for local HTTPS: [`mkcert`](https://github.com/FiloSottile/mkcert)
+
+## 1) Initialize a vault
+
+From the repository root:
+
+```bash
+cargo run -- init ./my-vault
+```
+
+This creates:
+
+- `my-vault/.clepsydra/config.toml`
+- `my-vault/.clepsydra/templates/`
+- `my-vault/_attachments/`
+
+## 2) Create application config
+
+Create (or edit) `config.toml` at the repo root:
+
+```toml
+[server]
+host = "localhost"
+port = 3000
+dev_mode = false
+
+[server.tls]
+enabled = false
+# cert_path = "certs/localhost.pem"
+# key_path = "certs/localhost-key.pem"
+
+[vault]
+root = "./my-vault"
+```
+
+Notes:
+- `host = "localhost"` is the default and works best with local TLS certs.
+- `dev_mode = false` enables embedded frontend serving.
+- `dev_mode = true` disables embedded frontend serving (useful with Vite dev server).
+
+## 3) Build frontend assets for embedding
+
+The backend embeds `ui/dist` into the binary via `rust-embed`.
+
+```bash
+cd ui
+bun install
+bun run build
+cd ..
+```
+
+> Re-run `bun run build` whenever you want updated frontend assets embedded into the server binary.
+
+## 4) Start Clepsydra (single-binary mode)
+
+```bash
+cargo run -- serve
+```
+
+Open:
+
+- App: `http://localhost:3000/`
+- OpenAPI JSON: `http://localhost:3000/api/openapi.json`
+- Swagger UI: `http://localhost:3000/api/docs`
+
+Unknown frontend routes automatically fall back to `index.html` (SPA routing support).
+
+## 5) Optional: Enable localhost HTTPS (`mkcert`)
+
+Set in `config.toml`:
+
+```toml
+[server.tls]
+enabled = true
+# cert_path = "certs/localhost.pem"
+# key_path = "certs/localhost-key.pem"
+```
+
+Behavior:
+- If `cert_path` + `key_path` are provided, Clepsydra uses them.
+- If omitted, Clepsydra attempts to run `mkcert` automatically and generate localhost certs.
+
+Generated cert location uses your platform app-data directory, for example:
+- macOS: `~/Library/Application Support/clepsydra/localhost.pem`
+- macOS key: `~/Library/Application Support/clepsydra/localhost-key.pem`
+
+Then start normally:
+
+```bash
+cargo run -- serve
+```
+
+Open: `https://localhost:3000/`
+
+## 6) Optional: Frontend development mode (Vite + HMR)
+
+For active UI development, disable embedded frontend serving:
+
+```toml
+[server]
+dev_mode = true
+```
+
+Run backend:
+
+```bash
+cargo run -- serve
+```
+
+Run frontend in another terminal:
+
+```bash
+cd ui
+bun run dev
+```
+
+Open the Vite URL (usually `http://127.0.0.1:5173`).
+
+> In `dev_mode`, Clepsydra serves API/docs endpoints only; Vite serves the app shell.
+
+## 7) Create your first page
+
+### Option A: CLI
+
+```bash
+cargo run -- new "My first note" --body "Hello from Clepsydra"
+```
+
+### Option B: API
+
+```bash
+curl -X POST http://localhost:3000/api/vault/pages/notes/first.md \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "First note",
+    "tags": ["demo"],
+    "body": "# First note\n\nCreated via API."
+  }'
+```
+
+(If TLS is enabled, use `https://localhost:3000/...`.)
+
+## 8) Optional: Edit the vault from Neovim (LSP)
+
+`clep lsp` starts a standalone language server on stdio — completion for
+`[[wikilinks]]`, `#tags`, and frontmatter properties, hover previews,
+go-to-definition, link diagnostics, and project-wide rename. It's
+read-only and keeps its own in-memory index, so run it alongside
+`clep serve`, not instead of it: `clep serve` powers the web UI (and owns
+all writes, including folder-follows-metadata moves), while Neovim spawns
+and stops `clep lsp` independently.
+
+For typed properties and filtered table views, see [the Bases guide](/docs/bases).
+
+Install the binary and register it (Neovim 0.11+):
+
+```bash
+cargo install --path .
+```
+
+```lua
+vim.lsp.config['clepsydra'] = {
+  cmd = { 'clep', 'lsp' },
+  filetypes = { 'markdown' },
+  root_dir = function(bufnr, on_dir)
+    local root = vim.fs.root(bufnr, '.clepsydra')
+    if root then on_dir(root) end
+  end,
+}
+vim.lsp.enable('clepsydra')
+```
+
+`root_dir` becomes the workspace root the LSP resolves from: it searches
+that root's ancestors for a `.clepsydra` directory and, failing that, falls
+back to the usual `config.toml` lookup. Because each Neovim workspace sends
+its own root, multiple vaults just work without any shared config.
+
+Full capability list, save-time move behavior, and troubleshooting:
+`/docs/lsp`.
+
+## 9) Optional: Browser extension
+
+For local install and setup instructions:
+
+- `extension/README.md`
+
+## Quick troubleshooting
+
+- **`no config.toml found`** when running `serve`/`new`
+  - Create `config.toml` in your current directory, or in
+    `$XDG_CONFIG_HOME/clepsydra/config.toml`.
+- **Server fails with TLS auto-cert message**
+  - Install `mkcert` and retry, or provide `server.tls.cert_path` + `server.tls.key_path`.
+- **UI doesn’t load in single-binary mode**
+  - Rebuild embedded assets: `cd ui && bun run build`.
+- **UI can’t reach backend in Vite mode**
+  - Confirm backend is running on `http://127.0.0.1:3000` and `server.dev_mode = true`.
+- **`vault already initialized`**
+  - Use a new path, or reuse the existing initialized vault.
+- **Neovim LSP fails to initialize / attaches then stops**
+  - No `.clepsydra` directory was found above the workspace root, and no
+    `config.toml` resolved either. Check `:LspLog` and run
+    `clep config path --trace` from the same directory. Details:
+    `/docs/lsp`.

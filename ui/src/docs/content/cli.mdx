@@ -1,4 +1,8 @@
-# CLI Reference
+export const meta = {
+  slug: "cli",
+  title: "CLI",
+  description: "Use Clepsydra’s command-line interface."
+}
 
 Clepsydra ships a single CLI binary: `clepsydra`.
 
@@ -156,7 +160,7 @@ clepsydra serve --tls --port 3443
 
 Certificates come from `[server.tls]` when `cert_path` and `key_path` are both
 set; otherwise Clepsydra generates localhost certs with `mkcert` and caches them
-in the app data dir. See [configuration.md](configuration.md) for details.
+in the app data dir. See [configuration.md](/docs/configuration) for details.
 
 For the iOS Simulator, install the mkcert CA into its keychain once per
 simulator — without this the app reports an untrusted certificate:
@@ -181,7 +185,7 @@ Read-only, and independent of `clepsydra serve` — it opens its own vault
 state (resolved from the editor's workspace root, falling back to
 `config.toml`) rather than talking to a running server. All tracing output
 goes to stderr; stdout carries only the LSP protocol. See
-[lsp.md](lsp.md) for editor setup.
+[lsp.md](/docs/lsp) for editor setup.
 
 ---
 

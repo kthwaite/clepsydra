@@ -1,4 +1,8 @@
-# Bases
+export const meta = {
+  slug: "bases",
+  title: "Bases",
+  description: "Define typed fields and filtered table views."
+}
 
 A base is a saved, non-owning view over pages in a vault. It declares which pages belong to the base, gives their frontmatter properties advisory types, and defines table views over the matching pages. The pages remain ordinary Markdown files: a base does not move, copy, or own them.
 
@@ -196,7 +200,7 @@ With `clep lsp` attached, completion inside a page's `+++` frontmatter offers pr
 
 For matching bases, the LSP warns about incompatible native TOML types, values outside a non-empty select vocabulary, multiple relation values when `many = false`, and unresolved relation targets. These are warnings, never indexing errors. Legacy `---` frontmatter does not receive property-schema diagnostics. The LSP completes and checks page frontmatter; it does not provide an editor for `.base.toml` files.
 
-See [LSP setup and troubleshooting](lsp.md) for client configuration and the complete language-server capability list.
+See [LSP setup and troubleshooting](/docs/lsp) for client configuration and the complete language-server capability list.
 
 ## Validation, troubleshooting, and v1 limits
 

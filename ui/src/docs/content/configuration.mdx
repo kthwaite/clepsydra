@@ -1,4 +1,8 @@
-# Configuration Reference
+export const meta = {
+  slug: "configuration",
+  title: "Configuration",
+  description: "Configure Clepsydra’s server, vault, TLS, and runtime behavior."
+}
 
 Clepsydra uses two config layers:
 
@@ -106,7 +110,7 @@ testing an HTTPS-only client against a machine that already runs a plain server
 clepsydra serve --tls --port 3443
 ```
 
-See [cli.md](cli.md#running-an-https-server-for-client-testing), including the
+See [cli.md](/docs/cli#running-an-https-server-for-client-testing), including the
 one-off step to make the iOS Simulator trust the mkcert CA.
 
 ### Environment overrides
@@ -276,8 +280,8 @@ gc_min_age_days = 30
 
 ## Related docs
 
-- `docs/getting-started.md`
-- `docs/cli.md`
+- `/docs/getting-started`
+- `/docs/cli`
 - `docs/encrypted-notes.md`
 - `ui/README.md`
 - `extension/README.md`
