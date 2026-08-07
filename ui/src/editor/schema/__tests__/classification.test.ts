@@ -14,6 +14,7 @@ const VOID = new Set<ElementType>([
   "block-ref",
   "footnote-ref",
   "thematic-break",
+  "journal-time",
 ]);
 
 const ALL_TYPES: ElementType[] = [
@@ -30,6 +31,7 @@ const ALL_TYPES: ElementType[] = [
   "block-ref",
   "footnote-ref",
   "footnote-def",
+  "journal-time",
 ];
 
 describe("withSchema classification", () => {

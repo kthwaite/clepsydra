@@ -114,6 +114,21 @@ describe("formatChord", () => {
 });
 
 describe("registry", () => {
+  it("registers Mod+Shift+Enter for inserting a time heading", () => {
+    const shortcut = (
+      SHORTCUTS as unknown as Record<
+        string,
+        { chord: Record<string, unknown>; label: string; scope: string }
+      >
+    )["editor.timeHeading"];
+    expect(shortcut).toEqual({
+      chord: { key: "Enter", mod: true, shift: true },
+      label: "Insert time heading",
+      group: "Editor",
+      scope: "editor",
+    });
+  });
+
   it("shortcutsByGroup covers every shortcut exactly once", () => {
     const listed = shortcutsByGroup().flatMap(([, defs]) =>
       defs.map((d) => d.id),

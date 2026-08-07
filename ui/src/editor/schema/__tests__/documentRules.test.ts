@@ -53,6 +53,19 @@ describe("trailing paragraph after a code block", () => {
     expect(editor.children.length).toBe(2);
   });
 
+  it("appends an empty paragraph when the last block is a journal-time heading", () => {
+    const editor = withSchema(createEditor());
+    editor.children = [
+      { type: "journal-time", time: "09:07", children: [{ text: "" }] },
+    ];
+    Editor.normalize(editor, { force: true });
+    expect(editor.children).toHaveLength(2);
+    expect(editor.children[1]).toEqual({
+      type: "paragraph",
+      children: [{ text: "" }],
+    });
+  });
+
   it("does not append for a document ending in a paragraph", () => {
     const editor = withSchema(createEditor());
     editor.children = [

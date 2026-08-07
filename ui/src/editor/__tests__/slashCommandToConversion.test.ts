@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { slashCommandToConversion } from "../SlateEditor";
+import * as SlateEditorModule from "../SlateEditor";
+
+const { slashCommandToConversion } = SlateEditorModule;
 
 describe("slashCommandToConversion", () => {
   it("SC-01: maps h1..h6 to heading levels", () => {
@@ -31,7 +33,24 @@ describe("slashCommandToConversion", () => {
     });
   });
 
-  it("SC-04: returns null for an unknown id", () => {
+  it("SC-04: discovers Time Heading in the slash menu", () => {
+    const commands = (
+      SlateEditorModule as unknown as {
+        SLASH_COMMANDS: Array<{ id: string; label: string }>;
+      }
+    ).SLASH_COMMANDS;
+    expect(commands).toContainEqual(
+      expect.objectContaining({ id: "time", label: "Time Heading" }),
+    );
+  });
+
+  it("SC-05: dispatches the time command to journal-time insertion", () => {
+    expect(slashCommandToConversion("time")).toEqual({
+      type: "journal-time",
+    });
+  });
+
+  it("SC-06: returns null for an unknown id", () => {
     expect(slashCommandToConversion("nope")).toBeNull();
   });
 });

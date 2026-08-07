@@ -53,6 +53,12 @@ export interface ListItemElement {
   children: Descendant[];
 }
 
+export interface JournalTimeElement {
+  type: "journal-time";
+  time: string;
+  children: CustomText[];
+}
+
 export interface ThematicBreakElement {
   type: "thematic-break";
   children: CustomText[];
@@ -98,6 +104,7 @@ export type CustomElement =
   | NumberedListElement
   | ListItemElement
   | ThematicBreakElement
+  | JournalTimeElement
   | WikilinkElement
   | LinkElement
   | BlockRefElement
