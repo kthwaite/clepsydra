@@ -103,9 +103,13 @@ Every search result, content-index entry, journal summary, graph node, backlink,
 
 - `q`: case-insensitive substring over title, path, description, and tags.
 - repeated `tag`: all selected tags must match.
-- `sort`: `updated`, `path`, `title`, or `words`.
+- `sort`: `updated`, `created`, `path`, `title`, or `words`.
 
-Filtering and sorting occur before pagination. `updated` and `words` sort descending; `path` and `title` sort ascending. The response retains `items`, `total`, `limit`, and `offset`.
+Filtering and sorting occur before pagination. `updated`, `created`, and `words` sort descending; `path` and `title` sort ascending. Gazetteer exposes every sort except `created`, which Atrium uses for its bounded recently-created query. The response retains `items`, `total`, `limit`, and `offset`.
+
+### Activity query contract
+
+`GET /api/vault/index/activity` accepts `days` in the inclusive range `1...366`, defaulting to `182`. It returns one entry per page whose latest activity falls within the interval: stable page UUID, path, title, and `activity_at`, where `updated_at` takes precedence over `created_at`. Swift derives the calendar grid and streaks from this bounded list.
 
 ### Constellation query contract
 
@@ -138,7 +142,7 @@ Search is presented from root toolbars and Atrium. Creation remains a full-scree
 
 Atrium is a vertically scrolling card composition. Core delivery includes greeting and date context, today’s journal, quick capture, search, new note, inventory, top tags, recently edited/created pages, activity, partial loading, pull-to-refresh, and independent card errors.
 
-Later parity adds BCL, Sky/location, Reading Continues when its bases contract is suitable, and session-local recently opened history. One optional-card failure never replaces the entire Atrium.
+Later parity adds BCL, Sky/location, Reading Continues through `GET /bases/reading/views/continues` and UUID property patches, and session-local recently opened history. One optional-card failure never replaces the entire Atrium.
 
 ### Folio
 
