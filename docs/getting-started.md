@@ -162,6 +162,8 @@ read-only and keeps its own in-memory index, so run it alongside
 all writes, including folder-follows-metadata moves), while Neovim spawns
 and stops `clep lsp` independently.
 
+For typed properties and filtered table views, see [the Bases guide](bases.md).
+
 Install the binary and register it (Neovim 0.11+):
 
 ```bash
