@@ -36,7 +36,9 @@ describe("useJournalToday", () => {
   it("resolves to null when today's journal does not exist", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(jsonResponse(404, { error: "journal not found" })),
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse(404, { error: "journal not found" })),
     );
     const { result } = renderHook(() => useJournalToday(), {
       wrapper: wrapper(),
