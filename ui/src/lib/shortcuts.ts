@@ -81,6 +81,13 @@ export const SHORTCUTS = {
     group: "Workspace",
     scope: "global",
   },
+  "journal.capture": {
+    chord: { key: "d", mod: true, shift: true },
+    label: "Capture aside",
+    group: "Workspace",
+    scope: "global",
+    note: "appends to today's journal",
+  },
   "app.settings": {
     chord: { key: ",", mod: true },
     label: "Status / preferences",

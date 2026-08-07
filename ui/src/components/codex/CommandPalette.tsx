@@ -41,6 +41,7 @@ export function CommandPalette() {
   const open = useUiStore((s) => s.isSearchOpen);
   const close = useUiStore((s) => s.closeSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
+  const openCaptureAside = useUiStore((s) => s.openCaptureAside);
   const openSettings = useUiStore((s) => s.openSettings);
   const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const runBoot = useUiStore((s) => s.runBoot);
@@ -85,6 +86,12 @@ export function CommandPalette() {
         id: formatChord(SHORTCUTS["journal.today"].chord),
         title: "Today's journal",
         action: () => openTodayJournal(),
+      },
+      {
+        kind: "cmd",
+        id: formatChord(SHORTCUTS["journal.capture"].chord),
+        title: "Capture aside",
+        action: () => openCaptureAside(),
       },
       {
         kind: "cmd",
@@ -143,6 +150,7 @@ export function CommandPalette() {
       openTodayJournal,
       toggleTheme,
       openInscribe,
+      openCaptureAside,
       openSettings,
       openShortcutHelp,
       runBoot,

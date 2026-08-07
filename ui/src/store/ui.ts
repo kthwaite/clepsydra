@@ -13,6 +13,7 @@ interface UiState {
   activeSettingsSection: SettingsSection;
   isSearchOpen: boolean;
   isInscribeOpen: boolean;
+  isCaptureAsideOpen: boolean;
   isLocationOpen: boolean;
   isShortcutHelpOpen: boolean;
   isBooting: boolean;
@@ -25,6 +26,8 @@ interface UiState {
   setSearchOpen: (open: boolean) => void;
   openInscribe: () => void;
   closeInscribe: () => void;
+  openCaptureAside: () => void;
+  closeCaptureAside: () => void;
   openLocation: () => void;
   closeLocation: () => void;
   openShortcutHelp: () => void;
@@ -38,6 +41,7 @@ export const useUiStore = create<UiState>((set) => ({
   activeSettingsSection: "general",
   isSearchOpen: false,
   isInscribeOpen: false,
+  isCaptureAsideOpen: false,
   isLocationOpen: false,
   isShortcutHelpOpen: false,
   isBooting: false,
@@ -52,6 +56,8 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchOpen: (open) => set({ isSearchOpen: open }),
   openInscribe: () => set({ isInscribeOpen: true }),
   closeInscribe: () => set({ isInscribeOpen: false }),
+  openCaptureAside: () => set({ isCaptureAsideOpen: true }),
+  closeCaptureAside: () => set({ isCaptureAsideOpen: false }),
   openLocation: () => set({ isLocationOpen: true }),
   closeLocation: () => set({ isLocationOpen: false }),
   openShortcutHelp: () => set({ isShortcutHelpOpen: true }),

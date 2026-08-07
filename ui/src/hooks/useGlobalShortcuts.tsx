@@ -40,6 +40,7 @@ export function useGlobalShortcuts() {
   const navigate = useNavigate();
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
+  const openCaptureAside = useUiStore((s) => s.openCaptureAside);
   const openSettings = useUiStore((s) => s.openSettings);
   const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const { toggle: toggleTheme } = useTheme();
@@ -57,6 +58,7 @@ export function useGlobalShortcuts() {
       "nav.gazetteer": { run: () => navigate({ to: "/gazetteer" }) },
       "nav.tasking": { run: () => navigate({ to: "/tasking" }) },
       "app.inscribe": { run: openInscribe },
+      "journal.capture": { run: openCaptureAside },
       "app.settings": { run: () => openSettings("appearance") },
       "app.themeToggle": { run: toggleTheme },
       "app.shortcutHelp": { run: openShortcutHelp },
@@ -74,6 +76,7 @@ export function useGlobalShortcuts() {
       navigate,
       toggleSearch,
       openInscribe,
+      openCaptureAside,
       openSettings,
       openShortcutHelp,
       toggleTheme,

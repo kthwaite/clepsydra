@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { BootSequence } from "#/components/codex/BootSequence";
+import { CaptureAsideModal } from "#/components/codex/CaptureAsideModal";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { CommandPalette } from "#/components/codex/CommandPalette";
 import { InscribeModal } from "#/components/codex/InscribeModal";
@@ -31,6 +32,7 @@ export const Route = createRootRoute({
         <CommandPalette />
         <SettingsModal />
         <InscribeModal />
+        <CaptureAsideModal />
         <LocationModal />
         <ShortcutHelpModal />
         <LinkPreviewLayer />
