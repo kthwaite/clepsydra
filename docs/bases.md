@@ -91,9 +91,9 @@ The built-in system fields are:
 id, path, title, kind, project, tags, aliases, created_at, updated_at, journal_date, word_count
 ```
 
-They can all be used in columns and with their supported filter operators without property declarations. Scalar system fields can also be used for sorting; `tags` and `aliases` cannot be sorted because they are multi-valued. A bare field name resolves system-first, so `kind` means the resolved page kind and `prop.kind` means a raw page property named `kind`. Use `sys.kind` to make the system-field intent explicit. The same `sys.` and `prop.` prefixes work for other field references.
+They can all be used in columns and with their supported filter operators without property declarations. Use bare names for scalar system columns: shipped query materialization leaves `sys.`-prefixed scalar columns empty. Scalar system fields can also be used for sorting; `tags` and `aliases` cannot be sorted because they are multi-valued. A bare field name resolves system-first, so `kind` means the resolved page kind and `prop.kind` means a raw page property named `kind`. The `sys.` and `prop.` prefixes disambiguate field references in filters, sorts, grouping, and aggregate field references; for example, use `sys.kind` to make the system-field intent explicit in those contexts.
 
-A base may not declare a property whose name shadows a system field. If a page already has such an extra key, it can still be addressed with `prop.<name>`, but the base loader reports an undeclared-property diagnostic because it cannot appear in `[properties]`.
+If a page has an extra key whose name collides with a system field, address it as `prop.<name>`. Declaring that colliding key in `[properties]` produces a shadowing diagnostic.
 
 The system `kind` comes from the page's `type` frontmatter key, or from its top-level folder when `type` is absent. This is why the minimal example under `books/` matches `field = "kind"` even though its extra `kind` property is not the system field.
 
