@@ -253,7 +253,9 @@ fn node_label(node: &TreeNode) -> String {
                 s.push(' ');
                 s.push_str(&tags.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).to_string());
             }
-            if let Some(wc) = m.word_count {
+            if m.encrypted {
+                s.push_str(" 🔒");
+            } else if let Some(wc) = m.word_count {
                 s.push(' ');
                 s.push_str(&format!("({wc}w)").dimmed().to_string());
             }
@@ -375,6 +377,39 @@ mod tests {
         assert!(out.contains("NOTE")); // kind tag
         assert!(out.contains("diagram.png"));
         assert!(out.contains("├──") || out.contains("└──")); // branch glyphs
+    }
+
+    #[test]
+    fn encrypted_note_renders_lock_indicator_without_word_count() {
+        let root = TreeNode {
+            name: "vault".to_string(),
+            path: String::new(),
+            entry: NodeEntry::Dir,
+            children: vec![TreeNode {
+                name: "Protected.md".to_string(),
+                path: "Protected.md".to_string(),
+                entry: NodeEntry::Note(NoteMeta {
+                    kind: "NOTE".to_string(),
+                    title: Some("Protected".to_string()),
+                    encrypted: true,
+                    word_count: None,
+                    ..NoteMeta::default()
+                }),
+                children: Vec::new(),
+            }],
+        };
+
+        let mut buf = Vec::new();
+        render_human(&root, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains('🔒'),
+            "encrypted note needs a lock indicator: {out}"
+        );
+        assert!(
+            !out.contains("w)"),
+            "encrypted note must omit word count: {out}"
+        );
     }
 
     #[test]

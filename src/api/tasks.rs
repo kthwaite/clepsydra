@@ -13,6 +13,7 @@ use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::index::find_body_start;
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
+use crate::vault::page::parse_frontmatter;
 use crate::vault::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -323,6 +324,12 @@ async fn update_task_status(
                 ApiError::internal(format!("failed to read file: {error}"))
             }
         })?;
+
+    if parse_frontmatter(&content).is_ok_and(|(meta, _)| meta.encryption.is_some()) {
+        return Err(ApiError::conflict(
+            "cannot update a task inside a protected page",
+        ));
+    }
 
     let body_start = find_body_start(&content);
     let body_text = &content[body_start..];

@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+use std::path::Path;
+
+use clepsydra::lsp::diagnostics::compute_link_diagnostics;
 use clepsydra::lsp::document::Document;
 use clepsydra::vault::link::LinkKind;
-use tower_lsp::lsp_types::Position;
+use tower_lsp::lsp_types::{DiagnosticSeverity, Position};
 
 const SIMPLE_DOC: &str = "\
 ---
@@ -11,6 +15,44 @@ Hello world.
 
 This has a [[Wikilink]] in it.
 ";
+
+const ENCRYPTED_DOC: &str = "+++\nid = \"019fd000-0000-7000-8000-000000000701\"\ntitle = \"Protected LSP page\"\nencryption = { format = \"age\", version = 1, key_id = \"key-1\" }\n+++\n-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAuLi4K\n-----END AGE ENCRYPTED FILE-----\n";
+
+#[test]
+fn encrypted_document_keeps_frontmatter_but_suppresses_every_body_projection() {
+    let doc = Document::from_text(ENCRYPTED_DOC, 1);
+
+    assert!(doc.encrypted);
+    assert_eq!(doc.meta.title.as_deref(), Some("Protected LSP page"));
+    assert!(
+        doc.rope
+            .to_string()
+            .contains("title = \"Protected LSP page\"")
+    );
+    assert_eq!(doc.body, "");
+    assert!(doc.links.is_empty());
+
+    let body_position = doc.byte_offset_to_position(0);
+    assert!(doc.position_to_body_byte_offset(body_position).is_none());
+    assert!(doc.link_at_position(body_position).is_none());
+}
+
+#[test]
+fn encrypted_document_emits_one_informational_unavailable_diagnostic() {
+    let doc = Document::from_text(ENCRYPTED_DOC, 7);
+    let diagnostics = compute_link_diagnostics(&doc, &HashMap::new(), Path::new("/vault"));
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].severity,
+        Some(DiagnosticSeverity::INFORMATION)
+    );
+    assert_eq!(
+        diagnostics[0].message,
+        "Encrypted note body is unavailable to the LSP"
+    );
+    assert_eq!(diagnostics[0].range.start, doc.byte_offset_to_position(0));
+}
 
 #[test]
 fn parse_extracts_meta_and_body() {

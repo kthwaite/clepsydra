@@ -2,9 +2,12 @@ mod support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::http::StatusCode;
 use base64::prelude::{BASE64_STANDARD, Engine as _};
+use chrono::{DateTime, Utc};
+use clepsydra::api::Clock;
 use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::keyring::MAX_WRAPPED_IDENTITY_BYTES;
 use clepsydra::vault::page::{Page, page_revision};
@@ -20,6 +23,16 @@ const KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
 const UNKNOWN_ID: &str = "019fd000-0000-7000-8000-000000000499";
 const KEYRING_ID: &str = "019fd000-0000-7000-8000-000000000504";
 const ARMOR: &str = include_str!("support/fixtures/private-note.age");
+const FIXED_NOW: &str = "2026-08-07T12:00:00Z";
+
+#[derive(Debug)]
+struct FixedClock(DateTime<Utc>);
+
+impl Clock for FixedClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.0
+    }
+}
 
 fn plain_page(id: &str, title: &str, body: &str) -> String {
     format!(
@@ -138,6 +151,125 @@ async fn detail_and_every_summary_source_expose_encryption_state() {
             .unwrap()["encrypted"],
         false
     );
+}
+
+#[tokio::test]
+async fn encrypted_body_projections_are_absent_from_content_blocks_tasks_and_agenda() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("protected.md"),
+                protected_page(PROTECTED_ID, "Protected"),
+            )
+            .unwrap();
+        })
+        .build();
+
+    let content_index = get_json(&fixture, "/api/vault/index/content-index").await;
+    let entry = content_index["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "protected.md")
+        .expect("protected page remains metadata-visible");
+    assert_eq!(entry["description"], "");
+    assert!(entry["word_count"].is_null());
+
+    let listing = get_json(&fixture, "/api/vault/pages").await;
+    assert_eq!(
+        listing["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == PROTECTED_ID)
+            .unwrap()["encrypted"],
+        true
+    );
+
+    let blocks = get_json(&fixture, "/api/vault/blocks/search?q=AGE").await;
+    assert_eq!(blocks, json!([]));
+    let tasks = get_json(&fixture, "/api/vault/tasks").await;
+    assert_eq!(tasks["tasks"], json!([]));
+    let agenda = get_json(&fixture, "/api/vault/agenda/today").await;
+    assert_eq!(agenda["tasks"], json!([]));
+}
+
+#[tokio::test]
+async fn encrypted_block_and_task_mutations_fail_with_a_protected_page_conflict() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(
+                root.join("protected.md"),
+                protected_page(PROTECTED_ID, "Protected"),
+            )
+            .unwrap();
+        })
+        .build();
+    let original = fs::read(fixture.state.vault.root().join("protected.md")).unwrap();
+
+    for response in [
+        fixture
+            .server
+            .post("/api/vault/blocks/assign-id")
+            .json(&json!({ "page_path": "protected.md", "span_start": 0 }))
+            .await,
+        fixture
+            .server
+            .put("/api/vault/tasks/status")
+            .json(&json!({
+                "page_path": "protected.md",
+                "span_start": 0,
+                "status": "done",
+            }))
+            .await,
+    ] {
+        response.assert_status(StatusCode::CONFLICT);
+        let error: Value = response.json();
+        assert!(
+            error["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("protected")),
+            "unexpected mutation error: {error}"
+        );
+    }
+
+    assert_eq!(
+        fs::read(fixture.state.vault.root().join("protected.md")).unwrap(),
+        original
+    );
+}
+
+#[tokio::test]
+async fn encrypted_journal_rejects_capture_without_touching_armor() {
+    let now: DateTime<Utc> = FIXED_NOW.parse().unwrap();
+    let fixture = ApiFixture::builder()
+        .clock(Arc::new(FixedClock(now)))
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("journals")).unwrap();
+            fs::write(
+                root.join("journals/2026-08-07.md"),
+                protected_page(PROTECTED_ID, "2026-08-07"),
+            )
+            .unwrap();
+        })
+        .build();
+    let path = fixture.state.vault.root().join("journals/2026-08-07.md");
+    let original = fs::read(&path).unwrap();
+
+    let response = fixture
+        .server
+        .post("/api/vault/journal/today/capture")
+        .json(&json!({ "content": "must not be appended" }))
+        .await;
+    response.assert_status(StatusCode::CONFLICT);
+    let error: Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("protected")),
+        "unexpected capture error: {error}"
+    );
+    assert_eq!(fs::read(path).unwrap(), original);
 }
 
 #[tokio::test]

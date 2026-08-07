@@ -7,7 +7,7 @@ use serde::Serialize;
 use super::Vault;
 use super::canonical::CanonicalName;
 use super::index::{IndexError, VaultIndex};
-use super::page::Page;
+use super::page::{Page, parse_or_repair_frontmatter};
 use super::path::VaultPath;
 use super::rewriter;
 use super::sync::ChangeEvent;
@@ -21,6 +21,11 @@ fn vp_err(e: impl std::fmt::Display) -> IndexError {
         std::io::ErrorKind::InvalidInput,
         e.to_string(),
     ))
+}
+
+fn is_protected_content(content: &str) -> bool {
+    let (meta, _, _, _) = parse_or_repair_frontmatter(content);
+    meta.encryption.is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +300,9 @@ impl<'a> MutationPlanner<'a> {
             let ref_abs = self.vault.resolve(&ref_vp);
 
             let content = fs::read_to_string(&ref_abs)?;
+            if is_protected_content(&content) {
+                continue;
+            }
 
             let mut replacements: Vec<(String, String)> = Vec::new();
 
@@ -411,6 +419,9 @@ impl<'a> MutationPlanner<'a> {
             let ref_abs = self.vault.resolve(&ref_vp);
 
             let content = fs::read_to_string(&ref_abs)?;
+            if is_protected_content(&content) {
+                continue;
+            }
 
             let mut replacements: Vec<(String, String)> = Vec::new();
 
@@ -527,13 +538,18 @@ impl<'a> MutationPlanner<'a> {
                 let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
                 let ref_abs = self.vault.resolve(&ref_vp);
 
+                let disk_content = fs::read_to_string(&ref_abs)?;
+                if is_protected_content(&disk_content) {
+                    continue;
+                }
+
                 // Read from staged write if we already have one, otherwise from disk
                 let content = if let Some(existing) =
                     plan.staged_writes.iter().find(|(p, _)| *p == ref_abs)
                 {
                     existing.1.clone()
                 } else {
-                    fs::read_to_string(&ref_abs)?
+                    disk_content
                 };
 
                 let mut replacements: Vec<(String, String)> = Vec::new();

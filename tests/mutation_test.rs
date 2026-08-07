@@ -10,7 +10,7 @@ use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
 use clepsydra::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator};
-use clepsydra::vault::page::PageMeta;
+use clepsydra::vault::page::{PageMeta, parse_or_repair_frontmatter};
 use clepsydra::vault::path::VaultPath;
 
 use tempfile::TempDir;
@@ -28,6 +28,19 @@ fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
     }
     let vault = Vault::open(&root).unwrap();
     (tmp, vault)
+}
+
+fn encrypted_referrer(id: &str, title: &str, link: &str) -> String {
+    format!(
+        "+++\nid = \"{id}\"\ntitle = \"{title}\"\nencryption = {{ format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }}\n+++\n-----BEGIN AGE ENCRYPTED FILE-----\n{link}\n-----END AGE ENCRYPTED FILE-----\n"
+    )
+}
+
+fn assert_protected_referrer(vault: &Vault) {
+    let path = VaultPath::new("protected-ref.md").unwrap();
+    let content = fs::read_to_string(vault.resolve(&path)).unwrap();
+    let (meta, _, _, _) = parse_or_repair_frontmatter(&content);
+    assert!(meta.encryption.is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +308,55 @@ Content.
     assert_eq!(plan.index_events.len(), 2);
 }
 
+#[test]
+fn encrypted_page_move_skips_protected_referrers_but_rewrites_plain_referrers() {
+    let protected_plain =
+        "---\nid: 00000000-0000-0000-0000-000000000410\ntitle: Protected ref\n---\nSee [[Beta]].\n";
+    let plain_ref =
+        "---\nid: 00000000-0000-0000-0000-000000000411\ntitle: Plain ref\n---\nSee [[Beta]].\n";
+    let target = "---\nid: 00000000-0000-0000-0000-000000000412\ntitle: Beta\n---\nTarget.\n";
+    let (_tmp, vault) = setup_vault(&[
+        ("protected-ref.md", protected_plain),
+        ("plain-ref.md", plain_ref),
+        ("beta.md", target),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    fs::write(
+        vault.root().join("protected-ref.md"),
+        encrypted_referrer(
+            "00000000-0000-0000-0000-000000000410",
+            "Protected ref",
+            "[[Beta]]",
+        ),
+    )
+    .unwrap();
+    assert_protected_referrer(&vault);
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MovePage {
+            source: "beta.md".to_string(),
+            destination: "archive/gamma.md".to_string(),
+        })
+        .unwrap();
+
+    assert!(
+        plan.staged_writes
+            .iter()
+            .any(|(path, _)| path.ends_with("plain-ref.md")),
+        "plaintext backlink should still be rewritten"
+    );
+    assert!(
+        plan.staged_writes
+            .iter()
+            .all(|(path, _)| !path.ends_with("protected-ref.md")),
+        "protected armor must never be staged for rewrite"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Task 3: MutationPlanner page-delete tests
 // ---------------------------------------------------------------------------
@@ -362,6 +424,55 @@ fn plan_page_delete_rewrite_none_no_text_edits() {
     assert_eq!(plan.file_ops.len(), 1);
     assert!(plan.text_edits.is_empty());
     assert!(plan.staged_writes.is_empty());
+}
+
+#[test]
+fn encrypted_page_delete_skips_protected_referrers_but_rewrites_plain_referrers() {
+    let protected_plain =
+        "---\nid: 00000000-0000-0000-0000-000000000420\ntitle: Protected ref\n---\nSee [[Beta]].\n";
+    let plain_ref =
+        "---\nid: 00000000-0000-0000-0000-000000000421\ntitle: Plain ref\n---\nSee [[Beta]].\n";
+    let target = "---\nid: 00000000-0000-0000-0000-000000000422\ntitle: Beta\n---\nTarget.\n";
+    let (_tmp, vault) = setup_vault(&[
+        ("protected-ref.md", protected_plain),
+        ("plain-ref.md", plain_ref),
+        ("beta.md", target),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    fs::write(
+        vault.root().join("protected-ref.md"),
+        encrypted_referrer(
+            "00000000-0000-0000-0000-000000000420",
+            "Protected ref",
+            "[[Beta]]",
+        ),
+    )
+    .unwrap();
+    assert_protected_referrer(&vault);
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::DeletePage {
+            path: "beta.md".to_string(),
+            rewrite: RewriteMode::PlainText,
+        })
+        .unwrap();
+
+    assert!(
+        plan.staged_writes
+            .iter()
+            .any(|(path, _)| path.ends_with("plain-ref.md")),
+        "plaintext backlink should still be rewritten"
+    );
+    assert!(
+        plan.staged_writes
+            .iter()
+            .all(|(path, _)| !path.ends_with("protected-ref.md")),
+        "protected armor must never be staged for rewrite"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +592,55 @@ fn plan_folder_move_rewrites_all_contained_pages() {
 
     // Should have index events for the moved file
     assert!(!plan.index_events.is_empty());
+}
+
+#[test]
+fn encrypted_folder_move_skips_protected_referrers_but_rewrites_plain_referrers() {
+    let protected_plain =
+        "---\nid: 00000000-0000-0000-0000-000000000430\ntitle: Protected ref\n---\nSee [[Beta]].\n";
+    let plain_ref =
+        "---\nid: 00000000-0000-0000-0000-000000000431\ntitle: Plain ref\n---\nSee [[Beta]].\n";
+    let target = "---\nid: 00000000-0000-0000-0000-000000000432\ntitle: Beta\n---\nTarget.\n";
+    let (_tmp, vault) = setup_vault(&[
+        ("protected-ref.md", protected_plain),
+        ("plain-ref.md", plain_ref),
+        ("notes/beta.md", target),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    fs::write(
+        vault.root().join("protected-ref.md"),
+        encrypted_referrer(
+            "00000000-0000-0000-0000-000000000430",
+            "Protected ref",
+            "[[Beta]]",
+        ),
+    )
+    .unwrap();
+    assert_protected_referrer(&vault);
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MoveFolder {
+            source: "notes".to_string(),
+            destination: "archive".to_string(),
+        })
+        .unwrap();
+
+    assert!(
+        plan.staged_writes
+            .iter()
+            .any(|(path, _)| path.ends_with("plain-ref.md")),
+        "plaintext backlink should still be rewritten"
+    );
+    assert!(
+        plan.staged_writes
+            .iter()
+            .all(|(path, _)| !path.ends_with("protected-ref.md")),
+        "protected armor must never be staged for rewrite"
+    );
 }
 
 // ---------------------------------------------------------------------------

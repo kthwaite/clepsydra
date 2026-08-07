@@ -768,6 +768,31 @@ Run: `rg -n 'page\.body|\.body\.split|parse_blocks|extract_links|read_to_string|
 
 Classify each result as: metadata-only safe; already suppressed by index; direct file/body consumer requiring a guard; or mutation that must reject protected pages. Add the final classification as a comment block to the task notes before editing.
 
+<!-- Task 14 body-consumer audit (2026-08-07)
+metadata-only safe:
+- `src/api/pages.rs` detail/protect/unprotect/update/assign reads intentionally return or preserve armor; ordinary protected-body updates already validate armor. Stale-revision reads are CAS checks.
+- `src/api/properties.rs`, `src/api/board/{cycles,tasks}.rs`, and `src/vault/academic_hook.rs` change frontmatter while preserving the parsed body unchanged.
+- `src/api/archive.rs` reads only for exact compensation comparison; `src/api/academic.rs` detail/list reads expose the stored body like page detail, while its metadata mutations preserve that body.
+- `src/vault/{keyring,location,migrate,checkpoint,new_note,base,config,bcl,init,page}.rs`, API test/support reads, and reconcile tests read configuration, key material, fixtures, or whole pages for parsing/CAS rather than deriving plaintext projections.
+
+already suppressed by index:
+- `src/vault/index.rs` blanks `body` before `extract_links`, `parse_blocks`, FTS, derivers, and word counts whenever encryption metadata is present; both incremental and full builds retain raw armor only for exact persistence.
+- `src/vault/derivers/links.rs` consumes the already-suppressed indexed link list. Index-backed block search, task/agenda queries, backlink context, and grep therefore have no protected body rows/content.
+- `src/vault/tree.rs` loads indexed `encrypted` and nullable `word_count`; it needs only a visible encrypted marker in human output.
+
+direct file/body consumer requiring a guard or empty projection:
+- `src/api/index_routes.rs` derives content-index descriptions and word counts directly from `Page::body`.
+- `src/lsp/document.rs` stores armor as body and extracts links; this is the central guard point for body completion, hover-at-position, symbols, references, rename, block actions, and body diagnostics.
+- `src/lsp/mod.rs` direct file reads used for hover previews and throwaway documents must inherit/check encrypted state so armor is never previewed or edited.
+- `src/vault/index.rs` backlink-context file reads are safe for current encrypted rows because body links are suppressed, but the indexed-source invariant is documented and tested rather than re-parsing armor.
+
+mutation that must reject or skip protected pages:
+- `src/api/blocks.rs` block-ID assignment and `src/api/tasks.rs` task-status byte edits must reject protected targets before offset parsing or writes.
+- `src/api/journal.rs` capture must reject an already-protected daily page before appending.
+- `src/vault/mutation.rs` move/delete/folder backlink rewrite planning must skip protected referring pages while continuing to rewrite plaintext referrers.
+- `src/vault/rewriter.rs` remains a pure Markdown rewriter; callers are responsible for the protected-page guard.
+-->
+
 - [ ] **Step 2: Write failing API tests.** Protected pages must have empty description and `word_count: null` in content-index, no block-search/assignment results, and no body-derived task/agenda/journal entries. Metadata-backed listings may still include the page with `encrypted: true`.
 
 - [ ] **Step 3: Write failing rewrite tests.** Link rename/move/delete planning must never rewrite bytes inside a protected body. Inbound links from plain pages continue to rewrite normally. Block-ID assignment to a protected page returns a conflict/bad request rather than touching armor.
@@ -783,6 +808,14 @@ Classify each result as: metadata-only safe; already suppressed by index; direct
 Run: `cargo test --test api_encryption_test -- --nocapture && cargo test --test mutation_test encrypted -- --nocapture && cargo test --test lsp_document_test encrypted -- --nocapture && cargo test grep:: --lib`
 
 Expected: PASS.
+
+<!-- Task 14 final audit disposition:
+- API content-index, block assignment, task status, and journal capture now use explicit encryption guards; covered by `api_encryption_test` encrypted projection/mutation tests.
+- Move/delete/folder rewrite planning checks parsed encryption metadata before invoking the Markdown rewriter; covered by stale-index protected-referrer tests in `mutation_test` while plaintext referrers remain writable.
+- Incremental/full index suppression, FTS replacement, grep title-only behavior, and nullable word counts are covered by index/encryption and `vault::grep` tests; tree rendering adds a lock and defensively omits word count for encrypted metadata.
+- `lsp::Document` retains frontmatter/rope state but blanks body and links, rejects body positions, and emits one informational encrypted-body diagnostic; backend completion, hover preview, references, rename preparation/execution, symbols, referrer edits, and range fallbacks inherit or explicitly check that state.
+- Remaining `read_to_string` audit hits are configuration/keyring reads, exact CAS/compensation reads, metadata-only frontmatter mutations that preserve the body, public detail endpoints intentionally returning armor for client-side decryption, index paths that blank before derivation, or test fixtures.
+-->
 
 - [ ] **Step 8: Commit.**
 

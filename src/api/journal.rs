@@ -433,6 +433,11 @@ async fn capture_today(
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
     let page = Page::from_file(&abs_path, vault_path.clone())
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
+    if page.is_encrypted() {
+        return Err(ApiError::conflict(
+            "cannot capture into a protected journal page",
+        ));
+    }
 
     // Append content
     let mut new_body = page.body.clone();

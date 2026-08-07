@@ -312,13 +312,9 @@ impl LanguageServer for LspBackend {
                 let abs_path = state.vault.resolve(&vault_path);
                 let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
                     Ok(file_content) => {
-                        let (title, body) =
-                            match crate::vault::page::parse_frontmatter(&file_content) {
-                                Ok((meta, body)) => (meta.title, body),
-                                Err(_) => (None, file_content),
-                            };
-                        let preview = crate::lsp::hover::extract_preview(&body, 10);
-                        (title, preview)
+                        let target = document::Document::from_text(&file_content, 0);
+                        let preview = crate::lsp::hover::extract_preview(&target.body, 10);
+                        (target.meta.title, preview)
                     }
                     Err(_) => (None, String::new()),
                 };
@@ -340,7 +336,7 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
 
-        let (line_text, frontmatter_meta) = {
+        let (line_text, frontmatter_meta, encrypted_body_position) = {
             let docs = self.documents.lock().await;
             let doc = match docs.get(&uri) {
                 Some(d) => d,
@@ -363,8 +359,16 @@ impl LanguageServer for LspBackend {
                 && line_start_byte < doc.body_byte_offset
                 && line_text.trim_end() != "+++";
             let meta = inside_frontmatter.then(|| doc.meta.clone());
-            (line_text, meta)
+            (
+                line_text,
+                meta,
+                doc.encrypted && line_start_byte >= doc.body_byte_offset,
+            )
         };
+
+        if encrypted_body_position {
+            return Ok(None);
+        }
 
         let character = pos.character as usize;
 
@@ -414,6 +418,9 @@ impl LanguageServer for LspBackend {
                     Some(d) => d,
                     None => return Ok(None),
                 };
+                if doc.encrypted {
+                    return Ok(None);
+                }
                 doc.link_at_position(pos).map(|l| l.target_raw.clone())
             };
 
@@ -616,6 +623,9 @@ impl LanguageServer for LspBackend {
             Some(d) => d,
             None => return Ok(None),
         };
+        if doc.encrypted {
+            return Ok(None);
+        }
 
         // Case 1: Cursor on a wikilink
         if let Some(link) = doc.link_at_position(pos)
@@ -648,6 +658,13 @@ impl LanguageServer for LspBackend {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
         let new_name = params.new_name;
+
+        {
+            let docs = self.documents.lock().await;
+            if docs.get(&uri).is_some_and(|doc| doc.encrypted) {
+                return Ok(None);
+            }
+        }
 
         // ---------------------------------------------------------------
         // 1. Determine what is being renamed and resolve old vault path
@@ -847,6 +864,9 @@ impl LanguageServer for LspBackend {
             Some(d) => d,
             None => return Ok(None),
         };
+        if doc.encrypted {
+            return Ok(None);
+        }
 
         let title = doc
             .meta
@@ -1461,14 +1481,16 @@ async fn publish_diagnostics_for(
     let mut diagnostics =
         crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
 
-    // Frontmatter property diagnostics against the base registry.
-    let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
-    let path = vault_path_for_uri(state, uri)
-        .map(|vp| vp.as_str().to_string())
-        .unwrap_or_default();
-    diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
-        doc, &registry, &path, &names,
-    ));
+    if !doc.encrypted {
+        // Frontmatter property diagnostics against the base registry.
+        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
+        let path = vault_path_for_uri(state, uri)
+            .map(|vp| vp.as_str().to_string())
+            .unwrap_or_default();
+        diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
+            doc, &registry, &path, &names,
+        ));
+    }
     drop(names);
     client
         .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
