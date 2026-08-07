@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { expect, it } from "vitest";
 import Guide, { meta } from "#/docs/content/getting-started.mdx";
 import source from "#/docs/content/getting-started.mdx?raw";
 
