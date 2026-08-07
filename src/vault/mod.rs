@@ -13,6 +13,7 @@ pub mod config;
 pub mod context;
 pub mod derivation;
 pub mod derivers;
+pub mod encryption;
 pub mod geocode;
 pub mod grep;
 pub mod hooks;
