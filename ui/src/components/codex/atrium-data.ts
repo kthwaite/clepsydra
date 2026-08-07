@@ -1,5 +1,7 @@
 // Pure derivations for the ATRIUM dashboard. No React, no I/O — fully testable.
 
+import { dayOfYear, pad2 } from "#/lib/time";
+
 export interface HeatItem {
   updated_at?: string | null;
   created_at?: string | null;
@@ -79,26 +81,6 @@ function dayKeyOf(iso: string): string {
 /** UTC day key for a Date. */
 function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
-}
-
-export function dayOfYear(d: Date): number {
-  const start = Date.UTC(d.getUTCFullYear(), 0, 0);
-  return Math.floor((d.getTime() - start) / MS_PER_DAY);
-}
-
-export function julianDay(d: Date): number {
-  const a = Math.floor((14 - (d.getUTCMonth() + 1)) / 12);
-  const y = d.getUTCFullYear() + 4800 - a;
-  const m = d.getUTCMonth() + 1 + 12 * a - 3;
-  return (
-    d.getUTCDate() +
-    Math.floor((153 * m + 2) / 5) +
-    365 * y +
-    Math.floor(y / 4) -
-    Math.floor(y / 100) +
-    Math.floor(y / 400) -
-    32045
-  );
 }
 
 function level(n: number): number {
@@ -271,4 +253,85 @@ export function sortRecents(
       return bv - av;
     })
     .slice(0, limit);
+}
+
+/* ── daystart presentation ─────────────────────────────────────────────── */
+
+const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+/** Diegetic dot-date, e.g. "2026.08.07". */
+export function formatDotDate(d: Date): string {
+  return `${d.getFullYear()}.${pad2(d.getMonth() + 1)}.${pad2(d.getDate())}`;
+}
+
+/** Hero daystamp: "2026.08.07 (THU)". */
+export function daystampLabel(d: Date): string {
+  return `${formatDotDate(d)} (${WEEKDAYS[d.getDay()]})`;
+}
+
+/** Time-of-day salutation for the hero heading. */
+export function greeting(d: Date): string {
+  const h = d.getHours();
+  if (h < 5) return "Still awake?!";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  if (h < 22) return "Good evening";
+  return "Good night";
+}
+
+const APHORISMS: { text: string; who: string }[] = [
+  {
+    text: "Attention is the rarest and purest form of generosity.",
+    who: "Simone Weil",
+  },
+  {
+    text: "The smallest unit of memory is the willingness to return.",
+    who: "Claude Opus 4.7",
+  },
+  {
+    text: "What is to give light must endure burning.",
+    who: "Viktor Frankl",
+  },
+  {
+    text: "We do not write in order to be understood; we write in order to understand.",
+    who: "C. Day-Lewis",
+  },
+  {
+    text: "The notebook is a net for catching days.",
+    who: "Annie Dillard",
+  },
+  {
+    text: "Order is not pressure imposed from without, but an equilibrium set up from within.",
+    who: "José Ortega y Gasset",
+  },
+  {
+    text: "A man should keep his little brain attic stocked with all the furniture that he is likely to use.",
+    who: "Arthur Conan Doyle",
+  },
+];
+
+/** Aphorism of the day, rotating by local day-of-year. */
+export function aphorismForDay(d: Date): { text: string; who: string } {
+  return APHORISMS[dayOfYear(d) % APHORISMS.length];
+}
+
+/** Signed BCL countdown, e.g. "12,345d · 6h" ("+" once crossed). */
+export function formatBclDuration(totalSeconds: number): string {
+  const past = totalSeconds < 0;
+  const s = Math.abs(totalSeconds);
+  const days = Math.floor(s / 86_400);
+  const hours = Math.floor((s % 86_400) / 3_600);
+  return `${past ? "+" : ""}${days.toLocaleString("en-US")}d · ${hours}h`;
+}
+
+/** BCL crossing date as a long local date; echoes malformed input unchanged. */
+export function formatBclDate(yyyymmdd: string): string {
+  const [y, m, d] = yyyymmdd.split("-").map(Number);
+  if (!y || !m || !d) return yyyymmdd;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
 }

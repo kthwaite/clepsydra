@@ -2,7 +2,6 @@ import { useIsMutating } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useStats } from "#/api/index";
-import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { Sheaf } from "#/components/codex/Sheaf";
@@ -10,6 +9,7 @@ import { useTheme } from "#/components/ThemeProvider";
 import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
+import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -125,9 +125,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
                     : "text-ink-mute hover:text-ink",
                 )}
               >
-                <span className="text-[9px] text-ink-mute">
-                  {String(i).padStart(2, "0")}
-                </span>
+                <span className="text-[9px] text-ink-mute">{pad2(i)}</span>
                 <span className="text-[10px]">{label}</span>
               </button>
             );
@@ -258,15 +256,13 @@ function useFolioCode(view: View): string {
 }
 
 function useUtcClock(): string {
-  const [t, setT] = useState(() => fmtClock(new Date()));
+  const [t, setT] = useState(() => formatClock(new Date(), true));
   useEffect(() => {
-    const id = window.setInterval(() => setT(fmtClock(new Date())), 1000);
+    const id = window.setInterval(
+      () => setT(formatClock(new Date(), true)),
+      1000,
+    );
     return () => window.clearInterval(id);
   }, []);
   return t;
-}
-
-function fmtClock(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }

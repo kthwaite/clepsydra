@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import SunCalc from "suncalc";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex, useStats, useTags } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
@@ -9,26 +8,32 @@ import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
+import {
+  dayOfYear,
+  formatClock,
+  formatRelativeTime,
+  isLeapYear,
+  julianDay,
+  pad2,
+} from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import {
+  aphorismForDay,
   buildHeatmap,
-  dayOfYear,
+  daystampLabel,
   deriveInventory,
-  julianDay,
+  formatBclDate,
+  formatBclDuration,
+  formatDotDate,
+  greeting,
   sortRecents,
 } from "./atrium-data";
 import { Card } from "./Card";
-import { formatRelativeTime } from "./codex-time";
 import { shortFolio } from "./folio-utils";
 import { ReadingContinuesPanel } from "./ReadingContinues";
 import { SkyCard } from "./SkyCard";
-import {
-  moonPhase,
-  nextLocalDate,
-  selectDisplayedSunrise,
-  sunArcPosition,
-} from "./sky";
+import { deriveSky, hasCoords } from "./sky";
 
 export function Atrium() {
   const navigate = useNavigate();
@@ -74,14 +79,14 @@ export function Atrium() {
     return sortRecents(items, recentTab);
   }, [recentTab, openHistory, byPath, items]);
 
-  const todayLabel = `${fmtDate(now)} (${WEEKDAYS[now.getDay()]})`;
+  const todayLabel = daystampLabel(now);
   const doy = dayOfYear(now);
-  const yearDays = isLeap(now.getFullYear()) ? 366 : 365;
+  const yearDays = isLeapYear(now.getFullYear()) ? 366 : 365;
   const week = Math.ceil(doy / 7);
-  const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const clock = formatClock(now);
   const journalSub = journalToday?.meta.id
-    ? `${journalToday.meta.id} · JOURNAL / ${fmtDate(now)}`
-    : `JOURNAL / ${fmtDate(now)}`;
+    ? `${journalToday.meta.id} · JOURNAL / ${formatDotDate(now)}`
+    : `JOURNAL / ${formatDotDate(now)}`;
 
   const dayKeyDep = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
 
@@ -97,43 +102,10 @@ export function Atrium() {
     [stats, tags, items, dayKeyDep],
   );
 
-  const sky = useMemo(() => {
-    const lat = location?.latitude ?? null;
-    const lon = location?.longitude ?? null;
-    const hasLoc = lat !== null && lon !== null;
-    const getSunTimes = (date: Date) =>
-      hasLoc
-        ? SunCalc.getTimes(date, lat, lon)
-        : { sunrise: atHour(date, 6), sunset: atHour(date, 20) };
-    const times = getSunTimes(now);
-    const displayedSunrise = selectDisplayedSunrise(
-      now,
-      times.sunrise,
-      times.sunset,
-      () => getSunTimes(nextLocalDate(now)).sunrise,
-    );
-    const arc = sunArcPosition(now, times.sunrise, times.sunset);
-    const moon = moonPhase(now);
-    const remMin = Math.max(
-      0,
-      Math.floor((times.sunset.getTime() - now.getTime()) / 60_000),
-    );
-    return {
-      moon,
-      sunrise: fmtTime(displayedSunrise.time),
-      sunriseIsTomorrow: displayedSunrise.isTomorrow,
-      sunset: fmtTime(times.sunset),
-      lightLeft: `${Math.floor(remMin / 60)}h ${pad(remMin % 60)}m`,
-      arc,
-      place: location?.label ?? null,
-    };
-  }, [location, now]);
+  const sky = useMemo(() => deriveSky(now, location), [location, now]);
+  const located = hasCoords(location);
 
-  const located =
-    (location?.latitude ?? null) !== null &&
-    (location?.longitude ?? null) !== null;
-
-  const aphorism = APHORISMS[dayOfYear(now) % APHORISMS.length];
+  const aphorism = aphorismForDay(now);
 
   return (
     <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-4 py-4">
@@ -153,7 +125,7 @@ export function Atrium() {
             <span className="tabular-nums">{clock} LOCAL</span>
           </div>
           <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
-            {greeting(now)}.
+            {greeting(now)}
           </h1>
         </div>
 
@@ -254,11 +226,11 @@ export function Atrium() {
             caption="FIG. VII"
           >
             <div className="cl-mono text-[22px] leading-none text-accent">
-              {fmtBclDuration(bcl.remaining_seconds)}
+              {formatBclDuration(bcl.remaining_seconds)}
             </div>
             <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
               {bcl.remaining_seconds >= 0 ? "crosses" : "crossed"}{" "}
-              {fmtBclDate(bcl.bcl_date)} · natal {bcl.birth_date}
+              {formatBclDate(bcl.bcl_date)} · natal {bcl.birth_date}
             </div>
           </Card>
         )}
@@ -386,7 +358,7 @@ export function Atrium() {
                     className="grid cursor-pointer grid-cols-[18px_90px_1fr_72px] items-baseline gap-3 border-b border-dotted border-rule-soft px-3.5 py-2 text-left hover:bg-paper-edge"
                   >
                     <span className="cl-mono text-[9px] tabular-nums text-ink-mute">
-                      {pad(i + 1)}
+                      {pad2(i + 1)}
                     </span>
                     <span className="cl-mono flex items-center gap-1.5 text-[9px] text-ink-mute">
                       <span
@@ -509,89 +481,4 @@ function HeatmapFooter({
       </span>
     </div>
   );
-}
-
-/* ── data helpers ─────────────────────────────────────────────────────── */
-
-const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-
-function isLeap(y: number): boolean {
-  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-}
-
-function greeting(d: Date): string {
-  const h = d.getHours();
-  if (h < 5) return "Still awake";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  if (h < 22) return "Good evening";
-  return "Good night";
-}
-
-function fmtDate(d: Date): string {
-  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
-}
-
-function atHour(now: Date, h: number): Date {
-  const d = new Date(now);
-  d.setHours(h, 0, 0, 0);
-  return d;
-}
-
-function fmtTime(d: Date): string {
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-const APHORISMS: { text: string; who: string }[] = [
-  {
-    text: "Attention is the rarest and purest form of generosity.",
-    who: "Simone Weil",
-  },
-  {
-    text: "The smallest unit of memory is the willingness to return.",
-    who: "—",
-  },
-  {
-    text: "What is to give light must endure burning.",
-    who: "Viktor Frankl",
-  },
-  {
-    text: "We do not write in order to be understood; we write in order to understand.",
-    who: "C. Day-Lewis",
-  },
-  {
-    text: "The notebook is a net for catching days.",
-    who: "Annie Dillard",
-  },
-  {
-    text: "Order is not pressure imposed from without, but an equilibrium set up from within.",
-    who: "José Ortega y Gasset",
-  },
-  {
-    text: "A man should keep his little brain attic stocked with all the furniture that he is likely to use.",
-    who: "Arthur Conan Doyle",
-  },
-];
-
-function fmtBclDuration(totalSeconds: number): string {
-  const past = totalSeconds < 0;
-  const s = Math.abs(totalSeconds);
-  const days = Math.floor(s / 86_400);
-  const hours = Math.floor((s % 86_400) / 3_600);
-  return `${past ? "+" : ""}${days.toLocaleString("en-US")}d · ${hours}h`;
-}
-
-function fmtBclDate(yyyymmdd: string): string {
-  const [y, m, d] = yyyymmdd.split("-").map((p) => Number.parseInt(p, 10));
-  if (!y || !m || !d) return yyyymmdd;
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
 }

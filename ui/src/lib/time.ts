@@ -1,177 +1,102 @@
-/**
- * Convert a timestamp into a human-readable "time since" string.
- * @param timestamp - Date string or Date object.
- * @returns Human-readable duration string.
- */
-export function formatRelativeTime(timestamp: string | Date): string {
-  const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  const diffMins = Math.floor(diffSecs / 60);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
+// Shared time helpers: zero-padding, clocks, local "YYYY-MM-DD" calendar
+// dates, calendar math, and human-readable relative/absolute formatting.
 
-  // Less than 1 minute
-  if (diffMins < 1) {
-    return `${diffSecs} second${diffSecs !== 1 ? "s" : ""} ago`;
-  }
+const MS_PER_DAY = 86_400_000;
 
-  // Less than 1 hour
-  if (diffHours < 1) {
-    return `${diffMins} minute${diffMins !== 1 ? "s" : ""} ago`;
-  }
-
-  // Less than 24 hours
-  if (diffDays < 1) {
-    if (diffMins % 60 === 0) {
-      // Exact hours
-      return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
-    } else {
-      // Hours and minutes
-      const remainingMins = diffMins % 60;
-      return `${diffHours} hour${diffHours !== 1 ? "s" : ""} and ${remainingMins} minute${remainingMins !== 1 ? "s" : ""} ago`;
-    }
-  }
-
-  // More than 24 hours
-  return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
+/** Zero-pad a number to two digits. */
+export function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
-export { formatRelativeTime as getTimeSince };
-
-/**
- * Formats a timestamp into a human-readable format: YYYY-MM-DD HH:MM(am/pm).
- * @param timestamp - Date string or Date object.
- * @returns Formatted date string.
- */
-export function humanizeTimestamp(timestamp: string | Date): string {
-  const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
-
-  // Get day, month, year
-  const day = date.getDate().toString().padStart(2, "0");
-  const month = (date.getMonth() + 1).toString().padStart(2, "0"); // getMonth() is 0-based
-  const year = date.getFullYear();
-
-  // Get hours in 12-hour format
-  let hours = date.getHours();
-  const ampm = hours >= 12 ? "pm" : "am";
-  hours = hours % 12;
-  hours = hours ? hours : 12; // Convert 0 to 12
-
-  // Get minutes
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-
-  return `${year}-${month}-${day} ${hours}:${minutes}${ampm}`;
+/** Local calendar date as a "YYYY-MM-DD" key. */
+export function localDateKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 /**
- * Formats a timestamp into a human-readable "casual" date string.
- * @param timestamp - string timestamp.
- * @returns Formatted date string.
+ * Parse "YYYY-MM-DD" into a local-midnight Date. Splitting avoids the UTC
+ * interpretation (and timezone day-shift) of `new Date("YYYY-MM-DD")`.
  */
-export const humanizeTimestampCasual = (date: string): string => {
-  const dateObject = new Date(date);
-  const options: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "short",
+export function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** "YYYY-MM-DD" + days → "YYYY-MM-DD", in local calendar days. */
+export function isoAddDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return localDateKey(new Date(y, m - 1, d + days));
+}
+
+/** 1-based day of the local calendar year (DST-safe). */
+export function dayOfYear(d: Date): number {
+  const start = Date.UTC(d.getFullYear(), 0, 0);
+  const day = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((day - start) / MS_PER_DAY);
+}
+
+/** Gregorian leap-year test. */
+export function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+/** Julian Day Number of a Date's UTC calendar day. */
+export function julianDay(d: Date): number {
+  const a = Math.floor((14 - (d.getUTCMonth() + 1)) / 12);
+  const y = d.getUTCFullYear() + 4800 - a;
+  const m = d.getUTCMonth() + 1 + 12 * a - 3;
+  return (
+    d.getUTCDate() +
+    Math.floor((153 * m + 2) / 5) +
+    365 * y +
+    Math.floor(y / 4) -
+    Math.floor(y / 100) +
+    Math.floor(y / 400) -
+    32045
+  );
+}
+
+/** "HH:MM:SS" wall clock; UTC when `utc` is set, local otherwise. */
+export function formatClock(d: Date, utc = false): string {
+  return utc
+    ? `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`
+    : `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** "HH:MM" local time of day. */
+export function formatTimeHM(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Duration as "Xh YYm". */
+export function formatDurationHM(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return `${h}h ${pad2(m)}m`;
+}
+
+/** Compact "time since" for telemetry rows: "just now", "5m ago", "3mo ago". */
+export function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  const diff = Math.floor((Date.now() - t) / 1000);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 86400 * 30) return `${Math.floor(diff / (86400 * 7))}w ago`;
+  return `${Math.floor(diff / (86400 * 30))}mo ago`;
+}
+
+/** Long local date ("28 April 2026" in en-GB) or an em-dash. */
+export function formatAbsoluteDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, {
     day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-  };
-  return dateObject.toLocaleDateString("en-GB", options);
-};
-
-/** Formats a timestamp into a path-safe string.
- *  @param date - Date string or Date object.
- *  @returns Formatted date string.
- */
-export const pathSafeTimestamp = (date: Date = new Date()): string => {
-  const day = date.getDate().toString().padStart(2, "0");
-  const month = (date.getMonth() + 1).toString().padStart(2, "0"); // getMonth() is 0-based
-  const year = date.getFullYear();
-  const hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-
-  return `${year}-${month}-${day}_${hours}${minutes}`;
-};
-
-/**
- * Detects the user's timezone from browser settings
- * @returns {string} Timezone identifier (e.g., "America/New_York")
- */
-export const detectUserTimezone = (): string => {
-  try {
-    // Get timezone from browser using Intl API
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return timezone;
-  } catch (e) {
-    console.error("Failed to detect timezone:", e);
-    // Default to UTC if detection fails
-    return "UTC";
-  }
-};
-
-interface GetRelativeTimeStringOptions {
-  timeZone?: string;
-}
-
-/** Prints last updated date for a given timestamp.
- *  Up to 24 hours ago, will print a relative time; otherwise,
- *  will print YYYY-MM-DD HH:MM AM/PM.
- *  If not provided, will print "No updated date".
- */
-export function getRelativeTimeString(
-  updatedAt: number | string | Date,
-  options: GetRelativeTimeStringOptions = {},
-) {
-  // Ensure we're working with a timestamp number
-  const timestamp =
-    typeof updatedAt === "object"
-      ? updatedAt.getTime()
-      : typeof updatedAt === "string"
-        ? new Date(updatedAt).getTime()
-        : Number(updatedAt);
-
-  // Current time in UTC milliseconds
-  const now = Date.now();
-
-  // Time difference in milliseconds
-  const diff = now - timestamp;
-
-  // Default display text
-  let innerText = "";
-
-  if (diff < 1000 * 60 * 60 * 24) {
-    // Less than 24 hours - show relative time
-    const diffMinutes = Math.floor(diff / 1000 / 60);
-
-    if (diffMinutes < 1) {
-      const diffSeconds = Math.floor(diff / 1000);
-      innerText = `Updated ${diffSeconds} second${diffSeconds === 1 ? "" : "s"} ago`;
-      // innerText = "Updated just now";
-    } else if (diffMinutes < 60) {
-      innerText = `Updated ${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
-    } else {
-      const diffHours = Math.floor(diffMinutes / 60);
-      innerText = `Updated ${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
-    }
-  } else {
-    // More than 24 hours - format according to user's timezone
-
-    // Get user's timezone (or use specified timezone from options)
-    const timeZone =
-      options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    // Format the date in the user's timezone
-    const dateFormatter = new Intl.DateTimeFormat(navigator.language, {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: timeZone,
-    });
-
-    innerText = `Last updated ${dateFormatter.format(new Date(timestamp))}`;
-  }
-
-  return innerText;
+    month: "long",
+    year: "numeric",
+  });
 }

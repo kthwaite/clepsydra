@@ -1,6 +1,7 @@
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
+import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { HealthDot, MODES } from "./board-constants";
 
@@ -155,10 +156,6 @@ export function BoardHeader({
   const open = tasks.filter((t) => t.status !== "SEALED").length;
   const inField = tasks.filter((t) => t.status === "FIELD").length;
   const onHold = tasks.filter((t) => Boolean(t.hold)).length;
-
-  function pad2(n: number): string {
-    return String(n).padStart(2, "0");
-  }
 
   const healthColor =
     activeOp?.health === "AMBER"

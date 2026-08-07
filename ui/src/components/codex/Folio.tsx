@@ -2,10 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { useAssignPage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
-import {
-  formatAbsoluteDate,
-  formatRelativeTime,
-} from "#/components/codex/codex-time";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import {
   countWordsFromSlate,
@@ -24,6 +20,7 @@ import { cn } from "#/lib/cn";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
+import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 

@@ -18,6 +18,7 @@
 
 import { useMemo } from "react";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
+import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { COL_LABEL, fmtCycleWindow, HealthDot } from "./board-constants";
 import { parseDay, pct, taskRange, windowOf } from "./timeline-math";
@@ -260,7 +261,7 @@ export function TimelineView({
       {unscheduled > 0 && (
         <div className="tl-foot" data-testid="tl-foot">
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-2)]">
-            {String(unscheduled).padStart(2, "0")} UNSCHEDULED
+            {pad2(unscheduled)} UNSCHEDULED
           </span>
           <span className="cl-mono text-[var(--fs-xs)] text-[var(--ink-4)]">
             — no due date · held in backlog / intake

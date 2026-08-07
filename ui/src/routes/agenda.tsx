@@ -9,6 +9,7 @@ import {
 import { TaskList } from "#/components/TaskList";
 import { SectionHeading } from "#/components/ui/section-heading";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
+import { localDateKey, parseLocalDate } from "#/lib/time";
 
 export const Route = createFileRoute("/agenda")({
   component: AgendaPage,
@@ -134,15 +135,9 @@ function LoadingIndicator() {
 
 /** Format YYYY-MM-DD as a readable weekday + date label. */
 function formatWeekDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
+  if (dateStr === localDateKey(new Date())) return "Today";
 
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
-  if (dateStr === todayStr) return "Today";
-
-  return date.toLocaleDateString(undefined, {
+  return parseLocalDate(dateStr).toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",

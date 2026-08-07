@@ -9,7 +9,6 @@ import {
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
-import { formatRelativeTime } from "#/components/codex/codex-time";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -21,6 +20,7 @@ import {
   kindLabel,
   resolveKind,
 } from "#/lib/kind";
+import { formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import { filterAndSortRows, type GazetteerSort } from "./gazetteer-filter";
 

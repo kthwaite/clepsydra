@@ -1,4 +1,5 @@
 import { cn } from "#/lib/cn";
+import { pad2 } from "#/lib/time";
 
 export interface CycleMetricProps {
   label: string;
@@ -18,7 +19,7 @@ export function CycleMetric({ label, value, testId, color }: CycleMetricProps) {
         style={color ? { color } : undefined}
         data-testid={testId}
       >
-        {typeof value === "number" ? String(value).padStart(2, "0") : value}
+        {typeof value === "number" ? pad2(value) : value}
       </b>
     </div>
   );
