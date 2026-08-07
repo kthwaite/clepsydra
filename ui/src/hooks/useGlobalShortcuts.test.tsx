@@ -58,6 +58,7 @@ describe("useGlobalShortcuts", () => {
     useUiStore.setState({
       isSearchOpen: false,
       isInscribeOpen: false,
+      isCaptureAsideOpen: false,
       isShortcutHelpOpen: false,
       isSettingsOpen: false,
     });
@@ -93,6 +94,8 @@ describe("useGlobalShortcuts", () => {
       todayJournalPath(),
       expect.any(String),
     );
+    press("d", { metaKey: true, shiftKey: true });
+    expect(useUiStore.getState().isCaptureAsideOpen).toBe(true);
     press("i", { metaKey: true });
     expect(navigateMock).toHaveBeenCalledWith({ to: "/gazetteer" });
     press("g", { metaKey: true });
