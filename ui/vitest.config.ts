@@ -6,7 +6,10 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [
-    { enforce: "pre", ...mdx({ rehypePlugins: [rehypeSlug] }) },
+    {
+      enforce: "pre",
+      ...mdx({ include: /\.mdx$/, rehypePlugins: [rehypeSlug] }),
+    },
     react({ include: /\.(jsx|js|mdx|md|tsx|ts)$/ }),
   ],
   resolve: {
