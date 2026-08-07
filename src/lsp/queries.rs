@@ -31,7 +31,7 @@ mod tests {
     #[tokio::test]
     async fn resolves_known_canonical_name() {
         let (backend, _tmp) = make_backend(&[("Target.md", "---\ntitle: Target\n---\nbody\n")]);
-        let path = canonical_to_vault_path(&backend.state.index, "target").await;
+        let path = canonical_to_vault_path(&backend.state().unwrap().index, "target").await;
         assert_eq!(path.as_deref(), Some("Target.md"));
     }
 
@@ -39,7 +39,7 @@ mod tests {
     async fn unknown_name_returns_none() {
         let (backend, _tmp) = make_backend(&[("Target.md", "# Target\n")]);
         assert!(
-            canonical_to_vault_path(&backend.state.index, "nope")
+            canonical_to_vault_path(&backend.state().unwrap().index, "nope")
                 .await
                 .is_none()
         );

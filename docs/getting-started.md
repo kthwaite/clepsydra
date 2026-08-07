@@ -152,7 +152,43 @@ curl -X POST http://localhost:3000/api/vault/pages/notes/first.md \
 
 (If TLS is enabled, use `https://localhost:3000/...`.)
 
-## 8) Optional: Browser extension
+## 8) Optional: Edit the vault from Neovim (LSP)
+
+`clep lsp` starts a standalone language server on stdio — completion for
+`[[wikilinks]]`, `#tags`, and frontmatter properties, hover previews,
+go-to-definition, link diagnostics, and project-wide rename. It's
+read-only and keeps its own in-memory index, so run it alongside
+`clep serve`, not instead of it: `clep serve` powers the web UI (and owns
+all writes, including folder-follows-metadata moves), while Neovim spawns
+and stops `clep lsp` independently.
+
+Install the binary and register it (Neovim 0.11+):
+
+```bash
+cargo install --path .
+```
+
+```lua
+vim.lsp.config['clepsydra'] = {
+  cmd = { 'clep', 'lsp' },
+  filetypes = { 'markdown' },
+  root_dir = function(bufnr, on_dir)
+    local root = vim.fs.root(bufnr, '.clepsydra')
+    if root then on_dir(root) end
+  end,
+}
+vim.lsp.enable('clepsydra')
+```
+
+`root_dir` becomes the workspace root the LSP resolves from: it searches
+that root's ancestors for a `.clepsydra` directory and, failing that, falls
+back to the usual `config.toml` lookup. Because each Neovim workspace sends
+its own root, multiple vaults just work without any shared config.
+
+Full capability list, save-time move behavior, and troubleshooting:
+`docs/lsp.md`.
+
+## 9) Optional: Browser extension
 
 For local install and setup instructions:
 
@@ -171,3 +207,8 @@ For local install and setup instructions:
   - Confirm backend is running on `http://127.0.0.1:3000` and `server.dev_mode = true`.
 - **`vault already initialized`**
   - Use a new path, or reuse the existing initialized vault.
+- **Neovim LSP fails to initialize / attaches then stops**
+  - No `.clepsydra` directory was found above the workspace root, and no
+    `config.toml` resolved either. Check `:LspLog` and run
+    `clep config path --trace` from the same directory. Details:
+    `docs/lsp.md`.

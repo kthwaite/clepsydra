@@ -6,6 +6,7 @@ pub mod hover;
 pub mod queries;
 pub mod references;
 pub mod rename;
+pub mod state;
 pub mod symbols;
 
 #[cfg(test)]
@@ -19,23 +20,71 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::api::AppState;
+use crate::vault::path::VaultPath;
+use crate::vault::sync::ChangeEvent;
 
-/// LSP backend holding the shared vault state and per-document data.
+/// LSP backend holding the per-document data and late-initialized vault state.
+///
+/// `vault_state` is empty until `initialize` resolves the workspace root and
+/// opens a read-only vault + in-memory index (see `state::open_lsp_state`).
+/// The LSP process never writes vault files (ADR 0001).
 pub struct LspBackend {
     /// The tower-lsp client handle for sending notifications/requests to the editor.
     pub client: Client,
-    /// Shared application state (vault, index, etc.).
-    pub state: Arc<AppState>,
-    /// Open documents keyed by URI.
-    pub documents: Mutex<HashMap<Url, document::Document>>,
+    /// Vault + index, opened during `initialize` once the workspace root is known.
+    pub vault_state: tokio::sync::OnceCell<Arc<state::LspState>>,
+    /// Open documents keyed by URI. `Arc`-wrapped so the spawned watcher task
+    /// (see `spawn_vault_watcher`) can share ownership with the backend.
+    pub documents: Arc<Mutex<HashMap<Url, document::Document>>>,
     /// Cached snapshot of canonical names → page paths for diagnostic checks.
     pub canonical_names: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// The debounced filesystem watcher keeping the read-only index fresh
+    /// (`spawn_vault_watcher`, started from `initialized`). `None` before
+    /// `initialized` runs and in tests that don't exercise the watcher.
+    pub watcher: std::sync::Mutex<Option<crate::vault::sync::watcher::VaultWatcher>>,
+}
+
+impl LspBackend {
+    /// State accessor for request handlers (jsonrpc error before initialize).
+    fn state(&self) -> tower_lsp::jsonrpc::Result<Arc<state::LspState>> {
+        self.vault_state.get().cloned().ok_or_else(|| {
+            let mut e = tower_lsp::jsonrpc::Error::internal_error();
+            e.message = "clepsydra: vault not initialized".to_string().into();
+            e
+        })
+    }
+    /// State accessor for notification handlers (silently skip before initialize).
+    fn state_opt(&self) -> Option<Arc<state::LspState>> {
+        self.vault_state.get().cloned()
+    }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for LspBackend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let cwd = std::env::current_dir().map_err(|e| {
+            let mut err = tower_lsp::jsonrpc::Error::internal_error();
+            err.message = format!("clepsydra: cannot read cwd: {e}").into();
+            err
+        })?;
+        let root = state::resolve_lsp_root(&params, &cwd).map_err(|msg| {
+            let mut err = tower_lsp::jsonrpc::Error::internal_error();
+            err.message = format!("clepsydra: {msg}").into();
+            err
+        })?;
+        let opened = tokio::task::spawn_blocking(move || state::open_lsp_state(&root))
+            .await
+            .map_err(|e| {
+                let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                err.message = format!("clepsydra: vault open task failed: {e}").into();
+                err
+            })?
+            .map_err(|e| {
+                let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                err.message = format!("clepsydra: cannot open vault: {e}").into();
+                err
+            })?;
+        let _ = self.vault_state.set(Arc::new(opened));
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 position_encoding: Some(PositionEncodingKind::UTF8),
@@ -77,6 +126,12 @@ impl LanguageServer for LspBackend {
 
     async fn initialized(&self, _params: InitializedParams) {
         self.refresh_canonical_names().await;
+        if let Some(state) = self.state_opt() {
+            match self.spawn_vault_watcher(Arc::clone(&state)) {
+                Ok(w) => *self.watcher.lock().unwrap() = Some(w),
+                Err(e) => tracing::warn!("lsp watcher failed to start: {e}"),
+            }
+        }
         self.client
             .log_message(MessageType::INFO, "clepsydra LSP initialized")
             .await;
@@ -136,6 +191,9 @@ impl LanguageServer for LspBackend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
+        let Some(state) = self.state_opt() else {
+            return;
+        };
 
         // Flush index update for this file
         let vault_path = match self.uri_to_vault_path(&uri) {
@@ -143,49 +201,29 @@ impl LanguageServer for LspBackend {
             None => return,
         };
 
-        if let Err(e) = self.state.index.index_page(vault_path.clone()).await {
+        if let Err(e) = state.index.index_page(vault_path.clone()).await {
             tracing::error!("index flush on save failed: {e}");
             return;
         }
         let path = vault_path.as_str().to_string();
-        if let Err(e) = self.state.index.resolve_links_for_page(vault_path).await {
+        if let Err(e) = state.index.resolve_links_for_page(vault_path).await {
             tracing::error!("link resolution on save failed: {e}");
         }
 
-        // Best-effort reconcile: a page whose declared kind/project points to a
-        // different folder is moved (and inbound links rewritten). Conservative
-        // (undeclared pages are untouched). A failure is logged, never fatal.
-        let hooks = self.state.hooks.clone();
+        // Reindex without reconciling folder placement: the standalone LSP is
+        // read-only (ADR 0001) — `clep serve`'s watcher owns healing folder
+        // drift (a page whose declared kind/project no longer matches its
+        // folder). This just keeps completion/diagnostics fresh.
         let reconcile_path = path.clone();
-        let reconcile = self
-            .state
-            .index
-            .with_index(move |index, vault| {
-                crate::vault::reconcile::reconcile_page(vault, index, &reconcile_path, &hooks)
-            })
-            .await;
-        match reconcile {
-            Err(e) | Ok(Err(e)) => {
-                tracing::warn!("did_save reconcile failed for {path}: {e}");
-            }
-            Ok(Ok(Some(new_path))) => {
-                // The file moved on disk; the editor's open buffer still points
-                // at the old URI. Full rename plumbing (workspace/didRenameFiles)
-                // is a v1 follow-up — for now just notify the operator. Best-effort.
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!(
-                            "clepsydra: moved {path} → {new_path} (folder follows kind/project)"
-                        ),
-                    )
+        match crate::vault::path::VaultPath::new(&reconcile_path) {
+            Ok(vp) => {
+                let _ = state
+                    .index
+                    .process_sync_events(vec![crate::vault::sync::ChangeEvent::Upsert(vp)])
                     .await;
             }
-            Ok(Ok(None)) => {}
+            Err(e) => tracing::warn!("did_save reindex failed for {reconcile_path}: {e}"),
         }
-
-        // Refresh canonical name snapshot
-        self.refresh_canonical_names().await;
 
         // Mark document as clean
         {
@@ -195,17 +233,11 @@ impl LanguageServer for LspBackend {
             }
         }
 
-        // Re-publish diagnostics for all open documents (snapshot changed)
-        let doc_uris: Vec<Url> = {
-            let docs = self.documents.lock().await;
-            docs.keys().cloned().collect()
-        };
-        for doc_uri in doc_uris {
-            let docs = self.documents.lock().await;
-            if let Some(doc) = docs.get(&doc_uri) {
-                self.publish_diagnostics_for(&doc_uri, doc).await;
-            }
-        }
+        // Refresh canonical name snapshot and re-publish diagnostics for all
+        // open documents (snapshot changed). Shared with the watch-resync
+        // path (`resync_from_watch_batch`) so the two flows cannot drift.
+        refresh_names_and_republish(&self.client, &state, &self.documents, &self.canonical_names)
+            .await;
     }
 
     async fn goto_definition(
@@ -229,17 +261,17 @@ impl LanguageServer for LspBackend {
             None => return Ok(None),
         };
 
+        let state = self.state()?;
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let target_path =
-            crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
-                .await;
+            crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
         let target_path = match target_path {
             Some(p) => p,
             None => return Ok(None),
         };
 
-        let abs_path = self.state.vault.resolve(
+        let abs_path = state.vault.resolve(
             &crate::vault::path::VaultPath::new(&target_path)
                 .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?,
         );
@@ -268,16 +300,16 @@ impl LanguageServer for LspBackend {
             }
         };
 
+        let state = self.state()?;
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let path =
-            crate::lsp::queries::canonical_to_vault_path(&self.state.index, canonical.as_str())
-                .await;
+            crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
 
         let content = match path {
             Some(path) => {
                 let vault_path = crate::vault::path::VaultPath::new(&path)
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-                let abs_path = self.state.vault.resolve(&vault_path);
+                let abs_path = state.vault.resolve(&vault_path);
                 let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
                     Ok(file_content) => {
                         let (title, body) =
@@ -372,6 +404,7 @@ impl LanguageServer for LspBackend {
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
+        let state = self.state()?;
 
         // Determine target vault path: either link target or current file
         let target_vp = {
@@ -386,11 +419,9 @@ impl LanguageServer for LspBackend {
 
             if let Some(target_raw) = link_target {
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
-                let path = crate::lsp::queries::canonical_to_vault_path(
-                    &self.state.index,
-                    canonical.as_str(),
-                )
-                .await;
+                let path =
+                    crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str())
+                        .await;
 
                 match path {
                     Some(p) => match crate::vault::path::VaultPath::new(&p) {
@@ -407,14 +438,13 @@ impl LanguageServer for LspBackend {
             }
         };
 
-        let backlinks = self
-            .state
+        let backlinks = state
             .index
             .backlinks(target_vp, 0)
             .await
             .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
 
-        let vault_root = self.state.vault.root();
+        let vault_root = state.vault.root();
         let mut locations = Vec::new();
         for bl in &backlinks {
             let source_vp = match crate::vault::path::VaultPath::new(&bl.source_path) {
@@ -445,11 +475,12 @@ impl LanguageServer for LspBackend {
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
         let query = params.query.trim().to_string();
-        let vault_root = self.state.vault.root().to_path_buf();
+        let state = self.state()?;
+        let vault_root = state.vault.root().to_path_buf();
 
         let results: Vec<(String, Option<String>)> = if query.is_empty() {
             // Empty query: return pages sorted by path
-            self.state
+            state
                 .index
                 .with_index(
                     move |index, _| -> std::result::Result<Vec<_>, rusqlite::Error> {
@@ -470,7 +501,7 @@ impl LanguageServer for LspBackend {
                 .unwrap_or_default()
         } else {
             // FTS5 search
-            self.state
+            state
                 .index
                 .search(query, 50)
                 .await
@@ -542,10 +573,11 @@ impl LanguageServer for LspBackend {
     }
 
     async fn code_lens_resolve(&self, lens: CodeLens) -> Result<CodeLens> {
+        let state = self.state()?;
         let vault_path_str = lens.data.as_ref().and_then(|v| v.as_str()).unwrap_or("");
 
         let count = if let Ok(vp) = crate::vault::path::VaultPath::new(vault_path_str) {
-            self.state
+            state
                 .index
                 .backlinks(vp, 0)
                 .await
@@ -624,6 +656,7 @@ impl LanguageServer for LspBackend {
             Some(vp) => vp,
             None => return Ok(None),
         };
+        let state = self.state()?;
 
         // ---------------------------------------------------------------
         // 2. Compute new VaultPath
@@ -635,7 +668,7 @@ impl LanguageServer for LspBackend {
         // 3. Check for conflicts
         // ---------------------------------------------------------------
         if new_vp.as_str() != old_vp.as_str() {
-            let new_abs = self.state.vault.resolve(&new_vp);
+            let new_abs = state.vault.resolve(&new_vp);
             if new_abs.exists() {
                 return Err(tower_lsp::jsonrpc::Error::new(
                     tower_lsp::jsonrpc::ErrorCode::InvalidParams,
@@ -649,7 +682,7 @@ impl LanguageServer for LspBackend {
         let old_canonical_names: Vec<String> = {
             let old_path = old_vp.as_str().to_string();
             flatten_index_result(
-                self.state
+                state
                     .index
                     .with_index(move |index, _| {
                         rename::fetch_canonical_names_for_path(index.connection(), &old_path)
@@ -669,7 +702,7 @@ impl LanguageServer for LspBackend {
             let old_path = old_vp.as_str().to_string();
             let cn_list = old_canonical_names.clone();
             flatten_index_result(
-                self.state
+                state
                     .index
                     .with_index(move |index, _| {
                         rename::find_referring_paths(index.connection(), &old_path, &cn_list)
@@ -685,7 +718,7 @@ impl LanguageServer for LspBackend {
 
         // 6a. TextDocumentEdit on the target page — update frontmatter title
         // (Must come BEFORE RenameFile so the edit targets a URI that still exists.)
-        let old_abs = self.state.vault.resolve(&old_vp);
+        let old_abs = state.vault.resolve(&old_vp);
         let old_uri = file_uri(&old_abs)?;
 
         match self
@@ -698,7 +731,7 @@ impl LanguageServer for LspBackend {
 
         // 6b. File rename operation (if path changes)
         if new_vp.as_str() != old_vp.as_str() {
-            let new_abs = self.state.vault.resolve(&new_vp);
+            let new_abs = state.vault.resolve(&new_vp);
             let new_uri = file_uri(&new_abs)?;
             ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
                 RenameFile {
@@ -729,6 +762,7 @@ impl LanguageServer for LspBackend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
+        let state = self.state()?;
         let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
         // Extract link data and body text in a single lock scope, then drop
@@ -767,7 +801,7 @@ impl LanguageServer for LspBackend {
                 "unresolved-link" => {
                     if let Some(action) = code_action::build_create_page_action(
                         &link.target_raw,
-                        self.state.vault.root(),
+                        state.vault.root(),
                         diag,
                     ) {
                         actions.push(action);
@@ -853,46 +887,68 @@ fn file_uri(abs: &std::path::Path) -> Result<Url> {
 
 impl LspBackend {
     /// Convert an LSP URI to a vault-relative path.
-    pub(crate) fn uri_to_vault_path(&self, uri: &Url) -> Option<crate::vault::path::VaultPath> {
-        let file_path = uri.to_file_path().ok()?;
-        let rel = file_path.strip_prefix(self.state.vault.root()).ok()?;
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
-        crate::vault::path::VaultPath::new(&rel_str).ok()
+    ///
+    /// Returns `None` before `initialize` opens the vault (no root to strip
+    /// against), matching the "not part of the vault" case.
+    pub(crate) fn uri_to_vault_path(&self, uri: &Url) -> Option<VaultPath> {
+        let state = self.state_opt()?;
+        vault_path_for_uri(&state, uri)
     }
 
     /// Reload the canonical name snapshot from the index.
     ///
     /// Builds a map from canonical name to all page paths that share it,
-    /// enabling both unresolved-link and ambiguous-link diagnostics.
+    /// enabling both unresolved-link and ambiguous-link diagnostics. A no-op
+    /// before `initialize` opens the vault.
     pub(crate) async fn refresh_canonical_names(&self) {
-        let result = self
-            .state
-            .index
-            .with_index(
-                |index, _| -> std::result::Result<HashMap<String, Vec<String>>, rusqlite::Error> {
-                    let mut stmt = index.connection().prepare(
-                        "SELECT cn.canonical_name, p.path \
-                         FROM canonical_names cn \
-                         JOIN pages p ON p.id = cn.page_id \
-                         ORDER BY cn.canonical_name",
-                    )?;
-                    let mut map: HashMap<String, Vec<String>> = HashMap::new();
-                    let rows = stmt.query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?;
-                    for row in rows.flatten() {
-                        map.entry(row.0).or_default().push(row.1);
-                    }
-                    Ok(map)
-                },
-            )
-            .await;
+        let Some(state) = self.state_opt() else {
+            return;
+        };
+        refresh_canonical_names(&state, &self.canonical_names).await;
+    }
 
-        match result {
-            Ok(Ok(names)) => *self.canonical_names.write().await = names,
-            Ok(Err(e)) => tracing::error!("failed to load canonical names: {e}"),
-            Err(e) => tracing::error!("index thread error loading canonical names: {e}"),
-        }
+    /// Start the debounced vault watcher and spawn the resync loop that
+    /// consumes its batches.
+    ///
+    /// The returned `VaultWatcher` must be kept alive (stored on
+    /// `self.watcher`) for the process lifetime — dropping it stops the
+    /// underlying `notify` watch. Each drained batch is handed to
+    /// `resync_from_watch_batch`, which reindexes, refreshes the canonical
+    /// snapshot, republishes diagnostics, and notifies on external moves of
+    /// open documents.
+    fn spawn_vault_watcher(
+        &self,
+        state: Arc<state::LspState>,
+    ) -> std::result::Result<
+        crate::vault::sync::watcher::VaultWatcher,
+        notify_debouncer_mini::notify::Error,
+    > {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let watcher = crate::vault::sync::watcher::VaultWatcher::start(
+            state.vault.root().to_path_buf(),
+            std::time::Duration::from_millis(500),
+            tx,
+        )?;
+        let client = self.client.clone();
+        let documents = Arc::clone(&self.documents);
+        let canonical_names = Arc::clone(&self.canonical_names);
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                let mut batch = vec![event];
+                while let Ok(next) = rx.try_recv() {
+                    batch.push(next);
+                }
+                resync_from_watch_batch(
+                    client.clone(),
+                    Arc::clone(&state),
+                    Arc::clone(&documents),
+                    Arc::clone(&canonical_names),
+                    batch,
+                )
+                .await;
+            }
+        });
+        Ok(watcher)
     }
 
     // -----------------------------------------------------------------------
@@ -924,7 +980,7 @@ impl LspBackend {
                 // Resolve target_raw to a VaultPath via canonical name lookup
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
                 let target_path: Option<String> = self
-                    .state
+                    .state()?
                     .index
                     .with_index({
                         let cn = canonical.as_str().to_string();
@@ -1014,13 +1070,16 @@ impl LspBackend {
         old_canonical_names: &[String],
         new_name: &str,
     ) -> Vec<DocumentChangeOperation> {
+        let Some(state) = self.state_opt() else {
+            return Vec::new();
+        };
         let mut ops: Vec<DocumentChangeOperation> = Vec::new();
         for ref_path_str in referring_paths {
             let ref_vp = match crate::vault::path::VaultPath::new(ref_path_str) {
                 Ok(vp) => vp,
                 Err(_) => continue,
             };
-            let ref_abs = self.state.vault.resolve(&ref_vp);
+            let ref_abs = state.vault.resolve(&ref_vp);
             let ref_uri = match Url::from_file_path(&ref_abs) {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -1063,7 +1122,7 @@ impl LspBackend {
     async fn complete_wikilinks(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
         let prefix = prefix.to_string();
         let results: Vec<(String, String, Option<String>)> = self
-            .state
+            .state()?
             .index
             .with_index({
                 let prefix = prefix.clone();
@@ -1118,7 +1177,7 @@ impl LspBackend {
     async fn complete_tags(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
         let prefix = prefix.to_string();
         let tags: Vec<String> = self
-            .state
+            .state()?
             .index
             .with_index({
                 let prefix = prefix.clone();
@@ -1161,7 +1220,10 @@ impl LspBackend {
         meta: &crate::vault::page::PageMeta,
         uri: &Url,
     ) -> Vec<CompletionItem> {
-        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let Some(state) = self.state_opt() else {
+            return Vec::new();
+        };
+        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
         let path = self
             .uri_to_vault_path(uri)
             .map(|vp| vp.as_str().to_string())
@@ -1210,7 +1272,8 @@ impl LspBackend {
         prefix: &str,
     ) -> Result<Vec<CompletionItem>> {
         use crate::vault::base::PropertyType;
-        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
+        let state = self.state()?;
+        let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
 
         let mut options: Vec<String> = Vec::new();
         let mut open_vocabulary = false;
@@ -1232,8 +1295,7 @@ impl LspBackend {
         if options.is_empty() && open_vocabulary {
             // Open vocabulary: offer values observed anywhere in the vault.
             let key = key.to_string();
-            options = self
-                .state
+            options = state
                 .index
                 .with_index(
                     move |index, _| -> std::result::Result<Vec<String>, rusqlite::Error> {
@@ -1292,8 +1354,10 @@ impl LspBackend {
             }
         }
         // Fall back: read from disk, build throwaway Document
-        if let Some(vp) = self.uri_to_vault_path(source_uri) {
-            let abs_path = self.state.vault.resolve(&vp);
+        if let Some(vp) = self.uri_to_vault_path(source_uri)
+            && let Some(state) = self.state_opt()
+        {
+            let abs_path = state.vault.resolve(&vp);
             if let Ok(content) = tokio::fs::read_to_string(&abs_path).await {
                 let doc = document::Document::from_text(&content, 0);
                 return doc.body_span_to_range(start, end);
@@ -1308,38 +1372,212 @@ impl LspBackend {
     /// Reports unresolved links (no match) as warnings and ambiguous links
     /// (multiple matches) as informational diagnostics with related locations.
     async fn publish_diagnostics_for(&self, uri: &Url, doc: &document::Document) {
-        let names = self.canonical_names.read().await;
-        let mut diagnostics =
-            crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, self.state.vault.root());
-
-        // Frontmatter property diagnostics against the base registry.
-        let registry = crate::vault::base::BaseRegistry::load(self.state.vault.root());
-        let path = self
-            .uri_to_vault_path(uri)
-            .map(|vp| vp.as_str().to_string())
-            .unwrap_or_default();
-        diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
-            doc, &registry, &path, &names,
-        ));
-        drop(names);
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
-            .await;
+        let Some(state) = self.state_opt() else {
+            return;
+        };
+        publish_diagnostics_for(&self.client, &state, &self.canonical_names, uri, doc).await;
     }
 }
 
-/// Start the LSP server on stdio, using the given shared state.
+/// Convert an LSP URI to a vault-relative path, given an already-resolved
+/// `LspState`. Shared core of `LspBackend::uri_to_vault_path` and the
+/// free-function diagnostics path (`publish_diagnostics_for` below), which
+/// run without a `&self` to call the method on.
+fn vault_path_for_uri(state: &state::LspState, uri: &Url) -> Option<VaultPath> {
+    let file_path = uri.to_file_path().ok()?;
+    let root = state.vault.root();
+    // `Vault::open` canonicalizes the root, but the editor's URI is whatever
+    // path the user opened — often through a symlink (macOS `/tmp` →
+    // `/private/tmp`, an iCloud or dotfiles symlink to the vault). Try the
+    // canonicalized path first, then the raw one, so neither a symlinked root
+    // nor a not-yet-created file (canonicalize fails on those) silently
+    // detaches the document from the vault.
+    let rel = file_path
+        .canonicalize()
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .strip_prefix(root)
+                .map(std::path::Path::to_path_buf)
+                .ok()
+        })
+        .or_else(|| {
+            file_path
+                .strip_prefix(root)
+                .map(std::path::Path::to_path_buf)
+                .ok()
+        })?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    VaultPath::new(&rel_str).ok()
+}
+
+/// Free-function core of `LspBackend::refresh_canonical_names` — reloads the
+/// canonical name snapshot from the index. Shared with the watch-resync path
+/// (via `refresh_names_and_republish`) so the two flows cannot drift.
+async fn refresh_canonical_names(
+    state: &state::LspState,
+    canonical_names: &RwLock<HashMap<String, Vec<String>>>,
+) {
+    let result = state
+        .index
+        .with_index(
+            |index, _| -> std::result::Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+                let mut stmt = index.connection().prepare(
+                    "SELECT cn.canonical_name, p.path \
+                     FROM canonical_names cn \
+                     JOIN pages p ON p.id = cn.page_id \
+                     ORDER BY cn.canonical_name",
+                )?;
+                let mut map: HashMap<String, Vec<String>> = HashMap::new();
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows.flatten() {
+                    map.entry(row.0).or_default().push(row.1);
+                }
+                Ok(map)
+            },
+        )
+        .await;
+
+    match result {
+        Ok(Ok(names)) => *canonical_names.write().await = names,
+        Ok(Err(e)) => tracing::error!("failed to load canonical names: {e}"),
+        Err(e) => tracing::error!("index thread error loading canonical names: {e}"),
+    }
+}
+
+/// Free-function core of `LspBackend::publish_diagnostics_for`. Shared with
+/// the watch-resync path (via `refresh_names_and_republish`) so the two
+/// flows cannot drift.
+async fn publish_diagnostics_for(
+    client: &Client,
+    state: &state::LspState,
+    canonical_names: &RwLock<HashMap<String, Vec<String>>>,
+    uri: &Url,
+    doc: &document::Document,
+) {
+    let names = canonical_names.read().await;
+    let mut diagnostics =
+        crate::lsp::diagnostics::compute_link_diagnostics(doc, &names, state.vault.root());
+
+    // Frontmatter property diagnostics against the base registry.
+    let registry = crate::vault::base::BaseRegistry::load(state.vault.root());
+    let path = vault_path_for_uri(state, uri)
+        .map(|vp| vp.as_str().to_string())
+        .unwrap_or_default();
+    diagnostics.extend(crate::lsp::diagnostics::compute_property_diagnostics(
+        doc, &registry, &path, &names,
+    ));
+    drop(names);
+    client
+        .publish_diagnostics(uri.clone(), diagnostics, Some(doc.version))
+        .await;
+}
+
+/// Refresh the canonical name snapshot and republish diagnostics for every
+/// open document. This is the exact tail of `did_save`'s post-write flow,
+/// extracted so the watch-resync path (`resync_from_watch_batch`) drives the
+/// identical sequence — the two paths cannot drift apart.
+async fn refresh_names_and_republish(
+    client: &Client,
+    state: &state::LspState,
+    documents: &Arc<Mutex<HashMap<Url, document::Document>>>,
+    canonical_names: &Arc<RwLock<HashMap<String, Vec<String>>>>,
+) {
+    refresh_canonical_names(state, canonical_names).await;
+
+    let doc_uris: Vec<Url> = {
+        let docs = documents.lock().await;
+        docs.keys().cloned().collect()
+    };
+    for doc_uri in doc_uris {
+        let docs = documents.lock().await;
+        if let Some(doc) = docs.get(&doc_uri) {
+            publish_diagnostics_for(client, state, canonical_names, &doc_uri, doc).await;
+        }
+    }
+}
+
+/// Pair Remove/Upsert events sharing a filename: a folder-projection move
+/// (server-side reconcile) shows up as exactly such a pair in one batch.
+fn pair_moves_by_filename(batch: &[ChangeEvent]) -> Vec<(VaultPath, VaultPath)> {
+    let mut moves = Vec::new();
+    for removed in batch {
+        let ChangeEvent::Remove(old) = removed else {
+            continue;
+        };
+        let old_name = old.as_str().rsplit('/').next().unwrap_or(old.as_str());
+        for added in batch {
+            let ChangeEvent::Upsert(new) = added else {
+                continue;
+            };
+            let new_name = new.as_str().rsplit('/').next().unwrap_or(new.as_str());
+            if old_name == new_name && old.as_str() != new.as_str() {
+                moves.push((old.clone(), new.clone()));
+            }
+        }
+    }
+    moves
+}
+
+/// Process one drained batch from the vault watcher: reindex, refresh the
+/// canonical snapshot, republish diagnostics for open docs, and log a
+/// message for any open document that the batch shows was moved externally
+/// (e.g. `clep serve`'s folder-follows-metadata reconcile).
 ///
-/// This function returns when the client disconnects (stdin EOF).
-pub async fn run_lsp(state: Arc<AppState>) {
+/// Free function (not a method) so the spawned loop in `spawn_vault_watcher`
+/// can own clones of the backend's shared state independent of `&self`.
+async fn resync_from_watch_batch(
+    client: Client,
+    state: Arc<state::LspState>,
+    documents: Arc<Mutex<HashMap<Url, document::Document>>>,
+    canonical_names: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    batch: Vec<ChangeEvent>,
+) {
+    let moves = pair_moves_by_filename(&batch);
+    if let Err(e) = state.index.process_sync_events(batch).await {
+        tracing::warn!("lsp watch resync failed: {e}");
+        return;
+    }
+    // Refresh snapshot + republish, mirroring the existing post-save flow.
+    refresh_names_and_republish(&client, &state, &documents, &canonical_names).await;
+
+    for (old, new) in moves {
+        // Match on the resolved vault path rather than on a reconstructed URI:
+        // the editor's document URIs may run through a symlinked workspace
+        // root, so they need not be string-equal to `root.join(old)`.
+        let is_open = {
+            let documents = documents.lock().await;
+            documents
+                .keys()
+                .any(|uri| vault_path_for_uri(&state, uri).as_ref() == Some(&old))
+        };
+        if is_open {
+            client
+                .log_message(
+                    MessageType::INFO,
+                    format!(
+                        "clepsydra: {old} moved to {new} (folder follows kind/project); reopen the file"
+                    ),
+                )
+                .await;
+        }
+    }
+}
+
+/// Start the LSP server on stdio. The vault opens during `initialize`
+/// (workspace root → config fallback). Returns on client disconnect.
+pub async fn run_lsp() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::new(|client| LspBackend {
         client,
-        state,
-        documents: Mutex::new(HashMap::new()),
+        vault_state: tokio::sync::OnceCell::new(),
+        documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
+        watcher: std::sync::Mutex::new(None),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -1349,6 +1587,8 @@ pub async fn run_lsp(state: Arc<AppState>) {
 mod tests {
     use super::LspBackend;
     use super::test_support::*;
+    use super::{ChangeEvent, VaultPath, pair_moves_by_filename, resync_from_watch_batch};
+    use std::sync::Arc;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -1359,6 +1599,24 @@ mod tests {
         open_doc(&backend, &uri, "# Note\n\nbody\n").await;
         let docs = backend.documents.lock().await;
         assert!(docs.contains_key(&uri));
+    }
+
+    #[tokio::test]
+    async fn initialize_opens_vault_from_root_uri() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(root.join("Note.md"), "# Note\n").unwrap();
+
+        let backend = make_uninitialized_backend();
+        #[allow(deprecated)]
+        let params = InitializeParams {
+            root_uri: Some(Url::from_file_path(&root).unwrap()),
+            ..Default::default()
+        };
+        let result = backend.initialize(params).await.unwrap();
+        assert!(result.capabilities.completion_provider.is_some());
+        assert!(backend.state().is_ok());
     }
 
     #[tokio::test]
@@ -1481,23 +1739,158 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn did_save_reconciles_declared_kind() {
-        let (backend, tmp) = make_backend(&[("notes/q.md", "---\ntype: quote\n---\nbody\n")]);
+    async fn did_save_reindexes_but_never_moves_files() {
+        // A page that declares `type: quote` while living under notes/ —
+        // declared kind mismatches its folder (mirrors lib.rs's
+        // serve_startup_reconciles_drifted_pages fixture). Only `clep
+        // serve`'s watcher reconciles folder drift (Task 3); the standalone
+        // LSP must never move vault files itself.
+        let initial = "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nbody\n";
+        let (backend, tmp) = make_backend(&[("notes/q.md", initial)]);
+        let root = tmp.path().join("vault");
         let uri = uri_for(&backend, "notes/q.md");
-        open_doc(&backend, &uri, "---\ntype: quote\n---\nbody\n").await;
+        open_doc(&backend, &uri, initial).await;
+
+        // The editor writes the saved content to disk before sending didSave.
+        let updated = "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntype: quote\n---\nupdated needle body\n";
+        std::fs::write(root.join("notes/q.md"), updated).unwrap();
+
         let params = DidSaveTextDocumentParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             text: None,
         };
         backend.did_save(params).await;
-        let root = tmp.path().join("vault");
+
         assert!(
-            !root.join("notes/q.md").exists(),
-            "source path should be gone after reconcile"
+            root.join("notes/q.md").exists(),
+            "did_save must never move the file off its saved path"
         );
         assert!(
-            root.join("quotes/q.md").exists(),
-            "page should be moved to projected folder"
+            !root.join("quotes/q.md").exists(),
+            "did_save must not reconcile declared kind into a projected folder"
+        );
+
+        let results = backend
+            .state()
+            .unwrap()
+            .index
+            .search("needle".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|r| r.path == "notes/q.md"),
+            "index should reflect the saved content: {results:?}"
+        );
+    }
+
+    /// The Global Constraint (ADR 0001): the standalone LSP process must never
+    /// write vault files. Frontmatter repair is the sharpest edge — a page with
+    /// no frontmatter at all, and a page whose frontmatter lacks `created_at`,
+    /// both make `parse_or_repair_frontmatter` ask for a rewrite. Under
+    /// `clep serve` that rewrite lands on disk; under `clep lsp` it must stay
+    /// in memory, at `initialize` (`open_lsp_state`) and on `didSave` alike.
+    #[tokio::test]
+    async fn lsp_never_rewrites_vault_files_to_repair_frontmatter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+
+        // No frontmatter fences at all.
+        let loose = "# Loose\n\nneedleloose\n";
+        std::fs::write(root.join("Loose.md"), loose).unwrap();
+        // Valid frontmatter, but missing created_at/updated_at.
+        let partial = "+++\nid = \"0190f8a0-0000-7000-8000-0000000000b1\"\n+++\n\nneedlepartial\n";
+        std::fs::write(root.join("Partial.md"), partial).unwrap();
+
+        let before = snapshot_tree(&root);
+
+        // initialize: full index build over both pages.
+        let backend = backend_for_root(&root);
+        assert_eq!(
+            snapshot_tree(&root),
+            before,
+            "open_lsp_state must leave every vault file byte-identical"
+        );
+
+        // didSave on each page: index_page runs the same repair path.
+        for rel in ["Loose.md", "Partial.md"] {
+            let uri = uri_for(&backend, rel);
+            open_doc(
+                &backend,
+                &uri,
+                &String::from_utf8(before[rel].clone()).unwrap(),
+            )
+            .await;
+            backend
+                .did_save(DidSaveTextDocumentParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    text: None,
+                })
+                .await;
+        }
+        assert_eq!(
+            snapshot_tree(&root),
+            before,
+            "did_save must leave every vault file byte-identical"
+        );
+
+        // The repaired metadata is still indexed in memory — read-only does not
+        // mean "unindexed".
+        let results = backend
+            .state()
+            .unwrap()
+            .index
+            .search("needleloose".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|r| r.path == "Loose.md"),
+            "frontmatter-less page must still be indexed: {results:?}"
+        );
+    }
+
+    /// A workspace opened through a symlink (macOS `/tmp` → `/private/tmp`, an
+    /// iCloud or dotfiles link) still resolves to vault paths: `Vault::open`
+    /// canonicalizes the root, so a raw `strip_prefix` would fail for every
+    /// document and silently disable didSave, diagnostics, and references.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resolves_documents_opened_through_a_symlinked_root() {
+        let initial = "# Note\n\nneedlebefore\n";
+        let (backend, tmp) = make_backend(&[("Note.md", initial)]);
+        let root = tmp.path().join("vault");
+        let linked_root = tmp.path().join("linked-vault");
+        std::os::unix::fs::symlink(&root, &linked_root).unwrap();
+
+        // The editor's URI travels through the symlink, not the canonical root.
+        let uri = Url::from_file_path(linked_root.join("Note.md")).unwrap();
+        assert_ne!(uri, uri_for(&backend, "Note.md"));
+        open_doc(&backend, &uri, initial).await;
+
+        std::fs::write(root.join("Note.md"), "# Note\n\nneedleafter\n").unwrap();
+        backend
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                text: None,
+            })
+            .await;
+
+        let results = backend
+            .state()
+            .unwrap()
+            .index
+            .search("needleafter".to_string(), 10)
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|r| r.path == "Note.md"),
+            "didSave through a symlinked root must reindex the page: {results:?}"
+        );
+
+        let docs = backend.documents.lock().await;
+        assert!(
+            !docs.get(&uri).unwrap().dirty,
+            "didSave through a symlinked root must clear the dirty flag"
         );
     }
 
@@ -1693,7 +2086,7 @@ mod tests {
             crate::lsp::diagnostics::compute_link_diagnostics(
                 doc,
                 &names,
-                backend.state.vault.root(),
+                backend.state().unwrap().vault.root(),
             )
         };
         let params = CodeActionParams {
@@ -1841,5 +2234,40 @@ mod tests {
             fm_labels.iter().any(|l| l.contains("Solar Cycle")),
             "{fm_labels:?}"
         );
+    }
+
+    // -- Phase 6: watcher-driven resync -------------------------------------
+
+    #[tokio::test]
+    async fn watch_batch_refreshes_canonical_names() {
+        let (backend, _tmp) = make_backend(&[("Note.md", "# Note\n")]);
+        backend.refresh_canonical_names().await;
+        let state = backend.state().unwrap();
+        // Simulate an external creation: write the file, then feed the batch.
+        std::fs::write(state.vault.root().join("Fresh.md"), "# Fresh\n").unwrap();
+        resync_from_watch_batch(
+            backend.client.clone(),
+            Arc::clone(&state),
+            Arc::clone(&backend.documents),
+            Arc::clone(&backend.canonical_names),
+            vec![crate::vault::sync::ChangeEvent::Upsert(
+                crate::vault::path::VaultPath::new("Fresh.md").unwrap(),
+            )],
+        )
+        .await;
+        let names = backend.canonical_names.read().await;
+        assert!(names.keys().any(|k| k.eq_ignore_ascii_case("fresh")));
+    }
+
+    #[test]
+    fn pairs_remove_and_upsert_by_filename() {
+        let batch = vec![
+            ChangeEvent::Remove(VaultPath::new("notes/20260807.a.abc123.md").unwrap()),
+            ChangeEvent::Upsert(VaultPath::new("projects/x/20260807.a.abc123.md").unwrap()),
+        ];
+        let moves = pair_moves_by_filename(&batch);
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].0.as_str(), "notes/20260807.a.abc123.md");
+        assert_eq!(moves[0].1.as_str(), "projects/x/20260807.a.abc123.md");
     }
 }

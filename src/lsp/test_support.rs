@@ -1,20 +1,17 @@
 //! Shared `#[cfg(test)]` helpers for driving `LspBackend` against a temp vault.
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use tempfile::TempDir;
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
 
-use crate::api::AppState;
 use crate::lsp::LspBackend;
 use crate::lsp::document::Document;
-use crate::vault::Vault;
-use crate::vault::cas::ContentStore;
-use crate::vault::index::VaultIndex;
-use crate::vault::index_handle::IndexHandle;
+use crate::lsp::state::open_lsp_state;
 use crate::vault::init::init_vault;
 
 /// Minimal `LanguageServer` impl whose only purpose is to let `LspService::new`
@@ -51,6 +48,19 @@ pub(crate) fn test_client() -> Client {
     slot.get().expect("client captured by factory").clone()
 }
 
+/// Build an `LspBackend` over an existing vault at `root`, opening it exactly
+/// the way `clep lsp` does (`open_lsp_state`: read-only in-memory index).
+pub(crate) fn backend_for_root(root: &Path) -> LspBackend {
+    let state = Arc::new(open_lsp_state(root).expect("open vault for LSP"));
+    LspBackend {
+        client: test_client(),
+        vault_state: tokio::sync::OnceCell::new_with(Some(state)),
+        documents: Arc::new(Mutex::new(HashMap::new())),
+        canonical_names: Arc::new(RwLock::new(HashMap::new())),
+        watcher: std::sync::Mutex::new(None),
+    }
+}
+
 /// Build an `LspBackend` over a fresh temp vault containing `files`
 /// (relative path, contents). The index is built and links resolved.
 pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
@@ -63,44 +73,44 @@ pub(crate) fn make_backend(files: &[(&str, &str)]) -> (LspBackend, TempDir) {
         std::fs::write(p, contents).unwrap();
     }
 
-    let vault = Vault::open(&root).unwrap();
-    let db_path = vault.root().join(".clepsydra/cache.db");
-    let mut index = VaultIndex::open(&db_path).unwrap();
-    index.build(&vault).unwrap();
-    index.resolve_links().unwrap();
+    (backend_for_root(&root), tmp)
+}
 
-    let cas = ContentStore::open(&tmp.path().join("cas")).unwrap();
-    let index_handle = IndexHandle::spawn(index, vault.clone());
-    let (change_tx, _rx) = broadcast::channel(64);
+/// Every file under `root`, as (vault-relative path, bytes). Used to assert
+/// that a read-only operation left the vault byte-identical.
+pub(crate) fn snapshot_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+    {
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .expect("entry under root")
+            .to_string_lossy()
+            .into_owned();
+        out.insert(rel, std::fs::read(entry.path()).expect("read vault file"));
+    }
+    out
+}
 
-    let state = Arc::new(AppState {
-        started_at: std::time::Instant::now(),
-        clock: Arc::new(crate::api::SystemClock),
-        vault,
-        index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
-        warnings: parking_lot::Mutex::new(Vec::new()),
-        change_tx,
-        hooks: Arc::new(vec![]),
-        delete_hooks: Arc::new(vec![]),
-        mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
-        archive_ingest_lock: tokio::sync::Mutex::new(()),
-        bcl: None,
-        location: parking_lot::RwLock::new(None),
-    });
-
-    let backend = LspBackend {
+/// Build an `LspBackend` with no vault state — as if `initialize` has not
+/// run yet. Only useful for exercising `initialize` itself.
+pub(crate) fn make_uninitialized_backend() -> LspBackend {
+    LspBackend {
         client: test_client(),
-        state,
-        documents: Mutex::new(HashMap::new()),
+        vault_state: tokio::sync::OnceCell::new(),
+        documents: Arc::new(Mutex::new(HashMap::new())),
         canonical_names: Arc::new(RwLock::new(HashMap::new())),
-    };
-    (backend, tmp)
+        watcher: std::sync::Mutex::new(None),
+    }
 }
 
 /// File URI for a vault-relative path under the backend's vault root.
 pub(crate) fn uri_for(backend: &LspBackend, rel: &str) -> Url {
-    Url::from_file_path(backend.state.vault.root().join(rel)).unwrap()
+    Url::from_file_path(backend.state().unwrap().vault.root().join(rel)).unwrap()
 }
 
 /// Open `text` as a document at `uri` (version 1) and refresh the

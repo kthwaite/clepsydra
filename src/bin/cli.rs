@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use clepsydra::doctor::{self, DoctorOpts};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::new_note::create_new_note;
-use clepsydra::{ServeOverrides, open_vault_and_index, run_server};
+use clepsydra::{ServeOverrides, open_vault_and_index, run_lsp_standalone, run_server};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -99,9 +99,6 @@ enum Commands {
         after_help = "Examples:\n  clepsydra serve\n  clepsydra serve --tls                 # HTTPS on the configured port\n  clepsydra serve --tls --port 3443     # HTTPS alongside a plain server\n\nHTTPS uses certs from [server.tls], or generates localhost ones with mkcert.\nTo let the iOS Simulator trust those: scripts/trust-simulator-ca.sh"
     )]
     Serve {
-        /// Start the LSP server on stdio alongside the HTTP server
-        #[arg(long)]
-        lsp: bool,
         /// Serve over HTTPS, generating localhost certs with mkcert if needed
         #[arg(long)]
         tls: bool,
@@ -109,6 +106,9 @@ enum Commands {
         #[arg(long, value_name = "PORT")]
         port: Option<u16>,
     },
+    /// Start the LSP server on stdio (standalone, read-only; the vault is
+    /// resolved from the editor's workspace root, falling back to config.toml)
+    Lsp,
     #[command(
         about = "Start the MCP server on stdio",
         long_about = "Speak MCP (Model Context Protocol) on stdio, proxying tool calls to the running Clepsydra HTTP API server.\n\nThe server is discovered via the usual config lookup:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\n`clep serve` must already be running; tool calls fail with a hint otherwise.",
@@ -261,8 +261,12 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             }
             Ok(report.exit_code(strict))
         }
-        Commands::Serve { lsp, tls, port } => {
-            run_server(lsp, ServeOverrides { tls, port }).await?;
+        Commands::Serve { tls, port } => {
+            run_server(ServeOverrides { tls, port }).await?;
+            Ok(0)
+        }
+        Commands::Lsp => {
+            run_lsp_standalone().await;
             Ok(0)
         }
         Commands::Mcp { allow_remote } => {
@@ -681,5 +685,11 @@ mod cli_tests {
     #[test]
     fn serve_rejects_a_port_outside_the_u16_range() {
         assert!(Cli::try_parse_from(["clepsydra", "serve", "--port", "70000"]).is_err());
+    }
+
+    #[test]
+    fn lsp_is_a_subcommand_and_serve_rejects_the_old_flag() {
+        assert!(Cli::try_parse_from(["clep", "lsp"]).is_ok());
+        assert!(Cli::try_parse_from(["clep", "serve", "--lsp"]).is_err());
     }
 }

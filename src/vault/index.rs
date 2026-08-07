@@ -280,34 +280,43 @@ pub fn reserve_code_number(
 pub struct VaultIndex {
     conn: Connection,
     derivers: Vec<Box<dyn Deriver>>,
+    /// Whether indexing may persist repaired frontmatter back to the vault.
+    ///
+    /// `true` for the on-disk index used by `clep serve` and the CLI: a page
+    /// with missing fences, a missing `id`, or missing timestamps is healed on
+    /// disk as it is indexed. `false` for the in-memory index used by the
+    /// standalone LSP process, which must never write vault files (ADR 0001) —
+    /// there the repaired metadata is still indexed, only the disk write is
+    /// skipped, leaving the file byte-identical.
+    repair_frontmatter: bool,
 }
 
 impl VaultIndex {
-    /// Open (or create) the index database at `db_path`.
+    /// Set up the pragmas, schema, and migrations for a SQLite connection.
     ///
-    /// Creates parent directories if needed, sets WAL journal mode and enables
-    /// foreign keys, then ensures the schema tables and indexes exist.
-    pub fn open(db_path: &Path) -> Result<Self, IndexError> {
-        // 1. Create parent directory if needed
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // 2. Open SQLite connection
-        let conn = Connection::open(db_path)?;
-
-        // 3. Pragmas
+    /// This is the shared post-connection initialization used by all constructors.
+    fn setup_connection(conn: &Connection) -> Result<(), IndexError> {
+        // 1. Pragmas
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
 
-        // 4. Run pre-schema migrations (column additions required before index creation)
-        migrate_links_add_target_block_id(&conn)?;
-        migrate_pages_add_kind_columns(&conn)?;
+        // 2. Run pre-schema migrations (column additions required before index creation)
+        migrate_links_add_target_block_id(conn)?;
+        migrate_pages_add_kind_columns(conn)?;
 
-        // 5. Execute schema
+        // 3. Execute schema
         conn.execute_batch(SCHEMA)?;
 
-        // 6. Migration: ensure links.target_id has ON DELETE SET NULL
-        migrate_links_fk(&conn)?;
+        // 4. Migration: ensure links.target_id has ON DELETE SET NULL
+        migrate_links_fk(conn)?;
+
+        Ok(())
+    }
+
+    /// Initialize an index from a ready SQLite connection with all derivers.
+    ///
+    /// Used internally by constructors that need a fully-setup connection.
+    fn from_connection(conn: Connection) -> Result<Self, IndexError> {
+        Self::setup_connection(&conn)?;
 
         Ok(Self {
             conn,
@@ -319,7 +328,23 @@ impl VaultIndex {
                 Box::new(PropertyDeriver),
                 Box::new(BlockDeriver),
             ],
+            repair_frontmatter: true,
         })
+    }
+
+    /// Open (or create) the index database at `db_path`.
+    ///
+    /// Creates parent directories if needed, sets WAL journal mode and enables
+    /// foreign keys, then ensures the schema tables and indexes exist.
+    pub fn open(db_path: &Path) -> Result<Self, IndexError> {
+        // 1. Create parent directory if needed
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // 2. Open SQLite connection and initialize
+        let conn = Connection::open(db_path)?;
+        Self::from_connection(conn)
     }
 
     /// Open the index database with NO derivers registered.
@@ -331,18 +356,24 @@ impl VaultIndex {
             fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(db_path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        migrate_links_add_target_block_id(&conn)?;
-        migrate_pages_add_kind_columns(&conn)?;
-        conn.execute_batch(SCHEMA)?;
-
-        // Migration: ensure links.target_id has ON DELETE SET NULL
-        migrate_links_fk(&conn)?;
+        Self::setup_connection(&conn)?;
 
         Ok(Self {
             conn,
             derivers: Vec::new(),
+            repair_frontmatter: true,
         })
+    }
+
+    /// Open an index backed by an in-memory SQLite database. Used by the
+    /// standalone LSP process, which must never write inside the vault: the
+    /// index is not merely off-vault, it also indexes read-only — repaired
+    /// frontmatter stays in memory instead of being written back to the page.
+    pub fn open_in_memory() -> Result<Self, IndexError> {
+        let conn = Connection::open_in_memory()?;
+        let mut index = Self::from_connection(conn)?;
+        index.repair_frontmatter = false;
+        Ok(index)
     }
 
     /// Borrow the underlying connection (primarily for test inspection).
@@ -393,9 +424,16 @@ impl VaultIndex {
             .optional()?;
         let force_rederive = stored_epoch.as_deref() != Some(epoch.as_str());
 
-        let (mut parsed_files, seen_paths) =
-            collect_indexed_pages(vault, &tx, &linkable_properties, force_rederive, &mut stats)?;
-        resolve_duplicate_uuids(&mut parsed_files, &mut stats)?;
+        let repair_frontmatter = self.repair_frontmatter;
+        let (mut parsed_files, seen_paths) = collect_indexed_pages(
+            vault,
+            &tx,
+            &linkable_properties,
+            force_rederive,
+            repair_frontmatter,
+            &mut stats,
+        )?;
+        resolve_duplicate_uuids(&mut parsed_files, repair_frontmatter, &mut stats)?;
         for pf in &parsed_files {
             upsert_indexed_page(pf, &tx, &self.derivers, &mut stats)?;
         }
@@ -549,7 +587,11 @@ impl VaultIndex {
             tracing::warn!("{}: {}", vault_path.as_str(), w);
         }
 
-        if rewrote_frontmatter {
+        // Persist the repair only when this index owns the vault on disk
+        // (`clep serve` / the CLI). A read-only index still indexes `meta` as
+        // repaired, but hashes the untouched on-disk bytes so an unchanged
+        // file keeps hashing the same on every re-index.
+        if rewrote_frontmatter && self.repair_frontmatter {
             content = write_page_content(&meta, &body);
             std::fs::write(&abs_path, &content).map_err(IndexError::Io)?;
         }
@@ -1653,6 +1695,7 @@ fn collect_indexed_pages(
     tx: &rusqlite::Transaction,
     linkable_properties: &[String],
     force_rederive: bool,
+    repair_frontmatter: bool,
     stats: &mut BuildStats,
 ) -> Result<(Vec<IndexedPage>, HashSet<String>), IndexError> {
     let mut parsed_files: Vec<IndexedPage> = Vec::new();
@@ -1701,7 +1744,10 @@ fn collect_indexed_pages(
         if let Some(w) = fm_warning {
             stats.warnings.push(format!("{rel_str}: {w}"));
         }
-        if rewrote_frontmatter {
+        // See `VaultIndex::repair_frontmatter`: a read-only index indexes the
+        // repaired `meta` but leaves the file on disk untouched, so the hash
+        // below stays the hash of the real bytes.
+        if rewrote_frontmatter && repair_frontmatter {
             content = write_page_content(&meta, &body);
             if let Err(e) = fs::write(abs_path, &content) {
                 stats
@@ -1760,9 +1806,11 @@ fn collect_indexed_pages(
 }
 
 /// Between passes: when pages share a UUID, keep the oldest (by created_at, then
-/// mtime) and reassign + rewrite the rest.
+/// mtime) and reassign + rewrite the rest. With `repair_frontmatter = false`
+/// the reassignment happens in memory only (see `VaultIndex::repair_frontmatter`).
 fn resolve_duplicate_uuids(
     parsed_files: &mut [IndexedPage],
+    repair_frontmatter: bool,
     stats: &mut BuildStats,
 ) -> Result<(), IndexError> {
     // Group parsed files by UUID
@@ -1812,12 +1860,14 @@ fn resolve_duplicate_uuids(
             // Update the in-memory meta with the new UUID
             loser.meta.id = new_uuid;
 
-            // Write the updated frontmatter back to disk
-            let new_content = write_page_content(&loser.meta, &loser.body);
-            fs::write(&loser.abs_path, &new_content)?;
+            // Write the updated frontmatter back to disk (owning indexes only).
+            if repair_frontmatter {
+                let new_content = write_page_content(&loser.meta, &loser.body);
+                fs::write(&loser.abs_path, &new_content)?;
 
-            // Recompute content hash after rewrite
-            loser.content_hash = blake3::hash(new_content.as_bytes()).to_hex().to_string();
+                // Recompute content hash after rewrite
+                loser.content_hash = blake3::hash(new_content.as_bytes()).to_hex().to_string();
+            }
         }
     }
 
@@ -2181,6 +2231,86 @@ mod kind_index_tests {
             )
             .unwrap();
         assert_eq!(wc, Some(5));
+    }
+
+    /// The on-disk index owns the vault: building it heals a page that has no
+    /// frontmatter, writing the generated id and timestamps back to the file.
+    /// This is `clep serve`/CLI behaviour and must not change — it is the
+    /// counterpart to `in_memory_build_never_writes_repaired_frontmatter`.
+    #[test]
+    fn build_repairs_frontmatter_on_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let page = root.join("Loose.md");
+        fs::write(&page, "# Loose\n\nbody\n").unwrap();
+
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        index.build(&vault).unwrap();
+
+        let repaired = fs::read_to_string(&page).unwrap();
+        assert!(
+            repaired.starts_with("+++"),
+            "serve-side build must write repaired frontmatter: {repaired:?}"
+        );
+        assert!(repaired.contains("id = "), "repair must persist an id");
+        assert!(
+            repaired.contains("created_at = "),
+            "repair must persist created_at"
+        );
+    }
+
+    /// The in-memory index is read-only: the same page is indexed with the
+    /// repaired metadata, but the file on disk keeps its exact bytes.
+    #[test]
+    fn in_memory_build_never_writes_repaired_frontmatter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let page = root.join("Loose.md");
+        let original = "# Loose\n\nbody\n";
+        fs::write(&page, original).unwrap();
+
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&page).unwrap(),
+            original,
+            "in-memory build must leave the file byte-identical"
+        );
+        // ...and the repaired page is still indexed, with the generated id.
+        let id: String = index
+            .connection()
+            .query_row("SELECT id FROM pages WHERE path = 'Loose.md'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn open_in_memory_builds_and_queries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(root.join("Note.md"), "# Note\n\nbody\n").unwrap();
+
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+
+        // Assert that the page was indexed by checking its path in the pages table
+        let page_path: String = index
+            .connection()
+            .query_row("SELECT path FROM pages WHERE path = 'Note.md'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(page_path, "Note.md");
     }
 }
 

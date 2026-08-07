@@ -417,7 +417,8 @@ mod tests {
         let (backend, _tmp) =
             make_backend(&[("Target.md", "---\ntitle: Target Page\n---\nbody\n")]);
         let names = backend
-            .state
+            .state()
+            .unwrap()
             .index
             .with_index(|idx, _| fetch_canonical_names_for_path(idx.connection(), "Target.md"))
             .await
@@ -437,7 +438,8 @@ mod tests {
         use crate::lsp::test_support::make_backend;
         let (backend, _tmp) = make_backend(&[("A.md", "# A\n")]);
         let result = backend
-            .state
+            .state()
+            .unwrap()
             .index
             .with_index(|idx, _| fetch_canonical_names_for_path(idx.connection(), "Nonexistent.md"))
             .await
@@ -457,14 +459,16 @@ mod tests {
             ("A.md", "# A\n\n[[Target]]\n"),
         ]);
         let old_cns = backend
-            .state
+            .state()
+            .unwrap()
             .index
             .with_index(|idx, _| fetch_canonical_names_for_path(idx.connection(), "Target.md"))
             .await
             .unwrap()
             .unwrap();
         let referring = backend
-            .state
+            .state()
+            .unwrap()
             .index
             .with_index(move |idx, _| find_referring_paths(idx.connection(), "Target.md", &old_cns))
             .await
@@ -487,14 +491,16 @@ mod tests {
         let (backend, _tmp) =
             make_backend(&[("Target.md", "---\ntitle: Target\n---\n[[Target]]\n")]);
         let old_cns = backend
-            .state
+            .state()
+            .unwrap()
             .index
             .with_index(|idx, _| fetch_canonical_names_for_path(idx.connection(), "Target.md"))
             .await
             .unwrap()
             .unwrap();
         let referring = backend
-            .state
+            .state()
+            .unwrap()
             .index
             .with_index(move |idx, _| find_referring_paths(idx.connection(), "Target.md", &old_cns))
             .await

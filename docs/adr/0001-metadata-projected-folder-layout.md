@@ -29,8 +29,11 @@ wins). Drift is healed by an idempotent **reconcile** operation, keyed only on
 *declared* metadata (inference never moves a file), fired from three triggers:
 
 1. UI assignment (backend moves immediately),
-2. LSP `didSave` (catches Neovim edits when the LSP is running),
-3. a `serve`-startup sweep (catch-all when the LSP was not running).
+2. the `serve` file watcher, after each sync batch (catches saves from any
+   external editor — Neovim, Obsidian, scripts — while the server runs;
+   until 2026-08 this layer was the LSP's `didSave`, which only covered
+   LSP-attached editors and made the LSP process a writer),
+3. a `serve`-startup sweep (catch-all when the server was not running).
 
 ## Consequences
 

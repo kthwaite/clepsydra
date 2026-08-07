@@ -18,7 +18,7 @@ After implementing any change, always run typecheck, lint, and the test suite be
 
 **Frontend:** all commands run from `ui/` with Bun; scripts live in `ui/package.json` (`dev`, `build`, `typecheck`, `lint`, `format`, `test`, `test:watch`, `openapi`, `knip`, `storybook`). Single test: `bun run test <file>` or `bun run test -t "<pattern>"`.
 
-**Backend:** standard cargo (`build`, `test`, `clippy`, `fmt`). `cargo run -- serve` starts the API server; `--lsp` adds the LSP on stdio. Single integration test file: `cargo test --test <name>`. The CLI binary is named `clep` (clap displays "clepsydra"); `clep --help` and `docs/cli.md` cover subcommands and config lookup order.
+**Backend:** standard cargo (`build`, `test`, `clippy`, `fmt`). `cargo run -- serve` starts the API server; `cargo run -- lsp` starts a standalone, read-only LSP on stdio that can run concurrently with `serve` (see `docs/lsp.md`). Single integration test file: `cargo test --test <name>`. The CLI binary is named `clep` (clap displays "clepsydra"); `clep --help` and `docs/cli.md` cover subcommands and config lookup order.
 
 ## Feature Workflow
 
@@ -33,7 +33,7 @@ Rust 2024 edition. Axum 0.8 + Tokio; rusqlite (bundled, FTS5 powers `grep`); pul
 - `src/bin/cli.rs` — clap dispatch → `src/lib.rs` (settings layering, `open_vault_and_index`, `run_server`)
 - `src/vault/` — the domain layer, independent of HTTP: paths (`VaultPath`, NFC-normalized), page/frontmatter parsing, SQLite index + derivation chain (`derivers/`), link extraction/rewriting, mutation coordinator, filesystem sync/reconcile, content-addressed attachment storage (`cas.rs`), academic imports (DOI/ISBN/Zotero), hooks
 - `src/api/` — one module per resource (pages, blocks, tasks, journal, agenda, board, folders, attachments, archive, academic, …); `events.rs` is the SSE stream the UI's sync indicator consumes; `frontend.rs` serves the embedded UI; `openapi.rs` + Swagger UI at `/docs`
-- `src/lsp/` — tower-lsp server (completion, hover, references, rename, diagnostics, code actions) sharing the vault index; started with `serve --lsp`
+- `src/lsp/` — tower-lsp server (completion, hover, references, rename, diagnostics, code actions) over its own private, read-only vault index; started standalone with `clep lsp` (see `docs/lsp.md`)
 - `tests/` — integration tests using axum-test, wiremock, serial_test
 
 ### API contract
