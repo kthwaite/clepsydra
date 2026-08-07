@@ -228,13 +228,12 @@ Vite already types `?raw` imports through `vite/client`.
 Create `ui/src/docs/content/getting-started.mdx` as a temporary minimal fixture:
 
 ```mdx
-import type { DocMeta } from "#/docs/types"
 
 export const meta = {
   slug: "getting-started",
   title: "Getting Started",
   description: "Run Clepsydra with an initialized vault."
-} satisfies DocMeta
+}
 
 # Getting Started
 
@@ -376,13 +375,12 @@ Expected: FAIL because `#/docs/registry` does not exist.
 Move each old Markdown body into its corresponding `.mdx` file. Prepend this shape, with exact values:
 
 ```mdx
-import type { DocMeta } from "#/docs/types"
 
 export const meta = {
   slug: "configuration",
   title: "Configuration",
   description: "Configure Clepsydra’s server, vault, TLS, and runtime behavior."
-} satisfies DocMeta
+}
 ```
 
 Use these metadata values:
