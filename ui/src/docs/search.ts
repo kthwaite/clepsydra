@@ -102,10 +102,12 @@ export function buildDocsIndex(pages: readonly DocPage[]): readonly DocSearchSec
         }
 
         emitSection();
-        heading = toString(node, { includeHtml: false, includeImageAlt: false })
-          .replace(/\s+/g, " ")
-          .trim();
-        headingId = slugger.slug(heading);
+        const semanticHeading = toString(node, {
+          includeHtml: false,
+          includeImageAlt: false,
+        });
+        heading = semanticHeading.replace(/\s+/g, " ").trim();
+        headingId = slugger.slug(semanticHeading);
         continue;
       }
 
