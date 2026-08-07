@@ -84,7 +84,7 @@ A single TypeScript registry is the source of truth for:
 - group hierarchy and labels
 - page order
 - route slugs
-- lazy imports of compiled MDX components
+- imports of compiled MDX modules
 - raw-source imports used to construct the search index
 - previous/next guide relationships
 
@@ -139,7 +139,7 @@ An empty query never shows a result mode. A non-empty query with no matches disp
 ## Failure Behavior
 
 - An unknown `/docs/$slug` renders a Docs-specific not-found state inside the two-column Docs layout. The sidebar remains available, and the state links to Getting Started.
-- A compiled MDX chunk-load failure flows through the existing route error boundary.
+- An unexpected MDX render failure flows through the existing route error boundary.
 - Invalid internal guide targets are implementation defects, not runtime fallbacks. Registry and link tests catch them.
 - Duplicate slugs, invalid group references, or inconsistent registry order fail invariant tests.
 - A missing URL fragment leaves the guide at its normal scroll position; it does not turn the valid guide into a not-found state.
