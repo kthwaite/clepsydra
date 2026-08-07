@@ -340,6 +340,45 @@ async fn capture_appends_multiple_entries() {
     assert!(text.contains("Second entry"));
 }
 
+#[tokio::test]
+async fn capture_stamps_plain_prose() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/journal/today/capture")
+        .json(&serde_json::json!({ "content": "a passing thought" }))
+        .await
+        .assert_status_ok();
+
+    let page = server.get("/api/vault/journal/today").await;
+    let body: serde_json::Value = page.json();
+    let text = body["body"].as_str().unwrap();
+    assert!(
+        text.contains("- 23:59 — a passing thought"),
+        "plain prose must be wrapped as a stamped list item, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn capture_leaves_structured_content_unstamped() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/journal/today/capture")
+        .json(&serde_json::json!({ "content": "- [ ] New task [due:: 2026-03-01]" }))
+        .await
+        .assert_status_ok();
+
+    let page = server.get("/api/vault/journal/today").await;
+    let body: serde_json::Value = page.json();
+    let text = body["body"].as_str().unwrap();
+    assert!(text.contains("- [ ] New task [due:: 2026-03-01]"));
+    assert!(
+        !text.contains("23:59 — -"),
+        "block constructs must not be wrapped in a stamp, got: {text}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // GET /journal/recent
 // ---------------------------------------------------------------------------

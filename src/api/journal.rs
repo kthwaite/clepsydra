@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, http::StatusCode};
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -385,6 +385,38 @@ async fn get_recent(
     Ok(Json(journals))
 }
 
+/// True when `line` already opens a markdown block construct (list item,
+/// task, ordered item, heading, blockquote, code fence). Such captures keep
+/// their syntax at line start; only plain prose gets a time stamp.
+fn is_block_construct(line: &str) -> bool {
+    if line.starts_with("- ")
+        || line.starts_with("* ")
+        || line.starts_with("+ ")
+        || line.starts_with("> ")
+        || line.starts_with('#')
+        || line.starts_with("```")
+    {
+        return true;
+    }
+    let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits == 0 {
+        return false;
+    }
+    let rest = &line[digits..];
+    rest.starts_with(". ") || rest.starts_with(") ")
+}
+
+/// Wrap a plain-prose capture as `- HH:MM — <content>` using the same clock
+/// that defines "today". Structured content passes through verbatim.
+fn format_capture_entry(now: DateTime<Utc>, content: &str) -> String {
+    let first_line = content.lines().next().unwrap_or("").trim_start();
+    if is_block_construct(first_line) {
+        content.to_string()
+    } else {
+        format!("- {} — {}", now.format("%H:%M"), content)
+    }
+}
+
 /// POST /journal/today/capture — append content to today's journal.
 async fn capture_today(
     State(state): State<Arc<AppState>>,
@@ -407,7 +439,7 @@ async fn capture_today(
     if !new_body.is_empty() && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
-    new_body.push_str(&req.content);
+    new_body.push_str(&format_capture_entry(now, &req.content));
     new_body.push('\n');
 
     let mut meta = page.meta;
