@@ -55,3 +55,9 @@ Added test names:
 - The parameterized unread, saved, and tag removal tests now share pagination and identity assertions in addition to membership assertions.
 
 Validation remains deferred under the task constraint; no installation, test, typecheck, lint, build, or formatter command was run during this fix round.
+
+## Review-fix round 2
+
+Parent validation reported one focused-test failure at `api.test.ts:231`: TanStack Query's structural sharing restored values with deep equality but not the original top-level object identity. Updated the four restored-cache assertions from `toBe` to `toStrictEqual`, matching QueryClient's public value semantics. The explicit undefined-cache absence assertions and the pure updater's unaffected entry/page identity assertions remain unchanged.
+
+No validation command was run in this fix round; the parent agent will rerun `bun run test`.

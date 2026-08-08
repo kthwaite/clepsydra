@@ -228,10 +228,10 @@ describe("entry cache snapshots", () => {
 
     restoreEntryCaches(queryClient, snapshots);
 
-    expect(queryClient.getQueryData(unreadKey)).toBe(originals.unread);
-    expect(queryClient.getQueryData(savedKey)).toBe(originals.saved);
-    expect(queryClient.getQueryData(tagKey)).toBe(originals.tag);
-    expect(queryClient.getQueryData(allKey)).toBe(originals.all);
+    expect(queryClient.getQueryData(unreadKey)).toStrictEqual(originals.unread);
+    expect(queryClient.getQueryData(savedKey)).toStrictEqual(originals.saved);
+    expect(queryClient.getQueryData(tagKey)).toStrictEqual(originals.tag);
+    expect(queryClient.getQueryData(allKey)).toStrictEqual(originals.all);
     expect(queryClient.getQueryData(undefinedKey)).toBeUndefined();
     expect(
       queryClient.getQueryCache().find({ queryKey: undefinedKey, exact: true }),
