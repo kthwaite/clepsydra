@@ -10,7 +10,7 @@ import {
 } from "d3-force";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity } from "d3-zoom";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
 
@@ -42,17 +42,49 @@ interface ForceGraphProps {
 }
 
 export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef({ width: 0, height: 0 });
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
   const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateViewport = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      viewportRef.current = { width, height };
+      setViewport((current) =>
+        current.width === width && current.height === height
+          ? current
+          : { width, height },
+      );
+    };
+
+    const bounds = container.getBoundingClientRect();
+    updateViewport(bounds.width, bounds.height);
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      updateViewport(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const initGraph = useCallback(() => {
     const svg = svgRef.current;
     const g = gRef.current;
     if (!svg || !g) return undefined;
 
-    const width = svg.clientWidth;
-    const height = svg.clientHeight;
+    const bounds = containerRef.current?.getBoundingClientRect();
+    const width =
+      viewportRef.current.width || bounds?.width || svg.clientWidth || 1;
+    const height =
+      viewportRef.current.height || bounds?.height || svg.clientHeight || 1;
 
     // Build simulation data (copies to avoid mutating props)
     const simNodes: SimNode[] = nodes.map((n) => ({ ...n }));
@@ -119,7 +151,10 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("stroke-width", (d) =>
         nodeShape(resolveKindFromPath(d.path)).filled ? 0 : 1.5,
       )
-      .on("click", (_event, d) => onNodeClick?.(d));
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        onNodeClick?.(d);
+      });
 
     // Labels
     const labelSel = gSel
@@ -170,9 +205,34 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
     return initGraph();
   }, [initGraph]);
 
+  useEffect(() => {
+    if (viewport.width <= 0 || viewport.height <= 0) return;
+    const simulation = simRef.current;
+    if (!simulation) return;
+    simulation.force(
+      "center",
+      forceCenter(viewport.width / 2, viewport.height / 2),
+    );
+    simulation.alpha(0.3).restart();
+  }, [viewport.height, viewport.width]);
+
+  const viewBoxWidth = Math.max(viewport.width, 1);
+  const viewBoxHeight = Math.max(viewport.height, 1);
+
   return (
-    <svg ref={svgRef} className="h-full w-full bg-background">
-      <g ref={gRef} />
-    </svg>
+    <div
+      ref={containerRef}
+      className="h-full w-full overflow-hidden bg-background"
+    >
+      <svg
+        ref={svgRef}
+        role="img"
+        aria-label="Constellation graph"
+        className="block h-full w-full touch-none bg-background"
+        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+      >
+        <g ref={gRef} />
+      </svg>
+    </div>
   );
 }

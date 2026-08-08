@@ -3,27 +3,39 @@ import { useGraph } from "#/api/index";
 import type { GraphNode } from "#/api/types";
 import { ASCII_COMPASS } from "#/components/codex/ascii";
 import { applyFilters } from "#/components/codex/constellation-filters";
+import { MobileConstellation } from "#/components/codex/MobileConstellation";
 import { ForceGraph } from "#/components/ForceGraph";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { type Kind, kindColorVar } from "#/lib/kind";
 import { useWorkspaceStore } from "#/store/workspace";
 
 export function Constellation() {
   const { data: graph, isLoading } = useGraph();
   const openTab = useOpenTab();
+  const isMobile = useMobileLayout();
 
   const [orphansVisible, setOrphansVisible] = useState(true);
   const [hideDaily, setHideDaily] = useState(false);
   const [depth, setDepth] = useState<number | null>(null);
+  const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
 
   const activeTabId2 = useWorkspaceStore((s) => s.activeTabId);
   const wsTabs = useWorkspaceStore((s) => s.tabs);
   const anchorPath = wsTabs.find(
     (t) => t.id === activeTabId2 && t.type === "page",
   )?.path;
-  const anchorId = useMemo(
+  const activeAnchorId = useMemo(
     () => graph?.nodes.find((n) => n.path === anchorPath)?.id ?? null,
     [graph, anchorPath],
+  );
+  const anchorId = useMemo(
+    () =>
+      selectedAnchorId &&
+      graph?.nodes.some((node) => node.id === selectedAnchorId)
+        ? selectedAnchorId
+        : activeAnchorId,
+    [activeAnchorId, graph, selectedAnchorId],
   );
 
   const filtered = useMemo(
@@ -47,6 +59,22 @@ export function Constellation() {
 
   const handle = (node: GraphNode) =>
     openTab("page", node.path, node.title || node.path);
+  if (isMobile) {
+    return (
+      <MobileConstellation
+        graph={graph}
+        anchorId={anchorId}
+        depth={depth === 2 ? 2 : 1}
+        hideDaily={hideDaily}
+        orphansVisible={orphansVisible}
+        onAnchorChange={setSelectedAnchorId}
+        onDepthChange={(nextDepth) => setDepth(nextDepth)}
+        onHideDailyChange={setHideDaily}
+        onOrphansVisibleChange={setOrphansVisible}
+        onOpen={handle}
+      />
+    );
+  }
   const orphans = filtered.nodes.filter(
     (n) => !filtered.edges.some((e) => e.source === n.id || e.target === n.id),
   );

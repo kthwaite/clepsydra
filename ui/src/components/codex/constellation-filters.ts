@@ -11,48 +11,55 @@ export function applyFilters(
   graph: { nodes: GraphNode[]; edges: GraphEdge[] },
   opts: FilterOptions,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  let nodes = graph.nodes;
-  if (opts.hideDaily) {
-    nodes = nodes.filter((n) => !n.path.startsWith("journals/"));
-  }
-  let edges = graph.edges.filter((e) => {
-    const okSrc = nodes.some((n) => n.id === e.source);
-    const okTgt = nodes.some((n) => n.id === e.target);
-    return okSrc && okTgt;
-  });
+  let nodes = opts.hideDaily
+    ? graph.nodes.filter((node) => !node.path.startsWith("journals/"))
+    : graph.nodes;
+  let nodeIds = new Set(nodes.map((node) => node.id));
+  let edges = graph.edges.filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target),
+  );
+
   if (!opts.orphansVisible) {
     const connected = new Set<string>();
-    for (const e of edges) {
-      connected.add(e.source);
-      connected.add(e.target);
+    for (const edge of edges) {
+      connected.add(edge.source);
+      connected.add(edge.target);
     }
-    nodes = nodes.filter((n) => connected.has(n.id));
+    nodes = nodes.filter((node) => connected.has(node.id));
+    nodeIds = new Set(nodes.map((node) => node.id));
   }
+
   if (opts.depth != null && opts.anchorId) {
-    const adj = new Map<string, Set<string>>();
-    for (const e of edges) {
-      if (!adj.has(e.source)) adj.set(e.source, new Set());
-      if (!adj.has(e.target)) adj.set(e.target, new Set());
-      adj.get(e.source)!.add(e.target);
-      adj.get(e.target)!.add(e.source);
+    const adjacency = new Map<string, Set<string>>();
+    for (const edge of edges) {
+      const sourceNeighbors = adjacency.get(edge.source);
+      if (sourceNeighbors) sourceNeighbors.add(edge.target);
+      else adjacency.set(edge.source, new Set([edge.target]));
+
+      const targetNeighbors = adjacency.get(edge.target);
+      if (targetNeighbors) targetNeighbors.add(edge.source);
+      else adjacency.set(edge.target, new Set([edge.source]));
     }
-    const seen = new Set<string>([opts.anchorId]);
+
+    const visibleIds = new Set<string>([opts.anchorId]);
     let frontier = new Set<string>([opts.anchorId]);
-    for (let i = 0; i < opts.depth; i++) {
+    for (let hop = 0; hop < opts.depth && frontier.size > 0; hop += 1) {
       const next = new Set<string>();
       for (const id of frontier) {
-        for (const nb of adj.get(id) ?? []) {
-          if (!seen.has(nb)) {
-            seen.add(nb);
-            next.add(nb);
-          }
+        for (const neighbor of adjacency.get(id) ?? []) {
+          if (visibleIds.has(neighbor)) continue;
+          visibleIds.add(neighbor);
+          next.add(neighbor);
         }
       }
       frontier = next;
-      if (frontier.size === 0) break;
     }
-    nodes = nodes.filter((n) => seen.has(n.id));
-    edges = edges.filter((e) => seen.has(e.source) && seen.has(e.target));
+    nodes = nodes.filter((node) => visibleIds.has(node.id));
+    nodeIds = new Set(nodes.map((node) => node.id));
   }
+
+  edges = edges.filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target),
+  );
   return { nodes, edges };
 }
