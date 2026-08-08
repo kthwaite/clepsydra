@@ -50,9 +50,8 @@ function DocsLink({
 
     event.preventDefault();
     await router.navigate({
-      // Task 7 adds the generated /docs/$slug route type and removes these casts.
-      to: "/docs/$slug" as never,
-      params: { slug: page.slug } as never,
+      to: "/docs/$slug",
+      params: { slug: page.slug },
       hash,
     });
 
@@ -66,9 +65,8 @@ function DocsLink({
 
   return (
     <Link
-      // Task 7 adds the generated /docs/$slug route type and removes these casts.
-      to={"/docs/$slug" as never}
-      params={{ slug: page.slug } as never}
+      to="/docs/$slug"
+      params={{ slug: page.slug }}
       hash={hash}
       activeOptions={{ exact: true, includeHash: includeHashInCurrent }}
       aria-current={isCurrent ? "page" : undefined}

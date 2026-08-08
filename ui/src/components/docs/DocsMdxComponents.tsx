@@ -79,11 +79,25 @@ function DocsLink({
     const pathname = hashIndex < 0 ? href : href.slice(0, hashIndex);
     const hash = hashIndex < 0 ? undefined : href.slice(hashIndex + 1);
 
-    // Task 7 removes this boundary once /docs/$slug is in generated route types.
+    if (pathname === "/docs") {
+      return (
+        <Link
+          {...props}
+          to="/docs"
+          hash={hash}
+          className={classes}
+        >
+          {children}
+        </Link>
+      );
+    }
+
+    const slug = pathname.slice("/docs/".length);
     return (
       <Link
         {...props}
-        to={pathname as never}
+        to="/docs/$slug"
+        params={{ slug }}
         hash={hash}
         className={classes}
       >

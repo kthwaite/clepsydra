@@ -14,9 +14,11 @@ import { Route as TaskingRouteImport } from './routes/tasking'
 import { Route as LinkMissRouteImport } from './routes/link-miss'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as GazetteerRouteImport } from './routes/gazetteer'
+import { Route as DocsRouteImport } from './routes/docs'
 import { Route as AgendaRouteImport } from './routes/agenda'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PagesSplatRouteImport } from './routes/pages/$'
+import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
 
 const WorkspaceRoute = WorkspaceRouteImport.update({
@@ -44,6 +46,11 @@ const GazetteerRoute = GazetteerRouteImport.update({
   path: '/gazetteer',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgendaRoute = AgendaRouteImport.update({
   id: '/agenda',
   path: '/agenda',
@@ -59,6 +66,11 @@ const PagesSplatRoute = PagesSplatRouteImport.update({
   path: '/pages/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsSlugRoute = DocsSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => DocsRoute,
+} as any)
 const BasesSlugRoute = BasesSlugRouteImport.update({
   id: '/bases/$slug',
   path: '/bases/$slug',
@@ -68,35 +80,41 @@ const BasesSlugRoute = BasesSlugRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agenda': typeof AgendaRoute
+  '/docs': typeof DocsRouteWithChildren
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/link-miss': typeof LinkMissRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/bases/$slug': typeof BasesSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agenda': typeof AgendaRoute
+  '/docs': typeof DocsRouteWithChildren
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/link-miss': typeof LinkMissRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/bases/$slug': typeof BasesSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agenda': typeof AgendaRoute
+  '/docs': typeof DocsRouteWithChildren
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/link-miss': typeof LinkMissRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/bases/$slug': typeof BasesSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
 }
 export interface FileRouteTypes {
@@ -104,40 +122,47 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/agenda'
+    | '/docs'
     | '/gazetteer'
     | '/graph'
     | '/link-miss'
     | '/tasking'
     | '/workspace'
     | '/bases/$slug'
+    | '/docs/$slug'
     | '/pages/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/agenda'
+    | '/docs'
     | '/gazetteer'
     | '/graph'
     | '/link-miss'
     | '/tasking'
     | '/workspace'
     | '/bases/$slug'
+    | '/docs/$slug'
     | '/pages/$'
   id:
     | '__root__'
     | '/'
     | '/agenda'
+    | '/docs'
     | '/gazetteer'
     | '/graph'
     | '/link-miss'
     | '/tasking'
     | '/workspace'
     | '/bases/$slug'
+    | '/docs/$slug'
     | '/pages/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgendaRoute: typeof AgendaRoute
+  DocsRoute: typeof DocsRouteWithChildren
   GazetteerRoute: typeof GazetteerRoute
   GraphRoute: typeof GraphRoute
   LinkMissRoute: typeof LinkMissRoute
@@ -184,6 +209,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GazetteerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agenda': {
       id: '/agenda'
       path: '/agenda'
@@ -205,6 +237,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PagesSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
+      parentRoute: typeof DocsRoute
+    }
     '/bases/$slug': {
       id: '/bases/$slug'
       path: '/bases/$slug'
@@ -215,9 +254,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface DocsRouteChildren {
+  DocsSlugRoute: typeof DocsSlugRoute
+}
+
+const DocsRouteChildren: DocsRouteChildren = {
+  DocsSlugRoute: DocsSlugRoute,
+}
+
+const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgendaRoute: AgendaRoute,
+  DocsRoute: DocsRouteWithChildren,
   GazetteerRoute: GazetteerRoute,
   GraphRoute: GraphRoute,
   LinkMissRoute: LinkMissRoute,

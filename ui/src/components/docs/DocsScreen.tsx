@@ -23,9 +23,8 @@ export function DocsScreen({ slug }: { slug: string }) {
             Use the documentation navigation or return to the first guide.
           </p>
           <Link
-            // Removed after the controller regenerates Task 7 route types.
-            to={"/docs/$slug" as never}
-            params={{ slug: DEFAULT_DOC_SLUG } as never}
+            to="/docs/$slug"
+            params={{ slug: DEFAULT_DOC_SLUG }}
             className="mt-7 inline-flex border border-accent bg-accent px-4 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-paper outline-none transition-colors hover:bg-accent/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             Open Getting Started
