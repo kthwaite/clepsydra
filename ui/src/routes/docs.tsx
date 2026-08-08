@@ -7,6 +7,7 @@ export const Route = createFileRoute("/docs")({
       throw redirect({
         to: "/docs/$slug",
         params: { slug: DEFAULT_DOC_SLUG },
+        hash: location.hash || undefined,
       });
     }
   },
