@@ -8,6 +8,6 @@ function DocsRoute() {
   return <DocsScreen slug={slug} />;
 }
 
-export const Route = createFileRoute("/docs/$slug" as never)({
+export const Route = createFileRoute("/docs/$slug")({
   component: DocsRoute,
 });
