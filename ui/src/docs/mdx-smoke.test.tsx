@@ -19,10 +19,11 @@ it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
 it("renders repository-only guide references as non-clickable source paths", () => {
   render(<Configuration />);
 
-  expect(screen.getByText("docs/encrypted-notes.md")).toHaveProperty(
-    "tagName",
-    "CODE",
-  );
+  const references = screen.getAllByText("docs/encrypted-notes.md");
+  expect(references).toHaveLength(2);
+  for (const reference of references) {
+    expect(reference).toHaveProperty("tagName", "CODE");
+  }
   expect(
     screen.queryByRole("link", { name: "encrypted-notes.md" }),
   ).not.toBeInTheDocument();
