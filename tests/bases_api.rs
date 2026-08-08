@@ -3,7 +3,11 @@ mod support;
 use std::fs;
 use std::path::Path;
 
+use axum::http::StatusCode;
+use clepsydra::api::events::SyncNotification;
+use clepsydra::vault::base_document;
 use support::ApiFixture;
+use tokio::sync::broadcast::error::TryRecvError;
 
 const READING_BASE: &str = r#"
 name = "Reading Log"
@@ -154,4 +158,214 @@ async fn generic_query_filters_numerically_with_inline_types() {
     assert_eq!(rows.len(), 1, "{body}");
     assert_eq!(rows[0]["path"], "b.md");
     assert_eq!(body["total"], 1);
+}
+
+fn assert_base_registry_changed(
+    notifications: &mut tokio::sync::broadcast::Receiver<SyncNotification>,
+) {
+    assert!(
+        matches!(
+            notifications.try_recv(),
+            Ok(SyncNotification::BaseRegistryChanged)
+        ),
+        "expected one base_registry_changed notification"
+    );
+}
+
+fn assert_no_notification(notifications: &mut tokio::sync::broadcast::Receiver<SyncNotification>) {
+    assert!(
+        matches!(notifications.try_recv(), Err(TryRecvError::Empty)),
+        "failed mutation must not emit a notification"
+    );
+}
+
+#[tokio::test]
+async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let root = fixture.state.vault.root();
+    let page_path = root.join("a.md");
+    let page_before = fs::read_to_string(&page_path).unwrap();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let create = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "books",
+            "definition": {
+                "name": "Books",
+                "properties": {
+                    "status": { "type": "select", "options": [] }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    create.assert_status_ok();
+    let created: serde_json::Value = create.json();
+    let created_revision = created["revision"].as_str().unwrap().to_owned();
+    assert_eq!(created["slug"], "books");
+    assert_eq!(
+        created_revision,
+        base_document::revision(&fs::read_to_string(root.join("bases/books.base.toml")).unwrap())
+    );
+    assert_base_registry_changed(&mut notifications);
+
+    let stale_update = fixture
+        .server
+        .put("/api/vault/bases/books")
+        .json(&serde_json::json!({
+            "expected_revision": "stale",
+            "definition": {
+                "name": "Books Updated",
+                "properties": {
+                    "status": { "type": "select", "options": [] }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    stale_update.assert_status(StatusCode::CONFLICT);
+    let stale_update_error: serde_json::Value = stale_update.json();
+    assert_eq!(
+        stale_update_error["error"],
+        "base definition changed since expected_revision"
+    );
+    assert_eq!(stale_update_error["detail"]["revision"], created_revision);
+    assert_no_notification(&mut notifications);
+
+    let update = fixture
+        .server
+        .put("/api/vault/bases/books")
+        .json(&serde_json::json!({
+            "expected_revision": created_revision,
+            "definition": {
+                "name": "Books Updated",
+                "properties": {
+                    "status": { "type": "select", "options": [] }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    update.assert_status_ok();
+    let updated: serde_json::Value = update.json();
+    let updated_revision = updated["revision"].as_str().unwrap().to_owned();
+    assert_eq!(updated["name"], "Books Updated");
+    assert_ne!(updated_revision, created["revision"]);
+    assert_eq!(
+        updated_revision,
+        base_document::revision(&fs::read_to_string(root.join("bases/books.base.toml")).unwrap())
+    );
+    assert_base_registry_changed(&mut notifications);
+
+    let stale_delete = fixture
+        .server
+        .delete("/api/vault/bases/books")
+        .json(&serde_json::json!({
+            "expected_revision": created["revision"]
+        }))
+        .await;
+    stale_delete.assert_status(StatusCode::CONFLICT);
+    let stale_delete_error: serde_json::Value = stale_delete.json();
+    assert_eq!(stale_delete_error["detail"]["revision"], updated_revision);
+    assert_no_notification(&mut notifications);
+
+    fixture
+        .server
+        .delete("/api/vault/bases/books")
+        .json(&serde_json::json!({
+            "expected_revision": updated_revision
+        }))
+        .await
+        .assert_status_ok();
+    assert!(!root.join("bases/books.base.toml").exists());
+    assert_base_registry_changed(&mut notifications);
+    assert_eq!(fs::read_to_string(page_path).unwrap(), page_before);
+}
+
+#[tokio::test]
+async fn duplicate_create_is_conflict_without_notification() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let original =
+        fs::read_to_string(fixture.state.vault.root().join("bases/reading.base.toml")).unwrap();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "reading",
+            "definition": {
+                "name": "Replacement",
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::CONFLICT);
+    assert_no_notification(&mut notifications);
+    assert_eq!(
+        fs::read_to_string(fixture.state.vault.root().join("bases/reading.base.toml")).unwrap(),
+        original
+    );
+}
+
+#[tokio::test]
+async fn unsafe_slug_is_bad_request_without_notification_or_escape() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "../escape",
+            "definition": {
+                "name": "Escape",
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+    assert_no_notification(&mut notifications);
+    assert!(!fixture.temp_dir.path().join("escape.base.toml").exists());
+}
+
+#[tokio::test]
+async fn blocking_diagnostics_are_bad_request_detail_without_notification() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "invalid",
+            "definition": {
+                "name": "",
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    assert_eq!(error["status"], 400);
+    assert_eq!(error["error"], "base definition is invalid");
+    assert!(error.get("hint").is_none());
+    let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["slug"] == "invalid"
+            && diagnostic["severity"] == "error"
+            && diagnostic["path"] == "name"
+            && diagnostic["message"] == "base name must not be empty"
+    }));
+    assert_no_notification(&mut notifications);
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/invalid.base.toml")
+            .exists()
+    );
 }
