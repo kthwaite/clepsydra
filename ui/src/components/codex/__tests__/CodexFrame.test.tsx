@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   locationState,
+  locationHookMock,
   navigateMock,
   openSearchMock,
   openSettingsMock,
@@ -11,6 +12,7 @@ const {
   workspaceState,
 } = vi.hoisted(() => ({
   locationState: { pathname: "/docs/getting-started" },
+  locationHookMock: vi.fn(),
   navigateMock: vi.fn(),
   openSearchMock: vi.fn(),
   openSettingsMock: vi.fn(),
@@ -28,7 +30,10 @@ vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
 }));
 vi.mock("@tanstack/react-router", () => ({
-  useLocation: () => locationState,
+  useLocation: () => {
+    locationHookMock();
+    return locationState;
+  },
   useNavigate: () => navigateMock,
 }));
 vi.mock("#/api/index", () => ({
@@ -160,5 +165,17 @@ describe("CodexFrame Docs integration", () => {
 
     expect(screen.getByText("42%")).toBeInTheDocument();
     expect(screen.getByTestId("sheaf")).toBeInTheDocument();
+  });
+
+  it("does not re-render the shell when the UTC clock ticks", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00Z"));
+    renderFrame();
+    expect(locationHookMock).toHaveBeenCalledOnce();
+
+    act(() => vi.advanceTimersByTime(1000));
+
+    expect(locationHookMock).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 });

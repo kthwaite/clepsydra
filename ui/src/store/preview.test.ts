@@ -58,3 +58,19 @@ describe("closePath", () => {
     expect(usePreviewStore.getState().hoverId).toBeNull();
   });
 });
+
+describe("preview movement persistence", () => {
+  it("keeps transient moves in memory and persists only final coordinates", () => {
+    usePreviewStore.setState({ windows: [windows[1]], hoverId: null });
+    const actions = usePreviewStore.getState();
+
+    actions.move("pinned-target", 80, 90);
+    actions.move("pinned-target", 120, 140);
+
+    expect(window.localStorage.getItem("clp.preview.pinned")).toBeNull();
+    actions.commitMove("pinned-target", 120, 140);
+    expect(window.localStorage.getItem("clp.preview.pinned")).toBe(
+      JSON.stringify([{ path: "notes/target.md", x: 120, y: 140 }]),
+    );
+  });
+});

@@ -1,12 +1,13 @@
 import { useIsMutating } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo } from "react";
 import { useStats } from "#/api/index";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { Sheaf } from "#/components/codex/Sheaf";
 import { useTheme } from "#/components/ThemeProvider";
-import { DEFAULT_DOC_SLUG } from "#/docs/registry";
+import { DEFAULT_DOC_SLUG } from "#/docs/constants";
+import { useClock } from "#/hooks/useClock";
 import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
@@ -89,8 +90,6 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   };
 
   const folioCode = useFolioCode(view);
-  const clock = useUtcClock();
-  const uptime = useUptime();
   const writing = useIsMutating() > 0;
 
   const pages = stats?.pages ?? 0;
@@ -235,12 +234,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
             {formatRelativeTime(stats?.last_indexed_at)}
           </span>
         )}
-        <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums opacity-70">
-          up {uptime}
-        </span>
-        <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
-          {clock} UTC
-        </span>
+        <UptimeText />
+        <UtcClockText />
       </footer>
     </div>
   );
@@ -260,14 +255,20 @@ function useFolioCode(view: View): string {
   return shortFolio(active.path);
 }
 
-function useUtcClock(): string {
-  const [t, setT] = useState(() => formatClock(new Date(), true));
-  useEffect(() => {
-    const id = window.setInterval(
-      () => setT(formatClock(new Date(), true)),
-      1000,
-    );
-    return () => window.clearInterval(id);
-  }, []);
-  return t;
+function UptimeText() {
+  const uptime = useUptime();
+  return (
+    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums opacity-70">
+      up {uptime}
+    </span>
+  );
+}
+
+function UtcClockText() {
+  const clock = formatClock(useClock(), true);
+  return (
+    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
+      {clock} UTC
+    </span>
+  );
 }

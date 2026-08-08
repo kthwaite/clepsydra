@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
+import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 import {
-  DEFAULT_DOC_SLUG,
   DOC_GROUPS,
   DOC_PAGES,
   getDocNeighbors,

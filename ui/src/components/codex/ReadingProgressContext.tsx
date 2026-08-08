@@ -2,7 +2,6 @@ import {
   createContext,
   type PropsWithChildren,
   useContext,
-  useMemo,
   useState,
 } from "react";
 
@@ -11,22 +10,32 @@ type Ctx = {
   setProgress: (p: number) => void;
 };
 
-const ReadingProgressContext = createContext<Ctx | null>(null);
+type SetProgress = (progress: number) => void;
+
+const DEFAULT_SET_PROGRESS: SetProgress = () => undefined;
+const ReadingProgressValueContext = createContext(0);
+const ReadingProgressActionsContext = createContext<SetProgress>(
+  DEFAULT_SET_PROGRESS,
+);
 
 export function ReadingProgressProvider({ children }: PropsWithChildren) {
   const [progress, setProgress] = useState(0);
-  const value = useMemo(() => ({ progress, setProgress }), [progress]);
   return (
-    <ReadingProgressContext.Provider value={value}>
-      {children}
-    </ReadingProgressContext.Provider>
+    <ReadingProgressActionsContext.Provider value={setProgress}>
+      <ReadingProgressValueContext.Provider value={progress}>
+        {children}
+      </ReadingProgressValueContext.Provider>
+    </ReadingProgressActionsContext.Provider>
   );
 }
 
 export function useReadingProgress(): Ctx {
-  const ctx = useContext(ReadingProgressContext);
-  if (!ctx) {
-    return { progress: 0, setProgress: () => undefined };
-  }
-  return ctx;
+  return {
+    progress: useContext(ReadingProgressValueContext),
+    setProgress: useContext(ReadingProgressActionsContext),
+  };
+}
+
+export function useSetReadingProgress(): SetProgress {
+  return useContext(ReadingProgressActionsContext);
 }

@@ -10,26 +10,21 @@ import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
 import {
-  dayOfYear,
   formatClock,
   formatRelativeTime,
-  isLeapYear,
-  julianDay,
   pad2,
 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import {
-  aphorismForDay,
   buildHeatmap,
-  daystampLabel,
   deriveInventory,
   formatBclDate,
   formatBclDuration,
-  formatDotDate,
   greeting,
   sortRecents,
 } from "./atrium-data";
+import { useAtriumCalendar } from "./atrium-time";
 import { ActivityHeatmap } from "./ActivityHeatmap";
 import { Card } from "./Card";
 import { shortFolio } from "./folio-utils";
@@ -82,18 +77,16 @@ export function Atrium() {
     return sortRecents(items, recentTab);
   }, [recentTab, openHistory, byPath, items]);
 
-  const todayLabel = daystampLabel(now);
-  const doy = dayOfYear(now);
-  const yearDays = isLeapYear(now.getFullYear()) ? 366 : 365;
-  const week = Math.ceil(doy / 7);
+  const calendar = useAtriumCalendar(now);
   const clock = formatClock(now);
   const journalSub = journalToday?.meta.id
-    ? `${journalToday.meta.id} · JOURNAL / ${formatDotDate(now)}`
-    : `JOURNAL / ${formatDotDate(now)}`;
+    ? `${journalToday.meta.id} · JOURNAL / ${calendar.dotDate}`
+    : `JOURNAL / ${calendar.dotDate}`;
 
-  const dayKeyDep = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-
-  const heat = useMemo(() => buildHeatmap(items, now), [items, dayKeyDep]);
+  const heat = useMemo(
+    () => buildHeatmap(items, calendar.date),
+    [items, calendar],
+  );
   const topTags = useMemo(
     () => [...(tags ?? [])].sort((a, b) => b.count - a.count).slice(0, 8),
     [tags],
@@ -101,14 +94,16 @@ export function Atrium() {
   const maxTag = topTags[0]?.count ?? 1;
 
   const inventory = useMemo(
-    () => deriveInventory(stats, tags, items, now),
-    [stats, tags, items, dayKeyDep],
+    () => deriveInventory(stats, tags, items, calendar.date),
+    [stats, tags, items, calendar],
   );
 
-  const sky = useMemo(() => deriveSky(now, location), [location, now]);
+  const skyMinute = Math.floor(now.getTime() / 60_000);
+  const skyNow = useMemo(() => new Date(skyMinute * 60_000), [skyMinute]);
+  const sky = useMemo(() => deriveSky(skyNow, location), [location, skyNow]);
   const located = hasCoords(location);
 
-  const aphorism = aphorismForDay(now);
+  const aphorism = calendar.aphorism;
 
   return (
     <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-4 py-4">
@@ -118,13 +113,13 @@ export function Atrium() {
           <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
             <span className="text-accent">●</span>
             <span>
-              DAYSTART / <b className="font-medium text-ink">{todayLabel}</b>
+              DAYSTART / <b className="font-medium text-ink">{calendar.todayLabel}</b>
             </span>
-            <span>WEEK {week}</span>
+            <span>WEEK {calendar.week}</span>
             <span>
-              DAY {doy} / {yearDays}
+              DAY {calendar.doy} / {calendar.yearDays}
             </span>
-            <span>JD {julianDay(now)}</span>
+            <span>JD {calendar.julian}</span>
             <span className="tabular-nums">{clock} LOCAL</span>
           </div>
           <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
