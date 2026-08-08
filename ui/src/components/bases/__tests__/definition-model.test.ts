@@ -141,6 +141,8 @@ describe("base definition model", () => {
 
   it("offers operators that match field type and cardinality", () => {
     expect(operatorsFor("system-multi")).toEqual([
+      "eq",
+      "ne",
       "contains",
       "in",
       "is_empty",
@@ -168,12 +170,31 @@ describe("base definition model", () => {
     expect(operatorsFor("relation")).toEqual([
       "eq",
       "ne",
+      "contains",
+      "in",
       "links_to",
       "is_empty",
       "not_empty",
     ]);
-    expect(operatorsFor("multi_select")).toEqual([
+    expect(operatorsFor("select")).toEqual([
+      "eq",
+      "ne",
       "contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("multi_select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("bool")).toEqual([
+      "eq",
+      "ne",
       "in",
       "is_empty",
       "not_empty",

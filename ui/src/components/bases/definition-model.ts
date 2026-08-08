@@ -128,7 +128,7 @@ export function operatorsFor(
   switch (type) {
     case "system-multi":
     case "multi_select":
-      return ["contains", "in", "is_empty", "not_empty"];
+      return ["eq", "ne", "contains", "in", "is_empty", "not_empty"];
     case "number":
     case "date":
     case "datetime":
@@ -144,11 +144,19 @@ export function operatorsFor(
         "not_empty",
       ];
     case "relation":
-      return ["eq", "ne", "links_to", "is_empty", "not_empty"];
+      return [
+        "eq",
+        "ne",
+        "contains",
+        "in",
+        "links_to",
+        "is_empty",
+        "not_empty",
+      ];
     case "bool":
-      return ["eq", "ne", "is_empty", "not_empty"];
-    case "select":
       return ["eq", "ne", "in", "is_empty", "not_empty"];
+    case "select":
+      return ["eq", "ne", "contains", "in", "is_empty", "not_empty"];
     case "text":
     case "url":
     case "system-scalar":
