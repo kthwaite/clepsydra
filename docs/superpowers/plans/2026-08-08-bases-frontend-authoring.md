@@ -599,7 +599,7 @@ root = "<tmp>/vault"
 ```
 
 4. Start `cargo run -- serve --port 3000` through the harness service manager with `XDG_CONFIG_HOME=<tmp>/xdg`; wait for port 3000.
-5. Run `bun --cwd ui run openapi`.
+5. Run `bun run --cwd ui openapi`.
 
 Expected: generated paths include POST `/api/vault/bases`, PUT/DELETE `/api/vault/bases/{slug}`, POST `/api/vault/bases/preview`; `BaseDetailResponse` includes `revision`; `BaseSummary` includes nullable `match_count`; Filter is recursive rather than `Record<string, never>`.
 
@@ -636,7 +636,7 @@ it("creates a valid minimal All view", () => {
 
 - [ ] **Step 3: Run and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/definition-model.test.ts`
+Run: `bun run --cwd ui test src/components/bases/__tests__/definition-model.test.ts`
 
 Expected: module/functions absent.
 
@@ -671,9 +671,9 @@ On successful mutation, invalidate `queryKeys.bases.pathPrefix` and `queryKeys.q
 
 - [ ] **Step 6: Run focused frontend checks and commit**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/definition-model.test.ts`
+Run: `bun run --cwd ui test src/components/bases/__tests__/definition-model.test.ts`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass with no transport casts to `never`.
 
@@ -732,7 +732,7 @@ it("submits a minimal valid base", async () => {
 
 - [ ] **Step 3: Run tests and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/BasesIndex.test.tsx src/components/bases/__tests__/CreateBaseDialog.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/BasesIndex.test.tsx src/components/bases/__tests__/CreateBaseDialog.test.tsx`
 
 Expected: components absent.
 
@@ -765,9 +765,9 @@ navigate({
 
 - [ ] **Step 6: Run focused tests, typecheck, and commit**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/BasesIndex.test.tsx src/components/bases/__tests__/CreateBaseDialog.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/BasesIndex.test.tsx src/components/bases/__tests__/CreateBaseDialog.test.tsx`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass; route tree regenerates without manual edits.
 
@@ -812,7 +812,7 @@ it("preserves a dirty draft on revision conflict", async () => {
 
 - [ ] **Step 2: Run and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
 
 Expected: route/components absent.
 
@@ -843,9 +843,9 @@ General edits name/description and displays the immutable slug and `bases/<slug>
 
 - [ ] **Step 5: Run focused tests and typecheck**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass; no dirty draft is overwritten by query invalidation.
 
@@ -905,7 +905,7 @@ it("labels nested boolean structure", () => {
 
 - [ ] **Step 2: Run and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/MembershipEditor.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/MembershipEditor.test.tsx`
 
 Expected: components absent.
 
@@ -932,9 +932,9 @@ Reuse this editor in guided creation for the optional initial membership rule.
 
 - [ ] **Step 5: Run tests, accessibility assertions, and commit**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/MembershipEditor.test.tsx src/components/bases/__tests__/definition-model.test.ts`
+Run: `bun run --cwd ui test src/components/bases/__tests__/MembershipEditor.test.tsx src/components/bases/__tests__/definition-model.test.ts`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass.
 
@@ -980,7 +980,7 @@ it("states that removing a declaration keeps page values", async () => {
 
 - [ ] **Step 2: Run and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/PropertiesEditor.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/PropertiesEditor.test.tsx`
 
 Expected: components absent.
 
@@ -1013,9 +1013,9 @@ Show system fields in a separate read-only reference; prevent their bare names f
 
 - [ ] **Step 5: Run tests and commit**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/PropertiesEditor.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/PropertiesEditor.test.tsx`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass.
 
@@ -1068,7 +1068,7 @@ Use fake timers. Change a draft twice before the debounce expires; assert one re
 
 - [ ] **Step 3: Run and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/ViewsEditor.test.tsx src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/ViewsEditor.test.tsx src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
 
 Expected: view/preview components absent.
 
@@ -1097,9 +1097,9 @@ Preview status uses `aria-live="polite"`; result refresh does not focus the tabl
 
 - [ ] **Step 6: Run focused tests and commit**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/ViewsEditor.test.tsx src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/ViewsEditor.test.tsx src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass.
 
@@ -1140,7 +1140,7 @@ it("opens definition workspace from a saved base", async () => {
 
 - [ ] **Step 2: Run and observe failure**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/BaseTableView.test.tsx src/components/codex/__tests__/CodexFrame.test.tsx src/components/codex/__tests__/CommandPalette.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/BaseTableView.test.tsx src/components/codex/__tests__/CodexFrame.test.tsx src/components/codex/__tests__/CommandPalette.test.tsx`
 
 Expected: BASES nav and Configure action absent.
 
@@ -1166,11 +1166,11 @@ Keep the TOML syntax reference; the UI removes the requirement, not the format.
 
 - [ ] **Step 5: Run focused tests and commit**
 
-Run: `bun --cwd ui run test src/components/bases/__tests__/BaseTableView.test.tsx`
+Run: `bun run --cwd ui test src/components/bases/__tests__/BaseTableView.test.tsx`
 
-Run: `bun --cwd ui run test src/components/codex/__tests__/CodexFrame.test.tsx src/components/codex/__tests__/CommandPalette.test.tsx`
+Run: `bun run --cwd ui test src/components/codex/__tests__/CodexFrame.test.tsx src/components/codex/__tests__/CommandPalette.test.tsx`
 
-Run: `bun --cwd ui run typecheck`
+Run: `bun run --cwd ui typecheck`
 
 Expected: pass.
 
@@ -1210,10 +1210,10 @@ Expected: all commands exit 0. Fix only failures caused by this feature; preserv
 Run:
 
 ```bash
-bun --cwd ui run typecheck
-bun --cwd ui run lint
-bun --cwd ui run test
-bun --cwd ui run build
+bun run --cwd ui typecheck
+bun run --cwd ui lint
+bun run --cwd ui test
+bun run --cwd ui build
 ```
 
 Expected: all commands exit 0.
@@ -1243,7 +1243,7 @@ Only after the smoke passes:
 
 - remove temporary/disposable vault data;
 - remove dead imports, obsolete manual-only copy, and any superseded base-authoring helpers;
-- run `bun --cwd ui run knip` and resolve only newly introduced dead exports;
+- run `bun run --cwd ui knip` and resolve only newly introduced dead exports;
 - confirm no `TODO`, placeholder, raw TOML editor, generic file writer, or backend draft store was introduced.
 
 - [ ] **Step 5: Re-run affected gates after cleanup**
