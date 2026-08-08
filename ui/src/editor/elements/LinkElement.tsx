@@ -23,6 +23,7 @@ import { resolveSchemeUrl } from "#/api/deeplink";
 import { isSchemeLink, openSchemeLink } from "#/editor/schemeLinks";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { classifyLinkResource } from "#/lib/linkResource";
 
 type Props = RenderElementProps & { element: LinkElementType };
 
@@ -119,6 +120,7 @@ export function LinkElement({ attributes, children, element }: Props) {
   };
 
   const safeHref = isExternal(url) ? url : undefined;
+  const resource = safeHref ? classifyLinkResource(safeHref) : null;
 
   return (
     <>
@@ -126,6 +128,7 @@ export function LinkElement({ attributes, children, element }: Props) {
         {...attributes}
         ref={setRef}
         href={safeHref}
+        data-link-resource={resource ?? undefined}
         className="cl-link underline decoration-1 underline-offset-2 hover:decoration-2"
         {...getReferenceProps({ onClick })}
       >
