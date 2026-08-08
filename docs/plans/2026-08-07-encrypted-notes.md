@@ -54,7 +54,6 @@ The body contains no Markdown wrapper or commentary around the armor. One traili
 | Inbound links from plain pages | Normal | Still resolve to clear title/id |
 | Hover preview | Markdown | Locked placeholder in v1 |
 | LSP | Full behavior | Locked diagnostic; no body semantics |
-| iOS v1 | Read/edit | Locked, read-only explanation |
 
 ---
 
@@ -869,7 +868,7 @@ git commit -m "test: verify encrypted notes in responsive web"
   - first setup, recovery export, import-key mode, password change;
   - manual/idle lock behavior;
   - loss of meaningful line diffs for encrypted bodies;
-  - no search/outlinks/blocks/LSP/iOS editing in v1;
+  - no search/outlinks/blocks/LSP body semantics in v1;
   - attachments, filenames, metadata, Git history, backups, browser memory, and malicious-client limitations;
   - cache scrub behavior and its storage-device limitations;
   - recovery is impossible if all unlock material is lost.
@@ -951,7 +950,6 @@ git commit -m "test: verify encrypted notes end to end"
 
 ## Explicit follow-ups, not part of v1
 
-- Native iOS age decryption and Keychain-backed identity storage.
 - Passkey/WebAuthn or hardware-security-key wrapping. Do not invoke an authenticator on every autosave; unwrap the vault identity once per session.
 - Multiple recipients, sharing, recipient removal, and key rotation.
 - Encrypted attachments and attachment-key lifecycle.
