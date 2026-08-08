@@ -53,6 +53,7 @@ export function WikilinkInlineEditor({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (finishedRef.current) return;
 
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {

@@ -10,6 +10,7 @@ import { useWikilinkEditing } from "#/editor/wikilinkEditing";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
+import { usePreviewStore } from "#/store/preview";
 
 type Props = RenderElementProps & { element: WikilinkElementType };
 
@@ -134,6 +135,8 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     if (event.metaKey || event.ctrlKey) {
       void openTarget(element.target);
     } else {
+      const { hoverId, close } = usePreviewStore.getState();
+      if (hoverId) close(hoverId);
       controller.begin(path, "end", "after");
     }
   };

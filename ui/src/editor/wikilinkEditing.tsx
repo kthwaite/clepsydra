@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Editor, Element, Path, Text, Transforms } from "slate";
 import { HistoryEditor } from "slate-history";
+import { ReactEditor } from "slate-react";
 
 export type WikilinkExit = "before" | "after" | "preserve";
 export type WikilinkCaretEdge = "start" | "end";
@@ -90,7 +91,9 @@ function selectExit(editor: Editor, path: Path, exit: WikilinkExit): void {
   if (exit === "preserve") return;
   const point =
     exit === "before" ? Editor.before(editor, path) : Editor.after(editor, path);
+  if (ReactEditor.isFocused(editor)) ReactEditor.blur(editor);
   if (point) Transforms.select(editor, point);
+  ReactEditor.focus(editor);
 }
 
 export function useWikilinkEditingController(

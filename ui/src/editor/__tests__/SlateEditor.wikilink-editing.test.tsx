@@ -17,21 +17,25 @@ import userEvent from "@testing-library/user-event";
 import type * as BlocksApi from "#/api/blocks";
 import type * as ApiClient from "#/api/client";
 import type * as PagesApi from "#/api/pages";
+import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import type * as WikilinkResolution from "#/editor/wikilinkResolution";
 import { type Descendant, type Editor, Transforms } from "slate";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
+import { usePreviewStore } from "#/store/preview";
 
 const {
   assignBlockIdMock,
   createPageMock,
+  lookupMock,
   refetchAndLookupMock,
   searchGetMock,
 } = vi.hoisted(() => ({
   assignBlockIdMock: vi.fn(),
   createPageMock: vi.fn(),
+  lookupMock: vi.fn(),
   refetchAndLookupMock: vi.fn(),
   searchGetMock: vi.fn(),
 }));
@@ -72,7 +76,7 @@ vi.mock("#/editor/wikilinkResolution", async (importOriginal) => {
   return {
     ...actual,
     useWikilinkResolution: () => ({
-      lookup: () => null,
+      lookup: lookupMock,
       refetchAndLookup: refetchAndLookupMock,
     }),
   };
@@ -107,6 +111,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  lookupMock.mockReturnValue(null);
+  usePreviewStore.setState({ windows: [], hoverId: null, topZ: 200 });
   createPageMock.mockResolvedValue(undefined);
   refetchAndLookupMock.mockResolvedValue(null);
   searchGetMock.mockResolvedValue({ data: [] });
@@ -124,7 +130,10 @@ function typeInSlate(editor: Editor, text: string) {
   });
 }
 
-function renderEditor(initialValue: Descendant[]) {
+function renderEditor(
+  initialValue: Descendant[],
+  { showPreviewLayer = false }: { showPreviewLayer?: boolean } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, enabled: false } },
   });
@@ -141,7 +150,14 @@ function renderEditor(initialValue: Descendant[]) {
       onSaveNow={() => {}}
     />
   );
-  const rootRoute = createRootRoute({ component: () => editorView });
+  const rootRoute = createRootRoute({
+    component: () => (
+      <>
+        {editorView}
+        {showPreviewLayer ? <LinkPreviewLayer /> : null}
+      </>
+    ),
+  });
   const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
@@ -225,7 +241,7 @@ describe("SlateEditor wikilink editing integration", () => {
     expect(screen.queryByText("My Page")).toBeNull();
   });
 
-  it("enters a following wikilink at draft start and Escape returns before it", async () => {
+  it("restores Editable focus and typing before a following wikilink after Escape", async () => {
     const harness = renderEditor([
       makeParagraph([
         { text: "Before " },
@@ -251,19 +267,27 @@ describe("SlateEditor wikilink editing integration", () => {
     await userEvent.setup().type(input, "changed ");
     await userEvent.setup().keyboard("{Escape}");
 
+    await waitFor(() => expect(editable).toHaveFocus());
+    expect(harness.getEditor()?.selection?.anchor).toEqual({
+      path: [0, 0],
+      offset: "Before ".length,
+    });
+    typeInSlate(harness.getEditor() as Editor, "!");
+    await waitFor(() =>
+      expect(slateToMarkdown(harness.getValue())).toContain(
+        "Before \\![[My Page|Original label]] after",
+      ),
+    );
+
     expect(
       screen.getByRole("link", { name: "Original label" }),
     ).toBeInTheDocument();
     expect(slateToMarkdown(harness.getValue())).toContain(
       "[[My Page|Original label]]",
     );
-    expect(harness.getEditor()?.selection?.anchor).toEqual({
-      path: [0, 0],
-      offset: "Before ".length,
-    });
   });
 
-  it("enters a preceding wikilink at draft end and Escape returns after it", async () => {
+  it("restores Editable focus and typing after a preceding wikilink after Escape", async () => {
     const harness = renderEditor([
       makeParagraph([
         { text: "Before " },
@@ -286,15 +310,63 @@ describe("SlateEditor wikilink editing integration", () => {
     await userEvent.setup().type(input, " changed");
     await userEvent.setup().keyboard("{Escape}");
 
+    await waitFor(() => expect(editable).toHaveFocus());
+    expect(harness.getEditor()?.selection?.anchor).toEqual({
+      path: [0, 2],
+      offset: 0,
+    });
+    typeInSlate(harness.getEditor() as Editor, "!");
+    await waitFor(() =>
+      expect(slateToMarkdown(harness.getValue())).toContain(
+        "Before [[My Page|Original label]]! after",
+      ),
+    );
+
     expect(
       screen.getByRole("link", { name: "Original label" }),
     ).toBeInTheDocument();
     expect(slateToMarkdown(harness.getValue())).toContain(
       "[[My Page|Original label]]",
     );
-    expect(harness.getEditor()?.selection?.anchor).toEqual({
-      path: [0, 2],
-      offset: 0,
+  });
+
+  it("closes a resolved hover preview when plain click begins editing", async () => {
+    lookupMock.mockReturnValue("notes/my-page.md");
+    usePreviewStore.setState({
+      windows: [
+        {
+          id: "hover-my-page",
+          path: "notes/my-page.md",
+          x: 8,
+          y: 20,
+          pinned: false,
+          minimized: false,
+          z: 201,
+        },
+      ],
+      hoverId: "hover-my-page",
+      topZ: 201,
     });
+    renderEditor(
+      [
+        makeParagraph([
+          { text: "Before " },
+          makeWikilink({ target: "My Page" }),
+          { text: " after" },
+        ]),
+      ],
+      { showPreviewLayer: true },
+    );
+
+    expect(await screen.findByText(/notes\/my-page\.md/)).toBeInTheDocument();
+    await userEvent.setup().click(
+      screen.getByRole("link", { name: "My Page" }),
+    );
+
+    expect(
+      screen.getByRole("textbox", { name: "Edit wikilink" }),
+    ).toHaveFocus();
+    expect(screen.queryByText(/notes\/my-page\.md/)).toBeNull();
+    expect(usePreviewStore.getState().windows).toEqual([]);
   });
 });

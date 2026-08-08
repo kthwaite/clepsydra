@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
@@ -49,6 +49,53 @@ describe("WikilinkInlineEditor", () => {
     expect(input.selectionStart).toBe("Target|Label".length);
     expect(input.selectionEnd).toBe("Target|Label".length);
   });
+
+  it.each([
+    {
+      name: "Enter",
+      initialCaret: "end",
+      event: { key: "Enter", isComposing: true },
+    },
+    {
+      name: "Cmd+Enter",
+      initialCaret: "end",
+      event: { key: "Enter", metaKey: true, isComposing: true },
+    },
+    {
+      name: "Escape",
+      initialCaret: "end",
+      event: { key: "Escape", isComposing: true },
+    },
+    {
+      name: "ArrowLeft at the start boundary",
+      initialCaret: "start",
+      event: { key: "ArrowLeft", isComposing: true },
+    },
+    {
+      name: "ArrowRight at the end boundary",
+      initialCaret: "end",
+      event: { key: "ArrowRight", isComposing: true },
+    },
+    {
+      name: "legacy keyCode 229 Enter",
+      initialCaret: "end",
+      event: { key: "Enter", keyCode: 229, metaKey: true },
+    },
+  ] as const)(
+    "ignores $name while an IME composition is active",
+    ({ initialCaret, event }) => {
+      const { input, onCommit, onCancel, onOpen } = renderEditor({
+        initialCaret,
+      });
+
+      fireEvent.keyDown(input, event);
+
+      expect(input).toHaveFocus();
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(onCancel).not.toHaveBeenCalled();
+      expect(onOpen).not.toHaveBeenCalled();
+    },
+  );
 
   it("commits before when ArrowLeft is pressed at offset zero", async () => {
     const user = userEvent.setup();
