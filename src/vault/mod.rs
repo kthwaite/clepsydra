@@ -1,6 +1,7 @@
 pub mod academic;
 pub mod academic_hook;
 pub mod archive_hook;
+pub mod backup;
 pub mod atomic_file;
 pub mod base;
 pub mod bcl;
