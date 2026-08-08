@@ -25,6 +25,9 @@ vi.mock("#/components/ThemeProvider", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
+vi.mock("#/api/journal", () => ({
+  useJournalToday: () => ({ data: null, refetch: vi.fn() }),
+}));
 
 import { useGlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { todayJournalPath } from "#/lib/journal";

@@ -50,6 +50,17 @@ describe("TagsInput", () => {
     await user.keyboard("{Enter}");
     expect(onChange).toHaveBeenLastCalledWith(["pkm"]);
   });
+  it("keeps spaces in a tag draft until comma or Enter commits", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const input = screen.getByRole("combobox", { name: "Tags" });
+    await user.type(input, "project notes");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["project notes"]);
+  });
+
 
   it("shows filtered suggestions and tab-completes the highlighted one", async () => {
     const user = userEvent.setup();

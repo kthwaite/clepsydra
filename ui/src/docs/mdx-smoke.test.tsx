@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { expect, it } from "vitest";
+import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
 import Guide, { meta } from "#/docs/content/getting-started.mdx";
 import source from "#/docs/content/getting-started.mdx?raw";
 import Configuration from "#/docs/content/configuration.mdx";
@@ -14,6 +15,29 @@ it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   expect(source).toContain(
     "This guide gets Clepsydra running locally with an initialized vault.",
   );
+});
+
+it("renders GFM tables as semantic HTML", () => {
+  render(
+    <Configuration
+      components={{
+        table: docsMdxComponents.table,
+        th: docsMdxComponents.th,
+        td: docsMdxComponents.td,
+      }}
+    />,
+  );
+
+  const table = screen.getAllByRole("table")[1];
+  expect(table.closest('[role="region"]')).toHaveAccessibleName(
+    "Scrollable table",
+  );
+  expect(
+    within(table).getByRole("columnheader", { name: "Key" }),
+  ).toBeInTheDocument();
+  expect(
+    within(table).getByRole("cell", { name: "attachment_folder" }),
+  ).toBeInTheDocument();
 });
 
 it("renders repository-only guide references as non-clickable source paths", () => {

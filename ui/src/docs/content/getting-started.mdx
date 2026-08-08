@@ -108,7 +108,79 @@ cargo run -- serve
 
 Open: `https://localhost:3000/`
 
-## 6) Optional: Frontend development mode (Vite + HMR)
+## 6) Optional: Expose over Tailscale with Caddy
+
+On macOS, Caddy can serve Clepsydra directly at the machine's fully qualified
+MagicDNS name. This avoids placing Tailscale Serve in front of Caddy when
+Caddy already owns port 443.
+
+Prerequisites:
+
+- the Mac is connected to the tailnet;
+- MagicDNS and HTTPS certificates are enabled for the tailnet; and
+- Clepsydra remains bound to `localhost:3000`.
+
+Find the Mac's canonical MagicDNS name:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale status --json
+```
+
+Use the `Self.DNSName` value without its trailing dot. For this installation,
+the name is `gathering.tail94fed9.ts.net`. Configure
+`/opt/homebrew/etc/Caddyfile`:
+
+```caddyfile
+clepsydra.localhost {
+	reverse_proxy localhost:3000
+}
+
+gathering.tail94fed9.ts.net {
+	reverse_proxy localhost:3000
+}
+```
+
+Caddy recognizes the `.ts.net` hostname and obtains its certificate through
+the local Tailscale daemon. Validate and reload the active configuration:
+
+```bash
+/opt/homebrew/opt/caddy/bin/caddy validate --config /opt/homebrew/etc/Caddyfile
+/opt/homebrew/opt/caddy/bin/caddy reload --config /opt/homebrew/etc/Caddyfile
+```
+
+Verify the tailnet route and certificate:
+
+```bash
+curl -v https://gathering.tail94fed9.ts.net/
+```
+
+The request must resolve to the Mac's Tailscale IP, pass certificate
+verification, and return HTTP 200. The local
+`https://clepsydra.localhost` route remains available.
+
+The MagicDNS name survives restarts, roaming, Tailscale IP changes, and key
+renewal. It changes only when the device name or tailnet DNS suffix is
+explicitly renamed; update the Caddy site address after either change.
+
+Do not run `tailscale serve` for this topology. Caddy currently listens on
+`*:443`, so Serve cannot bind the Mac's Tailscale addresses on port 443.
+The macOS extension also rejects the Clepsydra IPv6-loopback proxy target
+after normalizing `[::1]:3000` incorrectly. Confirm Serve is inactive with:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale serve status
+```
+
+Expected output: `No serve config`.
+
+Security boundary: the `.ts.net` hostname is discoverable through the
+tailnet, but this Caddy configuration listens on every local interface.
+Tailnet policy governs traffic arriving through Tailscale; it does not block
+a client already on the same LAN from connecting directly with the tailnet
+hostname. Bind Caddy's tailnet site specifically to the Mac's Tailscale IP if
+the LAN is not trusted.
+
+## 7) Optional: Frontend development mode (Vite + HMR)
 
 For active UI development, disable embedded frontend serving:
 
@@ -134,7 +206,7 @@ Open the Vite URL (usually `http://127.0.0.1:5173`).
 
 > In `dev_mode`, Clepsydra serves API/docs endpoints only; Vite serves the app shell.
 
-## 7) Create your first page
+## 8) Create your first page
 
 ### Option A: CLI
 
@@ -176,7 +248,7 @@ Design Notes. After completing a page from the dropdown, press Left to move
 back into the link and type `|the design doc`. Plain click edits a wikilink;
 Cmd-click on macOS or Ctrl-click elsewhere opens it.
 
-## 8) Optional: Edit the vault from Neovim (LSP)
+## 9) Optional: Edit the vault from Neovim (LSP)
 
 `clep lsp` starts a standalone language server on stdio — completion for
 `[[wikilinks]]`, `#tags`, and frontmatter properties, hover previews,
@@ -214,7 +286,7 @@ its own root, multiple vaults just work without any shared config.
 Full capability list, save-time move behavior, and troubleshooting:
 `/docs/lsp`.
 
-## 9) Optional: Browser extension
+## 10) Optional: Browser extension
 
 For local install and setup instructions:
 

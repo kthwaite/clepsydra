@@ -274,10 +274,12 @@ function notFoundError() {
 
 const TODAY_PATH = "journals/2026-08-06.md";
 const PAST_PATH = "journals/2026-08-05.md";
+const CANONICAL_TODAY_PATH =
+  "journals/20260808T005500Z--2026-08-06--a1b2c3.md";
 
 function ensuredPage(body = "") {
   return {
-    path: TODAY_PATH,
+    path: CANONICAL_TODAY_PATH,
     revision: "rev-e",
     body,
     meta: { title: "2026-08-06", tags: ["journal"], aliases: [] },
@@ -351,6 +353,7 @@ describe("usePageEditor draft mode", () => {
       mutateAsyncMock.mock.invocationCallOrder[0],
     );
     const request = mutateAsyncMock.mock.calls[0][0];
+    expect(request.params.path.path).toBe(CANONICAL_TODAY_PATH);
     expect(request.body.expected_revision).toBe("rev-e");
     expect(request.body.body).toBe("B\n");
     // Untouched template metadata is adopted, not re-sent.
@@ -617,7 +620,7 @@ describe("usePageEditor draft mode", () => {
       result.current.onSlateChange(paragraph("Today"), astChangeEditor()),
     );
     // Leave for a past date inside the debounce window. The flush belongs to
-    // the draft, so it must still ensure and write to today's path.
+    // the draft, so it must still ensure and write to today's canonical path.
     rerender({ path: PAST_PATH });
     await act(async () => {
       await Promise.resolve();
@@ -629,7 +632,7 @@ describe("usePageEditor draft mode", () => {
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
     const flushed = mutateAsyncMock.mock.calls[0][0];
-    expect(flushed.params.path.path).toBe(TODAY_PATH);
+    expect(flushed.params.path.path).toBe(CANONICAL_TODAY_PATH);
     expect(flushed.body.expected_revision).toBe("rev-e");
     expect(flushed.body.body).toBe("Today\n");
 

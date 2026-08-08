@@ -1,10 +1,13 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import type { HeatmapDay, HeatmapPage } from "./atrium-data";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActivityHeatmap } from "./ActivityHeatmap";
+import type { HeatmapDay, HeatmapPage } from "./atrium-data";
 
-function page(index: number, title: string | null = `Page ${index}`): HeatmapPage {
+function page(
+  index: number,
+  title: string | null = `Page ${index}`,
+): HeatmapPage {
   return {
     path: title === null ? "untitled.md" : `page-${index}.md`,
     title,
@@ -12,10 +15,7 @@ function page(index: number, title: string | null = `Page ${index}`): HeatmapPag
   };
 }
 
-function day(
-  date: string,
-  overrides: Partial<HeatmapDay> = {},
-): HeatmapDay {
+function day(date: string, overrides: Partial<HeatmapDay> = {}): HeatmapDay {
   return {
     date,
     isFuture: false,
@@ -57,6 +57,30 @@ const fixtureProps = {
   current: 2,
 };
 
+afterEach(() => vi.restoreAllMocks());
+
+function mockRect(element: HTMLElement, x: number) {
+  element.getBoundingClientRect = () =>
+    ({
+      x,
+      y: 100,
+      top: 100,
+      right: x + 10,
+      bottom: 110,
+      left: x,
+      width: 10,
+      height: 10,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
+function positionedX(element: HTMLElement): number {
+  const translatedX = element.style.transform.match(
+    /translate\(([-\d.]+)px/,
+  )?.[1];
+  return Number.parseFloat(translatedX ?? element.style.left);
+}
+
 describe("ActivityHeatmap", () => {
   it("opens the dated page list on hover and activates a page", async () => {
     const user = userEvent.setup();
@@ -87,9 +111,9 @@ describe("ActivityHeatmap", () => {
       name: /1 May 2026, 0 captures/i,
     });
     act(() => emptyDay.focus());
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveFocus();
-    expect(dialog).toHaveClass("focus-visible:outline-2");
+    await screen.findByRole("dialog");
+    expect(emptyDay).toHaveFocus();
+    expect(emptyDay).toHaveClass("focus-visible:outline-2");
     expect(screen.getByText("0 captures")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /^Open / }),
@@ -100,7 +124,7 @@ describe("ActivityHeatmap", () => {
     );
   });
 
-  it("stays closed after Escape restores focus to the day button", async () => {
+  it("stays open when the pointer leaves a focused day", async () => {
     const user = userEvent.setup();
     render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
 
@@ -108,20 +132,59 @@ describe("ActivityHeatmap", () => {
       name: /2 May 2026, 6 captures/i,
     });
     act(() => activeDay.focus());
+    const dialog = await screen.findByRole("dialog");
+
+    await user.hover(activeDay);
+    await user.unhover(activeDay);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+    expect(dialog).toBeVisible();
+  });
+
+  it("stays closed after Escape, then reopens on a later focus", async () => {
+    const user = userEvent.setup();
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+
+    const activeDay = screen.getByRole("button", {
+      name: /2 May 2026, 6 captures/i,
+    });
+
+    act(() => activeDay.focus());
     expect(await screen.findByRole("dialog")).toBeVisible();
     await user.keyboard("{Escape}");
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
+    expect(activeDay).toHaveFocus();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
     act(() => {
       activeDay.blur();
       activeDay.focus();
     });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeVisible();
+  });
 
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  it("stays closed after Escape when pointer entry follows keyboard focus", async () => {
+    const user = userEvent.setup();
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+
+    const activeDay = screen.getByRole("button", {
+      name: /2 May 2026, 6 captures/i,
+    });
+    act(() => activeDay.focus());
+    await screen.findByRole("dialog");
+
+    await user.hover(activeDay);
+    act(() => screen.getByRole("button", { name: "Open Page 2" }).focus());
+    await user.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
     expect(activeDay).toHaveFocus();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("keeps the popover open while the pointer moves into it", async () => {
@@ -139,6 +202,45 @@ describe("ActivityHeatmap", () => {
     expect(dialog).toBeVisible();
   });
 
+  it("keeps one stable popover while hovering from one day to the next", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(
+      1024,
+    );
+    vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(
+      768,
+    );
+    render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
+
+    const emptyDay = screen.getByRole("button", {
+      name: /1 May 2026, 0 captures/i,
+    });
+    const activeDay = screen.getByRole("button", {
+      name: /2 May 2026, 6 captures/i,
+    });
+    mockRect(emptyDay, 10);
+    mockRect(activeDay, 200);
+
+    await user.hover(emptyDay);
+    const dialog = await screen.findByRole("dialog", {
+      name: /1 May 2026 activity/i,
+    });
+    const positionedPopover = dialog.closest("[data-placement]") as HTMLElement;
+    await waitFor(() => expect(positionedX(positionedPopover)).not.toBeNaN());
+    const firstLeft = positionedX(positionedPopover);
+    await user.hover(activeDay);
+
+    await waitFor(() =>
+      expect(dialog).toHaveAccessibleName(/2 May 2026 activity/i),
+    );
+    expect(screen.getByText("6 captures")).toBeVisible();
+    await waitFor(() =>
+      expect(positionedX(positionedPopover)).toBeGreaterThan(firstLeft + 100),
+    );
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+    expect(dialog).toBeVisible();
+  });
+
   it("stays open when focus remains inside after the pointer leaves", async () => {
     const user = userEvent.setup();
     render(<ActivityHeatmap {...fixtureProps} onOpenPage={vi.fn()} />);
@@ -150,9 +252,7 @@ describe("ActivityHeatmap", () => {
     const dialog = await screen.findByRole("dialog");
     await user.unhover(activeDay);
     await user.hover(dialog);
-    act(() =>
-      screen.getByRole("button", { name: "Open Page 2" }).focus(),
-    );
+    act(() => screen.getByRole("button", { name: "Open Page 2" }).focus());
     await user.unhover(dialog);
 
     await new Promise<void>((resolve) => window.setTimeout(resolve, 150));

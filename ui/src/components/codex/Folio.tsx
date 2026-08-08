@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
-import { useJournalEditorOptions } from "#/api/journal";
+import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
@@ -24,6 +24,7 @@ import { cn } from "#/lib/cn";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
+import { todayJournalPath } from "#/lib/journal";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
@@ -44,6 +45,9 @@ const NoteProtectionDialog = lazy(() =>
 );
 
 export function Folio({ tabId, path }: FolioProps) {
+  const isTodayDraftPath = path === todayJournalPath();
+  const { data: journalToday, isLoading: isJournalTodayLoading } =
+    useJournalToday(isTodayDraftPath);
   const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
   const { data: outlinks } = useOutlinks(path);
@@ -51,6 +55,20 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  useEffect(() => {
+    if (
+      isTodayDraftPath &&
+      journalToday?.path &&
+      journalToday.path !== path
+    ) {
+      updateTabPath(
+        tabId,
+        journalToday.path,
+        journalToday.meta.title ?? undefined,
+      );
+    }
+  }, [isTodayDraftPath, journalToday, path, tabId, updateTabPath]);
+
   const assign = useAssignPage();
   const projects = useProjects();
   const { setProgress } = useReadingProgress();
@@ -157,6 +175,9 @@ export function Folio({ tabId, path }: FolioProps) {
     editor.editorRevision,
   );
 
+  if (isTodayDraftPath && (isJournalTodayLoading || journalToday)) {
+    return <div className="cl-marg p-6">… fetching today’s journal …</div>;
+  }
   if (editor.isLoading) {
     return <div className="cl-marg p-6">… fetching folio {path} …</div>;
   }

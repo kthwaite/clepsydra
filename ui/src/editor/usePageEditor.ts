@@ -178,6 +178,7 @@ export function usePageEditor(
   const savedMetaGenRef = useRef(0);
 
   const revisionRef = useRef("");
+  const savePathRef = useRef(path);
   const saveRequestedRef = useRef(false);
   const saveFlightRef = useRef<{
     epoch: number;
@@ -233,6 +234,7 @@ export function usePageEditor(
     savedRef.current = { title: "", tags: [], aliases: [], body: "" };
     editorValueRef.current = [];
     revisionRef.current = "";
+    savePathRef.current = path;
     bodyEditGenRef.current = 0;
     metaEditGenRef.current = 0;
     savedBodyGenRef.current = 0;
@@ -332,6 +334,7 @@ export function usePageEditor(
       // Read synchronously: the reset effect clears revisionRef, so the request
       // must not re-read it across an await.
       let expectedRevision = revisionRef.current;
+      let requestPath = savePathRef.current;
       const currentTitle = titleRef.current;
       const currentTags = tagsRef.current;
       const currentAliases = aliasesRef.current;
@@ -359,6 +362,7 @@ export function usePageEditor(
       try {
         if (isDraftRef.current && ensureRef.current) {
           const result = await ensureRef.current();
+          requestPath = result.page.path;
           expectedRevision = result.page.revision;
           const serverTitle = result.page.meta.title ?? "";
           const serverTags = result.page.meta.tags ?? [];
@@ -382,6 +386,7 @@ export function usePageEditor(
           // it was typed on (via expectedRevision) but the now-current page's
           // lifecycle must stay untouched.
           if (!isStale()) {
+            savePathRef.current = requestPath;
             revisionRef.current = result.page.revision;
             savedRef.current = {
               title: serverTitle,
@@ -421,7 +426,7 @@ export function usePageEditor(
         }
 
         const response = await updatePageMutateAsync({
-          params: { path: { path } },
+          params: { path: { path: requestPath } },
           body: {
             expected_revision: expectedRevision,
             ...(titleChanged ? { title: currentTitle || null } : {}),

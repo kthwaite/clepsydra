@@ -1,6 +1,17 @@
+import {
+  autoUpdate,
+  FloatingFocusManager,
+  FloatingPortal,
+  flip,
+  offset,
+  shift,
+  useDismiss,
+  useFloating,
+  useInteractions,
+  useRole,
+} from "@floating-ui/react";
 import type React from "react";
 import { useEffect, useId, useRef, useState } from "react";
-import { Dialog, Heading, Popover } from "react-aria-components";
 import { cn } from "#/lib/cn";
 import type { HeatmapDay } from "./atrium-data";
 
@@ -48,10 +59,29 @@ export function ActivityHeatmap({
   onOpenPage,
 }: ActivityHeatmapProps): React.JSX.Element {
   const dialogId = useId();
+  const headingId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const suppressedFocusTargetRef = useRef<HTMLButtonElement | null>(null);
+  const openReasonRef = useRef<"focus" | "pointer" | "press">("pointer");
   const [activeDay, setActiveDay] = useState<HeatmapDay | null>(null);
+  const focusManagerEnabled =
+    activeDay !== null && openReasonRef.current === "focus";
+
+  const { context, floatingStyles, placement, refs } = useFloating({
+    open: activeDay !== null,
+    onOpenChange(isOpen) {
+      if (!isOpen) closeDay();
+    },
+    placement: "top",
+    strategy: "fixed",
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  const dismiss = useDismiss(context);
+  const role = useRole(context, { role: "dialog" });
+  const { getFloatingProps } = useInteractions([dismiss, role]);
 
   function cancelClose() {
     if (closeTimerRef.current === null) return;
@@ -59,9 +89,15 @@ export function ActivityHeatmap({
     closeTimerRef.current = null;
   }
 
-  function openDay(day: HeatmapDay, trigger: HTMLButtonElement) {
+  function openDay(
+    day: HeatmapDay,
+    trigger: HTMLButtonElement,
+    reason: "focus" | "pointer" | "press",
+  ) {
     cancelClose();
+    openReasonRef.current = reason;
     triggerRef.current = trigger;
+    refs.setReference(trigger);
     setActiveDay(day);
   }
 
@@ -70,22 +106,31 @@ export function ActivityHeatmap({
       suppressedFocusTargetRef.current = null;
       return;
     }
-    openDay(day, trigger);
+    openDay(day, trigger, "focus");
   }
 
   function closeDay() {
+    const shouldSuppressRestoredFocus =
+      focusManagerEnabled &&
+      refs.floating.current?.contains(document.activeElement);
     cancelClose();
-    suppressedFocusTargetRef.current = triggerRef.current;
+    suppressedFocusTargetRef.current = shouldSuppressRestoredFocus
+      ? triggerRef.current
+      : null;
     setActiveDay(null);
   }
 
-  function scheduleClose() {
+  function scheduleClose(trigger = triggerRef.current) {
     cancelClose();
-    closeTimerRef.current = window.setTimeout(closeDay, 100);
+    closeTimerRef.current = window.setTimeout(() => {
+      if (triggerRef.current !== trigger) return;
+      if (refs.floating.current?.contains(document.activeElement)) return;
+      if (trigger?.contains(document.activeElement)) return;
+      closeDay();
+    }, 100);
   }
 
   useEffect(() => cancelClose, []);
-
   const activeDate = activeDay ? formatDate(activeDay.date) : "";
 
   return (
@@ -151,15 +196,17 @@ export function ActivityHeatmap({
                         cellClassName,
                         "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1",
                       )}
-                      onPointerEnter={(event) => openDay(day, event.currentTarget)}
-                      onPointerLeave={(event) => {
-                        if (document.activeElement !== event.currentTarget) {
-                          scheduleClose();
-                        }
-                      }}
+                      onPointerEnter={(event) =>
+                        openDay(day, event.currentTarget, "pointer")
+                      }
+                      onPointerLeave={(event) =>
+                        scheduleClose(event.currentTarget)
+                      }
                       onFocus={(event) => focusDay(day, event.currentTarget)}
-                      onBlur={scheduleClose}
-                      onClick={(event) => openDay(day, event.currentTarget)}
+                      onBlur={(event) => scheduleClose(event.currentTarget)}
+                      onClick={(event) =>
+                        openDay(day, event.currentTarget, "press")
+                      }
                     />
                   );
                 })}
@@ -171,7 +218,10 @@ export function ActivityHeatmap({
 
       <div className="cl-mono mt-3 flex flex-wrap items-center justify-between gap-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
         <span>
-          TOTAL <b className="font-medium text-ink">{total.toLocaleString("en-US")}</b>{" "}
+          TOTAL{" "}
+          <b className="font-medium text-ink">
+            {total.toLocaleString("en-US")}
+          </b>{" "}
           · LONGEST <b className="font-medium text-ink">{longest}d</b> · CURRENT{" "}
           <b className="text-accent">{current}d</b>
         </span>
@@ -190,80 +240,77 @@ export function ActivityHeatmap({
         </span>
       </div>
 
-      <Popover
-        triggerRef={triggerRef}
-        isOpen={activeDay !== null}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) closeDay();
-        }}
-        shouldCloseOnInteractOutside={(element) =>
-          !triggerRef.current?.contains(element)
-        }
-        placement="top"
-        className="z-50 w-72 border border-rule bg-paper outline-none"
-        onPointerEnter={cancelClose}
-        onPointerLeave={(event) => {
-          if (!event.currentTarget.contains(document.activeElement)) {
-            scheduleClose();
-          }
-        }}
-      >
-        {activeDay ? (
-          <div
-            onFocusCapture={cancelClose}
-            onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) {
-                scheduleClose();
-              }
-            }}
+      {activeDay ? (
+        <FloatingPortal>
+          <FloatingFocusManager
+            context={context}
+            disabled={!focusManagerEnabled}
+            initialFocus={-1}
+            modal={false}
+            order={["reference", "content"]}
           >
-            <Dialog
-              id={dialogId}
-              className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1"
+            <div
+              ref={refs.setFloating}
+              data-placement={placement}
+              style={floatingStyles}
+              className="z-50 w-72 border border-rule bg-paper outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-1"
+              {...getFloatingProps({
+                id: dialogId,
+                "aria-labelledby": headingId,
+                tabIndex: -1,
+                onPointerEnter: cancelClose,
+                onPointerLeave: () => scheduleClose(),
+                onFocusCapture: cancelClose,
+                onBlurCapture: (event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    scheduleClose();
+                  }
+                },
+              })}
             >
-            <div className="border-b border-rule bg-paper-2 px-3 py-2">
-              <Heading
-                slot="title"
-                className="cl-mono text-[10px] font-medium uppercase tracking-[0.18em] text-ink"
-              >
-                {activeDate} activity
-              </Heading>
-              <p className="cl-mono mt-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                {captureCount(activeDay.count)}
-              </p>
-            </div>
-            {activeDay.pages.length > 0 ? (
-              <div className="flex flex-col py-1">
-                {activeDay.pages
-                  .slice(0, VISIBLE_PAGES)
-                  .map((page, occurrenceIndex) => {
-                    const title = page.title || page.path;
-                    return (
-                      <button
-                        key={`${page.path}:${page.activityAt}:${occurrenceIndex}`}
-                        type="button"
-                        aria-label={`Open ${title}`}
-                        className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
-                        onClick={() => {
-                          closeDay();
-                          onOpenPage(page.path, title);
-                        }}
-                      >
-                        {title}
-                      </button>
-                    );
-                  })}
-                {activeDay.pages.length > VISIBLE_PAGES ? (
-                  <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                    +{activeDay.pages.length - VISIBLE_PAGES} more
-                  </span>
-                ) : null}
+              <div className="border-b border-rule bg-paper-2 px-3 py-2">
+                <h2
+                  id={headingId}
+                  className="cl-mono text-[10px] font-medium uppercase tracking-[0.18em] text-ink"
+                >
+                  {activeDate} activity
+                </h2>
+                <p className="cl-mono mt-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                  {captureCount(activeDay.count)}
+                </p>
               </div>
-            ) : null}
-            </Dialog>
-          </div>
-        ) : null}
-      </Popover>
+              {activeDay.pages.length > 0 ? (
+                <div className="flex flex-col py-1">
+                  {activeDay.pages
+                    .slice(0, VISIBLE_PAGES)
+                    .map((page, occurrenceIndex) => {
+                      const title = page.title || page.path;
+                      return (
+                        <button
+                          key={`${page.path}:${page.activityAt}:${occurrenceIndex}`}
+                          type="button"
+                          aria-label={`Open ${title}`}
+                          className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
+                          onClick={() => {
+                            closeDay();
+                            onOpenPage(page.path, title);
+                          }}
+                        >
+                          {title}
+                        </button>
+                      );
+                    })}
+                  {activeDay.pages.length > VISIBLE_PAGES ? (
+                    <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                      +{activeDay.pages.length - VISIBLE_PAGES} more
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </FloatingFocusManager>
+        </FloatingPortal>
+      ) : null}
     </>
   );
 }

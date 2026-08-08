@@ -38,6 +38,7 @@ vi.mock("#/editor/SlateEditor", () => ({
   SlateEditor: () => <div data-testid="slate-editor">Slate editor</div>,
 }));
 vi.mock("#/api/journal", () => ({
+  useJournalToday: () => ({ data: null, isLoading: false }),
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
 }));

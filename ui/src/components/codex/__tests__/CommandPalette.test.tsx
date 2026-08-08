@@ -10,6 +10,9 @@ const { navigateMock, openTabMock } = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
 }));
+vi.mock("#/api/journal", () => ({
+  useJournalToday: () => ({ data: null, refetch: vi.fn() }),
+}));
 vi.mock("#/api/index", () => ({
   useSearch: () => ({ data: [] }),
   useTags: () => ({ data: [] }),

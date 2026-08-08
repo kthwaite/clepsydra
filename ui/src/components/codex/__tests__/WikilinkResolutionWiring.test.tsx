@@ -45,6 +45,7 @@ vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("#/api/journal", () => ({
+  useJournalToday: () => ({ data: null, isLoading: false }),
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
   useEnsureJournalToday: () => ({ mutateAsync: vi.fn() }),

@@ -5,6 +5,7 @@ a bespoke personal knowledge management system.
 ## Getting started
 
 - Local setup: [ui/src/docs/content/getting-started.mdx](ui/src/docs/content/getting-started.mdx) (in app: `/docs/getting-started`)
+- Tailnet HTTPS via Caddy: [ui/src/docs/content/getting-started.mdx#6-optional-expose-over-tailscale-with-caddy](ui/src/docs/content/getting-started.mdx#6-optional-expose-over-tailscale-with-caddy)
 
 ## Documentation
 

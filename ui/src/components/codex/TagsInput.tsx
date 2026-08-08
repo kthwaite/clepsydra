@@ -13,10 +13,10 @@ const MAX_SUGGESTIONS = 8;
 
 /** Inline chiclet tag editor with autosuggest. Typing filters `suggestions`;
  * Tab completes the highlighted match, Enter commits the draft (or the
- * highlighted match after arrow navigation), comma/space also commit,
- * Backspace on an empty draft removes the last chip. Escape closes the
- * suggestion list first and only bubbles (e.g. to a modal dismiss handler)
- * when no list is open. */
+ * highlighted match after arrow navigation), comma commits, and Backspace
+ * on an empty draft removes the last chip. Escape closes the suggestion list
+ * first and only bubbles (e.g. to a modal dismiss handler) when no list is
+ * open. */
 export function TagsInput({
   value,
   onChange,
@@ -76,7 +76,7 @@ export function TagsInput({
     } else if (e.key === "Enter" && query) {
       e.preventDefault();
       commit(open && navigated ? matches[sel] : query);
-    } else if (e.key === "," || e.key === " ") {
+    } else if (e.key === ",") {
       e.preventDefault();
       if (query) commit(query);
     } else if (e.key === "Backspace" && !draft && value.length) {

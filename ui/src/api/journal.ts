@@ -29,9 +29,10 @@ export interface JournalSummary {
   journal_date: string;
 }
 
-export function useJournalToday() {
+export function useJournalToday(enabled = true) {
   return useQuery<JournalDetail | null>({
     queryKey: queryKeys.journal.today,
+    enabled,
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/today`);
       if (res.status === 404) return null;

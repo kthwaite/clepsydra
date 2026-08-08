@@ -8,6 +8,9 @@ const { openTabMock } = vi.hoisted(() => ({ openTabMock: vi.fn() }));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
+vi.mock("#/api/journal", () => ({
+  useJournalToday: () => ({ data: null, refetch: vi.fn() }),
+}));
 
 import { todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
