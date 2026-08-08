@@ -29,10 +29,11 @@ impl reqwest::dns::Resolve for SystemResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let host = name.as_str().to_string();
         Box::pin(async move {
-            let addresses = tokio::net::lookup_host((host.as_str(), 0))
+            let addresses: Vec<_> = tokio::net::lookup_host((host.as_str(), 0))
                 .await
-                .map_err(|error| Box::new(error) as ResolverError)?;
-            let addresses: reqwest::dns::Addrs = Box::new(addresses);
+                .map_err(|error| Box::new(error) as ResolverError)?
+                .collect();
+            let addresses: reqwest::dns::Addrs = Box::new(addresses.into_iter());
             Ok(addresses)
         })
     }
