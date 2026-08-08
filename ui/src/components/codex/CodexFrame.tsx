@@ -55,7 +55,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     if (forceView) return forceView;
     const p = location.pathname;
     if (p === "/" || p === "") return "atrium";
-    if (p.startsWith("/docs")) return "docs";
+    if (p === "/docs" || p.startsWith("/docs/")) return "docs";
     if (p.startsWith("/gazetteer")) return "gazetteer";
     if (p.startsWith("/tasking")) return "tasking";
     if (p.startsWith("/workspace")) {

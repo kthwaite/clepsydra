@@ -95,7 +95,7 @@ describe("CodexFrame Docs integration", () => {
     workspaceState.activeTabId = null;
   });
 
-  it("renders Docs as the active shell view", () => {
+  it("renders a nested Docs guide as the active shell view", () => {
     renderFrame();
 
     expect(screen.getByRole("button", { name: /05.*DOCS/i })).toHaveClass(
@@ -109,6 +109,33 @@ describe("CodexFrame Docs integration", () => {
     expect(screen.queryByText("42%")).not.toBeInTheDocument();
     expect(screen.getByText("Frame content")).toBeInTheDocument();
   });
+
+  it("recognizes the exact Docs root path", () => {
+    locationState.pathname = "/docs";
+    renderFrame();
+
+    expect(screen.getByRole("button", { name: /05.*DOCS/i })).toHaveClass(
+      "shadow-[inset_0_-2px_0_0_var(--accent)]",
+    );
+    expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
+  });
+
+  it.each(["/docs-old", "/docsfoo"])(
+    "keeps near-prefix path %s in the Atrium fallback view",
+    (pathname) => {
+      locationState.pathname = pathname;
+      renderFrame();
+
+      expect(screen.getByRole("button", { name: /00.*ATRIUM/i })).toHaveClass(
+        "shadow-[inset_0_-2px_0_0_var(--accent)]",
+      );
+      expect(
+        screen.getByRole("button", { name: /05.*DOCS/i }),
+      ).not.toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
+      expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeInTheDocument();
+      expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+    },
+  );
 
   it("navigates an inactive Docs item to the typed default guide route", async () => {
     const user = userEvent.setup();
