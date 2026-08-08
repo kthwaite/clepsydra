@@ -300,6 +300,7 @@ struct EntryOut {
     read: bool,
     bookmarked: bool,
     tags: Vec<String>,
+    feed_tags: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -337,7 +338,8 @@ async fn list_entries(
         "SELECT e.id, e.feed_id, e.url, e.title, e.author, e.content_html,
                 e.published_at, e.read_at, e.bookmarked_at,
                 coalesce(e.published_at, e.fetched_at) AS sort_ts,
-                f.group_name, f.title AS feed_title, f.title_override, f.url AS feed_url
+                f.group_name, f.title AS feed_title, f.title_override, f.url AS feed_url,
+                f.tags AS feed_tags
          FROM entry e JOIN feed f ON f.id = e.feed_id WHERE 1=1",
     );
     if q.unread == Some(true) {
@@ -417,6 +419,8 @@ async fn list_entries(
                 read: r.get::<Option<String>, _>("read_at").is_some(),
                 bookmarked: r.get::<Option<String>, _>("bookmarked_at").is_some(),
                 tags: tag_map.remove(&id).unwrap_or_default(),
+                feed_tags: serde_json::from_str(r.get::<String, _>("feed_tags").as_str())
+                    .unwrap_or_default(),
             }
         })
         .collect();

@@ -41,6 +41,7 @@ export interface Entry {
   read: boolean;
   bookmarked: boolean;
   tags: string[];
+  feed_tags: string[];
 }
 
 export interface EntriesResponse {
@@ -113,7 +114,12 @@ type EntriesCache = InfiniteData<EntriesResponse, string | null>;
 function entryMatchesFilters(entry: Entry, filters: EntryFilters): boolean {
   if (filters.view === "unread" && entry.read) return false;
   if (filters.view === "saved" && !entry.bookmarked) return false;
-  if (filters.tag && !entry.tags.includes(filters.tag)) return false;
+  if (
+    filters.tag &&
+    !entry.tags.includes(filters.tag) &&
+    !entry.feed_tags.includes(filters.tag)
+  )
+    return false;
   return true;
 }
 

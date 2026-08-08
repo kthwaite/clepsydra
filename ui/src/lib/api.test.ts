@@ -28,6 +28,7 @@ function entry(overrides: Partial<Entry> = {}): Entry {
     read: false,
     bookmarked: true,
     tags: ["rust"],
+    feed_tags: [],
     ...overrides,
   };
 }
@@ -124,6 +125,59 @@ describe("updateEntryCache", () => {
       expect(result.pages[0].entries[0]).toBe(unaffectedEntry);
       expect(result.pages[1]).toBe(unaffectedPage);
     }
+  });
+
+  it.each([
+    ["read", { read: true }],
+    ["bookmark", { bookmarked: false }],
+    ["entry-tag", { tags: ["typescript"] }],
+  ] satisfies Array<[string, EntryPatch]>)(
+    "retains a feed-derived tag match after a %s patch",
+    (_kind, patch) => {
+      const original: EntriesCache = {
+        pages: [
+          {
+            entries: [entry({ tags: [], feed_tags: ["rust"] })],
+            next_cursor: null,
+          },
+        ],
+        pageParams: [null],
+      };
+
+      const result = updateEntryCache(
+        original,
+        { view: "all", tag: "rust" },
+        1,
+        patch,
+      );
+
+      expect(result.pages[0].entries).toHaveLength(1);
+      expect(result.pages[0].entries[0]).toMatchObject({
+        ...patch,
+        feed_tags: ["rust"],
+      });
+    },
+  );
+
+  it("removes an entry when its last entry-owned match is removed and feed tags do not match", () => {
+    const original: EntriesCache = {
+      pages: [
+        {
+          entries: [entry({ tags: ["rust"], feed_tags: ["typescript"] })],
+          next_cursor: null,
+        },
+      ],
+      pageParams: [null],
+    };
+
+    const result = updateEntryCache(
+      original,
+      { view: "all", tag: "rust" },
+      1,
+      { tags: [] },
+    );
+
+    expect(result.pages[0].entries).toEqual([]);
   });
 
   it("preserves page order, cursors, and unaffected entries and pages", () => {
