@@ -56,6 +56,8 @@ const SYSTEM_COLUMNS = new Set([
   "word_count",
 ]);
 
+const EMPTY_PROPERTIES: NonNullable<BaseDetailResponse["properties"]> = {};
+
 function aggregateLabel(
   definition: BaseDetailResponse,
   viewName: string,
@@ -88,6 +90,7 @@ export function BaseTableView({
   const view = definition.views?.find((v) => v.name === activeView);
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
+  const properties = definition.properties ?? EMPTY_PROPERTIES;
 
   const sortDescriptor = sortOverride.sort
     ? {
@@ -152,13 +155,12 @@ export function BaseTableView({
                   >
                     {row.title ?? row.path}
                   </button>
-                ) : !SYSTEM_COLUMNS.has(column) &&
-                  definition.properties[column] ? (
+                ) : !SYSTEM_COLUMNS.has(column) && properties[column] ? (
                   <EditableCell
                     value={
                       (row.columns as Record<string, CellValue>)[column] ?? null
                     }
-                    definition={definition.properties[column]}
+                    definition={properties[column]}
                     onCommit={(value, hint) =>
                       onCommitCell(row, column, value, hint)
                     }

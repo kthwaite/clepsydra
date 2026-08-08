@@ -4,6 +4,7 @@ import { BaseTableView } from "./BaseTableView";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
+  revision: "storybook-revision",
   name: "Reading Log",
   description: "Books in flight and their wake.",
   properties: {

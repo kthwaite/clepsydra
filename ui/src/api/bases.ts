@@ -6,6 +6,20 @@ import { $api, fetchClient } from "./client";
 import { invalidateByPath, queryKeys } from "./keys";
 
 export type BaseDetailResponse = components["schemas"]["BaseDetailResponse"];
+export type BaseFile = components["schemas"]["BaseFile"];
+export type BaseListResponse = components["schemas"]["BaseListResponse"];
+export type BaseSummary = components["schemas"]["BaseSummary"];
+export type BaseMutationResponse =
+  components["schemas"]["BaseMutationResponse"];
+export type CreateBaseRequest = components["schemas"]["CreateBaseRequest"];
+export type UpdateBaseRequest = components["schemas"]["UpdateBaseRequest"];
+export type DeleteBaseRequest = components["schemas"]["DeleteBaseRequest"];
+export type BasePreviewRequest = components["schemas"]["BasePreviewRequest"];
+export type BasePreviewResponse = components["schemas"]["BasePreviewResponse"];
+export type BaseFilter = components["schemas"]["Filter"];
+export type FilterOp = components["schemas"]["Op"];
+export type SortKey = components["schemas"]["SortKey"];
+export type Aggregate = components["schemas"]["Aggregate"];
 export type PropertyType = components["schemas"]["PropertyType"];
 export type PropertyDefinition = components["schemas"]["PropertyDefinition"];
 export type QueryOutput = components["schemas"]["QueryOutput"];
@@ -15,6 +29,36 @@ export type PropertyPatchRequest =
   components["schemas"]["PropertyPatchRequest"];
 export type PropertyPatchResponse =
   components["schemas"]["PropertyPatchResponse"];
+
+function useInvalidateBaseQueries() {
+  const qc = useQueryClient();
+  return useCallback(() => {
+    invalidateByPath(qc, queryKeys.bases.pathPrefix);
+    invalidateByPath(qc, queryKeys.query.pathPrefix);
+  }, [qc]);
+}
+
+export const useBases = () => $api.useQuery("get", "/api/vault/bases", {});
+
+export function useCreateBase() {
+  const onSuccess = useInvalidateBaseQueries();
+  return $api.useMutation("post", "/api/vault/bases", { onSuccess });
+}
+
+export function useUpdateBase() {
+  const onSuccess = useInvalidateBaseQueries();
+  return $api.useMutation("put", "/api/vault/bases/{slug}", { onSuccess });
+}
+
+export function useDeleteBase() {
+  const onSuccess = useInvalidateBaseQueries();
+  return $api.useMutation("delete", "/api/vault/bases/{slug}", { onSuccess });
+}
+
+export function usePreviewBase() {
+  const onSuccess = useInvalidateBaseQueries();
+  return $api.useMutation("post", "/api/vault/bases/preview", { onSuccess });
+}
 
 export function useBase(slug: string) {
   return $api.useQuery(

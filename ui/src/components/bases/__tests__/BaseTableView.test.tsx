@@ -6,6 +6,7 @@ import { BaseTableView } from "#/components/bases/BaseTableView";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
+  revision: "revision-1",
   name: "Reading Log",
   properties: {
     author: { type: "text" },
@@ -122,6 +123,18 @@ describe("BaseTableView", () => {
     }
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
+  it("treats omitted property definitions as an empty read-only schema", () => {
+    renderView({
+      definition: {
+        ...definition,
+        properties: undefined,
+      },
+    });
+
+    expect(screen.getByText("Gene Wolfe").tagName).toBe("SPAN");
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("renders an error banner instead of an empty table on view failure", () => {
