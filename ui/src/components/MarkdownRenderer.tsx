@@ -5,6 +5,7 @@ import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { classifyLinkResource } from "#/lib/linkResource";
 
 interface MarkdownRendererProps {
   content: string;
@@ -53,6 +54,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       remarkPlugins={remarkPlugins}
       components={{
         a: ({ href, children, ...props }) => {
+          const resource = href ? classifyLinkResource(href) : null;
           if (href?.startsWith("/pages/")) {
             const pagePath = decodeURIComponent(href.replace(/^\/pages\//, ""));
             return (
@@ -75,6 +77,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
               target="_blank"
               rel="noopener noreferrer"
               className="underline decoration-1 underline-offset-2 hover:decoration-2"
+              data-link-resource={resource ?? undefined}
               {...props}
             >
               {children}

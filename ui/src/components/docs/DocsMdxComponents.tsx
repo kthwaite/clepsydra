@@ -8,6 +8,7 @@ import {
 import type { MDXComponents } from "mdx/types";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { cn } from "#/lib/cn";
+import { classifyLinkResource } from "#/lib/linkResource";
 
 const linkClasses =
   "font-medium text-ink underline decoration-rule underline-offset-4 transition-colors hover:text-accent hover:decoration-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
@@ -107,6 +108,7 @@ function DocsLink({
   }
 
   if (/^https?:\/\//i.test(href)) {
+    const resource = classifyLinkResource(href);
     return (
       <a
         {...props}
@@ -114,11 +116,14 @@ function DocsLink({
         target="_blank"
         rel="noreferrer"
         className={classes}
+        data-link-resource={resource ?? undefined}
       >
         {children}
-        <span aria-hidden="true" className="ml-1 font-mono text-xs">
-          ↗
-        </span>
+        {!resource && (
+          <span aria-hidden="true" className="ml-1 font-mono text-xs">
+            ↗
+          </span>
+        )}
       </a>
     );
   }

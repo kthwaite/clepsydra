@@ -667,7 +667,7 @@ Use these fixed sources and licenses; do not add an icon package:
 | --- | --- | --- |
 | `wikipedia.svg` | Font Awesome `wikipedia-w` | Font Awesome Free Brands, CC BY 4.0 |
 | `arxiv.svg` | Simple Icons `arXiv` | Simple Icons, CC0 1.0; brand trademark noted |
-| `biorxiv.svg` | Simple Icons `bioRxiv` | Simple Icons, CC0 1.0; brand trademark noted |
+| `biorxiv.svg` | Original Clepsydra χ/DNA mark: a Greek chi silhouette crossed by four horizontal DNA rungs | Original project artwork; metadata records the 2026-08-08 design decision |
 | `doi.svg` | Simple Icons `DOI` | Simple Icons, CC0 1.0; brand trademark noted |
 | `pubmed.svg` | Wikimedia Commons `US-NLM-NCBI-Logo.svg`, reduced to the NCBI/NLM letterform | U.S. government work/public-domain status recorded from source page |
 | `semantic-scholar.svg` | Simple Icons `Semantic Scholar` | Simple Icons, CC0 1.0; brand trademark noted |
@@ -702,7 +702,7 @@ Normalize each file to one view box and mask-compatible black geometry. Put prov
 </svg>
 ```
 
-For the remaining files, preserve the exact path or stroke geometry supplied by the named source and add metadata with that table row's source, icon name, license, and copied/adapted status.
+For copied files, preserve the exact path or stroke geometry supplied by the named source and add metadata with that table row's source, icon name, license, and copied/adapted status. For `biorxiv.svg`, draw original geometry matching the table description and use `<metadata>Original Clepsydra χ/DNA resource mark; designed 2026-08-08; project license.</metadata>`.
 
 For stroke-based Lucide sources, preserve `fill="none"`, `stroke="black"`, `stroke-width="2"`, `stroke-linecap="round"`, and `stroke-linejoin="round"`; the CSS mask uses stroke alpha correctly. Do not include scripts, styles, external image references, embedded raster data, brand colors, fixed pixel width, or fixed pixel height.
 

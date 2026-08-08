@@ -30,4 +30,28 @@ describe("MarkdownRenderer", () => {
     render(<MarkdownRenderer content={"some `inline` code"} />);
     expect(screen.queryByRole("button", { name: "Copy code" })).toBeNull();
   });
+
+  it("marks recognized external resources without changing their accessible name", () => {
+    render(
+      <MarkdownRenderer
+        content={
+          "[Wikipedia](https://en.wikipedia.org/wiki/Hypertext) and [ordinary](https://example.com)"
+        }
+      />,
+    );
+
+    const wikipedia = screen.getByRole("link", { name: "Wikipedia" });
+    expect(wikipedia).toHaveAttribute("data-link-resource", "wikipedia");
+    expect(wikipedia).toHaveTextContent("Wikipedia");
+    expect(screen.getByRole("link", { name: "ordinary" })).not.toHaveAttribute(
+      "data-link-resource",
+    );
+  });
+
+  it("does not mark internal page links", () => {
+    render(<MarkdownRenderer content="[Local](/pages/notes/local.md)" />);
+    expect(screen.getByRole("link", { name: "Local" })).not.toHaveAttribute(
+      "data-link-resource",
+    );
+  });
 });
