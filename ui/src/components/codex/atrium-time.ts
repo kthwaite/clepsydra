@@ -17,6 +17,7 @@ export function useAtriumCalendar(now: Date) {
   const dayKey = `${year}-${month}-${date}`;
   return useMemo(() => {
     const day = new Date(year, month, date);
+    const utcDate = new Date(Date.UTC(year, month, date));
     const doy = dayOfYear(day);
     return {
       aphorism: aphorismForDay(day),
@@ -26,6 +27,7 @@ export function useAtriumCalendar(now: Date) {
       doy,
       julian: julianDay(day),
       todayLabel: daystampLabel(day),
+      utcDate,
       week: Math.ceil(doy / 7),
       yearDays: isLeapYear(year) ? 366 : 365,
     };

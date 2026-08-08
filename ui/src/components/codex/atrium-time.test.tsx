@@ -15,3 +15,25 @@ it("reuses day-derived values across same-day clock ticks", () => {
   rerender({ now: new Date(2026, 7, 9, 0, 0, 0) });
   expect(result.current).not.toBe(morning);
 });
+
+it("retains a local-midnight date for day-derived display values", () => {
+  const now = new Date(2026, 7, 8, 10, 30, 45);
+  const { result } = renderHook(() => useAtriumCalendar(now));
+
+  expect(result.current.date).toEqual(new Date(2026, 7, 8));
+});
+it("uses the local calendar date for UTC day keys in positive-offset zones", () => {
+  const previousTz = process.env.TZ;
+  process.env.TZ = "Pacific/Kiritimati";
+  try {
+    const now = new Date(2026, 7, 8, 0, 30, 0);
+    const { result } = renderHook(() => useAtriumCalendar(now));
+
+    expect(result.current.date).toEqual(new Date(2026, 7, 8));
+    expect(result.current.utcDate).toEqual(new Date(Date.UTC(2026, 7, 8)));
+    expect(result.current.utcDate.toISOString().slice(0, 10)).toBe("2026-08-08");
+  } finally {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  }
+});

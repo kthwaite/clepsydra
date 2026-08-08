@@ -84,7 +84,7 @@ export function Atrium() {
     : `JOURNAL / ${calendar.dotDate}`;
 
   const heat = useMemo(
-    () => buildHeatmap(items, calendar.date),
+    () => buildHeatmap(items, calendar.utcDate),
     [items, calendar],
   );
   const topTags = useMemo(
@@ -94,7 +94,7 @@ export function Atrium() {
   const maxTag = topTags[0]?.count ?? 1;
 
   const inventory = useMemo(
-    () => deriveInventory(stats, tags, items, calendar.date),
+    () => deriveInventory(stats, tags, items, calendar.utcDate),
     [stats, tags, items, calendar],
   );
 
