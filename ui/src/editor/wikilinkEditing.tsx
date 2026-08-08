@@ -93,7 +93,9 @@ function selectExit(editor: Editor, path: Path, exit: WikilinkExit): void {
     exit === "before" ? Editor.before(editor, path) : Editor.after(editor, path);
   if (ReactEditor.isFocused(editor)) ReactEditor.blur(editor);
   if (point) Transforms.select(editor, point);
-  ReactEditor.focus(editor);
+  // Slate clears selection operations in a microtask. Focus after that flush
+  // so a stale DOM selectionchange cannot overwrite the requested exit point.
+  queueMicrotask(() => ReactEditor.focus(editor));
 }
 
 export function useWikilinkEditingController(
