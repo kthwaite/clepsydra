@@ -28,6 +28,7 @@ import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
+import { withInlinePunctuationBoundary } from "./plugins/withInlinePunctuationBoundary";
 import { withMarkdownPaste } from "./plugins/withMarkdownPaste";
 import {
   indentListItem,
@@ -129,7 +130,9 @@ export function SlateEditor({
     () =>
       withMarkdownPaste(
         withReact(
-          withHistory(withAutoformat(withOutliner(withSchema(createEditor())))),
+          withInlinePunctuationBoundary(
+            withHistory(withAutoformat(withOutliner(withSchema(createEditor())))),
+          ),
         ),
       ),
     [],
