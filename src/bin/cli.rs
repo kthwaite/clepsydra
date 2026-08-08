@@ -567,7 +567,7 @@ mod cli_tests {
             Cli::try_parse_from(["clep", "backup", "--destination", "out"]).unwrap();
         assert!(matches!(
             cli.command,
-            Commands::Backup { destination } if destination == PathBuf::from("out")
+            Commands::Backup { destination } if destination == std::path::Path::new("out")
         ));
     }
 
