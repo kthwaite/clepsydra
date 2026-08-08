@@ -672,11 +672,11 @@ function Block({
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div className="cl-mono grid grid-cols-[64px_1fr] gap-2 py-[1px] text-[11px]">
+    <div className="cl-mono grid grid-cols-[64px_1fr] items-center gap-2 py-[1px] text-[11px]">
       <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
         {k}
       </span>
-      <span className="min-w-0 text-ink-2">{v}</span>
+      <span className="flex min-w-0 items-center text-ink-2">{v}</span>
     </div>
   );
 }
