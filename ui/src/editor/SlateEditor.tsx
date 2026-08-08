@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type BasePoint,
   createEditor,
@@ -19,6 +19,7 @@ import {
   applyBlockConversion,
   type BlockConversion,
 } from "#/editor/transforms/blockConversions";
+import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import { makeDecorateCode } from "./decorate-code";
@@ -127,6 +128,7 @@ export function SlateEditor({
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
   const assignBlockId = useAssignBlockId();
+  const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
 
   // Grammars load lazily on the first decorate pass over a highlighted code
   // block; the fresh decorate identity when they land re-runs decorations.
@@ -142,11 +144,22 @@ export function SlateEditor({
 
   const [wikilinkTrigger, setWikilinkTrigger] =
     useState<ComboboxTrigger | null>(null);
+  const wikilinkTriggerRef = useRef<ComboboxTrigger | null>(null);
+  const wikilinkCreatePendingRef = useRef(false);
+  const [wikilinkCreatePending, setWikilinkCreatePending] = useState(false);
+  const [wikilinkCreateError, setWikilinkCreateError] = useState<string | null>(
+    null,
+  );
   const [blockRefTrigger, setBlockRefTrigger] =
     useState<ComboboxTrigger | null>(null);
   const [slashTrigger, setSlashTrigger] = useState<ComboboxTrigger | null>(
     null,
   );
+
+  useEffect(() => {
+    wikilinkTriggerRef.current = wikilinkTrigger;
+    setWikilinkCreateError(null);
+  }, [wikilinkTrigger]);
 
   const handleChange = (value: Descendant[]) => {
     onChange(value, editor);
@@ -223,31 +236,46 @@ export function SlateEditor({
     setSlashTrigger(null);
   };
 
+  const insertWikilinkTarget = (
+    target: string,
+    trigger: ComboboxTrigger | null = wikilinkTrigger,
+  ) => {
+    if (!trigger || !editor.selection) return;
+    const deleteRange = {
+      anchor: trigger.anchor,
+      focus: editor.selection.focus,
+    };
+    Transforms.select(editor, deleteRange);
+    Transforms.delete(editor);
+    Transforms.insertNodes(editor, makeWikilink({ target }));
+    Transforms.move(editor);
+    setWikilinkTrigger(null);
+  };
+
   const insertWikilink = (page: {
     title?: string | null;
     canonical_name: string;
-  }) => {
-    if (!wikilinkTrigger) return;
+  }) => insertWikilinkTarget(page.title ?? page.canonical_name);
 
-    const { selection } = editor;
-    if (!selection) return;
-
-    const deleteRange = {
-      anchor: wikilinkTrigger.anchor,
-      focus: selection.focus,
-    };
-
-    Transforms.select(editor, deleteRange);
-    Transforms.delete(editor);
-
-    const wikilinkNode = makeWikilink({
-      target: page.title ?? page.canonical_name,
-    });
-
-    Transforms.insertNodes(editor, wikilinkNode);
-    Transforms.move(editor);
-
-    setWikilinkTrigger(null);
+  const createWikilinkTarget = async (title: string) => {
+    if (wikilinkCreatePendingRef.current) return;
+    const trigger = wikilinkTriggerRef.current;
+    if (!trigger) return;
+    wikilinkCreatePendingRef.current = true;
+    setWikilinkCreatePending(true);
+    setWikilinkCreateError(null);
+    try {
+      const result = await resolveOrCreate(title);
+      if (wikilinkTriggerRef.current !== trigger) return;
+      insertWikilinkTarget(result.title, trigger);
+    } catch {
+      if (wikilinkTriggerRef.current === trigger) {
+        setWikilinkCreateError("Creation failed — press Enter to retry");
+      }
+    } finally {
+      wikilinkCreatePendingRef.current = false;
+      setWikilinkCreatePending(false);
+    }
   };
 
   const doInsertBlockRef = (blockId: string) => {
@@ -507,7 +535,10 @@ export function SlateEditor({
           query={wikilinkTrigger.query}
           reference={createSelectionReference(editor)}
           onSelect={insertWikilink}
+          onCreate={(title) => void createWikilinkTarget(title)}
           onClose={() => setWikilinkTrigger(null)}
+          isCreating={wikilinkCreatePending}
+          createError={wikilinkCreateError}
         />
       )}
 
