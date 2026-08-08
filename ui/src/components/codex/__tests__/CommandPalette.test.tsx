@@ -2,17 +2,19 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { navigateMock, openTabMock } = vi.hoisted(() => ({
+const { navigateMock, openTabMock, useSearchMock, useTagsMock } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   openTabMock: vi.fn(),
+  useSearchMock: vi.fn(() => ({ data: [] })),
+  useTagsMock: vi.fn(() => ({ data: [] })),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
 }));
 vi.mock("#/api/index", () => ({
-  useSearch: () => ({ data: [] }),
-  useTags: () => ({ data: [] }),
+  useSearch: useSearchMock,
+  useTags: useTagsMock,
 }));
 vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
@@ -70,5 +72,32 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(screen.getByText("Today's journal")).toBeInTheDocument();
     expect(screen.queryByText("Open Diurnal")).not.toBeInTheDocument();
+  });
+
+  it("resets the selected command as soon as typing changes the query", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+    const input = screen.getByRole("textbox");
+
+    await user.click(input);
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    await user.type(input, "today");
+    await user.keyboard("{Enter}");
+
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      todayJournalPath(),
+      expect.any(String),
+    );
+  });
+
+  it("does not subscribe to search or tags while closed", () => {
+    useUiStore.setState({ isSearchOpen: false });
+
+    render(<CommandPalette />);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useSearchMock).not.toHaveBeenCalled();
+    expect(useTagsMock).not.toHaveBeenCalled();
   });
 });

@@ -9,8 +9,8 @@ export function useBacklinks(path: string) {
   );
 }
 
-export function useTags() {
-  return $api.useQuery("get", "/api/vault/index/tags");
+export function useTags(enabled = true) {
+  return $api.useQuery("get", "/api/vault/index/tags", {}, { enabled });
 }
 
 export function useStats() {
