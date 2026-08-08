@@ -6,6 +6,7 @@ import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { Sheaf } from "#/components/codex/Sheaf";
 import { useTheme } from "#/components/ThemeProvider";
+import { DEFAULT_DOC_SLUG } from "#/docs/registry";
 import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
@@ -13,7 +14,13 @@ import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
-type View = "atrium" | "folio" | "gazetteer" | "constellation" | "tasking";
+type View =
+  | "atrium"
+  | "folio"
+  | "gazetteer"
+  | "constellation"
+  | "tasking"
+  | "docs";
 
 /** Nav order + diegetic index numbers. */
 const NAV: ReadonlyArray<readonly [View, string]> = [
@@ -22,6 +29,7 @@ const NAV: ReadonlyArray<readonly [View, string]> = [
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
   ["tasking", "TASKING"],
+  ["docs", "DOCS"],
 ];
 
 type CodexFrameProps = {
@@ -47,6 +55,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     if (forceView) return forceView;
     const p = location.pathname;
     if (p === "/" || p === "") return "atrium";
+    if (p.startsWith("/docs")) return "docs";
     if (p.startsWith("/gazetteer")) return "gazetteer";
     if (p.startsWith("/tasking")) return "tasking";
     if (p.startsWith("/workspace")) {
@@ -59,7 +68,12 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const onNav = (target: View) => {
     if (target === "atrium") navigate({ to: "/" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
-    else if (target === "constellation") {
+    else if (target === "docs") {
+      navigate({
+        to: "/docs/$slug",
+        params: { slug: DEFAULT_DOC_SLUG },
+      });
+    } else if (target === "constellation") {
       openTab("graph");
       navigate({ to: "/workspace" });
     } else if (target === "tasking") navigate({ to: "/tasking" });
@@ -157,7 +171,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
                 : "text-ink-mute hover:text-ink",
             )}
           >
-            <span className="text-[9px] text-ink-mute">05</span>
+            <span className="text-[9px] text-ink-mute">06</span>
             <span className="text-[10px]">STATUS</span>
           </button>
           <button
@@ -172,10 +186,10 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
         </div>
       </header>
 
-      {/* ── SHEAF (open files) — hidden on ATRIUM + CONSTELLATION ───── */}
-      {view !== "atrium" && view !== "constellation" && (
-        <Sheaf activeTabId={activeTabId} />
-      )}
+      {/* ── SHEAF — hidden on ATRIUM, CONSTELLATION, and DOCS ──────── */}
+      {view !== "atrium" &&
+        view !== "constellation" &&
+        view !== "docs" && <Sheaf activeTabId={activeTabId} />}
 
       {/* Reading progress now renders as a per-heading tick rail inside the
           FOLIO prose gutter (see Folio.tsx). The footer keeps the % readout. */}
@@ -240,6 +254,7 @@ function useFolioCode(view: View): string {
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
   if (view === "tasking") return "TASKING";
+  if (view === "docs") return "DOC-001";
   const active = tabs.find((t) => t.id === activeTabId);
   if (!active?.path) return "—";
   return shortFolio(active.path);
