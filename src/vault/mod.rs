@@ -3,6 +3,7 @@ pub mod academic_hook;
 pub mod archive_hook;
 pub mod atomic_file;
 pub mod base;
+pub mod base_document;
 pub mod bcl;
 pub mod block;
 pub mod block_id;
