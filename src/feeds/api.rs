@@ -718,11 +718,10 @@ mod tests {
     fn required_cursor_distinguishes_missing_valid_and_invalid_values() {
         assert!(matches!(parse_required_cursor(None), Ok(None)));
 
-        let parsed = parse_required_cursor(Some("2026-01-01T00:00:00+00:00|42")).unwrap();
-        assert_eq!(
-            parsed,
-            Some(("2026-01-01T00:00:00+00:00".to_string(), 42))
-        );
+        assert!(matches!(
+            parse_required_cursor(Some("2026-01-01T00:00:00+00:00|42")),
+            Ok(Some((timestamp, 42))) if timestamp == "2026-01-01T00:00:00+00:00"
+        ));
         assert!(matches!(
             parse_required_cursor(Some("garbage")),
             Err(ApiError::BadRequest(_))
