@@ -1,7 +1,12 @@
 //! Fetch pipeline: conditional GET, parse via feed-rs, sanitize at ingestion,
 //! idempotent upsert keyed on (feed_id, guid), exponential backoff on error.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{
+    error::Error,
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 
 use anyhow::{Context, bail, ensure};
 use bytes::BytesMut;
@@ -15,6 +20,66 @@ use crate::AppState;
 const MAX_BACKOFF_MINS: i64 = 24 * 60;
 const SWEEP_CONCURRENCY: usize = 4;
 const MAX_REDIRECTS: usize = 5;
+
+type ResolverError = Box<dyn Error + Send + Sync>;
+
+struct SystemResolver;
+
+impl reqwest::dns::Resolve for SystemResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addresses = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(|error| Box::new(error) as ResolverError)?;
+            let addresses: reqwest::dns::Addrs = Box::new(addresses);
+            Ok(addresses)
+        })
+    }
+}
+
+struct CheckedResolver<R> {
+    inner: R,
+}
+
+impl<R> CheckedResolver<R> {
+    fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+impl<R> reqwest::dns::Resolve for CheckedResolver<R>
+where
+    R: reqwest::dns::Resolve,
+{
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        let resolving = self.inner.resolve(name);
+        Box::pin(async move {
+            let addresses: Vec<_> = resolving.await?.collect();
+            if addresses.is_empty() {
+                return Err(Box::new(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("{host} did not resolve to any address"),
+                )) as ResolverError);
+            }
+            for address in &addresses {
+                if !is_public_ip(address.ip()) {
+                    return Err(Box::new(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("{host} resolves to non-public address {}", address.ip()),
+                    )) as ResolverError);
+                }
+            }
+            let addresses: reqwest::dns::Addrs = Box::new(addresses.into_iter());
+            Ok(addresses)
+        })
+    }
+}
+
+pub(crate) fn checked_dns_resolver() -> Arc<impl reqwest::dns::Resolve> {
+    Arc::new(CheckedResolver::new(SystemResolver))
+}
 
 fn is_public_ip(address: IpAddr) -> bool {
     match address {
@@ -43,23 +108,67 @@ fn is_public_ipv4(address: Ipv4Addr) -> bool {
 }
 
 fn is_public_ipv6(address: Ipv6Addr) -> bool {
-    if let Some(address) = address.to_ipv4() {
-        return is_public_ipv4(address);
+    let segments = address.segments();
+
+    // IPv4-mapped addresses are connectable as their embedded IPv4 address.
+    if segments[..5] == [0, 0, 0, 0, 0] && segments[5] == 0xffff {
+        return is_public_ipv4(Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            segments[6] as u8,
+            (segments[7] >> 8) as u8,
+            segments[7] as u8,
+        ));
     }
 
-    let segments = address.segments();
-    !(address.is_unspecified()
-        || address.is_loopback()
-        || address.is_multicast()
-        || segments[0] & 0xfe00 == 0xfc00
-        || segments[0] & 0xffc0 == 0xfe80
-        || segments[0] & 0xffc0 == 0xfec0
-        || (segments[0] == 0x0100
-            && segments[1] == 0
-            && segments[2] == 0
-            && segments[3] == 0)
-        || (segments[0] == 0x2001 && segments[1] == 0x0002 && segments[2] == 0)
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+    // RFC 6052's well-known NAT64 prefix is globally usable, but its embedded
+    // IPv4 destination must itself be public.
+    if ipv6_has_prefix(address, Ipv6Addr::new(0x0064, 0xff9b, 0, 0, 0, 0, 0, 0), 96) {
+        return is_public_ipv4(Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            segments[6] as u8,
+            (segments[7] >> 8) as u8,
+            segments[7] as u8,
+        ));
+    }
+
+    // Global Unicast Address space, with special assignments classified from
+    // the IANA IPv6 Special-Purpose Address Registry (reviewed 2026-08-08).
+    if !ipv6_has_prefix(address, Ipv6Addr::new(0x2000, 0, 0, 0, 0, 0, 0, 0), 3) {
+        return false;
+    }
+    if ipv6_has_prefix(address, Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23) {
+        return address == Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 1)
+            || address == Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 2)
+            || address == Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 3)
+            || ipv6_has_prefix(
+                address,
+                Ipv6Addr::new(0x2001, 3, 0, 0, 0, 0, 0, 0),
+                32,
+            )
+            || ipv6_has_prefix(
+                address,
+                Ipv6Addr::new(0x2001, 4, 0x0112, 0, 0, 0, 0, 0),
+                48,
+            )
+            || ipv6_has_prefix(
+                address,
+                Ipv6Addr::new(0x2001, 0x0030, 0, 0, 0, 0, 0, 0),
+                28,
+            );
+    }
+    const NON_GLOBAL: &[(Ipv6Addr, u8)] = &[
+        (Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32), // documentation
+        (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16), // deprecated 6to4
+        (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20), // documentation
+    ];
+    !NON_GLOBAL
+        .iter()
+        .any(|(prefix, bits)| ipv6_has_prefix(address, *prefix, *bits))
+}
+
+fn ipv6_has_prefix(address: Ipv6Addr, prefix: Ipv6Addr, bits: u8) -> bool {
+    let mask = u128::MAX << (128 - bits);
+    u128::from(address) & mask == u128::from(prefix) & mask
 }
 
 async fn validate_remote_url(url: &reqwest::Url) -> anyhow::Result<()> {
@@ -85,22 +194,6 @@ async fn validate_remote_url(url: &reqwest::Url) -> anyhow::Result<()> {
         normalized != "localhost" && !normalized.ends_with(".localhost"),
         "localhost URLs are not allowed"
     );
-    let port = url
-        .port_or_known_default()
-        .context("HTTP(S) URL has no known port")?;
-    let mut addresses = tokio::net::lookup_host((host, port))
-        .await
-        .with_context(|| format!("resolving {host}"))?;
-    let mut found = false;
-    for address in &mut addresses {
-        found = true;
-        ensure!(
-            is_public_ip(address.ip()),
-            "{host} resolves to non-public address {}",
-            address.ip()
-        );
-    }
-    ensure!(found, "{host} did not resolve to any address");
     Ok(())
 }
 
@@ -395,6 +488,7 @@ fn sanitize_entry_content(raw_content: Option<String>, limit: usize) -> Option<S
     raw_content
         .filter(|content| content.len() <= limit)
         .map(|content| ammonia::clean(&content))
+        .filter(|content| content.len() <= limit)
 }
 
 async fn record_success(
@@ -545,7 +639,8 @@ fn attr_value(tag: &str, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::convert::Infallible;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -553,12 +648,33 @@ mod tests {
 
     use axum::{
         Router,
+        body::Body,
         http::{StatusCode, header::LOCATION},
         response::IntoResponse,
         routing::get,
     };
+    use futures_util::stream;
+    use reqwest::dns::Resolve as _;
 
     use super::*;
+
+    struct RebindingResolver {
+        calls: Arc<AtomicUsize>,
+        public: SocketAddr,
+        loopback: SocketAddr,
+    }
+
+    impl reqwest::dns::Resolve for RebindingResolver {
+        fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            let address = if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.public
+            } else {
+                self.loopback
+            };
+            let addresses: reqwest::dns::Addrs = Box::new(std::iter::once(address));
+            Box::pin(std::future::ready(Ok(addresses)))
+        }
+    }
 
     #[test]
     fn classifies_only_public_ip_addresses_as_remote() {
@@ -578,6 +694,12 @@ mod tests {
             "fc00::1".parse().unwrap(),
             "fd12:3456::1".parse().unwrap(),
             "fe80::1".parse().unwrap(),
+            "64:ff9b:1::1".parse().unwrap(),
+            "2001:20::1".parse().unwrap(),
+            "2001:5::1".parse().unwrap(),
+            "3fff::1".parse().unwrap(),
+            "::ffff:127.0.0.1".parse().unwrap(),
+            "64:ff9b::127.0.0.1".parse().unwrap(),
         ] {
             assert!(!is_public_ip(IpAddr::V6(address)), "{address}");
         }
@@ -586,6 +708,10 @@ mod tests {
             "1.1.1.1".parse().unwrap(),
             "2606:4700:4700::1111".parse().unwrap(),
             "2001:4860:4860::8888".parse().unwrap(),
+            "2001:3::1".parse().unwrap(),
+            "2001:30::1".parse().unwrap(),
+            "::ffff:8.8.8.8".parse().unwrap(),
+            "64:ff9b::8.8.8.8".parse().unwrap(),
         ] {
             assert!(is_public_ip(address), "{address}");
         }
@@ -601,6 +727,61 @@ mod tests {
 
         let ipv6_loopback = reqwest::Url::parse("http://[::1]/feed.xml").unwrap();
         assert!(validate_remote_url(&ipv6_loopback).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn connector_rejects_rebound_loopback_address() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let route_hits = hits.clone();
+        let app = Router::new().route(
+            "/",
+            get(move || {
+                let route_hits = route_hits.clone();
+                async move {
+                    route_hits.fetch_add(1, Ordering::SeqCst);
+                    StatusCode::OK
+                }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resolver = RebindingResolver {
+            calls: calls.clone(),
+            public: SocketAddr::from(([93, 184, 216, 34], address.port())),
+            loopback: address,
+        };
+        let prior = resolver
+            .resolve("feed.example".parse().unwrap())
+            .await
+            .unwrap()
+            .next()
+            .unwrap();
+        assert!(is_public_ip(prior.ip()));
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(CheckedResolver::new(resolver)))
+            .build()
+            .unwrap();
+
+        let error = send_checked_after_validation(
+            &client,
+            reqwest::Url::parse(&format!("http://feed.example:{}/", address.port())).unwrap(),
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("non-public"));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        server.abort();
     }
 
     #[tokio::test]
@@ -640,6 +821,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         let client = reqwest::Client::builder()
+            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap();
@@ -671,7 +853,51 @@ mod tests {
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let response = reqwest::get(format!("http://{address}/")).await.unwrap();
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+
+        let error = read_limited(response, limit).await.unwrap_err();
+
+        assert!(error.to_string().contains("exceeds"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_length_body_when_final_chunk_crosses_limit() {
+        let limit = 16;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/",
+            get(move || async move {
+                let chunks = [
+                    Ok::<_, Infallible>(bytes::Bytes::from_static(b"12345678")),
+                    Ok(bytes::Bytes::from_static(b"abcdefgh")),
+                    Ok(bytes::Bytes::from_static(b"!")),
+                ];
+                Body::from_stream(stream::iter(chunks))
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.content_length(), None);
 
         let error = read_limited(response, limit).await.unwrap_err();
 
@@ -689,6 +915,15 @@ mod tests {
             sanitize_entry_content(Some("<b>too long</b>".to_string()), 9),
             None
         );
+    }
+
+    #[test]
+    fn drops_content_when_sanitizer_expands_it_over_limit() {
+        assert_eq!(
+            sanitize_entry_content(Some("&".to_string()), 5).as_deref(),
+            Some("&amp;")
+        );
+        assert_eq!(sanitize_entry_content(Some("&".to_string()), 1), None);
     }
 
     #[test]

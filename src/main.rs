@@ -106,7 +106,9 @@ async fn main() -> anyhow::Result<()> {
     let http = reqwest::Client::builder()
         .user_agent(concat!("clepsydra/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(20))
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
+        .dns_resolver(feeds::fetch::checked_dns_resolver())
         .build()?;
 
     let state = AppState {
