@@ -1,0 +1,125 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CreateBaseDialog } from "#/components/bases/CreateBaseDialog";
+
+const navigateMock = vi.fn();
+
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => navigateMock,
+}));
+
+function renderDialog(
+  onCreate = vi.fn().mockResolvedValue({ slug: "books" }),
+  onClose = vi.fn(),
+) {
+  render(<CreateBaseDialog isOpen onClose={onClose} onCreate={onCreate} />);
+  return { onCreate, onClose };
+}
+
+describe("CreateBaseDialog", () => {
+  beforeEach(() => navigateMock.mockReset());
+
+  it("synchronizes the generated slug with the name", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.type(screen.getByLabelText("Name"), "Reading Log");
+    expect(screen.getByLabelText("Slug")).toHaveValue("reading-log");
+  });
+
+  it("preserves a manually edited slug when the name changes", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.type(screen.getByLabelText("Name"), "Reading Log");
+    await user.clear(screen.getByLabelText("Slug"));
+    await user.type(screen.getByLabelText("Slug"), "books-2026");
+    await user.type(screen.getByLabelText("Name"), " Archive");
+
+    expect(screen.getByLabelText("Slug")).toHaveValue("books-2026");
+  });
+
+  it("submits a deterministic minimal base with explicit All-pages membership", async () => {
+    const user = userEvent.setup();
+    const { onCreate } = renderDialog();
+
+    await user.type(screen.getByLabelText("Name"), "Books");
+    await user.click(screen.getByRole("button", { name: "Create base" }));
+
+    expect(onCreate).toHaveBeenCalledWith({
+      slug: "books",
+      definition: {
+        name: "Books",
+        description: undefined,
+        filter: undefined,
+        properties: {},
+        views: [
+          {
+            name: "All",
+            layout: "table",
+            filter: undefined,
+            sort: [],
+            group_by: undefined,
+            aggregates: [],
+            columns: ["title"],
+          },
+        ],
+      },
+    });
+    expect(screen.getByText("All pages")).toBeInTheDocument();
+    expect(screen.getByText(/default view: All/i)).toBeInTheDocument();
+  });
+
+  it("shows local validation errors without submitting", async () => {
+    const user = userEvent.setup();
+    const { onCreate } = renderDialog();
+
+    await user.click(screen.getByRole("button", { name: "Create base" }));
+    expect(screen.getByText("Name is required.")).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Name"), "Books");
+    await user.clear(screen.getByLabelText("Slug"));
+    await user.type(screen.getByLabelText("Slug"), "not valid");
+    await user.click(screen.getByRole("button", { name: "Create base" }));
+    expect(
+      screen.getByText("Use only letters, numbers, underscores, and hyphens."),
+    ).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("retains field values when the server rejects creation", async () => {
+    const user = userEvent.setup();
+    const create = vi.fn().mockRejectedValue(new Error("Slug already exists"));
+    renderDialog(create);
+
+    await user.type(screen.getByLabelText("Name"), "Books");
+    await user.click(screen.getByRole("button", { name: "Create base" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Slug already exists",
+    );
+    expect(screen.getByLabelText("Name")).toHaveValue("Books");
+    expect(screen.getByLabelText("Slug")).toHaveValue("books");
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("closes and navigates to the created base editor on success", async () => {
+    const user = userEvent.setup();
+    const create = vi.fn().mockResolvedValue({ slug: "reading-log" });
+    const close = vi.fn();
+    renderDialog(create, close);
+
+    await user.type(screen.getByLabelText("Name"), "Reading Log");
+    await user.click(screen.getByRole("button", { name: "Create base" }));
+
+    await waitFor(() => {
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(navigateMock).toHaveBeenCalledWith({
+        to: "/bases/$slug/edit",
+        params: { slug: "reading-log" },
+      });
+    });
+  });
+});

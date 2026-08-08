@@ -17,6 +17,7 @@ import { Route as GazetteerRouteImport } from './routes/gazetteer'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as AgendaRouteImport } from './routes/agenda'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BasesIndexRouteImport } from './routes/bases.index'
 import { Route as PagesSplatRouteImport } from './routes/pages/$'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
@@ -61,6 +62,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BasesIndexRoute = BasesIndexRouteImport.update({
+  id: '/bases/',
+  path: '/bases/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PagesSplatRoute = PagesSplatRouteImport.update({
   id: '/pages/$',
   path: '/pages/$',
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/bases/$slug': typeof BasesSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
+  '/bases/': typeof BasesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/bases/$slug': typeof BasesSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
+  '/bases': typeof BasesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/bases/$slug': typeof BasesSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
+  '/bases/': typeof BasesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/bases/$slug'
     | '/docs/$slug'
     | '/pages/$'
+    | '/bases/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/bases/$slug'
     | '/docs/$slug'
     | '/pages/$'
+    | '/bases'
   id:
     | '__root__'
     | '/'
@@ -157,6 +168,7 @@ export interface FileRouteTypes {
     | '/bases/$slug'
     | '/docs/$slug'
     | '/pages/$'
+    | '/bases/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -170,6 +182,7 @@ export interface RootRouteChildren {
   WorkspaceRoute: typeof WorkspaceRoute
   BasesSlugRoute: typeof BasesSlugRoute
   PagesSplatRoute: typeof PagesSplatRoute
+  BasesIndexRoute: typeof BasesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -230,6 +243,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bases/': {
+      id: '/bases/'
+      path: '/bases'
+      fullPath: '/bases/'
+      preLoaderRoute: typeof BasesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pages/$': {
       id: '/pages/$'
       path: '/pages/$'
@@ -275,6 +295,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspaceRoute: WorkspaceRoute,
   BasesSlugRoute: BasesSlugRoute,
   PagesSplatRoute: PagesSplatRoute,
+  BasesIndexRoute: BasesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
