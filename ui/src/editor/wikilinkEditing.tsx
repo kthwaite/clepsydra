@@ -147,12 +147,11 @@ const WikilinkEditingContext =
   createContext<WikilinkEditingController | null>(null);
 
 export function WikilinkEditingProvider({
-  editor,
+  value,
   children,
-}: PropsWithChildren<{ editor: Editor }>) {
-  const controller = useWikilinkEditingController(editor);
+}: PropsWithChildren<{ value: WikilinkEditingController }>) {
   return (
-    <WikilinkEditingContext.Provider value={controller}>
+    <WikilinkEditingContext.Provider value={value}>
       {children}
     </WikilinkEditingContext.Provider>
   );

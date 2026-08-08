@@ -1,4 +1,4 @@
-import { type ComponentProps, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   type BasePoint,
   createEditor,
@@ -48,9 +48,8 @@ import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
 import {
   findAdjacentWikilink,
-  type WikilinkEditingController,
+  useWikilinkEditingController,
   WikilinkEditingProvider,
-  useWikilinkEditing,
 } from "./wikilinkEditing";
 
 export function slashCommandToConversion(id: string): BlockConversion | null {
@@ -115,29 +114,6 @@ interface ComboboxTrigger {
   query: string;
 }
 
-type WikilinkEditingEditableProps = Omit<
-  ComponentProps<typeof Editable>,
-  "onKeyDown"
-> & {
-  onKeyDown(
-    event: React.KeyboardEvent,
-    controller: WikilinkEditingController,
-  ): void;
-};
-
-function WikilinkEditingEditable({
-  onKeyDown,
-  ...props
-}: WikilinkEditingEditableProps) {
-  const wikilinkEditing = useWikilinkEditing();
-  return (
-    <Editable
-      {...props}
-      onKeyDown={(event) => onKeyDown(event, wikilinkEditing)}
-    />
-  );
-}
-
 export function SlateEditor({
   initialValue,
   onChange,
@@ -152,6 +128,7 @@ export function SlateEditor({
       ),
     [],
   );
+  const wikilinkEditing = useWikilinkEditingController(editor);
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
@@ -360,10 +337,7 @@ export function SlateEditor({
     setSlashTrigger(null);
   }, [slashTrigger, editor]);
 
-  const handleKeyDown = (
-    event: React.KeyboardEvent,
-    wikilinkEditing: WikilinkEditingController,
-  ) => {
+  const handleKeyDown = (event: React.KeyboardEvent) => {
     if (wikilinkTrigger || blockRefTrigger || slashTrigger) {
       if (
         ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)
@@ -527,18 +501,14 @@ export function SlateEditor({
         initialValue={initialValue}
         onChange={handleChange}
       >
-        <WikilinkEditingProvider editor={editor}>
-          <WikilinkEditingEditable
+        <WikilinkEditingProvider value={wikilinkEditing}>
+          <Editable
             renderElement={renderElement}
             renderLeaf={renderLeaf}
             decorate={decorateCode}
             onKeyDown={handleKeyDown}
-            onDOMBeforeInput={(event) => {
-              vim.handleDOMBeforeInput(event);
-            }}
-            onMouseDown={() => {
-              vim.handleMouseDown();
-            }}
+            onDOMBeforeInput={vim.handleDOMBeforeInput}
+            onMouseDown={vim.handleMouseDown}
             placeholder="Start writing..."
             className="min-h-[200px] outline-none"
             spellCheck

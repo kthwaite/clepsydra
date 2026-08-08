@@ -84,7 +84,7 @@ const meta = {
 } satisfies Meta<typeof SlateEditor>;
 
 export default meta;
-type Story = StoryObj<typeof meta>;
+type Story = StoryObj;
 
 export const EditableLabeledWikilink: Story = {
   render: () => <StoryProviders />,

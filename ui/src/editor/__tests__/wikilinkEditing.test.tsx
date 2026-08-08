@@ -8,12 +8,13 @@ import {
   type Editor,
 } from "slate";
 import { withHistory } from "slate-history";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeWikilink } from "../schema/elements/wikilink";
 import { withSchema } from "../schema/withSchema";
 import {
   findAdjacentWikilink,
   parseWikilinkDraft,
+  type WikilinkEditingController,
   useWikilinkEditing,
   useWikilinkEditingController,
   WikilinkEditingProvider,
@@ -34,10 +35,10 @@ function createWikilinkEditor(): Editor {
   return editor;
 }
 
-function controllerWrapper(editor: Editor) {
+function controllerWrapper(controller: WikilinkEditingController) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <WikilinkEditingProvider editor={editor}>
+      <WikilinkEditingProvider value={controller}>
         {children}
       </WikilinkEditingProvider>
     );
@@ -239,19 +240,18 @@ describe("useWikilinkEditingController", () => {
 });
 
 describe("WikilinkEditingProvider", () => {
-  it("provides the editor-specific controller", () => {
-    const editor = createWikilinkEditor();
+  it("provides the supplied controller unchanged", () => {
+    const controller: WikilinkEditingController = {
+      active: null,
+      begin: vi.fn(),
+      commit: vi.fn(),
+      cancel: vi.fn(),
+    };
     const { result } = renderHook(() => useWikilinkEditing(), {
-      wrapper: controllerWrapper(editor),
+      wrapper: controllerWrapper(controller),
     });
 
-    act(() => result.current.begin([0, 1], "start", "before"));
-
-    expect(result.current.active).toEqual({
-      path: [0, 1],
-      initialCaret: "start",
-      returnSide: "before",
-    });
+    expect(result.current).toBe(controller);
   });
 
   it("throws a descriptive error outside the provider", () => {
