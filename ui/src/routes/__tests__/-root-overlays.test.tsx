@@ -85,7 +85,7 @@ it("mounts each overlay from its corresponding UI state", async () => {
       ],
     }),
   );
-  expect(await screen.findByText("lazy previews")).toBeInTheDocument();
+  expect(screen.getByText("lazy previews")).toBeInTheDocument();
 });
 
 it("keeps a pending overlay dismissible while it loads", () => {
