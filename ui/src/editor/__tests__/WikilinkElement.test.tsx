@@ -310,7 +310,6 @@ describe("WikilinkElement dangling click", () => {
   });
 
   it("leaves the link dangling when resolution or creation fails", async () => {
-    const user = userEvent.setup();
     resolveOrCreateMock.mockRejectedValue(new Error("create failed"));
     renderWikilink("New Topic");
 
