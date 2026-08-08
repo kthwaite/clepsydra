@@ -4,6 +4,9 @@ import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
 import Guide, { meta } from "#/docs/content/getting-started.mdx";
 import source from "#/docs/content/getting-started.mdx?raw";
 import Configuration from "#/docs/content/configuration.mdx";
+import Troubleshooting, {
+  meta as troubleshootingMeta,
+} from "#/docs/content/troubleshooting.mdx";
 
 it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   render(<Guide />);
@@ -15,6 +18,15 @@ it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   expect(source).toContain(
     "This guide gets Clepsydra running locally with an initialized vault.",
   );
+});
+
+it("renders the dedicated troubleshooting guide", () => {
+  render(<Troubleshooting />);
+  expect(troubleshootingMeta.slug).toBe("troubleshooting");
+  expect(
+    screen.getByRole("heading", { name: "UI doesn’t load in single-binary mode" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("clep config path --trace")).toBeInTheDocument();
 });
 
 it("renders GFM tables as semantic HTML", () => {

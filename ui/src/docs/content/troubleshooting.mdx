@@ -1,0 +1,42 @@
+export const meta = {
+  slug: "troubleshooting",
+  title: "Troubleshooting",
+  description: "Resolve common Clepsydra setup, server, UI, and LSP problems."
+}
+
+Use these checks when Clepsydra does not start or a client cannot connect.
+
+## `no config.toml found`
+
+Create `config.toml` in your current directory, or in
+`$XDG_CONFIG_HOME/clepsydra/config.toml`.
+
+## Server fails with a TLS auto-cert message
+
+Install `mkcert` and retry, or provide `server.tls.cert_path` and
+`server.tls.key_path`.
+
+## UI doesn’t load in single-binary mode
+
+Rebuild the embedded assets:
+
+```bash
+cd ui
+bun run build
+```
+
+## UI can’t reach the backend in Vite mode
+
+Confirm the backend is running on `http://127.0.0.1:3000` and
+`server.dev_mode = true`.
+
+## `vault already initialized`
+
+Use a new path, or reuse the existing initialized vault.
+
+## Neovim LSP fails to initialize or attaches then stops
+
+No `.clepsydra` directory was found above the workspace root, and no
+`config.toml` resolved either. Check `:LspLog` and run
+`clep config path --trace` from the same directory. See the
+[LSP guide](/docs/lsp) for complete setup and diagnostics.

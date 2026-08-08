@@ -14,6 +14,10 @@ import LspGuide, { meta as lspMeta } from "#/docs/content/lsp.mdx";
 import lspSource from "#/docs/content/lsp.mdx?raw";
 import McpGuide, { meta as mcpMeta } from "#/docs/content/mcp.mdx";
 import mcpSource from "#/docs/content/mcp.mdx?raw";
+import TroubleshootingGuide, {
+  meta as troubleshootingMeta,
+} from "#/docs/content/troubleshooting.mdx";
+import troubleshootingSource from "#/docs/content/troubleshooting.mdx?raw";
 import type { DocGroup, DocMeta, DocPage } from "#/docs/types";
 
 function page(
@@ -37,6 +41,12 @@ const configuration = page(
   ConfigurationGuide,
   configurationSource,
 );
+const troubleshooting = page(
+  "start",
+  troubleshootingMeta,
+  TroubleshootingGuide,
+  troubleshootingSource,
+);
 const cli = page("reference", cliMeta, CliGuide, cliSource);
 const bases = page("features", basesMeta, BasesGuide, basesSource);
 const lsp = page("integrations", lspMeta, LspGuide, lspSource);
@@ -45,7 +55,7 @@ const mcp = page("integrations", mcpMeta, McpGuide, mcpSource);
 export const DEFAULT_DOC_SLUG = "getting-started";
 
 export const DOC_GROUPS = [
-  { id: "start", label: "Start Here", pages: [gettingStarted, configuration] },
+  { id: "start", label: "Start Here", pages: [gettingStarted, configuration, troubleshooting] },
   { id: "reference", label: "Reference", pages: [cli] },
   { id: "features", label: "Features", pages: [bases] },
   { id: "integrations", label: "Integrations", pages: [lsp, mcp] },
