@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { useUiStore } from "#/store/ui";
 import { usePreviewStore } from "#/store/preview";
@@ -28,7 +28,7 @@ vi.mock("#/components/codex/LinkPreviewLayer", () => ({
   LinkPreviewLayer: () => <div>lazy previews</div>,
 }));
 
-import { GlobalOverlays } from "#/routes/__root";
+import { GlobalOverlays, OverlayBoundary } from "#/routes/__root";
 
 beforeEach(() => {
   useUiStore.setState({
@@ -86,4 +86,24 @@ it("mounts each overlay from its corresponding UI state", async () => {
     }),
   );
   expect(await screen.findByText("lazy previews")).toBeInTheDocument();
+});
+
+it("keeps a pending overlay dismissible while it loads", () => {
+  const onDismiss = vi.fn();
+  const pending = new Promise<never>(() => {});
+  function PendingOverlay(): never {
+    throw pending;
+  }
+
+  render(
+    <OverlayBoundary onDismiss={onDismiss} label="search">
+      <PendingOverlay />
+    </OverlayBoundary>,
+  );
+
+  const fallback = screen.getByRole("dialog", { name: "Loading search" });
+  expect(fallback).toHaveAttribute("aria-modal", "true");
+  expect(fallback).toHaveAttribute("tabindex", "-1");
+  fireEvent.keyDown(fallback, { key: "Escape" });
+  expect(onDismiss).toHaveBeenCalledOnce();
 });
