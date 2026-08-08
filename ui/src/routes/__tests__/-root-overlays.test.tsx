@@ -4,13 +4,25 @@ import { useUiStore } from "#/store/ui";
 import { usePreviewStore } from "#/store/preview";
 
 vi.mock("#/components/codex/CommandPalette", () => ({
-  CommandPalette: () => <div>lazy command palette</div>,
+  CommandPalette: () => (
+    <div role="dialog" aria-label="Command console">
+      lazy command palette
+    </div>
+  ),
 }));
 vi.mock("#/components/SettingsModal", () => ({
-  SettingsModal: () => <div>lazy settings</div>,
+  SettingsModal: () => (
+    <div role="dialog" aria-label="Settings">
+      lazy settings
+    </div>
+  ),
 }));
 vi.mock("#/components/codex/InscribeModal", () => ({
-  InscribeModal: () => <div>lazy inscribe</div>,
+  InscribeModal: () => (
+    <div role="dialog" aria-label="Intake">
+      lazy inscribe
+    </div>
+  ),
 }));
 vi.mock("#/components/codex/CaptureAsideModal", () => ({
   CaptureAsideModal: () => <div>lazy capture</div>,
@@ -50,6 +62,27 @@ it("mounts infrequent overlays only while their state is active", async () => {
   act(() => useUiStore.setState({ isSearchOpen: true }));
   expect(await screen.findByText("lazy command palette")).toBeInTheDocument();
   expect(screen.queryByText("lazy settings")).not.toBeInTheDocument();
+});
+
+it("opens Search, Settings, and New note as named dialogs through store actions", async () => {
+  render(<GlobalOverlays />);
+  const cases = [
+    ["Command console", () => useUiStore.getState().openSearch()],
+    ["Settings", () => useUiStore.getState().openSettings()],
+    ["Intake", () => useUiStore.getState().openInscribe()],
+  ] as const;
+
+  for (const [name, open] of cases) {
+    act(open);
+    expect(await screen.findByRole("dialog", { name })).toBeInTheDocument();
+    act(() => {
+      useUiStore.setState({
+        isSearchOpen: false,
+        isSettingsOpen: false,
+        isInscribeOpen: false,
+      });
+    });
+  }
 });
 
 it("mounts each overlay from its corresponding UI state", async () => {

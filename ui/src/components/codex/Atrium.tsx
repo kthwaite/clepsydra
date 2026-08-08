@@ -106,9 +106,9 @@ export function Atrium() {
   const aphorism = calendar.aphorism;
 
   return (
-    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-4 py-4">
+    <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-2 py-2 md:px-4 md:py-4">
       {/* HERO — col-12 */}
-      <section className="cl-grid-texture col-span-12 grid items-end gap-6 border border-rule bg-paper-2 px-6 py-5 md:grid-cols-[1fr_auto]">
+      <section className="cl-grid-texture col-span-12 grid items-end gap-6 border border-rule bg-paper-2 px-4 py-4 md:grid-cols-[1fr_auto] md:px-6 md:py-5">
         <div>
           <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
             <span className="text-accent">●</span>
@@ -127,7 +127,7 @@ export function Atrium() {
           </h1>
         </div>
 
-        <div className="flex min-w-[280px] flex-col gap-2">
+        <div className="flex flex-col gap-2 md:min-w-[280px]">
           <button
             type="button"
             onClick={openTodayJournal}
@@ -150,7 +150,7 @@ export function Atrium() {
               className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
             >
               Capture
-              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">
+              <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
                 ⌘ N
               </div>
             </button>
@@ -160,7 +160,7 @@ export function Atrium() {
               className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
             >
               Search
-              <div className="mt-1 text-[9px] tracking-[0.18em] text-ink-mute">
+              <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
                 ⌘ K
               </div>
             </button>
@@ -175,14 +175,18 @@ export function Atrium() {
         caption="FIG. I — STEADY-STATE TELEMETRY"
         tight
       >
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 [&>div:last-child]:border-r-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8">
           {inventory.map((cell, i) => (
             <div
               key={cell.label}
               className={cn(
-                "flex flex-col gap-1 border-rule px-3.5 py-3",
-                i % 8 !== 7 && "border-r",
-                i >= 4 && "border-t lg:border-t-0",
+                "flex flex-col gap-1 border-rule px-2.5 py-3 md:px-3.5",
+                i % 2 === 0 ? "border-r" : "border-r-0",
+                i >= 2 ? "border-t" : "border-t-0",
+                i % 4 !== 3 ? "md:border-r" : "md:border-r-0",
+                i >= 4 ? "md:border-t" : "md:border-t-0",
+                i !== 7 ? "lg:border-r" : "lg:border-r-0",
+                "lg:border-t-0",
               )}
             >
               <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
@@ -208,7 +212,12 @@ export function Atrium() {
 
       {/* APHORISM + BCL (stacked, col-7) + SKY (col-5) */}
       <div className="col-span-12 flex flex-col gap-3.5 lg:col-span-7">
-        <Card className="flex-1" label="Aphorism" pip="dim" caption="FIG. II">
+        <Card
+          className="flex-1 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
+          label="Aphorism"
+          pip="dim"
+          caption="FIG. II"
+        >
           <blockquote className="m-0 font-sans text-[18px] italic leading-[1.4] text-ink-2">
             “{aphorism.text}”
           </blockquote>
@@ -218,7 +227,7 @@ export function Atrium() {
         </Card>
         {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
           <Card
-            className="flex-1"
+            className="flex-1 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
             label="Brimley-Cocoon Line"
             pip="dim"
             caption="FIG. VII"
@@ -234,7 +243,7 @@ export function Atrium() {
         )}
       </div>
       <SkyCard
-        className="col-span-12 lg:col-span-5"
+        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-5"
         sky={sky}
         hasLocation={located}
         onEdit={openLocation}
@@ -242,7 +251,7 @@ export function Atrium() {
 
       {/* HEATMAP (col-8) + TAGS (col-4) */}
       <Card
-        className="col-span-12 lg:col-span-8"
+        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-8"
         label="Activity · Rolling 26 weeks"
         pip="cool"
         caption="FIG. IV — CAPTURES PER DAY · UTC"
@@ -257,7 +266,7 @@ export function Atrium() {
         />
       </Card>
       <Card
-        className="col-span-12 lg:col-span-4"
+        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-4"
         label="Subjects, by frequency"
         caption="FIG. V"
       >
@@ -275,7 +284,7 @@ export function Atrium() {
                     search: { tag: t.tag } as never,
                   })
                 }
-                className="group grid cursor-pointer grid-cols-[120px_1fr_36px] items-center gap-2 text-left"
+                className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(60px,1fr)_32px] items-center gap-2 text-left md:grid-cols-[120px_1fr_36px]"
               >
                 <span className="cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-2 group-hover:text-accent">
                   #{t.tag}
@@ -299,7 +308,7 @@ export function Atrium() {
 
       {/* RECENTS (col-7) */}
       <section className="col-span-12 flex h-[340px] flex-col border border-rule bg-paper-2 lg:col-span-7">
-        <div className="flex items-center justify-between border-b border-rule bg-paper">
+        <div className="flex flex-col border-b border-rule bg-paper md:flex-row md:items-center md:justify-between">
           <div className="flex">
             {(["edited", "created", "opened"] as const).map((t) => (
               <button
@@ -307,17 +316,26 @@ export function Atrium() {
                 key={t}
                 onClick={() => setRecentTab(t)}
                 className={cn(
-                  "cl-mono border-r border-rule px-3.5 py-2 text-[9px] uppercase tracking-[0.22em]",
+                  "cl-mono flex-1 border-r border-rule px-2 py-2 text-[9px] uppercase tracking-[0.22em] md:flex-none md:px-3.5",
                   recentTab === t
                     ? "text-ink shadow-[inset_0_2px_0_var(--accent)]"
                     : "text-ink-mute hover:text-ink",
                 )}
               >
-                {t === "edited"
-                  ? "Recently edited"
-                  : t === "created"
-                    ? "Recently created"
-                    : "Opened"}
+                <span className="md:hidden">
+                  {t === "edited"
+                    ? "Edited"
+                    : t === "created"
+                      ? "Created"
+                      : "Opened"}
+                </span>
+                <span className="hidden md:inline">
+                  {t === "edited"
+                    ? "Recently edited"
+                    : t === "created"
+                      ? "Recently created"
+                      : "Opened"}
+                </span>
               </button>
             ))}
           </div>
@@ -355,22 +373,22 @@ export function Atrium() {
                     type="button"
                     key={n.path}
                     onClick={() => openTab("page", n.path, n.title || n.path)}
-                    className="grid cursor-pointer grid-cols-[18px_90px_1fr_72px] items-baseline gap-3 border-b border-dotted border-rule-soft px-3.5 py-2 text-left hover:bg-paper-edge"
+                    className="grid cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-baseline gap-x-2 gap-y-1 border-b border-dotted border-rule-soft px-2.5 py-2 text-left hover:bg-paper-edge md:grid-cols-[18px_90px_1fr_72px] md:gap-3 md:px-3.5"
                   >
-                    <span className="cl-mono text-[9px] tabular-nums text-ink-mute">
+                    <span className="cl-mono row-span-2 text-[9px] tabular-nums text-ink-mute md:row-span-1">
                       {pad2(i + 1)}
                     </span>
-                    <span className="cl-mono flex items-center gap-1.5 text-[9px] text-ink-mute">
+                    <span className="cl-mono col-start-2 row-start-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-ink-mute md:col-start-auto md:row-start-auto">
                       <span
                         className="inline-block h-[6px] w-[6px] flex-shrink-0"
                         style={{ background: kindColorVar(kind) }}
                       />
                       {shortFolio(n.path)}
                     </span>
-                    <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink">
+                    <span className="col-span-2 col-start-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14px] text-ink md:col-span-1 md:col-start-auto md:row-start-auto">
                       {n.title || n.path}
                     </span>
-                    <span className="cl-mono text-right text-[9px] uppercase text-ink-mute">
+                    <span className="cl-mono col-start-3 row-start-1 text-right text-[9px] uppercase text-ink-mute md:col-start-auto md:row-start-auto">
                       {formatRelativeTime(ts)}
                     </span>
                   </button>
