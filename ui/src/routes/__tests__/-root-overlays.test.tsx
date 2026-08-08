@@ -51,3 +51,39 @@ it("mounts infrequent overlays only while their state is active", async () => {
   expect(await screen.findByText("lazy command palette")).toBeInTheDocument();
   expect(screen.queryByText("lazy settings")).not.toBeInTheDocument();
 });
+
+it("mounts each overlay from its corresponding UI state", async () => {
+  render(<GlobalOverlays />);
+  const cases = [
+    ["isSettingsOpen", "lazy settings"],
+    ["isInscribeOpen", "lazy inscribe"],
+    ["isCaptureAsideOpen", "lazy capture"],
+    ["isLocationOpen", "lazy location"],
+    ["isShortcutHelpOpen", "lazy shortcut help"],
+    ["isBooting", "lazy boot"],
+  ] as const;
+
+  for (const [state, label] of cases) {
+    act(() => useUiStore.setState({ [state]: true }));
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    act(() => useUiStore.setState({ [state]: false }));
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
+  }
+
+  act(() =>
+    usePreviewStore.setState({
+      windows: [
+        {
+          id: "preview-test",
+          path: "notes/test.md",
+          x: 0,
+          y: 0,
+          pinned: false,
+          minimized: false,
+          z: 1,
+        },
+      ],
+    }),
+  );
+  expect(await screen.findByText("lazy previews")).toBeInTheDocument();
+});
