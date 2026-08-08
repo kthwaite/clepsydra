@@ -1,5 +1,9 @@
 import BasesGuide, { meta as basesMeta } from "#/docs/content/bases.mdx";
 import basesSource from "#/docs/content/bases.mdx?raw";
+import BrowserExtensionGuide, {
+  meta as browserExtensionMeta,
+} from "#/docs/content/browser-extension.mdx";
+import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
 import CliGuide, { meta as cliMeta } from "#/docs/content/cli.mdx";
 import cliSource from "#/docs/content/cli.mdx?raw";
 import ConfigurationGuide, {
@@ -51,6 +55,12 @@ const cli = page("reference", cliMeta, CliGuide, cliSource);
 const bases = page("features", basesMeta, BasesGuide, basesSource);
 const lsp = page("integrations", lspMeta, LspGuide, lspSource);
 const mcp = page("integrations", mcpMeta, McpGuide, mcpSource);
+const browserExtension = page(
+  "integrations",
+  browserExtensionMeta,
+  BrowserExtensionGuide,
+  browserExtensionSource,
+);
 
 export const DEFAULT_DOC_SLUG = "getting-started";
 
@@ -58,7 +68,7 @@ export const DOC_GROUPS = [
   { id: "start", label: "Start Here", pages: [gettingStarted, configuration, troubleshooting] },
   { id: "reference", label: "Reference", pages: [cli] },
   { id: "features", label: "Features", pages: [bases] },
-  { id: "integrations", label: "Integrations", pages: [lsp, mcp] },
+  { id: "integrations", label: "Integrations", pages: [lsp, mcp, browserExtension] },
 ] as const satisfies readonly DocGroup[];
 
 export const DOC_PAGES: readonly DocPage[] = DOC_GROUPS.flatMap(

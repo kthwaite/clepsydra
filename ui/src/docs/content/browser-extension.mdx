@@ -1,0 +1,122 @@
+export const meta = {
+  slug: "browser-extension",
+  title: "Browser Extension",
+  description: "Build, install, configure, and use the Clepsydra web archive extension."
+}
+
+The Clepsydra browser extension archives the page you are viewing into your
+local vault. This guide covers building, installing, configuring, and using
+the extension in Chromium-based browsers and Firefox.
+
+## Prerequisites
+
+Install [Bun](https://bun.sh/), then start the Clepsydra server from the
+repository root:
+
+```bash
+cargo run -- serve
+```
+
+The extension requires the running server to provide both archive endpoints:
+
+- `GET /api/vault/archive/status`
+- `POST /api/vault/archive`
+
+## Build the extension
+
+Run the extension commands from the `extension/` directory:
+
+```bash
+cd extension
+bun install
+bun run typecheck
+bun run build
+bun run build:firefox
+```
+
+`bun run build` creates the Chromium Manifest V3 bundle at `extension/dist/`.
+`bun run build:firefox` creates the Firefox Manifest V2 bundle at
+`extension/dist-firefox/`.
+
+## Install in Chrome, Chromium, Brave, or Edge
+
+1. Open the browser's extensions page:
+   - Chrome or Chromium: `chrome://extensions`
+   - Brave: `brave://extensions`
+   - Edge: `edge://extensions`
+2. Enable **Developer mode**.
+3. Select **Load unpacked**.
+4. Select the `extension/dist` folder.
+5. Optionally pin the extension to the browser toolbar.
+
+## Install temporarily in Firefox
+
+Build the Firefox bundle first from the repository root:
+
+```bash
+cd extension
+bun run build:firefox
+```
+
+Then install it for the current Firefox session:
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Select **Load Temporary Add-on...**.
+3. Select `extension/dist-firefox/manifest.json`.
+
+Firefox removes temporary add-ons when it restarts, so repeat these steps after
+each restart.
+
+## First-time setup
+
+1. Select the extension icon, then open **Settings**.
+2. Set **Server URL**. The default is `http://localhost:3000`.
+3. Optionally set default tags and notification preferences.
+4. Select **Save**.
+5. Confirm that the status box shows **Connected**.
+
+## Capture a page
+
+Open a normal web page and choose **Capture This Page** in the extension popup.
+You can also use the keyboard shortcut:
+
+- Windows or Linux: `Ctrl+Shift+S`
+- macOS: `Command+Shift+S`
+
+## Development workflow
+
+Start the watch build from the repository root:
+
+```bash
+cd extension
+bun run dev
+```
+
+After a code change, reload the extension in the browser. On Chromium-based
+browsers, return to the browser's extensions page and select **Reload**. On
+Firefox, reload the temporary add-on, loading it again if needed.
+
+## Troubleshooting
+
+### Server unreachable
+
+If the popup or options page reports **Server unreachable**, verify that the
+server is running:
+
+```bash
+cargo run -- serve
+```
+
+Then verify that
+`http://localhost:3000/api/vault/archive/status` is reachable.
+
+### Capture does not run
+
+Reload the extension after rebuilding it. Capture only works on a normal
+`http://` or `https://` web page.
+
+### Content Changed conflict
+
+A **Content Changed** notification means that the URL already exists in the
+vault with different content. Whether the extension updates the existing
+archive is controlled by the extension settings.
