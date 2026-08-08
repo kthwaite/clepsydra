@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { createEditor, type Descendant } from "slate";
 import { Editable, type RenderElementProps, Slate, withReact } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { withSchema } from "#/editor/schema/withSchema";
 import type * as WikilinkEditingExports from "#/editor/wikilinkEditing";
 type CapturedCLinkProps = {

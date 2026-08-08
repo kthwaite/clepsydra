@@ -28,9 +28,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const inFlightRef = useRef(false);
 
   const path = ReactEditor.findPath(editor, element);
-  const active =
-    controller.active !== null &&
-    Path.equals(controller.active.path, path);
+  const activeSession = controller.active;
   const resolved = lookup(element.target);
 
   const displayText =
@@ -88,7 +86,10 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     }
   };
 
-  if (active) {
+  if (
+    activeSession !== null &&
+    Path.equals(activeSession.path, path)
+  ) {
     const draft =
       element.alias === undefined
         ? element.target
@@ -104,8 +105,8 @@ export function WikilinkElement({ attributes, children, element }: Props) {
           </span>
           <WikilinkInlineEditor
             initialDraft={draft}
-            initialCaret={controller.active.initialCaret}
-            returnSide={controller.active.returnSide}
+            initialCaret={activeSession.initialCaret}
+            returnSide={activeSession.returnSide}
             onCommit={(parsed, exit) => controller.commit(parsed, exit)}
             onCancel={(exit) => controller.cancel(exit)}
             onOpen={(target) => {
