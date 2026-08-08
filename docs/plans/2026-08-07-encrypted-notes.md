@@ -6,9 +6,9 @@
 
 **Architecture:** A protected page keeps its normal `+++` TOML frontmatter and stores exactly one age-armored ciphertext as its body. The Rust backend treats that body as opaque, rejects accidental plaintext writes, and indexes only clear metadata; the React frontend unwraps a vault age identity with a password or imports an identity, keeps it only in memory, decrypts immediately before editing, and encrypts before every body write. A small vault keyring under `.clepsydra/crypto/` contains the public recipient and, optionally, a password-wrapped private identity; neither passwords, private identities, nor plaintext protected bodies cross the HTTP boundary.
 
-**Tech Stack:** Rust 2024, Axum 0.8, rusqlite/FTS5, serde + toml, existing `base64` and BLAKE3 crates, atomic-file helpers, utoipa/OpenAPI. Frontend: React 19, TanStack Query, Slate, react-aria-components, Vitest, dynamically imported [`age-encryption`](https://github.com/FiloSottile/typage). iOS: Swift concurrency and existing ClepsydraMobileKit models, with safe locked handling in the first release.
+**Tech Stack:** Rust 2024, Axum 0.8, rusqlite/FTS5, serde + toml, existing `base64` and BLAKE3 crates, atomic-file helpers, utoipa/OpenAPI. Frontend: React 19, TanStack Query, Slate, react-aria-components, Vitest, dynamically imported [`age-encryption`](https://github.com/FiloSottile/typage).
 
-**Reference implementation areas:** `src/vault/page.rs`, `src/vault/index.rs`, `src/vault/mutation_coordinator.rs`, `src/api/pages.rs`, `src/api/index_routes.rs`, `ui/src/editor/usePageEditor.ts`, `ui/src/components/codex/Folio.tsx`, `ui/src/components/codex/PreviewBody.tsx`, `ios/Packages/ClepsydraMobileKit/`.
+**Reference implementation areas:** `src/vault/page.rs`, `src/vault/index.rs`, `src/vault/mutation_coordinator.rs`, `src/api/pages.rs`, `src/api/index_routes.rs`, `ui/src/editor/usePageEditor.ts`, `ui/src/components/codex/Folio.tsx`, `ui/src/components/codex/PreviewBody.tsx`.
 
 ---
 
@@ -93,12 +93,8 @@ The body contains no Markdown wrapper or commentary around the armor. One traili
 - `ui/src/components/codex/LockedFolio.tsx` — **create.** Unlock/error state.
 - `ui/src/components/codex/{Folio,PreviewBody,LinkPreviewLayer}.tsx`, `ui/src/editor/PageEditorHeader.tsx` — **modify.** Controls, badges, and locked previews.
 
-### iOS and documentation
+### Documentation
 
-- `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraCore/Models/PageDetail.swift` — **modify.** Decode encryption state.
-- `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraCore/Editor/EditorModel.swift` — **modify.** Refuse protected-page editing.
-- `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraUI/{Reader/NoteReaderView,Editor/NoteEditorView}.swift` — **modify.** Locked UI.
-- `ios/Packages/ClepsydraMobileKit/Tests/ClepsydraCoreTests/{WireModelTests,EditorModelTests}.swift` — **modify.** Safe handling tests.
 - `docs/encrypted-notes.md`, `docs/configuration.md` — **create/modify.** Threat model, setup, recovery, limitations.
 
 ---
@@ -824,33 +820,28 @@ git add src/api src/vault src/lsp tests
 git commit -m "feat: make body consumers encryption-aware"
 ```
 
-### Task 15: Make the iOS client safe before adding native decryption
+### Task 15: Verify the responsive web client handles encrypted notes
 
 **Files:**
-- Modify: `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraCore/Models/PageDetail.swift`
-- Modify: `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraCore/Editor/EditorModel.swift`
-- Modify: `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraUI/Reader/NoteReaderView.swift`
-- Modify: `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraUI/Editor/NoteEditorView.swift`
-- Modify: `ios/Packages/ClepsydraMobileKit/Tests/ClepsydraCoreTests/WireModelTests.swift`
-- Modify: `ios/Packages/ClepsydraMobileKit/Tests/ClepsydraCoreTests/EditorModelTests.swift`
+- Modify: `ui/src/components/codex/{Folio,PreviewBody,LinkPreviewLayer}.tsx`
+- Modify: `ui/src/editor/{usePageEditor,PageEditorHeader}.tsx`
+- Modify: `ui/src/editor/__tests__/usePageEditor.encryption.test.tsx`
 
-- [ ] **Step 1: Write failing decode tests.** Decode plain responses where `encrypted` is absent/default false and protected responses with the encryption descriptor. Preserve backward compatibility with older servers.
+- [ ] **Step 1: Verify locked/read and decrypt/edit states.** Protected pages show metadata and an explicit locked state until the in-memory frontend identity is available.
 
-- [ ] **Step 2: Write failing editor tests.** Constructing edit mode for a protected page must produce a locked/unsupported state; `save()` must never send the armored body as if it were Markdown.
+- [ ] **Step 2: Verify encrypted writes.** After unlock, edits decrypt before presentation and re-encrypt before every body write; ordinary saves never send armored ciphertext as Markdown.
 
-- [ ] **Step 3: Implement explicit state.** Add `encrypted` and optional descriptor to the wire model. Reader/editor views show a concise locked message directing the user to the web frontend; metadata remains visible.
+- [ ] **Step 3: Run focused frontend encryption tests.**
 
-- [ ] **Step 4: Run Swift tests.**
-
-Run: `cd ios/Packages/ClepsydraMobileKit && swift test`
+Run: `bun --cwd ui test src/editor/__tests__/usePageEditor.encryption.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 4: Commit.**
 
 ```bash
-git add ios/Packages/ClepsydraMobileKit
-git commit -m "feat(ios): handle encrypted notes safely"
+git add ui/src/components/codex ui/src/editor
+git commit -m "test: verify encrypted notes in responsive web"
 ```
 
 ---
@@ -939,9 +930,9 @@ Run: `cd ui && bun run knip`
 
 Expected: all PASS; `age-encryption` remains a lazy chunk.
 
-- [ ] **Step 5: Run iOS gates.**
+- [ ] **Step 5: Run responsive browser gates.**
 
-Run: `cd ios/Packages/ClepsydraMobileKit && swift test`
+Run: `bun --cwd ui test src/docs/mdx-smoke.test.tsx src/docs/registry.test.ts src/docs/search.test.ts`
 
 Expected: PASS.
 
@@ -952,7 +943,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit final test adjustments.**
 
 ```bash
-git add tests/e2e_encryption_test.rs ui/src ios/Packages/ClepsydraMobileKit
+git add tests/e2e_encryption_test.rs ui/src
 git commit -m "test: verify encrypted notes end to end"
 ```
 
