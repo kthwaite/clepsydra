@@ -32,7 +32,10 @@ cd ui && bun install && bun run dev
 cd ui && bun run build && cd .. && cargo run
 ```
 
-Configuration via environment: `CLEPSYDRA_PORT` (8640), `CLEPSYDRA_VAULT`
-(`vault/`), `CLEPSYDRA_DB` (`clepsydra.db`), `CLEPSYDRA_UI_DIST` (`ui/dist`),
+Configuration via environment: `CLEPSYDRA_BIND` (`127.0.0.1`),
+`CLEPSYDRA_PORT` (8640), `CLEPSYDRA_VAULT` (`vault/`), `CLEPSYDRA_DB`
+(`clepsydra.db`), `CLEPSYDRA_UI_DIST` (`ui/dist`),
 `CLEPSYDRA_FETCH_INTERVAL_MINS` (30), `CLEPSYDRA_RETENTION_DAYS` (30),
-`CLEPSYDRA_UNREAD_RETENTION_DAYS` (90).
+`CLEPSYDRA_UNREAD_RETENTION_DAYS` (90), `CLEPSYDRA_MAX_RESPONSE_BYTES`
+(10485760, or 10 MiB), and `CLEPSYDRA_MAX_ENTRY_CONTENT_BYTES` (1048576, or
+1 MiB).

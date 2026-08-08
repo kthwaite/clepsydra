@@ -1,7 +1,10 @@
 //! Fetch pipeline: conditional GET, parse via feed-rs, sanitize at ingestion,
 //! idempotent upsert keyed on (feed_id, guid), exponential backoff on error.
 
-use anyhow::{Context, bail};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use anyhow::{Context, bail, ensure};
+use bytes::BytesMut;
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -11,6 +14,180 @@ use crate::AppState;
 
 const MAX_BACKOFF_MINS: i64 = 24 * 60;
 const SWEEP_CONCURRENCY: usize = 4;
+const MAX_REDIRECTS: usize = 5;
+
+fn is_public_ip(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => is_public_ipv4(address),
+        IpAddr::V6(address) => is_public_ipv6(address),
+    }
+}
+
+fn is_public_ipv4(address: Ipv4Addr) -> bool {
+    let [a, b, c, _] = address.octets();
+    !(address.is_unspecified()
+        || address.is_loopback()
+        || address.is_private()
+        || address.is_link_local()
+        || address.is_multicast()
+        || address.is_broadcast()
+        || a == 0
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 192 && b == 0 && c == 2)
+        || (a == 192 && b == 88 && c == 99)
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113)
+        || a >= 240)
+}
+
+fn is_public_ipv6(address: Ipv6Addr) -> bool {
+    if let Some(address) = address.to_ipv4() {
+        return is_public_ipv4(address);
+    }
+
+    let segments = address.segments();
+    !(address.is_unspecified()
+        || address.is_loopback()
+        || address.is_multicast()
+        || segments[0] & 0xfe00 == 0xfc00
+        || segments[0] & 0xffc0 == 0xfe80
+        || segments[0] & 0xffc0 == 0xfec0
+        || (segments[0] == 0x0100
+            && segments[1] == 0
+            && segments[2] == 0
+            && segments[3] == 0)
+        || (segments[0] == 0x2001 && segments[1] == 0x0002 && segments[2] == 0)
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+}
+
+async fn validate_remote_url(url: &reqwest::Url) -> anyhow::Result<()> {
+    ensure!(
+        matches!(url.scheme(), "http" | "https"),
+        "not an HTTP(S) URL: {url}"
+    );
+    let host = url.host_str().context("URL has no host")?;
+    let address_literal = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(address) = address_literal.parse::<IpAddr>() {
+        ensure!(
+            is_public_ip(address),
+            "URL resolves to non-public address {address}"
+        );
+        return Ok(());
+    }
+
+    let normalized = host.trim_end_matches('.').to_ascii_lowercase();
+    ensure!(
+        normalized != "localhost" && !normalized.ends_with(".localhost"),
+        "localhost URLs are not allowed"
+    );
+    let port = url
+        .port_or_known_default()
+        .context("HTTP(S) URL has no known port")?;
+    let mut addresses = tokio::net::lookup_host((host, port))
+        .await
+        .with_context(|| format!("resolving {host}"))?;
+    let mut found = false;
+    for address in &mut addresses {
+        found = true;
+        ensure!(
+            is_public_ip(address.ip()),
+            "{host} resolves to non-public address {}",
+            address.ip()
+        );
+    }
+    ensure!(found, "{host} did not resolve to any address");
+    Ok(())
+}
+
+async fn send_checked(
+    state: &AppState,
+    url: reqwest::Url,
+    conditional: Option<(&str, &str)>,
+) -> anyhow::Result<reqwest::Response> {
+    validate_remote_url(&url).await?;
+    send_checked_after_validation(&state.http, url, conditional).await
+}
+
+async fn send_checked_after_validation(
+    client: &reqwest::Client,
+    mut url: reqwest::Url,
+    conditional: Option<(&str, &str)>,
+) -> anyhow::Result<reqwest::Response> {
+    for redirect_count in 0..=MAX_REDIRECTS {
+        let mut request = client.get(url.clone());
+        if let Some((etag, last_modified)) = conditional {
+            if !etag.is_empty() {
+                request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+            }
+            if !last_modified.is_empty() {
+                request = request.header(reqwest::header::IF_MODIFIED_SINCE, last_modified);
+            }
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("requesting {url}"))?;
+        if !matches!(
+            response.status(),
+            reqwest::StatusCode::MOVED_PERMANENTLY
+                | reqwest::StatusCode::FOUND
+                | reqwest::StatusCode::SEE_OTHER
+                | reqwest::StatusCode::TEMPORARY_REDIRECT
+                | reqwest::StatusCode::PERMANENT_REDIRECT
+        ) {
+            return Ok(response);
+        }
+        ensure!(
+            redirect_count < MAX_REDIRECTS,
+            "too many redirects (maximum {MAX_REDIRECTS})"
+        );
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .context("redirect response is missing Location")?
+            .to_str()
+            .context("redirect Location is not valid text")?;
+        let next = url
+            .join(location)
+            .with_context(|| format!("invalid redirect target {location:?}"))?;
+        validate_remote_url(&next)
+            .await
+            .with_context(|| format!("unsafe redirect target {next}"))?;
+        url = next;
+    }
+    unreachable!("redirect loop always returns or errors")
+}
+
+async fn read_limited(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> anyhow::Result<bytes::Bytes> {
+    if let Some(length) = response.content_length() {
+        ensure!(
+            length <= limit as u64,
+            "response body exceeds {limit} byte limit"
+        );
+    }
+    let capacity = response.content_length().unwrap_or(0).min(limit as u64) as usize;
+    let mut body = BytesMut::with_capacity(capacity);
+    while let Some(chunk) = response.chunk().await.context("reading response body")? {
+        let next_len = body
+            .len()
+            .checked_add(chunk.len())
+            .context("response body length overflow")?;
+        ensure!(
+            next_len <= limit,
+            "response body exceeds {limit} byte limit"
+        );
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body.freeze())
+}
 
 /// Fetch every subscribed feed that is due.
 pub async fn sweep(state: &AppState) {
@@ -58,18 +235,37 @@ pub async fn fetch_one(state: &AppState, feed_id: i64) -> anyhow::Result<()> {
     let last_modified: Option<String> = row.get("last_modified");
     let error_count: i64 = row.get("error_count");
 
-    let mut req = state.http.get(&url);
-    if let Some(etag) = &etag {
-        req = req.header("If-None-Match", etag);
-    }
-    if let Some(lm) = &last_modified {
-        req = req.header("If-Modified-Since", lm);
-    }
-
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            record_error(state, feed_id, error_count, &format!("request failed: {e}")).await?;
+    let url = match reqwest::Url::parse(&url) {
+        Ok(url) => url,
+        Err(error) => {
+            record_error(
+                state,
+                feed_id,
+                error_count,
+                &format!("invalid feed URL: {error}"),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let conditional = if etag.is_some() || last_modified.is_some() {
+        Some((
+            etag.as_deref().unwrap_or_default(),
+            last_modified.as_deref().unwrap_or_default(),
+        ))
+    } else {
+        None
+    };
+    let resp = match send_checked(state, url, conditional).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_error(
+                state,
+                feed_id,
+                error_count,
+                &format!("request failed: {error:#}"),
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -86,10 +282,16 @@ pub async fn fetch_one(state: &AppState, feed_id: i64) -> anyhow::Result<()> {
 
     let new_etag = header(&resp, "etag");
     let new_lm = header(&resp, "last-modified");
-    let body = match resp.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            record_error(state, feed_id, error_count, &format!("read failed: {e}")).await?;
+    let body = match read_limited(resp, state.config.max_response_bytes).await {
+        Ok(body) => body,
+        Err(error) => {
+            record_error(
+                state,
+                feed_id,
+                error_count,
+                &format!("read failed: {error:#}"),
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -157,7 +359,8 @@ async fn ingest_entry(
         .as_ref()
         .and_then(|c| c.body.clone())
         .or_else(|| entry.summary.as_ref().map(|s| s.content.clone()));
-    let content_html = raw_content.map(|c| ammonia::clean(&c));
+    let content_html =
+        sanitize_entry_content(raw_content, state.config.max_entry_content_bytes);
     let author = entry
         .authors
         .first()
@@ -186,6 +389,12 @@ async fn ingest_entry(
     .await
     .context("upserting entry")?;
     Ok(())
+}
+
+fn sanitize_entry_content(raw_content: Option<String>, limit: usize) -> Option<String> {
+    raw_content
+        .filter(|content| content.len() <= limit)
+        .map(|content| ammonia::clean(&content))
 }
 
 async fn record_success(
@@ -258,15 +467,18 @@ fn header(resp: &reqwest::Response, name: &str) -> Option<String> {
 /// `<link rel="alternate" type="application/rss+xml|atom+xml">`.
 pub async fn resolve_feed_url(state: &AppState, input: &str) -> anyhow::Result<String> {
     let input = input.trim();
-    if !input.starts_with("http://") && !input.starts_with("https://") {
-        bail!("not an http(s) URL: {input}");
+    let input_url =
+        reqwest::Url::parse(input).with_context(|| format!("invalid feed URL: {input}"))?;
+    let response = send_checked(state, input_url, None)
+        .await
+        .context("fetching URL")?;
+    if !response.status().is_success() {
+        bail!("HTTP {} fetching {input}", response.status());
     }
-    let resp = state.http.get(input).send().await.context("fetching URL")?;
-    if !resp.status().is_success() {
-        bail!("HTTP {} fetching {input}", resp.status());
-    }
-    let base = resp.url().clone();
-    let body = resp.bytes().await.context("reading response")?;
+    let base = response.url().clone();
+    let body = read_limited(response, state.config.max_response_bytes)
+        .await
+        .context("reading response")?;
 
     if feed_rs::parser::parse(&body[..]).is_ok() {
         return Ok(input.to_string());
@@ -277,13 +489,18 @@ pub async fn resolve_feed_url(state: &AppState, input: &str) -> anyhow::Result<S
         .and_then(|href| base.join(&href).ok())
         .context("no feed found at URL (not a feed, and no alternate link discovered)")?;
 
-    let resp = state
-        .http
-        .get(candidate.clone())
-        .send()
+    let response = send_checked(state, candidate.clone(), None)
         .await
         .context("fetching discovered feed")?;
-    let body = resp.bytes().await?;
+    if !response.status().is_success() {
+        bail!(
+            "HTTP {} fetching discovered feed {candidate}",
+            response.status()
+        );
+    }
+    let body = read_limited(response, state.config.max_response_bytes)
+        .await
+        .context("reading discovered feed")?;
     feed_rs::parser::parse(&body[..])
         .with_context(|| format!("discovered {candidate} but it does not parse as a feed"))?;
     Ok(candidate.to_string())
@@ -328,7 +545,151 @@ fn attr_value(tag: &str, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use axum::{
+        Router,
+        http::{StatusCode, header::LOCATION},
+        response::IntoResponse,
+        routing::get,
+    };
+
     use super::*;
+
+    #[test]
+    fn classifies_only_public_ip_addresses_as_remote() {
+        for address in [
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(172, 16, 0, 1),
+            Ipv4Addr::new(192, 168, 0, 1),
+            Ipv4Addr::new(169, 254, 0, 1),
+            Ipv4Addr::new(100, 64, 0, 1),
+            Ipv4Addr::new(240, 0, 0, 1),
+        ] {
+            assert!(!is_public_ip(IpAddr::V4(address)), "{address}");
+        }
+        for address in [
+            Ipv6Addr::LOCALHOST,
+            "fc00::1".parse().unwrap(),
+            "fd12:3456::1".parse().unwrap(),
+            "fe80::1".parse().unwrap(),
+        ] {
+            assert!(!is_public_ip(IpAddr::V6(address)), "{address}");
+        }
+        for address in [
+            "8.8.8.8".parse().unwrap(),
+            "1.1.1.1".parse().unwrap(),
+            "2606:4700:4700::1111".parse().unwrap(),
+            "2001:4860:4860::8888".parse().unwrap(),
+        ] {
+            assert!(is_public_ip(address), "{address}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_non_http_and_localhost_urls() {
+        let ftp = reqwest::Url::parse("ftp://example.com/feed.xml").unwrap();
+        assert!(validate_remote_url(&ftp).await.is_err());
+
+        let localhost = reqwest::Url::parse("http://news.localhost/feed.xml").unwrap();
+        assert!(validate_remote_url(&localhost).await.is_err());
+
+        let ipv6_loopback = reqwest::Url::parse("http://[::1]/feed.xml").unwrap();
+        assert!(validate_remote_url(&ipv6_loopback).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_loopback_redirect_before_following_it() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let route_hits = hits.clone();
+        let forbidden_hits = hits.clone();
+        let assert_hits = hits;
+        let location = format!("http://127.0.0.1:{}/forbidden", address.port());
+        let app = Router::new()
+            .route(
+                "/",
+                get(move || {
+                    let route_hits = route_hits.clone();
+                    let location = location.clone();
+                    async move {
+                        route_hits.fetch_add(1, Ordering::SeqCst);
+                        (StatusCode::FOUND, [(LOCATION, location)]).into_response()
+                    }
+                }),
+            )
+            .route(
+                "/forbidden",
+                get(move || {
+                    let forbidden_hits = forbidden_hits.clone();
+                    async move {
+                        forbidden_hits.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::OK
+                    }
+                }),
+            );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+
+        let error = send_checked_after_validation(
+            &client,
+            reqwest::Url::parse(&format!("http://{address}/")).unwrap(),
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("non-public"));
+        assert_eq!(assert_hits.load(Ordering::SeqCst), 1);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn rejects_response_body_one_byte_over_limit() {
+        let limit = 16;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/",
+            get(move || async move { vec![b'x'; limit + 1] }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let response = reqwest::get(format!("http://{address}/")).await.unwrap();
+
+        let error = read_limited(response, limit).await.unwrap_err();
+
+        assert!(error.to_string().contains("exceeds"));
+        server.abort();
+    }
+
+    #[test]
+    fn drops_oversized_entry_content_without_truncating_it() {
+        assert_eq!(
+            sanitize_entry_content(Some("<b>ok</b>".to_string()), 9).as_deref(),
+            Some("<b>ok</b>")
+        );
+        assert_eq!(
+            sanitize_entry_content(Some("<b>too long</b>".to_string()), 9),
+            None
+        );
+    }
 
     #[test]
     fn discovers_alternate_links() {

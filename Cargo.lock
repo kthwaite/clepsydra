@@ -237,6 +237,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "axum",
+ "bytes",
  "chrono",
  "feed-rs",
  "quick-xml 0.37.5",

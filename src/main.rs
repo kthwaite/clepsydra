@@ -1,6 +1,7 @@
 mod feeds;
 
 use std::{
+    net::IpAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -24,10 +25,13 @@ pub struct Config {
     pub db_path: PathBuf,
     pub vault_dir: PathBuf,
     pub ui_dist: PathBuf,
+    pub bind_addr: IpAddr,
     pub port: u16,
     pub fetch_interval_mins: i64,
     pub retention_days: i64,
     pub unread_retention_days: i64,
+    pub max_response_bytes: usize,
+    pub max_entry_content_bytes: usize,
 }
 
 impl Config {
@@ -37,6 +41,9 @@ impl Config {
             db_path: var("CLEPSYDRA_DB", "clepsydra.db").into(),
             vault_dir: var("CLEPSYDRA_VAULT", "vault").into(),
             ui_dist: var("CLEPSYDRA_UI_DIST", "ui/dist").into(),
+            bind_addr: var("CLEPSYDRA_BIND", "127.0.0.1")
+                .parse()
+                .expect("invalid bind address"),
             port: var("CLEPSYDRA_PORT", "8640").parse().expect("invalid port"),
             fetch_interval_mins: var("CLEPSYDRA_FETCH_INTERVAL_MINS", "30")
                 .parse()
@@ -47,6 +54,12 @@ impl Config {
             unread_retention_days: var("CLEPSYDRA_UNREAD_RETENTION_DAYS", "90")
                 .parse()
                 .expect("invalid unread retention"),
+            max_response_bytes: var("CLEPSYDRA_MAX_RESPONSE_BYTES", "10485760")
+                .parse()
+                .expect("invalid maximum response size"),
+            max_entry_content_bytes: var("CLEPSYDRA_MAX_ENTRY_CONTENT_BYTES", "1048576")
+                .parse()
+                .expect("invalid maximum entry content size"),
         }
     }
 
@@ -93,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
     let http = reqwest::Client::builder()
         .user_agent(concat!("clepsydra/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
 
     let state = AppState {
@@ -116,8 +130,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
-    tracing::info!("clepsydra listening on http://localhost:{}", config.port);
+    let listener = tokio::net::TcpListener::bind((config.bind_addr, config.port)).await?;
+    tracing::info!(
+        "clepsydra listening on http://{}:{}",
+        config.bind_addr,
+        config.port
+    );
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;

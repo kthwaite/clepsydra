@@ -7,6 +7,7 @@ edition = "2024"
 ammonia = "4"
 anyhow = "1"
 axum = "0.8"
+bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 feed-rs = "2"
 quick-xml = "0.37"
