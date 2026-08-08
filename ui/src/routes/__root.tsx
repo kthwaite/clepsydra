@@ -3,6 +3,7 @@ import { lazy, type ReactNode, Suspense, useEffect, useRef } from "react";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
 import { RouteError } from "#/components/RouteError";
+import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { Toaster } from "#/components/ui/Toaster";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { usePreviewStore } from "#/store/preview";
@@ -41,11 +42,6 @@ const ShortcutHelpModal = lazy(() =>
 const BootSequence = lazy(() =>
   import("#/components/codex/BootSequence").then((module) => ({
     default: module.BootSequence,
-  })),
-);
-const LinkPreviewLayer = lazy(() =>
-  import("#/components/codex/LinkPreviewLayer").then((module) => ({
-    default: module.LinkPreviewLayer,
   })),
 );
 
@@ -101,17 +97,7 @@ export function GlobalOverlays() {
           <ShortcutHelpModal />
         </OverlayBoundary>
       )}
-      {hasPreviews && (
-        <Suspense
-          fallback={
-            <div className="sr-only" aria-live="polite">
-              Loading link previews
-            </div>
-          }
-        >
-          <LinkPreviewLayer />
-        </Suspense>
-      )}
+      {hasPreviews && <LinkPreviewLayer />}
       {booting && (
         <OverlayBoundary onDismiss={endBoot} label="Boot sequence">
           <BootSequence />
