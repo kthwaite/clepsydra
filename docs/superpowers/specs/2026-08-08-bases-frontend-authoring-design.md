@@ -181,7 +181,7 @@ Each base entry shows:
 
 The empty state explains that a base is a saved non-owning view over existing pages and offers **Create base**.
 
-Unparseable files still appear as recoverable diagnostic entries. They offer diagnostic detail and **Open base file**; they do not enter the structured editor until the backend can parse them safely.
+Unparseable files still appear as recoverable diagnostic entries. They offer diagnostic detail and **Copy base file path**; they do not enter the structured editor until the backend can parse them safely. A browser cannot portably launch the user's local editor, so the frontend must not promise an Open action it cannot honor.
 
 ### Guided creation
 
@@ -214,7 +214,7 @@ Leaving with unsaved changes prompts the user to discard or stay. A successful S
 
 ### General
 
-Edit display name and description. Show the immutable slug and underlying `bases/<slug>.base.toml` location as secondary information. Provide **Open base file** as the advanced escape hatch.
+Edit display name and description. Show the immutable slug and underlying `bases/<slug>.base.toml` location as secondary information. Provide **Copy base file path** as the advanced escape hatch; manual editing remains external to the browser.
 
 ### Membership
 
@@ -311,7 +311,7 @@ Requirements:
 - Invalid definition: do not write; return structured diagnostics associated with sections or paths.
 - Stale revision: return `409`; preserve draft and offer reload/review.
 - Atomic publication failure: report failure and leave the previous file intact.
-- Unparseable existing TOML: show diagnostics and **Open base file**; do not fabricate a partial structured model.
+- Unparseable existing TOML: show diagnostics and **Copy base file path**; do not fabricate a partial structured model.
 - Preview failure: keep the draft editable and leave Save eligibility governed by validation, not transient network state.
 - Delete failure: keep the index entry and report the backend error.
 
