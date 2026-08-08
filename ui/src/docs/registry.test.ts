@@ -18,6 +18,17 @@ it("declares the approved hierarchy and unique slugs", () => {
   expect(getDocPage(DEFAULT_DOC_SLUG)?.title).toBe("Getting Started");
 });
 
+it("resolves the dedicated troubleshooting and browser extension guides", () => {
+  expect(getDocPage("troubleshooting")).toMatchObject({
+    slug: "troubleshooting",
+    title: "Troubleshooting",
+  });
+  expect(getDocPage("browser-extension")).toMatchObject({
+    slug: "browser-extension",
+    title: "Browser Extension",
+  });
+});
+
 it("derives previous and next guides from registry order", () => {
   expect(getDocNeighbors("getting-started").previous).toBeUndefined();
   expect(getDocNeighbors("getting-started").next?.slug).toBe("configuration");

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DOC_PAGES } from "#/docs/registry";
 import { buildDocsIndex, searchDocs } from "#/docs/search";
 import type { DocPage } from "#/docs/types";
 
@@ -139,6 +140,29 @@ Image heading body.
 });
 
 describe("searchDocs", () => {
+  it.each([
+    {
+      query: "attaches then stops",
+      expected: {
+        page: { slug: "troubleshooting" },
+        heading: "Neovim LSP fails to initialize or attaches then stops",
+        headingId: "neovim-lsp-fails-to-initialize-or-attaches-then-stops",
+      },
+    },
+    {
+      query: "notification only conflict behavior",
+      expected: {
+        page: { slug: "browser-extension" },
+        heading: "Content Changed conflict",
+        headingId: "content-changed-conflict",
+      },
+    },
+  ])("finds distinctive dedicated-guide content for $query", ({ query, expected }) => {
+    const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
+
+    expect(result).toMatchObject(expected);
+  });
+
   it("requires every normalized query token in the same section", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 

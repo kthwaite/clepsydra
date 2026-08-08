@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
+import { DOC_PAGES } from "#/docs/registry";
 import BrowserExtension, {
   meta as browserExtensionMeta,
 } from "#/docs/content/browser-extension.mdx";
@@ -20,6 +21,23 @@ it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   expect(meta.slug).toBe("getting-started");
   expect(source).toContain(
     "This guide gets Clepsydra running locally with an initialized vault.",
+  );
+});
+
+it.each(DOC_PAGES)("renders the registered $slug guide component", ({ Component }) => {
+  const { container } = render(<Component />);
+  expect(container).not.toBeEmptyDOMElement();
+});
+
+it("links Getting Started to both dedicated guides", () => {
+  render(<Guide />);
+
+  expect(
+    screen.getByRole("link", { name: "Browser Extension guide" }),
+  ).toHaveAttribute("href", "/docs/browser-extension");
+  expect(screen.getByRole("link", { name: "Troubleshooting guide" })).toHaveAttribute(
+    "href",
+    "/docs/troubleshooting",
   );
 });
 
