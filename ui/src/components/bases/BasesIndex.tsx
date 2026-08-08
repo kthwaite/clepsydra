@@ -9,11 +9,19 @@ import {
   useDeleteBase,
 } from "#/api/bases";
 import { fetchClient } from "#/api/client";
+import { formatApiError, isApiConflict } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
 import { CreateBaseDialog } from "./CreateBaseDialog";
 
 type BaseDiagnostic = BaseListResponse["diagnostics"][number];
+
+export interface DeleteCandidate {
+  base: BaseSummary;
+  revision: string;
+  requestId: number;
+}
 
 export interface BasesIndexViewProps {
   bases: BaseSummary[];
@@ -21,8 +29,11 @@ export interface BasesIndexViewProps {
   onCreate: () => void;
   onOpen: (slug: string) => void;
   onConfigure: (slug: string) => void;
-  onDelete: (slug: string) => void | Promise<void>;
-  onPrepareDelete?: (slug: string) => Promise<boolean>;
+  onDelete: (candidate: DeleteCandidate) => void | Promise<void>;
+  onPrepareDelete?: (
+    base: BaseSummary,
+    requestId: number,
+  ) => Promise<DeleteCandidate | undefined>;
   operationError?: string;
 }
 
@@ -35,6 +46,37 @@ function diagnosticLabel(count: number) {
   return `${count} ${count === 1 ? "diagnostic" : "diagnostics"}`;
 }
 
+function BrokenBaseEntry({ diagnostic }: { diagnostic: BaseDiagnostic }) {
+  const { copied, copy } = useCopyToClipboard();
+  const path = diagnostic.path;
+
+  return (
+    <article className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4">
+      <div className="min-w-0">
+        <h3 className="font-mono text-sm font-semibold text-foreground">
+          {diagnostic.slug}
+        </h3>
+        <p className="mt-1 text-sm text-destructive">{diagnostic.message}</p>
+        {path && (
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+            {path}
+          </p>
+        )}
+      </div>
+      {path && (
+        <Button
+          variant="secondary"
+          onPress={() => void copy(path)}
+          aria-label={`${copied ? "Copied" : "Copy"} base file path for ${diagnostic.slug}`}
+        >
+          <Copy aria-hidden="true" className="h-3.5 w-3.5" />
+          {copied ? "Copied" : "Copy path"}
+        </Button>
+      )}
+    </article>
+  );
+}
+
 export function BasesIndexView({
   bases,
   diagnostics,
@@ -45,44 +87,56 @@ export function BasesIndexView({
   onPrepareDelete,
   operationError,
 }: BasesIndexViewProps) {
-  const [deleteTarget, setDeleteTarget] = useState<BaseSummary>();
+  const [deleteCandidate, setDeleteCandidate] = useState<DeleteCandidate>();
+  const [preparing, setPreparing] = useState(false);
   const [preparingSlug, setPreparingSlug] = useState<string>();
-  const [deleteError, setDeleteError] = useState<string>();
   const [deleting, setDeleting] = useState(false);
+  const requestSequence = useRef(0);
+  const pendingPreparations = useRef(0);
+  const pendingCandidate = useRef<DeleteCandidate | undefined>(undefined);
 
   async function requestDelete(base: BaseSummary) {
-    setDeleteError(undefined);
-    if (!onPrepareDelete) {
-      setDeleteTarget(base);
-      return;
-    }
-
+    const requestId = ++requestSequence.current;
+    pendingPreparations.current += 1;
+    pendingCandidate.current = undefined;
+    setPreparing(true);
     setPreparingSlug(base.slug);
+
     try {
-      if (await onPrepareDelete(base.slug)) setDeleteTarget(base);
+      const candidate = onPrepareDelete
+        ? await onPrepareDelete(base, requestId)
+        : { base, revision: "", requestId };
+      if (requestId === requestSequence.current) {
+        pendingCandidate.current = candidate;
+      }
     } finally {
-      setPreparingSlug(undefined);
+      pendingPreparations.current -= 1;
+      if (pendingPreparations.current === 0) {
+        const candidate = pendingCandidate.current;
+        pendingCandidate.current = undefined;
+        setPreparing(false);
+        setPreparingSlug(undefined);
+        if (candidate?.requestId === requestSequence.current) {
+          setDeleteCandidate(candidate);
+        }
+      }
     }
   }
 
   async function confirmDelete() {
-    if (!deleteTarget || deleting) return;
+    if (!deleteCandidate || deleting) return;
+    const confirmedCandidate = deleteCandidate;
     setDeleting(true);
-    setDeleteError(undefined);
     try {
-      await onDelete(deleteTarget.slug);
-      setDeleteTarget(undefined);
-    } catch (error) {
-      setDeleteError(
-        error instanceof Error ? error.message : "Base could not be deleted.",
-      );
+      await onDelete(confirmedCandidate);
     } finally {
+      setDeleteCandidate(undefined);
       setDeleting(false);
     }
   }
 
   return (
-    <main className="mx-auto w-full max-w-5xl p-4">
+    <div className="mx-auto w-full max-w-5xl p-4">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
         <div className="max-w-2xl">
           <p className="font-mono text-xs uppercase tracking-widest text-primary">
@@ -111,7 +165,7 @@ export function BasesIndexView({
         </p>
       )}
 
-      {bases.length === 0 && diagnostics.length === 0 ? (
+      {bases.length === 0 ? (
         <section className="border-b border-border py-10">
           <h2 className="text-sm font-bold uppercase tracking-widest text-foreground">
             No saved bases
@@ -179,7 +233,7 @@ export function BasesIndexView({
                 <Button
                   variant="ghost"
                   onPress={() => void requestDelete(base)}
-                  isDisabled={preparingSlug === base.slug}
+                  isDisabled={preparing}
                   aria-label={`Delete ${base.name}`}
                 >
                   <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
@@ -205,59 +259,32 @@ export function BasesIndexView({
           </p>
           <div className="mt-3 border-t border-border">
             {diagnostics.map((diagnostic, index) => (
-              <article
+              <BrokenBaseEntry
                 key={`${diagnostic.slug}-${diagnostic.path ?? index}`}
-                className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4"
-              >
-                <div className="min-w-0">
-                  <h3 className="font-mono text-sm font-semibold text-foreground">
-                    {diagnostic.slug}
-                  </h3>
-                  <p className="mt-1 text-sm text-destructive">
-                    {diagnostic.message}
-                  </p>
-                  {diagnostic.path && (
-                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                      {diagnostic.path}
-                    </p>
-                  )}
-                </div>
-                {diagnostic.path && (
-                  <Button
-                    variant="secondary"
-                    onPress={() => {
-                      void navigator.clipboard?.writeText(
-                        diagnostic.path ?? "",
-                      );
-                    }}
-                    aria-label="Copy base file path"
-                  >
-                    <Copy aria-hidden="true" className="h-3.5 w-3.5" />
-                    Copy path
-                  </Button>
-                )}
-              </article>
+                diagnostic={diagnostic}
+              />
             ))}
           </div>
         </section>
       )}
 
       <Dialog
-        isOpen={!!deleteTarget}
+        isOpen={!!deleteCandidate}
         onOpenChange={(open) => {
-          if (!open && !deleting) {
-            setDeleteTarget(undefined);
-            setDeleteError(undefined);
-          }
+          if (!open && !deleting) setDeleteCandidate(undefined);
         }}
-        title={deleteTarget ? `Delete ${deleteTarget.name}?` : "Delete base?"}
+        title={
+          deleteCandidate
+            ? `Delete ${deleteCandidate.base.name}?`
+            : "Delete base?"
+        }
         description="Only the saved base file is removed. Pages and properties remain."
         isDismissable={!deleting}
         footer={
           <>
             <Button
               variant="secondary"
-              onPress={() => setDeleteTarget(undefined)}
+              onPress={() => setDeleteCandidate(undefined)}
               isDisabled={deleting}
             >
               Cancel
@@ -276,13 +303,8 @@ export function BasesIndexView({
           This cannot be undone. The base does not own content, so its matched
           pages and their properties remain unchanged.
         </p>
-        {deleteError && (
-          <p role="alert" className="mt-3 text-sm text-destructive">
-            {deleteError}
-          </p>
-        )}
       </Dialog>
-    </main>
+    </div>
   );
 }
 
@@ -291,7 +313,6 @@ export function BasesIndex() {
   const basesQuery = useBases();
   const createBase = useCreateBase();
   const deleteBase = useDeleteBase();
-  const revisions = useRef(new Map<string, string>());
   const [createOpen, setCreateOpen] = useState(false);
   const [operationError, setOperationError] = useState<string>();
   let queryError: unknown;
@@ -299,54 +320,61 @@ export function BasesIndex() {
 
   if (basesQuery.isPending) {
     return (
-      <main className="mx-auto max-w-5xl p-4">
+      <div className="mx-auto max-w-5xl p-4">
         <p role="status" className="font-mono text-xs text-muted-foreground">
           Loading bases…
         </p>
-      </main>
+      </div>
     );
   }
 
   if (queryError) {
     return (
-      <main className="mx-auto max-w-5xl p-4">
+      <div className="mx-auto max-w-5xl p-4">
         <p role="alert" className="text-sm text-destructive">
-          {queryError instanceof Error
-            ? queryError.message
-            : "Bases could not be loaded."}
+          {formatApiError(queryError, "Bases could not be loaded.")}
         </p>
-      </main>
+      </div>
     );
   }
 
   const data = basesQuery.data ?? { bases: [], diagnostics: [] };
 
-  async function prepareDelete(slug: string) {
+  async function prepareDelete(base: BaseSummary, requestId: number) {
     setOperationError(undefined);
     try {
       const result = await fetchClient.GET("/api/vault/bases/{slug}", {
-        params: { path: { slug } },
+        params: { path: { slug: base.slug } },
       });
       if (!result.data) {
-        throw new Error("Could not load the current base revision.");
+        throw result.error ?? new Error("Base revision is unavailable.");
       }
-      revisions.current.set(slug, result.data.revision);
-      return true;
-    } catch {
-      setOperationError("Could not load the current base revision. Try again.");
-      revisions.current.delete(slug);
-      return false;
+      return { base, revision: result.data.revision, requestId };
+    } catch (error) {
+      setOperationError(
+        formatApiError(
+          error,
+          "Could not load the current base revision. Try again.",
+        ),
+      );
+      return undefined;
     }
   }
 
-  async function removeBase(slug: string) {
-    const revision = revisions.current.get(slug);
-    if (!revision) throw new Error("Base revision is unavailable. Try again.");
-    await deleteBase.mutateAsync({
-      params: { path: { slug } },
-      body: { expected_revision: revision },
-    });
-    revisions.current.delete(slug);
+  async function removeBase(candidate: DeleteCandidate) {
+    setOperationError(undefined);
+    try {
+      await deleteBase.mutateAsync({
+        params: { path: { slug: candidate.base.slug } },
+        body: { expected_revision: candidate.revision },
+      });
+    } catch (error) {
+      setOperationError(
+        isApiConflict(error)
+          ? `${candidate.base.name} changed. Review it and confirm deletion again.`
+          : formatApiError(error, "Base could not be deleted. Try again."),
+      );
+    }
   }
 
   return (

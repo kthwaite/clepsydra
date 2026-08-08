@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseListResponse } from "#/api/bases";
 import { BasesIndex, BasesIndexView } from "#/components/bases/BasesIndex";
 
@@ -10,8 +10,10 @@ const { detailGetMock } = vi.hoisted(() => ({ detailGetMock: vi.fn() }));
 let basesState: {
   data?: BaseListResponse;
   isPending: boolean;
-  error: Error | null;
+  error: unknown;
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
@@ -38,6 +40,14 @@ const readingLog = {
   match_count: 12,
   views: ["All", "Unread"],
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
 
 describe("BasesIndexView", () => {
   it("explains non-owning bases and offers creation when empty", () => {
@@ -104,8 +114,8 @@ describe("BasesIndexView", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows an unparseable file without fabricating structured actions", () => {
-    render(
+  it("shows an empty saved state and real unparseable files without a saved region", () => {
+    const { container } = render(
       <BasesIndexView
         bases={[]}
         diagnostics={[
@@ -123,20 +133,71 @@ describe("BasesIndexView", () => {
       />,
     );
 
+    expect(screen.getByText("No saved bases")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Saved bases" })).toBeNull();
     expect(screen.getByText("expected a table")).toBeInTheDocument();
     expect(screen.getByText("bases/broken.base.toml")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Copy base file path" }),
+      screen.getByRole("button", {
+        name: "Copy base file path for broken",
+      }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Open broken/i })).toBeNull();
     expect(
       screen.queryByRole("button", { name: /Configure broken/i }),
     ).toBeNull();
+    expect(container.querySelector("main")).toBeNull();
+  });
+
+  it("distinguishes copy actions and reports copied feedback", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(
+      <BasesIndexView
+        bases={[]}
+        diagnostics={[
+          {
+            slug: "alpha",
+            severity: "error",
+            message: "broken alpha",
+            path: "bases/alpha.base.toml",
+          },
+          {
+            slug: "beta",
+            severity: "error",
+            message: "broken beta",
+            path: "bases/beta.base.toml",
+          },
+        ]}
+        onCreate={vi.fn()}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Copy base file path for beta",
+      }),
+    );
+    expect(writeText).toHaveBeenCalledWith("bases/beta.base.toml");
+    expect(
+      screen.getByRole("button", {
+        name: "Copied base file path for beta",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("confirms deletion without implying owned pages are removed", async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn();
+    const prepareDelete = vi.fn(async (base, requestId) => ({
+      base,
+      revision: "revision-1",
+      requestId,
+    }));
     render(
       <BasesIndexView
         bases={[readingLog]}
@@ -144,6 +205,7 @@ describe("BasesIndexView", () => {
         onCreate={vi.fn()}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
+        onPrepareDelete={prepareDelete}
         onDelete={onDelete}
       />,
     );
@@ -155,7 +217,11 @@ describe("BasesIndexView", () => {
       screen.getByText(/pages and properties remain/i),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete base" }));
-    expect(onDelete).toHaveBeenCalledWith("reading-log");
+    expect(onDelete).toHaveBeenCalledWith({
+      base: readingLog,
+      revision: "revision-1",
+      requestId: 1,
+    });
   });
 });
 
@@ -179,6 +245,12 @@ describe("BasesIndex", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("vault is unavailable");
   });
 
+  it("renders typed API query errors", () => {
+    basesState.error = { status: 500, error: "registry offline" };
+    render(<BasesIndex />);
+    expect(screen.getByRole("alert")).toHaveTextContent("registry offline");
+  });
+
   it("fetches the current revision before confirming and deleting", async () => {
     const user = userEvent.setup();
     basesState.data = { bases: [readingLog], diagnostics: [] };
@@ -198,6 +270,97 @@ describe("BasesIndex", () => {
     expect(deleteMock).toHaveBeenCalledWith({
       params: { path: { slug: "reading-log" } },
       body: { expected_revision: "revision-7" },
+    });
+  });
+
+  it("keeps one atomic candidate when deferred preparations resolve out of order", async () => {
+    const queue = { ...readingLog, slug: "queue", name: "Queue" };
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    basesState.data = { bases: [readingLog, queue], diagnostics: [] };
+    detailGetMock
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    deleteMock.mockResolvedValue({});
+    render(<BasesIndex />);
+
+    const readingDelete = screen.getByRole("button", {
+      name: "Delete Reading Log",
+    });
+    const queueDelete = screen.getByRole("button", { name: "Delete Queue" });
+    act(() => {
+      readingDelete.click();
+      queueDelete.click();
+    });
+
+    expect(readingDelete).toBeDisabled();
+    expect(queueDelete).toBeDisabled();
+    expect(detailGetMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      second.resolve({
+        data: { ...queue, revision: "queue-revision", diagnostics: [] },
+      });
+      await second.promise;
+    });
+    expect(screen.queryByRole("button", { name: "Delete base" })).toBeNull();
+
+    await act(async () => {
+      first.resolve({
+        data: { ...readingLog, revision: "reading-revision", diagnostics: [] },
+      });
+      await first.promise;
+    });
+    expect(
+      screen.getByRole("heading", { name: "Delete Queue?" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete base" }));
+    expect(deleteMock).toHaveBeenCalledWith({
+      params: { path: { slug: "queue" } },
+      body: { expected_revision: "queue-revision" },
+    });
+  });
+
+  it("requires a fresh GET and confirmation after a revision conflict", async () => {
+    const user = userEvent.setup();
+    basesState.data = { bases: [readingLog], diagnostics: [] };
+    detailGetMock
+      .mockResolvedValueOnce({
+        data: { ...readingLog, revision: "revision-1", diagnostics: [] },
+      })
+      .mockResolvedValueOnce({
+        data: { ...readingLog, revision: "revision-2", diagnostics: [] },
+      });
+    deleteMock
+      .mockRejectedValueOnce({
+        status: 409,
+        error: "base revision conflict",
+      })
+      .mockResolvedValueOnce({});
+    render(<BasesIndex />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Delete Reading Log" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Delete base" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Reading Log changed/i,
+    );
+    expect(screen.queryByRole("button", { name: "Delete base" })).toBeNull();
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(detailGetMock).toHaveBeenCalledTimes(1);
+
+    await user.click(
+      screen.getByRole("button", { name: "Delete Reading Log" }),
+    );
+    expect(detailGetMock).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole("button", { name: "Delete base" }));
+
+    expect(deleteMock).toHaveBeenNthCalledWith(2, {
+      params: { path: { slug: "reading-log" } },
+      body: { expected_revision: "revision-2" },
     });
   });
 

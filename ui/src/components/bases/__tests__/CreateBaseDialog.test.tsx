@@ -28,16 +28,20 @@ describe("CreateBaseDialog", () => {
     expect(screen.getByLabelText("Slug")).toHaveValue("reading-log");
   });
 
-  it("preserves a manually edited slug when the name changes", async () => {
+  it("submits a manually overridden slug after the name changes", async () => {
     const user = userEvent.setup();
-    renderDialog();
+    const { onCreate } = renderDialog();
 
     await user.type(screen.getByLabelText("Name"), "Reading Log");
     await user.clear(screen.getByLabelText("Slug"));
     await user.type(screen.getByLabelText("Slug"), "books-2026");
     await user.type(screen.getByLabelText("Name"), " Archive");
+    await user.click(screen.getByRole("button", { name: "Create base" }));
 
     expect(screen.getByLabelText("Slug")).toHaveValue("books-2026");
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "books-2026" }),
+    );
   });
 
   it("submits a deterministic minimal base with explicit All-pages membership", async () => {
@@ -89,16 +93,20 @@ describe("CreateBaseDialog", () => {
     expect(onCreate).not.toHaveBeenCalled();
   });
 
-  it("retains field values when the server rejects creation", async () => {
+  it("retains fields and shows a typed 409 API error", async () => {
     const user = userEvent.setup();
-    const create = vi.fn().mockRejectedValue(new Error("Slug already exists"));
+    const create = vi.fn().mockRejectedValue({
+      status: 409,
+      error: "base already exists",
+      detail: { field: "slug" },
+    });
     renderDialog(create);
 
     await user.type(screen.getByLabelText("Name"), "Books");
     await user.click(screen.getByRole("button", { name: "Create base" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Slug already exists",
+      "base already exists",
     );
     expect(screen.getByLabelText("Name")).toHaveValue("Books");
     expect(screen.getByLabelText("Slug")).toHaveValue("books");

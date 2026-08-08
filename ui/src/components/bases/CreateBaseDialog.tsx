@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import type { BaseMutationResponse, CreateBaseRequest } from "#/api/bases";
+import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
@@ -19,11 +20,6 @@ export interface CreateBaseDialogProps {
     request: CreateBaseRequest,
   ) => Promise<Pick<BaseMutationResponse, "slug">>;
   isPending?: boolean;
-}
-
-function errorMessage(error: unknown) {
-  if (error instanceof Error && error.message) return error.message;
-  return "Base could not be created.";
 }
 
 export function CreateBaseDialog({
@@ -98,7 +94,7 @@ export function CreateBaseDialog({
       };
       await navigate(destination as never);
     } catch (error) {
-      setRequestError(errorMessage(error));
+      setRequestError(formatApiError(error, "Base could not be created."));
     } finally {
       setSubmitting(false);
     }
