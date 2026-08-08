@@ -1,11 +1,13 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   locationState,
   locationHookMock,
+  mobileLayoutState,
   navigateMock,
+  openInscribeMock,
   openSearchMock,
   openSettingsMock,
   toggleThemeMock,
@@ -13,7 +15,9 @@ const {
 } = vi.hoisted(() => ({
   locationState: { pathname: "/docs/getting-started" },
   locationHookMock: vi.fn(),
+  mobileLayoutState: { matches: false },
   navigateMock: vi.fn(),
+  openInscribeMock: vi.fn(),
   openSearchMock: vi.fn(),
   openSettingsMock: vi.fn(),
   toggleThemeMock: vi.fn(),
@@ -61,15 +65,20 @@ vi.mock("#/hooks/useUptime", () => ({
 vi.mock("#/hooks/useVaultEvents", () => ({
   useVaultEvents: () => "connected",
 }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => mobileLayoutState.matches,
+}));
 vi.mock("#/store/ui", () => ({
   useUiStore: (
     selector: (state: {
+      openInscribe: () => void;
       openSearch: () => void;
       openSettings: () => void;
       isSettingsOpen: boolean;
     }) => unknown,
   ) =>
     selector({
+      openInscribe: openInscribeMock,
       openSearch: openSearchMock,
       openSettings: openSettingsMock,
       isSettingsOpen: false,
@@ -95,6 +104,7 @@ function renderFrame(forceView?: "folio") {
 describe("CodexFrame Docs integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mobileLayoutState.matches = false;
     locationState.pathname = "/docs/getting-started";
     workspaceState.tabs = [];
     workspaceState.activeTabId = null;
@@ -177,5 +187,68 @@ describe("CodexFrame Docs integration", () => {
 
     expect(locationHookMock).toHaveBeenCalledOnce();
     vi.useRealTimers();
+  });
+});
+
+describe("CodexFrame responsive shell", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    locationState.pathname = "/";
+    mobileLayoutState.matches = false;
+    workspaceState.tabs = [];
+    workspaceState.activeTabId = null;
+  });
+
+  it("retains the desktop header and footer", () => {
+    renderFrame();
+
+    expect(
+      screen.getByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+    ).toBeVisible();
+    expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
+    expect(
+      screen.queryByRole("navigation", { name: "Mobile roots" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows only the three roots and global actions in the mobile chrome", () => {
+    mobileLayoutState.matches = true;
+    renderFrame();
+
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    expect(within(roots).getAllByRole("button")).toHaveLength(3);
+    expect(
+      within(roots).getByRole("button", { name: "Atrium" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(roots).getByRole("button", { name: "Gazetteer" }),
+    ).toBeVisible();
+    expect(
+      within(roots).getByRole("button", { name: "Constellation" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "New note" })).toBeVisible();
+    expect(screen.queryByText("TASKING")).not.toBeInTheDocument();
+    expect(screen.getByText("Frame content")).toBeInTheDocument();
+  });
+
+  it("wires the mobile global actions and Constellation root", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = true;
+    renderFrame();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "New note" }));
+    await user.click(
+      screen.getByRole("button", { name: "Constellation" }),
+    );
+
+    expect(openSearchMock).toHaveBeenCalledOnce();
+    expect(openInscribeMock).toHaveBeenCalledOnce();
+    expect(workspaceState.openTab).toHaveBeenCalledWith("graph");
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/workspace" });
+    expect(workspaceState.openTab.mock.invocationCallOrder[0]).toBeLessThan(
+      navigateMock.mock.invocationCallOrder[0],
+    );
   });
 });
