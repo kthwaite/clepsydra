@@ -80,14 +80,54 @@ fn update_with_before_publication(
     before_publication: impl FnOnce(),
 ) -> Result<StoredBase, BaseDocumentError> {
     let path = base_path(root, slug)?;
-    let _writer = lock_writer();
-    let raw = read_matching_revision(&path, slug, expected_revision)?;
+    let writer = lock_writer();
+    update_locked(
+        &path,
+        slug,
+        expected_revision,
+        file,
+        writer,
+        before_publication,
+    )
+}
+
+#[cfg(test)]
+fn update_with_contention_ack(
+    root: &Path,
+    slug: &str,
+    expected_revision: &str,
+    file: &BaseFile,
+    contention_ack: impl FnOnce(),
+) -> Result<StoredBase, BaseDocumentError> {
+    let path = base_path(root, slug)?;
+    let writer = match BASE_DOCUMENT_WRITER.try_lock() {
+        Err(std::sync::TryLockError::WouldBlock) => {
+            contention_ack();
+            lock_writer()
+        }
+        Ok(_) => panic!("expected the base document writer lock to be held"),
+        Err(std::sync::TryLockError::Poisoned(_)) => {
+            panic!("expected a live holder, not a poisoned writer lock")
+        }
+    };
+    update_locked(&path, slug, expected_revision, file, writer, || {})
+}
+
+fn update_locked(
+    path: &Path,
+    slug: &str,
+    expected_revision: &str,
+    file: &BaseFile,
+    _writer: MutexGuard<'static, ()>,
+    before_publication: impl FnOnce(),
+) -> Result<StoredBase, BaseDocumentError> {
+    let raw = read_matching_revision(path, slug, expected_revision)?;
     reject_blocking_diagnostics(validate_definition(slug, file.clone()))?;
     let content = merge_document(&raw, file)?;
     before_publication();
-    read_matching_revision(&path, slug, expected_revision)?;
-    atomic_replace(&path, content.as_bytes()).map_err(map_publication_error)?;
-    load_stored(&path, slug)
+    read_matching_revision(path, slug, expected_revision)?;
+    atomic_replace(path, content.as_bytes()).map_err(map_publication_error)?;
+    load_stored(path, slug)
 }
 
 pub fn delete(root: &Path, slug: &str, expected_revision: &str) -> Result<(), BaseDocumentError> {
@@ -1020,7 +1060,7 @@ mod tests {
         let second_revision = expected_revision.clone();
         let (first_ready_tx, first_ready_rx) = mpsc::channel();
         let (release_first_tx, release_first_rx) = mpsc::channel();
-        let (second_started_tx, second_started_rx) = mpsc::channel();
+        let (second_contending_tx, second_contending_rx) = mpsc::channel();
 
         let first_writer = thread::spawn(move || {
             update_with_before_publication(&first_root, "reading", &first_revision, &first, || {
@@ -1030,10 +1070,11 @@ mod tests {
         });
         first_ready_rx.recv().unwrap();
         let second_writer = thread::spawn(move || {
-            second_started_tx.send(()).unwrap();
-            update(&second_root, "reading", &second_revision, &second)
+            update_with_contention_ack(&second_root, "reading", &second_revision, &second, || {
+                second_contending_tx.send(()).unwrap()
+            })
         });
-        second_started_rx.recv().unwrap();
+        second_contending_rx.recv().unwrap();
         release_first_tx.send(()).unwrap();
 
         let first_stored = first_writer.join().unwrap().unwrap();
