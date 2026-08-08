@@ -307,25 +307,10 @@ Full capability list, save-time move behavior, and troubleshooting:
 
 ## 10) Optional: Browser extension
 
-For local install and setup instructions:
+To archive web pages into Clepsydra, follow the complete
+[Browser Extension guide](/docs/browser-extension).
 
-- `extension/README.md`
+## Troubleshooting
 
-## Quick troubleshooting
-
-- **`no config.toml found`** when running `serve`/`new`
-  - Create `config.toml` in your current directory, or in
-    `$XDG_CONFIG_HOME/clepsydra/config.toml`.
-- **Server fails with TLS auto-cert message**
-  - Install `mkcert` and retry, or provide `server.tls.cert_path` + `server.tls.key_path`.
-- **UI doesn’t load in single-binary mode**
-  - Rebuild embedded assets: `cd ui && bun run build`.
-- **UI can’t reach backend in Vite mode**
-  - Confirm backend is running on `http://127.0.0.1:3000` and `server.dev_mode = true`.
-- **`vault already initialized`**
-  - Use a new path, or reuse the existing initialized vault.
-- **Neovim LSP fails to initialize / attaches then stops**
-  - No `.clepsydra` directory was found above the workspace root, and no
-    `config.toml` resolved either. Check `:LspLog` and run
-    `clep config path --trace` from the same directory. Details:
-    `/docs/lsp`.
+For common configuration, server, UI, vault initialization, and LSP problems,
+see the [Troubleshooting guide](/docs/troubleshooting).
