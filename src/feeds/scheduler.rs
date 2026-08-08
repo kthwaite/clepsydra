@@ -4,8 +4,8 @@
 
 use chrono::{Duration, Utc};
 
-use crate::AppState;
 use super::fetch;
+use crate::AppState;
 
 pub fn spawn(state: AppState) {
     tokio::spawn(async move {

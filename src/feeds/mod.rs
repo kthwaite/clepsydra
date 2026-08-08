@@ -117,10 +117,7 @@ async fn reconcile_parsed(state: &AppState, parsed: &manifest::Manifest) -> anyh
 }
 
 /// Serialize, validate, atomically write, and reconcile a manifest transform.
-pub async fn update_manifest<T, F>(
-    state: &AppState,
-    transform: F,
-) -> Result<T, ManifestUpdateError>
+pub async fn update_manifest<T, F>(state: &AppState, transform: F) -> Result<T, ManifestUpdateError>
 where
     F: FnOnce(&str) -> Result<(String, T), ManifestUpdateError>,
 {
@@ -174,7 +171,6 @@ pub async fn read_manifest(state: &AppState) -> anyhow::Result<String> {
         .await
         .with_context(|| format!("reading {}", path.display()))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -239,12 +235,11 @@ mod tests {
         .unwrap();
         reconcile(&state).await.unwrap();
 
-        let subscribed: i64 =
-            sqlx::query_scalar("SELECT subscribed FROM feed WHERE url = ?")
-                .bind("https://valid.example/feed")
-                .fetch_one(&state.pool)
-                .await
-                .unwrap();
+        let subscribed: i64 = sqlx::query_scalar("SELECT subscribed FROM feed WHERE url = ?")
+            .bind("https://valid.example/feed")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
         assert_eq!(subscribed, 1);
         assert!(!state.manifest_warnings.lock().unwrap().is_empty());
     }
@@ -274,16 +269,25 @@ mod tests {
 
         let parsed = manifest::parse(&read_manifest(&state).await.unwrap());
         assert_eq!(parsed.feeds.len(), 2);
-        assert!(parsed.feeds.iter().any(|feed| feed.url == "https://one.example/feed"));
-        assert!(parsed.feeds.iter().any(|feed| feed.url == "https://two.example/feed"));
+        assert!(
+            parsed
+                .feeds
+                .iter()
+                .any(|feed| feed.url == "https://one.example/feed")
+        );
+        assert!(
+            parsed
+                .feeds
+                .iter()
+                .any(|feed| feed.url == "https://two.example/feed")
+        );
     }
 
     #[tokio::test]
     async fn external_edit_conflict_preserves_external_content() {
         let (_vault, state) = test_state(VALID_MANIFEST).await;
         let manifest_path = state.config.manifest_path();
-        let external =
-            "# feeds\n\n## External\n\n- https://external.example/feed\n".to_string();
+        let external = "# feeds\n\n## External\n\n- https://external.example/feed\n".to_string();
         let external_write = external.clone();
 
         let result = update_manifest(&state, move |text| {
@@ -312,14 +316,16 @@ mod tests {
         })
         .await;
 
-        assert!(matches!(result, Err(ManifestUpdateError::InvalidCandidate(_))));
+        assert!(matches!(
+            result,
+            Err(ManifestUpdateError::InvalidCandidate(_))
+        ));
         assert_eq!(read_manifest(&state).await.unwrap(), VALID_MANIFEST);
-        let subscribed: i64 =
-            sqlx::query_scalar("SELECT subscribed FROM feed WHERE url = ?")
-                .bind("https://valid.example/feed")
-                .fetch_one(&state.pool)
-                .await
-                .unwrap();
+        let subscribed: i64 = sqlx::query_scalar("SELECT subscribed FROM feed WHERE url = ?")
+            .bind("https://valid.example/feed")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
         assert_eq!(subscribed, 1);
     }
 }

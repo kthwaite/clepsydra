@@ -18,7 +18,10 @@ pub fn router() -> Router<AppState> {
         .route("/feeds/refresh", post(refresh))
         .route("/feeds/export", get(export_opml))
         .route("/feeds/import", post(import_opml))
-        .route("/feeds/{id}", axum::routing::patch(update_feed).delete(unsubscribe))
+        .route(
+            "/feeds/{id}",
+            axum::routing::patch(update_feed).delete(unsubscribe),
+        )
         .route("/entries", get(list_entries))
         .route("/entries/mark-read", post(mark_read))
         .route("/entries/{id}", axum::routing::patch(update_entry))
@@ -58,12 +61,14 @@ type ApiResult<T> = Result<T, ApiError>;
 
 fn manifest_api_error(error: super::ManifestUpdateError) -> ApiError {
     match error {
-        super::ManifestUpdateError::InvalidSource(warnings) => {
-            ApiError::Conflict(format!("manifest contains warnings: {}", warnings.join("; ")))
-        }
-        super::ManifestUpdateError::InvalidCandidate(warnings) => {
-            ApiError::BadRequest(format!("manifest update is invalid: {}", warnings.join("; ")))
-        }
+        super::ManifestUpdateError::InvalidSource(warnings) => ApiError::Conflict(format!(
+            "manifest contains warnings: {}",
+            warnings.join("; ")
+        )),
+        super::ManifestUpdateError::InvalidCandidate(warnings) => ApiError::BadRequest(format!(
+            "manifest update is invalid: {}",
+            warnings.join("; ")
+        )),
         super::ManifestUpdateError::Conflict => {
             ApiError::Conflict("manifest changed during update".to_string())
         }
@@ -208,7 +213,11 @@ async fn update_feed(
 ) -> ApiResult<StatusCode> {
     let url = feed_url_by_id(&state, id).await?;
     super::update_manifest(&state, |source| {
-        if !manifest::parse(source).feeds.iter().any(|feed| feed.url == url) {
+        if !manifest::parse(source)
+            .feeds
+            .iter()
+            .any(|feed| feed.url == url)
+        {
             return Err(super::ManifestUpdateError::ItemNotFound);
         }
         let mut text = source.to_string();
@@ -228,10 +237,7 @@ async fn update_feed(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn unsubscribe(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> ApiResult<StatusCode> {
+async fn unsubscribe(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let url = feed_url_by_id(&state, id).await?;
     super::update_manifest(&state, |text| {
         let (new_text, removed) = manifest::remove_item(text, &url);
@@ -362,7 +368,8 @@ async fn list_entries(
             .push_bind(id)
             .push("))");
     }
-    qb.push(" ORDER BY sort_ts DESC, e.id DESC LIMIT ").push_bind(limit);
+    qb.push(" ORDER BY sort_ts DESC, e.id DESC LIMIT ")
+        .push_bind(limit);
 
     let rows = qb.build().fetch_all(&state.pool).await?;
 
@@ -393,9 +400,13 @@ async fn list_entries(
             EntryOut {
                 id,
                 feed_id: r.get("feed_id"),
-                feed_title: title_override
-                    .filter(|t| !t.is_empty())
-                    .unwrap_or(if feed_title.is_empty() { feed_url } else { feed_title }),
+                feed_title: title_override.filter(|t| !t.is_empty()).unwrap_or(
+                    if feed_title.is_empty() {
+                        feed_url
+                    } else {
+                        feed_title
+                    },
+                ),
                 group: r.get("group_name"),
                 url: r.get("url"),
                 title: r.get("title"),
@@ -414,7 +425,10 @@ async fn list_entries(
         .then(|| entries.last().map(|e| format!("{}|{}", e.sort_ts, e.id)))
         .flatten();
 
-    Ok(Json(EntriesResponse { entries, next_cursor }))
+    Ok(Json(EntriesResponse {
+        entries,
+        next_cursor,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -552,13 +566,17 @@ async fn export_opml(State(state): State<AppState>) -> ApiResult<Response> {
             "<outline type=\"rss\" text=\"{0}\" title=\"{0}\" xmlUrl=\"{1}\"{2}/>\n",
             xml_escape(&t),
             xml_escape(&url),
-            site.map(|s| format!(" htmlUrl=\"{}\"", xml_escape(&s))).unwrap_or_default(),
+            site.map(|s| format!(" htmlUrl=\"{}\"", xml_escape(&s)))
+                .unwrap_or_default(),
         )
     };
     for (group, feeds) in groups {
         match group {
             Some(g) => {
-                out.push_str(&format!("<outline text=\"{0}\" title=\"{0}\">\n", xml_escape(&g)));
+                out.push_str(&format!(
+                    "<outline text=\"{0}\" title=\"{0}\">\n",
+                    xml_escape(&g)
+                ));
                 for f in feeds {
                     out.push_str(&outline(f));
                 }
@@ -576,7 +594,10 @@ async fn export_opml(State(state): State<AppState>) -> ApiResult<Response> {
     Ok((
         [
             ("content-type", "text/x-opml"),
-            ("content-disposition", "attachment; filename=\"clepsydra.opml\""),
+            (
+                "content-disposition",
+                "attachment; filename=\"clepsydra.opml\"",
+            ),
         ],
         out,
     )
@@ -594,8 +615,8 @@ async fn import_opml(
     State(state): State<AppState>,
     body: String,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let discovered =
-        parse_opml(&body).map_err(|error| ApiError::BadRequest(format!("invalid OPML: {error}")))?;
+    let discovered = parse_opml(&body)
+        .map_err(|error| ApiError::BadRequest(format!("invalid OPML: {error}")))?;
     if discovered.is_empty() {
         return Err(ApiError::BadRequest("no feeds found in OPML".into()));
     }
@@ -613,8 +634,11 @@ async fn import_opml(
 }
 
 fn merge_opml(text: &str, discovered: Vec<OpmlItem>) -> (String, usize) {
-    let mut existing: std::collections::HashSet<String> =
-        manifest::parse(text).feeds.into_iter().map(|feed| feed.url).collect();
+    let mut existing: std::collections::HashSet<String> = manifest::parse(text)
+        .feeds
+        .into_iter()
+        .map(|feed| feed.url)
+        .collect();
     let mut updated = text.to_string();
     let mut added = 0;
 
@@ -623,11 +647,7 @@ fn merge_opml(text: &str, discovered: Vec<OpmlItem>) -> (String, usize) {
             continue;
         }
         let item = manifest::render_item(&url, title.as_deref(), &[]);
-        updated = manifest::add_item(
-            &updated,
-            group.as_deref().unwrap_or("Feeds"),
-            &item,
-        );
+        updated = manifest::add_item(&updated, group.as_deref().unwrap_or("Feeds"), &item);
         added += 1;
     }
     (updated, added)

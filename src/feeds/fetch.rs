@@ -141,26 +141,14 @@ fn is_public_ipv6(address: Ipv6Addr) -> bool {
         return address == Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 1)
             || address == Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 2)
             || address == Ipv6Addr::new(0x2001, 1, 0, 0, 0, 0, 0, 3)
-            || ipv6_has_prefix(
-                address,
-                Ipv6Addr::new(0x2001, 3, 0, 0, 0, 0, 0, 0),
-                32,
-            )
-            || ipv6_has_prefix(
-                address,
-                Ipv6Addr::new(0x2001, 4, 0x0112, 0, 0, 0, 0, 0),
-                48,
-            )
-            || ipv6_has_prefix(
-                address,
-                Ipv6Addr::new(0x2001, 0x0030, 0, 0, 0, 0, 0, 0),
-                28,
-            );
+            || ipv6_has_prefix(address, Ipv6Addr::new(0x2001, 3, 0, 0, 0, 0, 0, 0), 32)
+            || ipv6_has_prefix(address, Ipv6Addr::new(0x2001, 4, 0x0112, 0, 0, 0, 0, 0), 48)
+            || ipv6_has_prefix(address, Ipv6Addr::new(0x2001, 0x0030, 0, 0, 0, 0, 0, 0), 28);
     }
     const NON_GLOBAL: &[(Ipv6Addr, u8)] = &[
         (Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32), // documentation
-        (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16), // deprecated 6to4
-        (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20), // documentation
+        (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16),      // deprecated 6to4
+        (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),      // documentation
     ];
     !NON_GLOBAL
         .iter()
@@ -285,19 +273,18 @@ async fn read_limited(
 
 /// Fetch every subscribed feed that is due.
 pub async fn sweep(state: &AppState) {
-    let due: Vec<i64> = match sqlx::query_scalar(
-        "SELECT id FROM feed WHERE subscribed = 1 AND next_fetch_at <= ?",
-    )
-    .bind(Utc::now())
-    .fetch_all(&state.pool)
-    .await
-    {
-        Ok(ids) => ids,
-        Err(e) => {
-            tracing::error!("sweep query failed: {e}");
-            return;
-        }
-    };
+    let due: Vec<i64> =
+        match sqlx::query_scalar("SELECT id FROM feed WHERE subscribed = 1 AND next_fetch_at <= ?")
+            .bind(Utc::now())
+            .fetch_all(&state.pool)
+            .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("sweep query failed: {e}");
+                return;
+            }
+        };
     if due.is_empty() {
         return;
     }
@@ -365,12 +352,25 @@ pub async fn fetch_one(state: &AppState, feed_id: i64) -> anyhow::Result<()> {
     };
 
     if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
-        record_success(state, feed_id, None, None, etag.as_deref(), last_modified.as_deref())
-            .await?;
+        record_success(
+            state,
+            feed_id,
+            None,
+            None,
+            etag.as_deref(),
+            last_modified.as_deref(),
+        )
+        .await?;
         return Ok(());
     }
     if !resp.status().is_success() {
-        record_error(state, feed_id, error_count, &format!("HTTP {}", resp.status())).await?;
+        record_error(
+            state,
+            feed_id,
+            error_count,
+            &format!("HTTP {}", resp.status()),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -453,8 +453,7 @@ async fn ingest_entry(
         .as_ref()
         .and_then(|c| c.body.clone())
         .or_else(|| entry.summary.as_ref().map(|s| s.content.clone()));
-    let content_html =
-        sanitize_entry_content(raw_content, state.config.max_entry_content_bytes);
+    let content_html = sanitize_entry_content(raw_content, state.config.max_entry_content_bytes);
     let author = entry
         .authors
         .first()
@@ -847,10 +846,7 @@ mod tests {
             .await
             .unwrap();
         let address = listener.local_addr().unwrap();
-        let app = Router::new().route(
-            "/",
-            get(move || async move { vec![b'x'; limit + 1] }),
-        );
+        let app = Router::new().route("/", get(move || async move { vec![b'x'; limit + 1] }));
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -939,8 +935,17 @@ mod tests {
 
     #[test]
     fn attr_extraction_handles_quotes() {
-        assert_eq!(attr_value(r#"<link href="/a.xml">"#, "href").as_deref(), Some("/a.xml"));
-        assert_eq!(attr_value("<link href='/b.xml'>", "href").as_deref(), Some("/b.xml"));
-        assert_eq!(attr_value("<link href=/c.xml >", "href").as_deref(), Some("/c.xml"));
+        assert_eq!(
+            attr_value(r#"<link href="/a.xml">"#, "href").as_deref(),
+            Some("/a.xml")
+        );
+        assert_eq!(
+            attr_value("<link href='/b.xml'>", "href").as_deref(),
+            Some("/b.xml")
+        );
+        assert_eq!(
+            attr_value("<link href=/c.xml >", "href").as_deref(),
+            Some("/c.xml")
+        );
     }
 }

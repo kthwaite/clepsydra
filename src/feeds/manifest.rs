@@ -312,12 +312,19 @@ things i skim in the morning:
     #[test]
     fn remove_and_move_preserve_the_rest() {
         let (out, removed) = remove_item(SAMPLE, "https://ft.example.com/rss");
-        assert_eq!(removed.as_deref(), Some("[FT](https://ft.example.com/rss) #finance"));
+        assert_eq!(
+            removed.as_deref(),
+            Some("[FT](https://ft.example.com/rss) #finance")
+        );
         assert_eq!(parse(&out).feeds.len(), 3);
 
         let out = move_item(SAMPLE, "https://ft.example.com/rss", "Tech News");
         let m = parse(&out);
-        let ft = m.feeds.iter().find(|f| f.url == "https://ft.example.com/rss").unwrap();
+        let ft = m
+            .feeds
+            .iter()
+            .find(|f| f.url == "https://ft.example.com/rss")
+            .unwrap();
         assert_eq!(ft.group.as_deref(), Some("Tech News"));
         assert_eq!(ft.title_override.as_deref(), Some("FT"));
         // item tag survives; section tags now come from the new section
@@ -329,13 +336,21 @@ things i skim in the morning:
     fn set_title_rewrites_in_place() {
         let out = set_title(SAMPLE, "https://hn.example/rss", Some("Hacker News"));
         let m = parse(&out);
-        let hn = m.feeds.iter().find(|f| f.url == "https://hn.example/rss").unwrap();
+        let hn = m
+            .feeds
+            .iter()
+            .find(|f| f.url == "https://hn.example/rss")
+            .unwrap();
         assert_eq!(hn.title_override.as_deref(), Some("Hacker News"));
         assert!(hn.tags.contains(&"hn".to_string()));
 
         let out = set_title(&out, "https://hn.example/rss", None);
         let m = parse(&out);
-        let hn = m.feeds.iter().find(|f| f.url == "https://hn.example/rss").unwrap();
+        let hn = m
+            .feeds
+            .iter()
+            .find(|f| f.url == "https://hn.example/rss")
+            .unwrap();
         assert_eq!(hn.title_override, None);
     }
 }
