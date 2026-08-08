@@ -12,6 +12,7 @@ import { cn } from "#/lib/cn";
 export interface TagInputProps {
   label: string;
   values: string[];
+  readOnlyValues?: string[];
   onChange: (values: string[]) => void;
   placeholder?: string;
   className?: string;
@@ -22,6 +23,7 @@ export interface TagInputProps {
 export function TagInput({
   label,
   values,
+  readOnlyValues = [],
   onChange,
   placeholder,
   className,
@@ -33,12 +35,16 @@ export function TagInput({
   const addValue = useCallback(
     (val: string) => {
       const trimmed = val.trim();
-      if (trimmed && !values.includes(trimmed)) {
+      if (
+        trimmed &&
+        !values.includes(trimmed) &&
+        !readOnlyValues.includes(trimmed)
+      ) {
         onChange([...values, trimmed]);
       }
       setInputValue("");
     },
-    [values, onChange],
+    [values, readOnlyValues, onChange],
   );
 
   const handleRemove = useCallback(
@@ -76,6 +82,24 @@ export function TagInput({
       onClick={() => inputRef.current?.focus()}
     >
       <span className="text-xs text-muted-foreground">{label}:</span>
+      {readOnlyValues.length > 0 && (
+        <TagGroup aria-label={`Read-only ${label}`} className="contents">
+          <TagList
+            items={readOnlyValues.map((v) => ({ id: v, name: v }))}
+            className="contents"
+          >
+            {(item) => (
+              <Tag
+                id={item.id}
+                textValue={item.name}
+                className="flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs"
+              >
+                {item.name}
+              </Tag>
+            )}
+          </TagList>
+        </TagGroup>
+      )}
       {values.length > 0 && (
         <TagGroup
           onRemove={handleRemove}
@@ -121,7 +145,11 @@ export function TagInput({
           onBlur?.();
         }}
         aria-label={`Add ${label.toLowerCase()}`}
-        placeholder={values.length === 0 ? placeholder : undefined}
+        placeholder={
+          values.length === 0 && readOnlyValues.length === 0
+            ? placeholder
+            : undefined
+        }
         className="min-w-[80px] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
       />
     </div>

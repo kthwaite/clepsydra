@@ -37,6 +37,36 @@ describe("TagInput", () => {
     expect(screen.queryByPlaceholderText("Add tag...")).toBeNull();
   });
 
+  it("renders read-only values without remove controls", () => {
+    render(
+      <TagInput
+        label="Tags"
+        values={["pkm"]}
+        readOnlyValues={["journal"]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("journal")).toBeInTheDocument();
+    expect(screen.getByText("pkm")).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button").parentElement).toHaveTextContent("pkm");
+  });
+
+  it("hides the placeholder when only read-only values exist", () => {
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        readOnlyValues={["journal"]}
+        onChange={() => {}}
+        placeholder="Add tag..."
+      />,
+    );
+
+    expect(screen.queryByPlaceholderText("Add tag...")).toBeNull();
+  });
+
   it("adds tag on Enter", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -73,6 +103,55 @@ describe("TagInput", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("does not add a read-only value to editable values", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={["pkm"]}
+        readOnlyValues={["journal"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "journal{Enter}");
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("emits only editable values when adding a tag", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={["pkm"]}
+        readOnlyValues={["journal"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "daily{Enter}");
+
+    expect(onChange).toHaveBeenCalledWith(["pkm", "daily"]);
+    expect(onChange).not.toHaveBeenCalledWith(
+      expect.arrayContaining(["journal"]),
+    );
+  });
+
+  it("preserves an ordinary value that matches another caller's derived tag", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput label="Tags" values={["journal"]} onChange={onChange} />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "daily{Enter}");
+
+    expect(onChange).toHaveBeenCalledWith(["journal", "daily"]);
+  });
+
   it("does not add empty tags", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -92,6 +171,25 @@ describe("TagInput", () => {
     await user.click(input);
     await user.keyboard("{Backspace}");
     expect(onChange).toHaveBeenCalledWith(["alpha"]);
+  });
+
+  it("Backspace removes only the last editable value", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={["pkm"]}
+        readOnlyValues={["journal"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Backspace}");
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith([]);
   });
 
   it("removes a specific tag via remove button", async () => {

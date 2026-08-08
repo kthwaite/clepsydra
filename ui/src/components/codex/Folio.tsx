@@ -153,6 +153,25 @@ export function Folio({ tabId, path }: FolioProps) {
     () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
     [path, editor.kind, editor.bodyMarkdown],
   );
+  const isJournal = kind === "JOURNAL";
+  const editableTags = useMemo(
+    () =>
+      isJournal
+        ? editor.tags.filter((tag) => tag.toLowerCase() !== "journal")
+        : editor.tags,
+    [isJournal, editor.tags],
+  );
+  const hasPersistedJournalTag =
+    isJournal && editableTags.length !== editor.tags.length;
+  useEffect(() => {
+    if (editor.isLoading || !hasPersistedJournalTag) return;
+    editor.setTags(editableTags);
+  }, [
+    editor.isLoading,
+    editor.setTags,
+    editableTags,
+    hasPersistedJournalTag,
+  ]);
   const presentation = presentationFor(kind);
   const inferred = editor.inferred;
   const project = editor.project;
@@ -367,7 +386,8 @@ export function Folio({ tabId, path }: FolioProps) {
                 title={editor.title}
                 onTitleChange={editor.setTitle}
                 readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
-                tags={editor.tags}
+                tags={editableTags}
+                derivedTags={isJournal ? ["journal"] : []}
                 onTagsChange={editor.setTags}
                 aliases={editor.aliases}
                 onAliasesChange={editor.setAliases}

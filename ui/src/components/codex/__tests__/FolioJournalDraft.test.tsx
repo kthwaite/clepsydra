@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { usePageEditorMock, useJournalTodayMock } = vi.hoisted(() => ({
@@ -9,7 +10,6 @@ vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
 }));
 vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
-vi.mock("#/editor/PageEditorHeader", () => ({ PageEditorHeader: () => null }));
 vi.mock("#/editor/SlateEditor", () => ({ SlateEditor: () => null }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
@@ -72,6 +72,8 @@ function draftEditor() {
 
 describe("Folio journal draft", () => {
   beforeEach(() => {
+    usePageEditorMock.mockReset();
+    useJournalTodayMock.mockReset();
     useJournalTodayMock.mockReturnValue({ data: null, isLoading: false });
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
   });
@@ -106,6 +108,72 @@ describe("Folio journal draft", () => {
     render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
     expect(screen.queryByText(/not found/i)).toBeNull();
     expect(screen.getByText(/END OF FILE/)).toBeInTheDocument();
+  });
+
+  it("derives an immutable journal tag for a resolved journal", () => {
+    usePageEditorMock.mockReturnValue({
+      ...draftEditor(),
+      kind: "JOURNAL",
+    });
+
+    render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
+
+    const derivedTags = screen.getByRole("grid", {
+      name: "Read-only Tags",
+    });
+    expect(within(derivedTags).getByText("journal")).toBeInTheDocument();
+    expect(within(derivedTags).queryByRole("button")).toBeNull();
+  });
+
+  it("filters a persisted journal tag once and keeps other tags editable", async () => {
+    const setTags = vi.fn();
+    usePageEditorMock.mockImplementation(() => {
+      const [tags, setTagsState] = useState(["journal", "daily"]);
+      return {
+        ...draftEditor(),
+        kind: "JOURNAL",
+        tags,
+        setTags: (nextTags: string[]) => {
+          setTags(nextTags);
+          setTagsState(nextTags);
+        },
+      };
+    });
+
+    render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
+
+    const derivedTags = screen.getByRole("grid", {
+      name: "Read-only Tags",
+    });
+    const editableTags = screen.getByRole("grid", { name: "Tags" });
+    expect(screen.getAllByText("journal")).toHaveLength(1);
+    expect(within(derivedTags).getByText("journal")).toBeInTheDocument();
+    expect(within(editableTags).getByText("daily")).toBeInTheDocument();
+    expect(within(editableTags).getByRole("button")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(setTags).toHaveBeenCalledOnce();
+      expect(setTags).toHaveBeenCalledWith(["daily"]);
+    });
+  });
+
+  it("keeps an ordinary journal tag editable on a note", () => {
+    const setTags = vi.fn();
+    usePageEditorMock.mockReturnValue({
+      ...draftEditor(),
+      kind: "NOTE",
+      tags: ["journal"],
+      setTags,
+    });
+
+    render(<Folio tabId="t1" path="notes/note.md" />);
+
+    expect(
+      screen.queryByRole("grid", { name: "Read-only Tags" }),
+    ).toBeNull();
+    const editableTags = screen.getByRole("grid", { name: "Tags" });
+    expect(within(editableTags).getByText("journal")).toBeInTheDocument();
+    expect(within(editableTags).getByRole("button")).toBeInTheDocument();
+    expect(setTags).not.toHaveBeenCalled();
   });
 
   it("still renders FolioNotFound for a plain missing page", () => {
