@@ -342,7 +342,7 @@ async fn list_bases_includes_diagnostics_for_broken_base() {
 
 #[tokio::test]
 async fn get_base_returns_definition_and_unknown_is_404() {
-    let (server, _tmp) = ApiFixture::builder()
+    let (server, tmp) = ApiFixture::builder()
         .pre_index_seed(seed)
         .build()
         .into_server_and_temp();
@@ -353,6 +353,12 @@ async fn get_base_returns_definition_and_unknown_is_404() {
     assert_eq!(body["slug"], "reading");
     assert_eq!(body["properties"]["status"]["type"], "select");
     assert_eq!(body["views"][0]["name"], "Continues");
+    assert_eq!(
+        body["revision"],
+        base_document::revision(
+            &fs::read_to_string(tmp.path().join("vault/bases/reading.base.toml")).unwrap()
+        )
+    );
 
     server
         .get("/api/vault/bases/nonexistent")

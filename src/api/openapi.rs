@@ -506,6 +506,25 @@ mod tests {
             );
         }
 
+        let detail_schema = &json["components"]["schemas"]["BaseDetailResponse"];
+        let detail_fields = detail_schema["allOf"]
+            .as_array()
+            .expect("flattened BaseDetailResponse should use allOf")
+            .iter()
+            .find(|part| part["properties"].get("revision").is_some())
+            .expect("BaseDetailResponse should expose revision");
+        let detail_required = detail_fields["required"]
+            .as_array()
+            .expect("BaseDetailResponse fields should declare required properties");
+        assert!(
+            detail_required.iter().any(|field| field == "revision"),
+            "BaseDetailResponse should require revision"
+        );
+        assert_eq!(
+            detail_fields["properties"]["revision"]["type"], "string",
+            "BaseDetailResponse.revision should be a string"
+        );
+
         let variants = json["components"]["schemas"]["Filter"]["oneOf"]
             .as_array()
             .expect("Filter should be a recursive oneOf");

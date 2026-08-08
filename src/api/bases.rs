@@ -51,6 +51,7 @@ pub struct BaseDetailResponse {
     #[serde(flatten)]
     pub definition: BaseDefinition,
     pub diagnostics: Vec<BaseDiagnostic>,
+    pub revision: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -228,6 +229,14 @@ pub async fn get_base(
         .get(&slug)
         .cloned()
         .ok_or_else(|| ApiError::not_found(format!("no base with slug `{slug}`")))?;
+    let document_path = state
+        .vault
+        .root()
+        .join("bases")
+        .join(format!("{}.base.toml", base.slug));
+    let raw = std::fs::read_to_string(document_path)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let revision = base_document::revision(&raw);
     let diagnostics = registry
         .diagnostics
         .iter()
@@ -237,6 +246,7 @@ pub async fn get_base(
     Ok(Json(BaseDetailResponse {
         definition: base,
         diagnostics,
+        revision,
     }))
 }
 
