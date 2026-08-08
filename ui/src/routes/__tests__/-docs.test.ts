@@ -31,6 +31,14 @@ describe("documentation file routes", () => {
     expectDocsSlugMatch(router, "getting-started");
   });
 
+  it("canonicalizes a trailing slash and preserves its fragment", async () => {
+    const router = await loadDocsPath("/docs/#installation");
+
+    expect(router.state.location.pathname).toBe("/docs/getting-started");
+    expect(router.state.location.hash).toBe("installation");
+    expectDocsSlugMatch(router, "getting-started");
+  });
+
   it("preserves a fragment while redirecting the docs root", async () => {
     const router = await loadDocsPath("/docs#installation");
 
