@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { usePageEditorMock, useJournalTodayMock } = vi.hoisted(() => ({
+const { setReadingProgressMock, usePageEditorMock, useJournalTodayMock } = vi.hoisted(() => ({
+  setReadingProgressMock: vi.fn(),
   usePageEditorMock: vi.fn(),
   useJournalTodayMock: vi.fn(),
 }));
@@ -36,6 +37,10 @@ vi.mock("#/components/codex/useCollapsibleRail", () => ({
 }));
 vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: () => ({ activeIndex: -1, scrollTo: vi.fn() }),
+}));
+vi.mock("#/components/codex/ReadingProgressContext", () => ({
+  useReadingProgress: () => ({ setProgress: setReadingProgressMock }),
+  useSetReadingProgress: () => setReadingProgressMock,
 }));
 
 import { todayJournalPath } from "#/lib/journal";
@@ -72,6 +77,7 @@ function draftEditor() {
 
 describe("Folio journal draft", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useJournalTodayMock.mockReturnValue({ data: null, isLoading: false });
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
   });
@@ -115,5 +121,39 @@ describe("Folio journal draft", () => {
     });
     render(<Folio tabId="t1" path="notes/missing.md" />);
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+
+  it("coalesces scroll progress writes into one animation frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    usePageEditorMock.mockReturnValue(draftEditor());
+    const { container } = render(
+      <Folio tabId="t1" path="journals/2026-08-07.md" />,
+    );
+    setReadingProgressMock.mockClear();
+    const scroller = container.querySelector<HTMLElement>(
+      ".cl-noscroll.h-full.overflow-auto",
+    );
+    expect(scroller).not.toBeNull();
+    Object.defineProperties(scroller as HTMLElement, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1000 },
+    });
+
+    (scroller as HTMLElement).scrollTop = 200;
+    fireEvent.scroll(scroller as HTMLElement);
+    (scroller as HTMLElement).scrollTop = 600;
+    fireEvent.scroll(scroller as HTMLElement);
+
+    expect(setReadingProgressMock).not.toHaveBeenCalled();
+    expect(frames).toHaveLength(1);
+    act(() => frames[0]?.(0));
+    expect(setReadingProgressMock).toHaveBeenCalledOnce();
+    expect(setReadingProgressMock).toHaveBeenCalledWith(0.75);
+    vi.unstubAllGlobals();
   });
 });

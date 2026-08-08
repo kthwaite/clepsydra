@@ -36,13 +36,25 @@ export function useUptime(): string {
   }, [data]);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
+    if (!data) return;
+    let timer: number;
+    const scheduleVisibleChange = () => {
       const { serverSeconds, localMs } = anchor.current;
-      if (localMs === 0) return;
-      setSeconds(serverSeconds + Math.floor((Date.now() - localMs) / 1000));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, []);
+      const uptimeMs = serverSeconds * 1000 + (Date.now() - localMs);
+      const remainder = uptimeMs % 60_000;
+      const delay = remainder === 0 ? 60_000 : 60_000 - remainder;
+      timer = window.setTimeout(() => {
+        const current = anchor.current;
+        setSeconds(
+          current.serverSeconds +
+            Math.floor((Date.now() - current.localMs) / 1000),
+        );
+        scheduleVisibleChange();
+      }, delay);
+    };
+    scheduleVisibleChange();
+    return () => window.clearTimeout(timer);
+  }, [data]);
 
   return formatDurationHM(seconds);
 }

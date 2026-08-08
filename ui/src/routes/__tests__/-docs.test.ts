@@ -4,6 +4,7 @@ import {
   type Router,
 } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
+import { DOC_PAGES } from "#/docs/registry";
 import { routeTree } from "#/routeTree.gen";
 
 async function loadDocsPath(path: string) {
@@ -23,6 +24,14 @@ function expectDocsSlugMatch(router: Router<typeof routeTree>, slug: string) {
 }
 
 describe("documentation file routes", () => {
+  it("keeps guide components behind per-page lazy boundaries", () => {
+    for (const page of DOC_PAGES) {
+      expect(
+        (page.Component as unknown as { $$typeof?: symbol }).$$typeof,
+      ).toBe(Symbol.for("react.lazy"));
+    }
+  });
+
   it("redirects the docs root to Getting Started", async () => {
     const router = await loadDocsPath("/docs");
 

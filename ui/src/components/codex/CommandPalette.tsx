@@ -39,6 +39,12 @@ const KIND_LABEL: Record<Command["kind"], string> = {
 
 export function CommandPalette() {
   const open = useUiStore((s) => s.isSearchOpen);
+  if (!open) return null;
+  return <CommandPaletteContent />;
+}
+
+function CommandPaletteContent() {
+  const open = useUiStore((s) => s.isSearchOpen);
   const close = useUiStore((s) => s.closeSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openCaptureAside = useUiStore((s) => s.openCaptureAside);
@@ -59,7 +65,7 @@ export function CommandPalette() {
     open && debouncedQ.length > 0 ? debouncedQ : "",
     12,
   );
-  const { data: tags } = useTags();
+  const { data: tags } = useTags(open);
 
   useEffect(() => {
     if (open) {
@@ -69,9 +75,6 @@ export function CommandPalette() {
     }
   }, [open]);
 
-  useEffect(() => {
-    setSel(0);
-  }, [q]);
 
   const verbCommands = useMemo<Command[]>(
     () => [
@@ -248,8 +251,6 @@ export function CommandPalette() {
     }
   };
 
-  if (!open) return null;
-
   return (
     <CodexModalShell
       ariaLabel="Command console"
@@ -270,7 +271,10 @@ export function CommandPalette() {
         <input
           ref={inputRef}
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setSel(0);
+          }}
           placeholder="grep | go | id | tag — ⏎ to dispatch · esc to close"
           className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
         />

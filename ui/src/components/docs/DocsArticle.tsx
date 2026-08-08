@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { Suspense } from "react";
 import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
 import { DOC_GROUPS, getDocNeighbors } from "#/docs/registry";
 import type { DocPage } from "#/docs/types";
@@ -33,7 +34,15 @@ export function DocsArticle({ page }: { page: DocPage }) {
       </header>
 
       <div className="mt-8">
-        <Component components={docsMdxComponents} />
+        <Suspense
+          fallback={
+            <p className="font-mono text-xs uppercase tracking-widest text-ink-mute">
+              Loading guide…
+            </p>
+          }
+        >
+          <Component components={docsMdxComponents} />
+        </Suspense>
       </div>
 
       {previous || next ? (

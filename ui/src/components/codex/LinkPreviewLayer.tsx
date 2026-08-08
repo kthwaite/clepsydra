@@ -38,7 +38,12 @@ function PreviewWindow({ win }: { win: PW }) {
   const { data: page } = usePage(win.path);
   const { data: backlinks } = useBacklinks(win.path);
   const openTab = useOpenTab();
-  const { pin, minimize, close, raise, move } = usePreviewStore();
+  const pin = usePreviewStore((state) => state.pin);
+  const minimize = usePreviewStore((state) => state.minimize);
+  const close = usePreviewStore((state) => state.close);
+  const raise = usePreviewStore((state) => state.raise);
+  const move = usePreviewStore((state) => state.move);
+  const commitMove = usePreviewStore((state) => state.commitMove);
   const dragRef = useRef<{ ox: number; oy: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -58,7 +63,14 @@ function PreviewWindow({ win }: { win: PW }) {
       pending = { x: e.clientX - d.ox, y: e.clientY - d.oy };
       if (!raf) raf = requestAnimationFrame(flush);
     };
-    const onUp = () => setDragging(false);
+    const onUp = () => {
+      if (pending) {
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
+        commitMove(win.id, pending.x, pending.y);
+      }
+      setDragging(false);
+    };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     return () => {
@@ -66,7 +78,7 @@ function PreviewWindow({ win }: { win: PW }) {
       window.removeEventListener("pointerup", onUp);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [dragging, win.id, move]);
+  }, [commitMove, dragging, win.id, move]);
 
   const onTitlePointerDown = (e: React.PointerEvent) => {
     raise(win.id);
@@ -82,7 +94,13 @@ function PreviewWindow({ win }: { win: PW }) {
 
   return (
     <div
-      style={{ left: win.x, top: win.y, width: PREVIEW_WIDTH, zIndex: win.z }}
+      style={{
+        left: 0,
+        top: 0,
+        transform: `translate3d(${win.x}px, ${win.y}px, 0)`,
+        width: PREVIEW_WIDTH,
+        zIndex: win.z,
+      }}
       onMouseEnter={cancelHoverClose}
       onMouseLeave={() => {
         if (!win.pinned) scheduleHoverClose();
@@ -127,7 +145,8 @@ function PreviewWindow({ win }: { win: PW }) {
 }
 
 function Tray({ windows }: { windows: PW[] }) {
-  const { restore, close } = usePreviewStore();
+  const restore = usePreviewStore((state) => state.restore);
+  const close = usePreviewStore((state) => state.close);
   return (
     <div className="fixed bottom-2 left-2 z-[950] flex max-w-[60vw] flex-wrap gap-1.5">
       {windows.map((w) => (

@@ -11,7 +11,7 @@ import {
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
-import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
+import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
@@ -71,9 +71,11 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const assign = useAssignPage();
   const projects = useProjects();
-  const { setProgress } = useReadingProgress();
+  const setProgress = useSetReadingProgress();
   const encryptionActions = useOptionalEncryptionActions();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const pendingProgressFrame = useRef<number | null>(null);
+  const latestProgress = useRef(0);
   const [protectionDialog, setProtectionDialog] = useState<
     "protect" | "unprotect" | null
   >(null);
@@ -126,6 +128,15 @@ export function Folio({ tabId, path }: FolioProps) {
     setProgress(0);
   }, [setProgress]);
 
+  useEffect(
+    () => () => {
+      if (pendingProgressFrame.current !== null) {
+        cancelAnimationFrame(pendingProgressFrame.current);
+      }
+    },
+    [],
+  );
+
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
   const saveNow = editor.saveNow;
@@ -145,7 +156,12 @@ export function Folio({ tabId, path }: FolioProps) {
     const el = bodyRef.current;
     if (!el) return;
     const max = el.scrollHeight - el.clientHeight;
-    setProgress(max > 0 ? Math.min(1, el.scrollTop / max) : 0);
+    latestProgress.current = max > 0 ? Math.min(1, el.scrollTop / max) : 0;
+    if (pendingProgressFrame.current !== null) return;
+    pendingProgressFrame.current = requestAnimationFrame(() => {
+      pendingProgressFrame.current = null;
+      setProgress(latestProgress.current);
+    });
   };
 
   const folioCode = shortFolio(path);

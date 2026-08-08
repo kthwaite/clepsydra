@@ -62,6 +62,7 @@ type PreviewState = {
   closePath: (path: string) => void;
   raise: (id: string) => void;
   move: (id: string, x: number, y: number) => void;
+  commitMove: (id: string, x: number, y: number) => void;
 };
 
 let nextId = 1;
@@ -162,8 +163,16 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
   },
 
   move(id, x, y) {
+    set((s) => ({
+      windows: s.windows.map((w) => (w.id === id ? { ...w, x, y } : w)),
+    }));
+  },
+
+  commitMove(id, x, y) {
     set((s) => {
-      const windows = s.windows.map((w) => (w.id === id ? { ...w, x, y } : w));
+      const windows = s.windows.map((w) =>
+        w.id === id ? { ...w, x, y } : w,
+      );
       savePinned(windows);
       return { windows };
     });
