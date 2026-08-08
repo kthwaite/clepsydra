@@ -137,6 +137,32 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("revision-2")).toBeInTheDocument();
   });
 
+  it("saves the exact membership filter edited in the workspace", async () => {
+    const filter = { field: "id", op: "eq", value: "page-1" } as const;
+    updateMock.mockResolvedValue(
+      mutationResponse({ filter, revision: "revision-2" }),
+    );
+    renderWorkspace();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await user.selectOptions(
+      screen.getByLabelText("Field for condition 1"),
+      "id",
+    );
+    await user.type(screen.getByLabelText("Value for condition 1"), "page-1");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateMock).toHaveBeenCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({ filter }),
+      },
+    });
+  });
+
   it("shows saving and keeps edits made during the request dirty", async () => {
     const pending = deferred<BaseMutationResponse>();
     updateMock.mockReturnValue(pending.promise);

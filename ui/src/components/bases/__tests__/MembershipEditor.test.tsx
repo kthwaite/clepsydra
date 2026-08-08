@@ -268,23 +268,31 @@ describe("MembershipEditor", () => {
     expect(latest(onChange)).toEqual({
       field: "tags",
       op: "in",
+      value: [],
+    });
+    await user.keyboard("{Enter}");
+    expect(latest(onChange)).toEqual({
+      field: "tags",
+      op: "in",
       value: ["alpha", "beta"],
     });
   });
 
   it("keeps unsupported wire fields, operators, and option values visible", () => {
     const view = renderEditor({
-      field: "legacy_relation",
+      field: "prop.legacy_relation",
       op: "links_to",
       value: "Old Page",
     });
 
     expect(screen.getByLabelText("Field for condition 1")).toHaveValue(
-      "legacy_relation",
+      "prop.legacy_relation",
     );
     expect(
-      screen.getByRole("option", { name: "legacy_relation (undeclared)" }),
-    ).toHaveValue("legacy_relation");
+      screen.getByRole("option", {
+        name: "prop.legacy_relation (undeclared)",
+      }),
+    ).toHaveValue("prop.legacy_relation");
     expect(screen.getByLabelText("Operator for condition 1")).toHaveValue(
       "links_to",
     );
@@ -293,13 +301,35 @@ describe("MembershipEditor", () => {
     ).toHaveValue("links_to");
 
     view.unmount();
-    renderEditor({ field: "status", op: "eq", value: "retired" });
+    const removedOption = renderEditor({
+      field: "status",
+      op: "eq",
+      value: "retired",
+    });
     expect(screen.getByLabelText("Value for condition 1")).toHaveValue(
       "retired",
     );
     expect(
       screen.getByRole("option", { name: "retired (not declared)" }),
     ).toHaveValue("retired");
+
+    removedOption.unmount();
+    renderEditor({
+      field: "topics",
+      op: "in",
+      value: ["craft", "lost", "other"],
+    });
+    expect(screen.getByLabelText("Value for condition 1")).toHaveValue([
+      "craft",
+      "lost",
+      "other",
+    ]);
+    expect(
+      screen.getByRole("option", { name: "lost (not declared)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "other (not declared)" }),
+    ).toBeInTheDocument();
   });
 
   it("registers exact recursive diagnostic focus paths", () => {

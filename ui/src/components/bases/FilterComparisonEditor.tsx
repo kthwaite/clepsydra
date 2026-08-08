@@ -161,6 +161,21 @@ export function FilterComparisonEditor({
           ? "datetime-local"
           : "text";
 
+  function commitFreeform(rawValue: string) {
+    const nextValue =
+      activeOperator === "in"
+        ? rawValue
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : capability.type === "number"
+          ? rawValue === ""
+            ? ""
+            : Number(rawValue)
+          : rawValue;
+    onChange(comparison(filterValue.field, activeOperator, nextValue));
+  }
+
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-3">
       <label className="flex min-w-0 flex-col">
@@ -339,25 +354,25 @@ export function FilterComparisonEditor({
                   capability.type === "relation" ? relationListId : undefined
                 }
                 value={displayValueText}
-                onBlur={() => setFreeformDraft(undefined)}
+                onBlur={(event) => {
+                  if (activeOperator === "in" && freeformDraft !== undefined) {
+                    commitFreeform(event.currentTarget.value);
+                  }
+                  setFreeformDraft(undefined);
+                }}
                 onChange={(event) => {
                   setFreeformDraft(event.target.value);
-                  onChange(
-                    comparison(
-                      filterValue.field,
-                      activeOperator,
-                      activeOperator === "in"
-                        ? event.target.value
-                            .split(",")
-                            .map((item) => item.trim())
-                            .filter(Boolean)
-                        : capability.type === "number"
-                          ? event.target.value === ""
-                            ? ""
-                            : event.target.valueAsNumber
-                          : event.target.value,
-                    ),
-                  );
+                  if (activeOperator !== "in") {
+                    commitFreeform(event.target.value);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (activeOperator !== "in" || event.key !== "Enter") {
+                    return;
+                  }
+                  event.preventDefault();
+                  commitFreeform(event.currentTarget.value);
+                  setFreeformDraft(undefined);
                 }}
                 className={controlClass}
               />
