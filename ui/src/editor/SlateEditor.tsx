@@ -111,6 +111,10 @@ interface ComboboxTrigger {
   query: string;
 }
 
+interface WikilinkCreateRequest {
+  trigger: ComboboxTrigger;
+}
+
 export function SlateEditor({
   initialValue,
   onChange,
@@ -146,8 +150,9 @@ export function SlateEditor({
   const [wikilinkTrigger, setWikilinkTrigger] =
     useState<ComboboxTrigger | null>(null);
   const wikilinkTriggerRef = useRef<ComboboxTrigger | null>(null);
-  const wikilinkCreatePendingRef = useRef(false);
-  const [wikilinkCreatePending, setWikilinkCreatePending] = useState(false);
+  const wikilinkCreateRequestRef = useRef<WikilinkCreateRequest | null>(null);
+  const [wikilinkCreateRequest, setWikilinkCreateRequest] =
+    useState<WikilinkCreateRequest | null>(null);
   const [wikilinkCreateError, setWikilinkCreateError] = useState<string | null>(
     null,
   );
@@ -165,8 +170,9 @@ export function SlateEditor({
         : next === null ||
           previous.query !== next.query ||
           !Point.equals(previous.anchor, next.anchor);
-    wikilinkTriggerRef.current = next;
-    setWikilinkTrigger(next);
+    const activeTrigger = triggerChanged ? next : previous;
+    wikilinkTriggerRef.current = activeTrigger;
+    setWikilinkTrigger(activeTrigger);
     if (triggerChanged) setWikilinkCreateError(null);
   };
 
@@ -267,23 +273,35 @@ export function SlateEditor({
   }) => insertWikilinkTarget(page.title ?? page.canonical_name);
 
   const createWikilinkTarget = async (title: string) => {
-    if (wikilinkCreatePendingRef.current) return;
     const trigger = wikilinkTriggerRef.current;
-    if (!trigger) return;
-    wikilinkCreatePendingRef.current = true;
-    setWikilinkCreatePending(true);
+    if (!trigger || wikilinkCreateRequestRef.current?.trigger === trigger) {
+      return;
+    }
+    const request = { trigger };
+    wikilinkCreateRequestRef.current = request;
+    setWikilinkCreateRequest(request);
     setWikilinkCreateError(null);
     try {
       const result = await resolveOrCreate(title);
-      if (wikilinkTriggerRef.current !== trigger) return;
+      if (
+        wikilinkCreateRequestRef.current !== request ||
+        wikilinkTriggerRef.current !== trigger
+      ) {
+        return;
+      }
       insertWikilinkTarget(result.title, trigger);
     } catch {
-      if (wikilinkTriggerRef.current === trigger) {
+      if (
+        wikilinkCreateRequestRef.current === request &&
+        wikilinkTriggerRef.current === trigger
+      ) {
         setWikilinkCreateError("Creation failed — press Enter to retry");
       }
     } finally {
-      wikilinkCreatePendingRef.current = false;
-      setWikilinkCreatePending(false);
+      if (wikilinkCreateRequestRef.current === request) {
+        wikilinkCreateRequestRef.current = null;
+        setWikilinkCreateRequest(null);
+      }
     }
   };
 
@@ -546,7 +564,7 @@ export function SlateEditor({
           onSelect={insertWikilink}
           onCreate={(title) => void createWikilinkTarget(title)}
           onClose={() => updateWikilinkTrigger(null)}
-          isCreating={wikilinkCreatePending}
+          isCreating={wikilinkCreateRequest?.trigger === wikilinkTrigger}
           createError={wikilinkCreateError}
         />
       )}

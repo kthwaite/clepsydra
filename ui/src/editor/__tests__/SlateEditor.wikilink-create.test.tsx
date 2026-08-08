@@ -202,6 +202,47 @@ it("ignores repeat activation while creation is pending", async () => {
   });
 });
 
+it("creates for a new trigger while an older request is pending", async () => {
+  const first = deferred<ResolvedWikilinkTarget>();
+  const second = deferred<ResolvedWikilinkTarget>();
+  resolveOrCreateMock.mockImplementation((title: string) =>
+    title === "First" ? first.promise : second.promise,
+  );
+  const { user, editable, latestChanges, replaceText, typeText } =
+    renderEditor();
+  await user.click(editable);
+  await typeText("[[First");
+  await user.keyboard("{Enter}");
+  expect(resolveOrCreateMock).toHaveBeenNthCalledWith(1, "First");
+
+  await act(async () => replaceText("[[Second"));
+  expect(screen.getByText('Create “Second”')).toBeInTheDocument();
+  await user.keyboard("{Enter}");
+  expect(resolveOrCreateMock).toHaveBeenNthCalledWith(2, "Second");
+
+  await act(async () => {
+    first.resolve({ path: "notes/first.md", title: "First" });
+    await first.promise;
+  });
+  expect(findWikilinks(latestChanges())).toEqual([]);
+  expect(screen.getByText("Creating…")).toBeInTheDocument();
+  expect(
+    screen.queryByText("Creation failed — press Enter to retry"),
+  ).toBeNull();
+  await user.keyboard("{Enter}");
+  expect(resolveOrCreateMock).toHaveBeenCalledTimes(2);
+
+  await act(async () => {
+    second.resolve({ path: "notes/second.md", title: "Second" });
+    await second.promise;
+  });
+  expect(findWikilinks(latestChanges())).toEqual([
+    { type: "wikilink", target: "Second" },
+  ]);
+  expect(editable).toHaveFocus();
+  expect(openTabMock).not.toHaveBeenCalled();
+});
+
 it("does not insert after the initiating trigger closes", async () => {
   const pending = deferred<ResolvedWikilinkTarget>();
   resolveOrCreateMock.mockReturnValue(pending.promise);
