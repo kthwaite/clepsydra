@@ -202,6 +202,48 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("revision-3")).toBeInTheDocument();
   });
 
+  it("keeps both submitted revisions obsolete across consecutive saves", async () => {
+    updateMock
+      .mockResolvedValueOnce(
+        mutationResponse({ name: "First save", revision: "revision-2" }),
+      )
+      .mockResolvedValueOnce(
+        mutationResponse({ name: "Second save", revision: "revision-3" }),
+      );
+    const view = renderWorkspace();
+    const user = await renameBase("First save");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("revision-2")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Second save");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateMock).toHaveBeenLastCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-2",
+        definition: expect.objectContaining({ name: "Second save" }),
+      },
+    });
+    expect(await screen.findByText("revision-3")).toBeInTheDocument();
+
+    baseState.data = { ...detail };
+    view.rerender(<BaseDefinitionWorkspace slug="reading-log" />);
+    expect(screen.getByLabelText("Name")).toHaveValue("Second save");
+    expect(screen.getByText("revision-3")).toBeInTheDocument();
+
+    baseState.data = {
+      ...detail,
+      name: "Genuine external update",
+      revision: "revision-4",
+    };
+    view.rerender(<BaseDefinitionWorkspace slug="reading-log" />);
+    expect(screen.getByLabelText("Name")).toHaveValue(
+      "Genuine external update",
+    );
+    expect(screen.getByText("revision-4")).toBeInTheDocument();
+  });
+
   it("preserves a dirty draft on revision conflict until deliberate reload", async () => {
     updateMock.mockRejectedValue({
       status: 409,

@@ -149,15 +149,15 @@ export function BaseDefinitionWorkspace({
   const editGeneration = useRef(0);
   const savedGeneration = useRef(0);
   const hydrated = useRef(false);
-  const staleQueryRevision = useRef<string | undefined>(undefined);
+  const obsoleteQueryRevisions = useRef(new Set<string>());
   const focusTargets = useRef(new Map<string, HTMLElement>());
   const isDirty = editGeneration.current > savedGeneration.current;
 
   useEffect(() => {
     const detail = baseQuery.data;
     if (!detail || conflictMessage || isDirty) return;
-    if (detail.revision === staleQueryRevision.current) return;
-    staleQueryRevision.current = undefined;
+    if (obsoleteQueryRevisions.current.has(detail.revision)) return;
+    obsoleteQueryRevisions.current.clear();
     const serverDraft = fromWire(detail);
     setDraftState(serverDraft);
     setBaseline(serverDraft);
@@ -238,7 +238,7 @@ export function BaseDefinitionWorkspace({
       setRevision(response.revision);
       setDiagnostics(response.diagnostics);
       savedGeneration.current = submittedGeneration;
-      staleQueryRevision.current = submittedRevision;
+      obsoleteQueryRevisions.current.add(submittedRevision);
       if (editGeneration.current === submittedGeneration)
         setDraftState(serverDraft);
     } catch (error) {
@@ -274,7 +274,7 @@ export function BaseDefinitionWorkspace({
     setDiagnostics(result.data.diagnostics);
     editGeneration.current = 0;
     savedGeneration.current = 0;
-    staleQueryRevision.current = previousRevision;
+    obsoleteQueryRevisions.current.add(previousRevision);
     setConflictMessage(undefined);
     setSaveError(undefined);
     setReloadError(undefined);
