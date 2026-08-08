@@ -1,9 +1,15 @@
 //! Revision-aware persistence for canonical base definition documents.
+//!
+//! Clepsydra writers are serialized process-wide and revision-check again
+//! immediately before publication or removal. An external editor can still
+//! race in the narrow interval between that final check and the filesystem
+//! operation; the platform helpers do not provide compare-and-swap semantics.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::{Mutex, MutexGuard};
 
 use thiserror::Error;
 use toml_edit::{Array, ArrayOfTables, Decor, DocumentMut, InlineTable, Item, Table, Value};
@@ -15,6 +21,7 @@ use super::base::{
 };
 
 const MANAGED_KEYS: &[&str] = &["name", "description", "filter", "properties", "views"];
+static BASE_DOCUMENT_WRITER: Mutex<()> = Mutex::new(());
 
 #[derive(Debug)]
 pub struct StoredBase {
@@ -37,16 +44,15 @@ pub enum BaseDocumentError {
     InvalidDefinition(Vec<BaseDiagnostic>),
     #[error("base document cannot be updated safely: {0}")]
     UnsupportedDocument(String),
+    #[error("atomic publication completed but was not durable: {0}")]
+    PublishedButNotDurable(#[source] io::Error),
     #[error(transparent)]
     Io(#[from] io::Error),
 }
 
-pub fn create(
-    root: &Path,
-    slug: &str,
-    file: &BaseFile,
-) -> Result<StoredBase, BaseDocumentError> {
+pub fn create(root: &Path, slug: &str, file: &BaseFile) -> Result<StoredBase, BaseDocumentError> {
     let path = base_path(root, slug)?;
+    let _writer = lock_writer();
     reject_blocking_diagnostics(validate_definition(slug, file.clone()))?;
     let content = serialize_managed(file)?;
     fs::create_dir_all(
@@ -63,29 +69,42 @@ pub fn update(
     expected_revision: &str,
     file: &BaseFile,
 ) -> Result<StoredBase, BaseDocumentError> {
+    update_with_before_publication(root, slug, expected_revision, file, || {})
+}
+
+fn update_with_before_publication(
+    root: &Path,
+    slug: &str,
+    expected_revision: &str,
+    file: &BaseFile,
+    before_publication: impl FnOnce(),
+) -> Result<StoredBase, BaseDocumentError> {
     let path = base_path(root, slug)?;
-    let raw = fs::read_to_string(&path).map_err(|error| map_read_error(slug, error))?;
-    let current_revision = revision(&raw);
-    if current_revision != expected_revision {
-        return Err(BaseDocumentError::Conflict { current_revision });
-    }
+    let _writer = lock_writer();
+    let raw = read_matching_revision(&path, slug, expected_revision)?;
     reject_blocking_diagnostics(validate_definition(slug, file.clone()))?;
     let content = merge_document(&raw, file)?;
+    before_publication();
+    read_matching_revision(&path, slug, expected_revision)?;
     atomic_replace(&path, content.as_bytes()).map_err(map_publication_error)?;
     load_stored(&path, slug)
 }
 
-pub fn delete(
+pub fn delete(root: &Path, slug: &str, expected_revision: &str) -> Result<(), BaseDocumentError> {
+    delete_with_before_removal(root, slug, expected_revision, || {})
+}
+
+fn delete_with_before_removal(
     root: &Path,
     slug: &str,
     expected_revision: &str,
+    before_removal: impl FnOnce(),
 ) -> Result<(), BaseDocumentError> {
     let path = base_path(root, slug)?;
-    let raw = fs::read_to_string(&path).map_err(|error| map_read_error(slug, error))?;
-    let current_revision = revision(&raw);
-    if current_revision != expected_revision {
-        return Err(BaseDocumentError::Conflict { current_revision });
-    }
+    let _writer = lock_writer();
+    read_matching_revision(&path, slug, expected_revision)?;
+    before_removal();
+    read_matching_revision(&path, slug, expected_revision)?;
     fs::remove_file(path).map_err(|error| map_read_error(slug, error))
 }
 
@@ -117,6 +136,25 @@ fn reject_blocking_diagnostics(
     } else {
         Ok(result)
     }
+}
+
+fn lock_writer() -> MutexGuard<'static, ()> {
+    BASE_DOCUMENT_WRITER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn read_matching_revision(
+    path: &Path,
+    slug: &str,
+    expected_revision: &str,
+) -> Result<String, BaseDocumentError> {
+    let raw = fs::read_to_string(path).map_err(|error| map_read_error(slug, error))?;
+    let current_revision = revision(&raw);
+    if current_revision != expected_revision {
+        return Err(BaseDocumentError::Conflict { current_revision });
+    }
+    Ok(raw)
 }
 
 fn serialize_managed(file: &BaseFile) -> Result<String, BaseDocumentError> {
@@ -152,15 +190,26 @@ fn map_read_error(slug: &str, error: io::Error) -> BaseDocumentError {
 }
 
 fn map_create_error(slug: &str, error: AtomicPublicationError) -> BaseDocumentError {
-    if error.kind() == io::ErrorKind::AlreadyExists {
-        BaseDocumentError::AlreadyExists(slug.to_owned())
-    } else {
-        map_publication_error(error)
+    match error {
+        AtomicPublicationError::NotPublished(error)
+            if error.kind() == io::ErrorKind::AlreadyExists =>
+        {
+            BaseDocumentError::AlreadyExists(slug.to_owned())
+        }
+        AtomicPublicationError::NotPublished(error) => BaseDocumentError::Io(error),
+        AtomicPublicationError::PublishedButNotDurable(error) => {
+            BaseDocumentError::PublishedButNotDurable(error)
+        }
     }
 }
 
 fn map_publication_error(error: AtomicPublicationError) -> BaseDocumentError {
-    BaseDocumentError::Io(error.into_inner())
+    match error {
+        AtomicPublicationError::NotPublished(error) => BaseDocumentError::Io(error),
+        AtomicPublicationError::PublishedButNotDurable(error) => {
+            BaseDocumentError::PublishedButNotDurable(error)
+        }
+    }
 }
 
 fn merge_document(raw: &str, desired_file: &BaseFile) -> Result<String, BaseDocumentError> {
@@ -210,7 +259,10 @@ fn merge_table_key(
         (None, None) => Ok(()),
         (None, Some(desired)) => {
             if raw.contains_key(key) {
-                return Err(unsupported(path, "an unsupported value collides with a managed key"));
+                return Err(unsupported(
+                    path,
+                    "an unsupported value collides with a managed key",
+                ));
             }
             raw.insert(key, desired.clone());
             Ok(())
@@ -265,11 +317,9 @@ fn merge_item(
         (Item::Table(raw), Item::Table(current), Item::Table(desired)) => {
             merge_table(raw, current, desired, path)
         }
-        (
-            Item::ArrayOfTables(raw),
-            Item::ArrayOfTables(current),
-            Item::ArrayOfTables(desired),
-        ) => merge_array_of_tables(raw, current, desired, path),
+        (Item::ArrayOfTables(raw), Item::ArrayOfTables(current), Item::ArrayOfTables(desired)) => {
+            merge_array_of_tables(raw, current, desired, path)
+        }
         _ => Err(unsupported(
             path,
             "the current syntax does not match the managed document shape",
@@ -361,11 +411,9 @@ fn merge_raw_value(
 ) -> Result<(), BaseDocumentError> {
     match (raw, current, desired) {
         (Item::Value(raw), current, desired) => merge_value(raw, current, desired, path),
-        (
-            Item::Table(raw),
-            Value::InlineTable(current),
-            Value::InlineTable(desired),
-        ) => merge_table_inline(raw, current, desired, path),
+        (Item::Table(raw), Value::InlineTable(current), Value::InlineTable(desired)) => {
+            merge_table_inline(raw, current, desired, path)
+        }
         (Item::ArrayOfTables(raw), Value::Array(current), Value::Array(desired)) => {
             merge_array_tables_inline(raw, current, desired, path)
         }
@@ -443,7 +491,10 @@ fn ensure_raw_value_removable(
         (Item::ArrayOfTables(raw), Value::Array(current)) => {
             ensure_array_tables_inline_removable(raw, current, path)
         }
-        _ => Err(unsupported(path, "removal would discard an unsupported shape")),
+        _ => Err(unsupported(
+            path,
+            "removal would discard an unsupported shape",
+        )),
     }
 }
 
@@ -482,7 +533,10 @@ fn ensure_array_tables_inline_removable(
     path: &str,
 ) -> Result<(), BaseDocumentError> {
     if raw.len() != current.len() {
-        return Err(unsupported(path, "removal would discard unsupported tables"));
+        return Err(unsupported(
+            path,
+            "removal would discard unsupported tables",
+        ));
     }
     for index in 0..current.len() {
         let current_table = current
@@ -505,15 +559,15 @@ fn merge_value(
     path: &str,
 ) -> Result<(), BaseDocumentError> {
     match (raw, current, desired) {
-        (
-            Value::InlineTable(raw),
-            Value::InlineTable(current),
-            Value::InlineTable(desired),
-        ) => merge_inline_table(raw, current, desired, path),
+        (Value::InlineTable(raw), Value::InlineTable(current), Value::InlineTable(desired)) => {
+            merge_inline_table(raw, current, desired, path)
+        }
         (Value::Array(raw), Value::Array(current), Value::Array(desired)) => {
             merge_array(raw, current, desired, path)
         }
-        (raw, current, desired) if same_value_shape(raw, current) && same_value_shape(current, desired) => {
+        (raw, current, desired)
+            if same_value_shape(raw, current) && same_value_shape(current, desired) =>
+        {
             let decor = raw.decor().clone();
             let mut replacement = desired.clone();
             *replacement.decor_mut() = decor;
@@ -672,7 +726,10 @@ fn ensure_removable(raw: &Item, current: &Item, path: &str) -> Result<(), BaseDo
         (Item::Table(raw), Item::Table(current)) => ensure_table_removable(raw, current, path),
         (Item::ArrayOfTables(raw), Item::ArrayOfTables(current)) => {
             if raw.len() != current.len() {
-                return Err(unsupported(path, "removal would discard unsupported tables"));
+                return Err(unsupported(
+                    path,
+                    "removal would discard unsupported tables",
+                ));
             }
             for index in 0..current.len() {
                 ensure_table_removable(
@@ -683,7 +740,10 @@ fn ensure_removable(raw: &Item, current: &Item, path: &str) -> Result<(), BaseDo
             }
             Ok(())
         }
-        _ => Err(unsupported(path, "removal would discard an unsupported shape")),
+        _ => Err(unsupported(
+            path,
+            "removal would discard an unsupported shape",
+        )),
     }
 }
 
@@ -747,7 +807,10 @@ fn ensure_value_removable(
             Ok(())
         }
         (raw, current) if same_value_shape(raw, current) => Ok(()),
-        _ => Err(unsupported(path, "removal would discard an unsupported value shape")),
+        _ => Err(unsupported(
+            path,
+            "removal would discard an unsupported value shape",
+        )),
     }
 }
 
@@ -802,6 +865,8 @@ mod tests {
 
     use super::*;
     use crate::vault::base::{BaseFile, PropertyDefinition, PropertyType};
+    use std::sync::mpsc;
+    use std::thread;
 
     const MINIMAL_BASE: &str = "name = \"Reading\"\nproperties = {}\n";
 
@@ -917,19 +982,125 @@ mod tests {
     }
 
     #[test]
+    fn update_rechecks_revision_immediately_before_publication() {
+        let fixture = fixture_base(MINIMAL_BASE);
+        let before = fs::read_to_string(fixture.path()).unwrap();
+        let external = "name = \"Externally edited\"\nproperties = {}\n";
+        let mut next = minimal_file();
+        next.description = Some("Books".into());
+
+        let error = update_with_before_publication(
+            fixture.root(),
+            "reading",
+            &revision(&before),
+            &next,
+            || fs::write(fixture.path(), external).unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            BaseDocumentError::Conflict { current_revision }
+                if current_revision == revision(external)
+        ));
+        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), external);
+    }
+
+    #[test]
+    fn clepsydra_updates_serialize_and_the_second_writer_conflicts() {
+        let fixture = fixture_base(MINIMAL_BASE);
+        let expected_revision = revision(MINIMAL_BASE);
+        let mut first = minimal_file();
+        first.description = Some("First".into());
+        let mut second = minimal_file();
+        second.description = Some("Second".into());
+        let first_root = fixture.root().to_path_buf();
+        let second_root = fixture.root().to_path_buf();
+        let first_revision = expected_revision.clone();
+        let second_revision = expected_revision.clone();
+        let (first_ready_tx, first_ready_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let (second_started_tx, second_started_rx) = mpsc::channel();
+
+        let first_writer = thread::spawn(move || {
+            update_with_before_publication(&first_root, "reading", &first_revision, &first, || {
+                first_ready_tx.send(()).unwrap();
+                release_first_rx.recv().unwrap();
+            })
+        });
+        first_ready_rx.recv().unwrap();
+        let second_writer = thread::spawn(move || {
+            second_started_tx.send(()).unwrap();
+            update(&second_root, "reading", &second_revision, &second)
+        });
+        second_started_rx.recv().unwrap();
+        release_first_tx.send(()).unwrap();
+
+        let first_stored = first_writer.join().unwrap().unwrap();
+        let second_error = second_writer.join().unwrap().unwrap_err();
+
+        assert!(matches!(
+            second_error,
+            BaseDocumentError::Conflict { current_revision }
+                if current_revision == first_stored.revision
+        ));
+        assert_eq!(
+            load_for_test(fixture.root(), "reading")
+                .definition
+                .file
+                .description
+                .as_deref(),
+            Some("First")
+        );
+    }
+
+    #[test]
+    fn publication_errors_preserve_the_atomic_failure_phase() {
+        let already_exists = map_create_error(
+            "reading",
+            AtomicPublicationError::NotPublished(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "destination exists",
+            )),
+        );
+        assert!(matches!(
+            already_exists,
+            BaseDocumentError::AlreadyExists(slug) if slug == "reading"
+        ));
+
+        let create_not_durable = map_create_error(
+            "reading",
+            AtomicPublicationError::PublishedButNotDurable(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "directory sync failed",
+            )),
+        );
+        assert!(matches!(
+            create_not_durable,
+            BaseDocumentError::PublishedButNotDurable(error)
+                if error.kind() == io::ErrorKind::AlreadyExists
+        ));
+
+        let update_not_durable =
+            map_publication_error(AtomicPublicationError::PublishedButNotDurable(
+                io::Error::new(io::ErrorKind::Other, "directory sync failed"),
+            ));
+        assert!(matches!(
+            update_not_durable,
+            BaseDocumentError::PublishedButNotDurable(error)
+                if error.kind() == io::ErrorKind::Other
+        ));
+    }
+
+    #[test]
     fn invalid_update_is_rejected_before_atomic_publication() {
         let fixture = fixture_base(MINIMAL_BASE);
         let before = fs::read(fixture.path()).unwrap();
         let mut invalid = minimal_file();
         invalid.name.clear();
 
-        let error = update(
-            fixture.root(),
-            "reading",
-            &revision(MINIMAL_BASE),
-            &invalid,
-        )
-        .unwrap_err();
+        let error =
+            update(fixture.root(), "reading", &revision(MINIMAL_BASE), &invalid).unwrap_err();
 
         assert!(matches!(error, BaseDocumentError::InvalidDefinition(_)));
         assert_eq!(fs::read(fixture.path()).unwrap(), before);
@@ -1051,6 +1222,25 @@ mod tests {
 
         assert!(matches!(error, BaseDocumentError::Conflict { .. }));
         assert_eq!(fs::read(fixture.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn delete_rechecks_revision_immediately_before_removal() {
+        let fixture = fixture_base(MINIMAL_BASE);
+        let external = "name = \"Externally edited\"\nproperties = {}\n";
+
+        let error =
+            delete_with_before_removal(fixture.root(), "reading", &revision(MINIMAL_BASE), || {
+                fs::write(fixture.path(), external).unwrap()
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            BaseDocumentError::Conflict { current_revision }
+                if current_revision == revision(external)
+        ));
+        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), external);
     }
 
     #[test]
