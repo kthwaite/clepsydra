@@ -178,6 +178,30 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
 
+  it("accepts a newer query revision after ignoring the known pre-save revision", async () => {
+    updateMock.mockResolvedValue(
+      mutationResponse({ name: "My Reading", revision: "revision-2" }),
+    );
+    const view = renderWorkspace();
+    const user = await renameBase("My Reading");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("revision-2")).toBeInTheDocument();
+
+    baseState.data = detail;
+    view.rerender(<BaseDefinitionWorkspace slug="reading-log" />);
+    expect(screen.getByLabelText("Name")).toHaveValue("My Reading");
+    expect(screen.getByText("revision-2")).toBeInTheDocument();
+
+    baseState.data = {
+      ...detail,
+      name: "Newer external name",
+      revision: "revision-3",
+    };
+    view.rerender(<BaseDefinitionWorkspace slug="reading-log" />);
+    expect(screen.getByLabelText("Name")).toHaveValue("Newer external name");
+    expect(screen.getByText("revision-3")).toBeInTheDocument();
+  });
+
   it("preserves a dirty draft on revision conflict until deliberate reload", async () => {
     updateMock.mockRejectedValue({
       status: 409,
@@ -196,9 +220,16 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("My Reading");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(baseState.refetch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    expect(
+      screen.getByText("View editing is added in Task 10."),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Review my draft" }));
     expect(screen.getByLabelText("Name")).toHaveFocus();
     expect(baseState.refetch).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText("View editing is added in Task 10."),
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reload from file" }));
     expect(screen.getByRole("dialog")).toHaveTextContent(/discard your draft/i);
     await user.click(
@@ -209,8 +240,67 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
+  it("keeps conflict recovery intact when reload fails with retained stale data", async () => {
+    baseState.data = {
+      ...detail,
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "warning",
+          path: "description",
+          message: "Original warning",
+        },
+      ],
+    };
+    updateMock.mockRejectedValue({
+      status: 409,
+      error: "base definition changed since expected_revision",
+    });
+    baseState.refetch.mockResolvedValue({
+      data: baseState.data,
+      isError: true,
+      error: { status: 500, error: "vault unavailable" },
+    });
+    renderWorkspace();
+    const user = await renameBase("My conflicted draft");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.type(screen.getByLabelText("Description"), " plus local edit");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed outside clepsydra/i,
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Review my draft" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reload from file" }));
+    await user.click(
+      screen.getByRole("button", { name: "Reload and discard" }),
+    );
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      /vault unavailable/i,
+    );
+    expect(screen.getByLabelText("Name")).toHaveValue("My conflicted draft");
+    expect(screen.getByText("revision-1")).toBeInTheDocument();
+    expect(screen.getByText(/Original warning/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Keep my draft" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed outside clepsydra/i,
+    );
+    expect(
+      screen.getByRole("button", { name: "Reload from file" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Reading Log");
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
   it("guards browser and internal navigation while dirty", async () => {
     const view = renderWorkspace();
+    const user = userEvent.setup();
     await renameBase("Local draft");
     const options = useBlockerMock.mock.calls.at(-1)?.[0] as {
       shouldBlockFn: () => boolean;
@@ -225,13 +315,11 @@ describe("BaseDefinitionWorkspace", () => {
     blockerState = { status: "blocked", proceed, reset };
     view.rerender(<BaseDefinitionWorkspace slug="reading-log" />);
     expect(screen.getByRole("dialog")).toHaveTextContent(/unsaved changes/i);
-    await userEvent.click(screen.getByRole("button", { name: "Stay" }));
+    await user.click(screen.getByRole("button", { name: "Stay" }));
     expect(reset).toHaveBeenCalledTimes(1);
     blockerState = { status: "blocked", proceed, reset };
     view.rerender(<BaseDefinitionWorkspace slug="reading-log" />);
-    await userEvent.click(
-      screen.getByRole("button", { name: "Discard and leave" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Discard and leave" }));
     expect(proceed).toHaveBeenCalledTimes(1);
   });
 

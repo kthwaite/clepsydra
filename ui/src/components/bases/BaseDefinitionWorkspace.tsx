@@ -138,8 +138,9 @@ export function BaseDefinitionWorkspace({
   const [selectedSection, setSelectedSection] = useState<SectionId>("general");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
-  const [conflict, setConflict] = useState(false);
+  const [conflictMessage, setConflictMessage] = useState<string>();
   const [reloadConfirmation, setReloadConfirmation] = useState(false);
+  const [reloadError, setReloadError] = useState<string>();
   const [focusRequest, setFocusRequest] = useState<{
     path: string;
     sequence: number;
@@ -148,20 +149,15 @@ export function BaseDefinitionWorkspace({
   const editGeneration = useRef(0);
   const savedGeneration = useRef(0);
   const hydrated = useRef(false);
-  const expectedQueryRevision = useRef<string | undefined>(undefined);
+  const staleQueryRevision = useRef<string | undefined>(undefined);
   const focusTargets = useRef(new Map<string, HTMLElement>());
-  const nameFocusRef = useRef<HTMLElement | undefined>(undefined);
   const isDirty = editGeneration.current > savedGeneration.current;
 
   useEffect(() => {
     const detail = baseQuery.data;
-    if (!detail || conflict || isDirty) return;
-    if (
-      expectedQueryRevision.current &&
-      detail.revision !== expectedQueryRevision.current
-    )
-      return;
-    expectedQueryRevision.current = undefined;
+    if (!detail || conflictMessage || isDirty) return;
+    if (detail.revision === staleQueryRevision.current) return;
+    staleQueryRevision.current = undefined;
     const serverDraft = fromWire(detail);
     setDraftState(serverDraft);
     setBaseline(serverDraft);
@@ -171,13 +167,12 @@ export function BaseDefinitionWorkspace({
     savedGeneration.current = 0;
     hydrated.current = true;
     setSaveError(undefined);
-  }, [baseQuery.data, conflict, isDirty]);
+  }, [baseQuery.data, conflictMessage, isDirty]);
 
   const registerFocusTarget = useCallback<RegisterFocusTarget>(
     (path, element) => {
       if (element) {
         focusTargets.current.set(path, element);
-        if (path === "name") nameFocusRef.current = element;
       } else {
         focusTargets.current.delete(path);
       }
@@ -212,7 +207,8 @@ export function BaseDefinitionWorkspace({
     setDraftState(structuredClone(baseline));
     editGeneration.current = savedGeneration.current;
     setSaveError(undefined);
-    setConflict(false);
+    setConflictMessage(undefined);
+    setReloadError(undefined);
     setDiagnostics(baseQuery.data?.diagnostics ?? diagnostics);
   }, [baseQuery.data?.diagnostics, baseline, diagnostics]);
 
@@ -223,7 +219,7 @@ export function BaseDefinitionWorkspace({
   });
 
   async function save() {
-    if (!draft || !isDirty || saving || conflict) return;
+    if (!draft || !isDirty || saving || conflictMessage) return;
     const submittedGeneration = editGeneration.current;
     const submittedRevision = revision;
     const submittedDraft = structuredClone(draft);
@@ -242,15 +238,14 @@ export function BaseDefinitionWorkspace({
       setRevision(response.revision);
       setDiagnostics(response.diagnostics);
       savedGeneration.current = submittedGeneration;
-      expectedQueryRevision.current = response.revision;
+      staleQueryRevision.current = submittedRevision;
       if (editGeneration.current === submittedGeneration)
         setDraftState(serverDraft);
     } catch (error) {
       const nextDiagnostics = diagnosticsFromError(error);
       if (nextDiagnostics.length > 0) setDiagnostics(nextDiagnostics);
       if (isApiConflict(error)) {
-        setConflict(true);
-        setSaveError(
+        setConflictMessage(
           "This base changed outside Clepsydra. Review your draft or deliberately reload the file.",
         );
       } else {
@@ -264,12 +259,12 @@ export function BaseDefinitionWorkspace({
   }
 
   async function reloadFromFile() {
+    const previousRevision = revision;
     const result = await baseQuery.refetch();
-    if (!result.data) {
-      setSaveError(
+    if (result.isError || result.error || !result.data) {
+      setReloadError(
         formatApiError(result.error, "Base definition could not be reloaded."),
       );
-      setReloadConfirmation(false);
       return;
     }
     const serverDraft = fromWire(result.data);
@@ -279,9 +274,10 @@ export function BaseDefinitionWorkspace({
     setDiagnostics(result.data.diagnostics);
     editGeneration.current = 0;
     savedGeneration.current = 0;
-    expectedQueryRevision.current = result.data.revision;
-    setConflict(false);
+    staleQueryRevision.current = previousRevision;
+    setConflictMessage(undefined);
     setSaveError(undefined);
+    setReloadError(undefined);
     setReloadConfirmation(false);
   }
 
@@ -298,7 +294,7 @@ export function BaseDefinitionWorkspace({
 
   const status: DefinitionSaveStatus = saving
     ? "saving"
-    : saveError && !conflict
+    : saveError
       ? "error"
       : isDirty
         ? "unsaved"
@@ -318,30 +314,33 @@ export function BaseDefinitionWorkspace({
         slug={slug}
         revision={revision}
         status={status}
-        saveError={saveError}
-        canSave={isDirty && !saving && !conflict}
+        saveError={saveError ?? conflictMessage}
+        canSave={isDirty && !saving && !conflictMessage}
         canDiscard={isDirty && !saving}
         onSave={() => void save()}
         onDiscard={discard}
       />
 
-      {saveError && (
+      {(saveError || conflictMessage) && (
         <div
           role="alert"
           className="mt-4 border border-destructive p-3 text-sm text-destructive"
         >
-          <p>{saveError}</p>
-          {conflict && (
+          <p>{conflictMessage ?? saveError}</p>
+          {conflictMessage && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 variant="secondary"
-                onPress={() => nameFocusRef.current?.focus()}
+                onPress={() => focusDiagnostic("name")}
               >
                 Review my draft
               </Button>
               <Button
                 variant="danger"
-                onPress={() => setReloadConfirmation(true)}
+                onPress={() => {
+                  setReloadError(undefined);
+                  setReloadConfirmation(true);
+                }}
               >
                 Reload from file
               </Button>
@@ -437,14 +436,20 @@ export function BaseDefinitionWorkspace({
 
       <Dialog
         isOpen={reloadConfirmation}
-        onOpenChange={setReloadConfirmation}
+        onOpenChange={(open) => {
+          setReloadConfirmation(open);
+          if (!open) setReloadError(undefined);
+        }}
         title="Reload base file?"
         description="This will discard your draft and load the current file. No changes are merged automatically."
         footer={
           <>
             <Button
               variant="secondary"
-              onPress={() => setReloadConfirmation(false)}
+              onPress={() => {
+                setReloadConfirmation(false);
+                setReloadError(undefined);
+              }}
             >
               Keep my draft
             </Button>
@@ -457,6 +462,11 @@ export function BaseDefinitionWorkspace({
         <p className="text-sm text-muted-foreground">
           Review your draft first if you need to reapply any changes.
         </p>
+        {reloadError && (
+          <p role="alert" className="mt-3 text-sm text-destructive">
+            {reloadError}
+          </p>
+        )}
       </Dialog>
     </div>
   );
