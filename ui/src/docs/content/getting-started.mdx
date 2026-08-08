@@ -248,6 +248,25 @@ Design Notes. After completing a page from the dropdown, press Left to move
 back into the link and type `|the design doc`. Plain click edits a wikilink;
 Cmd-click on macOS or Ctrl-click elsewhere opens it.
 
+## External resource marks
+
+Clepsydra adds a small decorative mark to recognized external links in the web
+UI. The mark is automatic: your Markdown, link label, URL, accessible link
+name, and copied text stay unchanged.
+
+For example:
+
+```markdown
+[Wikipedia](https://en.wikipedia.org/wiki/Hypertext)
+[An arXiv paper](https://arxiv.org/pdf/1706.03762.pdf)
+```
+
+Recognized service families include Wikipedia and Wikimedia, arXiv, bioRxiv,
+DOI, PubMed, Semantic Scholar, GitHub, GitLab, Internet Archive, YouTube, and
+Vimeo. Direct PDF, audio, video, and image links receive file-type marks. A
+specific service takes precedence over a generic file extension, so an arXiv
+PDF receives the arXiv mark rather than the generic PDF mark.
+
 ## 9) Optional: Edit the vault from Neovim (LSP)
 
 `clep lsp` starts a standalone language server on stdio — completion for
