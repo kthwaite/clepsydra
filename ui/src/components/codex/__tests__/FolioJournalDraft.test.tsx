@@ -1,7 +1,13 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { setReadingProgressMock, usePageEditorMock, useJournalTodayMock } = vi.hoisted(() => ({
+const {
+  mobileLayoutState,
+  setReadingProgressMock,
+  usePageEditorMock,
+  useJournalTodayMock,
+} = vi.hoisted(() => ({
+  mobileLayoutState: { matches: false },
   setReadingProgressMock: vi.fn(),
   usePageEditorMock: vi.fn(),
   useJournalTodayMock: vi.fn(),
@@ -9,9 +15,34 @@ const { setReadingProgressMock, usePageEditorMock, useJournalTodayMock } = vi.ho
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
 }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => mobileLayoutState.matches,
+}));
 vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
 vi.mock("#/editor/PageEditorHeader", () => ({ PageEditorHeader: () => null }));
-vi.mock("#/editor/SlateEditor", () => ({ SlateEditor: () => null }));
+vi.mock("#/editor/SlateEditor", () => ({
+  SlateEditor: ({
+    onChange,
+    onSaveNow,
+  }: {
+    onChange: (value: unknown[]) => void;
+    onSaveNow: () => void;
+  }) => (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          onChange([{ type: "paragraph", children: [{ text: "First line" }] }])
+        }
+      >
+        Edit journal body
+      </button>
+      <button type="button" onClick={onSaveNow}>
+        Save journal body
+      </button>
+    </>
+  ),
+}));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
   useOutlinks: () => ({ data: [] }),
@@ -78,6 +109,7 @@ function draftEditor() {
 describe("Folio journal draft", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mobileLayoutState.matches = false;
     useJournalTodayMock.mockReturnValue({ data: null, isLoading: false });
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
   });
@@ -112,6 +144,28 @@ describe("Folio journal draft", () => {
     render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
     expect(screen.queryByText(/not found/i)).toBeNull();
     expect(screen.getByText(/END OF FILE/)).toBeInTheDocument();
+  });
+
+  it("keeps an unwritten mobile journal lazy until its first edit and save", () => {
+    const editor = draftEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    mobileLayoutState.matches = true;
+
+    render(<Folio tabId="t1" path={todayJournalPath()} />);
+
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit journal body" }),
+    );
+    expect(editor.onSlateChange).toHaveBeenCalledOnce();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save journal body" }),
+    );
+    expect(editor.saveNow).toHaveBeenCalledOnce();
   });
 
   it("still renders FolioNotFound for a plain missing page", () => {

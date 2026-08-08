@@ -6,11 +6,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
 // early-return branch renders FolioNotFound. Mock the editor + data hooks so
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
-const { usePageEditorMock } = vi.hoisted(() => ({
-  usePageEditorMock: vi.fn(),
-}));
+const { mobileLayoutState, useCollapsibleRailMock, usePageEditorMock } =
+  vi.hoisted(() => ({
+    mobileLayoutState: { matches: false },
+    useCollapsibleRailMock: vi.fn(() => ({
+      collapsed: false,
+      width: 240,
+      toggle: vi.fn(),
+      onResizeStart: vi.fn(),
+    })),
+    usePageEditorMock: vi.fn(),
+  }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
+}));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => mobileLayoutState.matches,
+}));
+vi.mock("#/components/codex/useCollapsibleRail", () => ({
+  useCollapsibleRail: useCollapsibleRailMock,
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
@@ -63,9 +77,44 @@ function errorEditor() {
     editorRevision: 0,
   };
 }
+function editableEditor() {
+  return {
+    isLoading: false,
+    error: null,
+    isDraft: false,
+    title: "Alpha",
+    setTitle: vi.fn(),
+    tags: ["mobile"],
+    setTags: vi.fn(),
+    aliases: [],
+    setAliases: vi.fn(),
+    saveNow: vi.fn(),
+    saveStatus: "saved" as const,
+    saveError: null,
+    revisionConflict: null,
+    reloadAfterConflict: vi.fn(),
+    kind: "NOTE",
+    bodyMarkdown: "Editable body",
+    inferred: false,
+    project: null,
+    initialValue: [
+      { type: "paragraph", children: [{ text: "Editable body" }] },
+    ],
+    onSlateChange: vi.fn(),
+    editorRevision: 1,
+    createdAt: "2026-08-08T00:00:00Z",
+    updatedAt: "2026-08-08T00:00:00Z",
+    encrypted: false,
+    pageId: "page-alpha",
+    getPlaintext: vi.fn(),
+    getRevision: vi.fn(),
+  };
+}
 
 describe("Folio invalid-tab recovery", () => {
   beforeEach(() => {
+    mobileLayoutState.matches = false;
+    useCollapsibleRailMock.mockClear();
     usePageEditorMock.mockReturnValue(errorEditor());
     useWorkspaceStore.setState({
       tabs: [{ id: "t1", type: "page", path: "notes/gone.md", label: "gone" }],
@@ -113,5 +162,44 @@ describe("Folio invalid-tab recovery", () => {
     expect(screen.queryByTestId("slate-editor")).toBeNull();
     expect(document.body.textContent).not.toContain(armor);
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+});
+
+describe("Folio mobile presentation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mobileLayoutState.matches = true;
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+  });
+
+  it("keeps the page editable without initializing desktop rails", async () => {
+    const user = userEvent.setup();
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(screen.getByRole("textbox", { name: "Page title" })).toHaveValue(
+      "Alpha",
+    );
+    expect(
+      screen.queryByRole("button", { name: "collapse panel" }),
+    ).not.toBeInTheDocument();
+    expect(useCollapsibleRailMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Document details" }));
+    expect(
+      screen.getByRole("dialog", { name: "Document details" }),
+    ).toBeVisible();
+    expect(screen.getByText("notes/alpha.md")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Page relationships" }));
+    expect(
+      screen.getByRole("dialog", { name: "Page relationships" }),
+    ).toBeVisible();
+    expect(screen.getByText("Backlinks")).toBeVisible();
   });
 });

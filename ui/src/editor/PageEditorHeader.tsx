@@ -59,15 +59,15 @@ export function PageEditorHeader({
   };
 
   return (
-    <div className="pb-4">
+    <div className="pb-4 max-md:flex max-md:flex-col max-md:gap-3">
       {encrypted && onRequestLock ? (
-        <div className="mb-2 flex items-center justify-end gap-2">
+        <div className="mb-2 flex items-center justify-end gap-2 max-md:mb-0 max-md:min-h-11 max-md:w-full max-md:justify-between">
           <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
             encrypted
           </span>
           <button
             type="button"
-            className="cl-btn"
+            className="cl-btn max-md:min-h-11"
             disabled={locking}
             onClick={() => void requestLock()}
             aria-label="Lock encrypted notes"
@@ -88,11 +88,12 @@ export function PageEditorHeader({
       ) : (
         <input
           type="text"
+          aria-label="Page title"
           value={title}
           onChange={(e) => onTitleChange(e.target.value)}
           onBlur={flush}
           placeholder={filename(path)}
-          className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground"
+          className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground max-md:min-h-11"
         />
       )}
 
@@ -102,7 +103,7 @@ export function PageEditorHeader({
         onChange={onTagsChange}
         onBlur={flush}
         placeholder="Add tag..."
-        className="mt-2"
+        className="mt-2 max-md:mt-0 max-md:w-full"
       />
 
       {(aliases.length > 0 || tags.length > 0) && (
@@ -112,7 +113,7 @@ export function PageEditorHeader({
           onChange={onAliasesChange}
           onBlur={flush}
           placeholder="Add alias..."
-          className="mt-2"
+          className="mt-2 max-md:mt-0 max-md:w-full"
         />
       )}
     </div>

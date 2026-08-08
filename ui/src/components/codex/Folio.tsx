@@ -11,10 +11,12 @@ import {
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
@@ -45,6 +47,7 @@ const NoteProtectionDialog = lazy(() =>
 );
 
 export function Folio({ tabId, path }: FolioProps) {
+  const mobile = useMobileLayout();
   const isTodayDraftPath = path === todayJournalPath();
   const { data: journalToday, isLoading: isJournalTodayLoading } =
     useJournalToday(isTodayDraftPath);
@@ -88,20 +91,6 @@ export function Folio({ tabId, path }: FolioProps) {
     if (data.path && data.path !== path) updateTabPath(tabId, data.path);
   };
 
-  const left = useCollapsibleRail({
-    storageKey: "clp.folio.l",
-    side: "left",
-    defaultWidth: 240,
-    min: 180,
-    max: 480,
-  });
-  const right = useCollapsibleRail({
-    storageKey: "clp.folio.r",
-    side: "right",
-    defaultWidth: 280,
-    min: 220,
-    max: 480,
-  });
   const [rTab, setRTab] = useState<RTab>(() => {
     try {
       const v = window.localStorage.getItem(R_TAB_KEY);
@@ -211,6 +200,384 @@ export function Folio({ tabId, path }: FolioProps) {
     );
   }
 
+  const dossierHeader = (
+    <>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+          FILE / {folioCode}
+        </span>
+        <div className="flex items-center gap-3">
+          <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+            <Pip kind={kind} />
+            {kindLabel(kind)}
+          </span>
+          <SaveIndicator
+            status={editor.saveStatus}
+            error={editor.saveError}
+            revisionConflict={editor.revisionConflict}
+            onReloadAfterConflict={editor.reloadAfterConflict}
+          />
+        </div>
+      </div>
+      <hr className="cl-rule-dash mt-2" />
+    </>
+  );
+
+  const document = (
+    <>
+      <div className="mt-4">
+        <PageEditorHeader
+          path={path}
+          title={editor.title}
+          onTitleChange={editor.setTitle}
+          readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
+          tags={editor.tags}
+          onTagsChange={editor.setTags}
+          aliases={editor.aliases}
+          onAliasesChange={editor.setAliases}
+          onSaveNow={editor.saveNow}
+          encrypted={encrypted}
+          onRequestLock={encryptionActions?.lock}
+        />
+      </div>
+
+      <hr className="cl-rule-dash mt-3" />
+
+      <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
+        <WikilinkResolutionProvider path={path}>
+          <SlateEditor
+            key={`${path}:${editor.editorRevision}`}
+            initialValue={editor.initialValue}
+            onChange={editor.onSlateChange}
+            onSaveNow={editor.saveNow}
+          />
+        </WikilinkResolutionProvider>
+      </article>
+
+      <hr className="cl-rule-dash mt-8" />
+      <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+        <span>END OF FILE</span>
+        <span>
+          {folioCode} · {wordCount > 0 ? `${wordCount} WD` : "—"}
+        </span>
+      </div>
+    </>
+  );
+
+  const details = (
+    <Block label="Document">
+        <KV k="ID" v={folioCode} />
+        <KV
+          k="Kind"
+          v={
+            <KindSelect
+              value={kind}
+              inferred={inferred}
+              onAssign={(k) =>
+                assign.mutate(
+                  { params: { path: { path } }, body: { kind: k } },
+                  { onSuccess: followMove },
+                )
+              }
+            />
+          }
+        />
+        <KV
+          k="Project"
+          v={
+            <ProjectCombo
+              key={project ?? ""}
+              value={project}
+              options={projects}
+              onAssign={(slug) =>
+                assign.mutate(
+                  { params: { path: { path } }, body: { project: slug } },
+                  { onSuccess: followMove },
+                )
+              }
+              onClear={() =>
+                assign.mutate(
+                  {
+                    params: { path: { path } },
+                    body: { clear_project: true },
+                  },
+                  { onSuccess: followMove },
+                )
+              }
+            />
+          }
+        />
+        <KV
+          k="Path"
+          v={<span className="break-all text-ink-mute">{path}</span>}
+        />
+        <KV
+          k="Protection"
+          v={
+            <button
+              type="button"
+              className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
+              disabled={!editor.pageId}
+              onClick={() =>
+                setProtectionDialog(encrypted ? "unprotect" : "protect")
+              }
+            >
+              {encrypted ? "encrypted · remove" : "plaintext · protect"}
+            </button>
+          }
+        />
+      </Block>
+  );
+
+  const supplementalDetails = (
+    <>
+
+      <Block label="Chronology">
+        <KV k="Created" v={formatAbsoluteDate(editor.createdAt)} />
+        <KV k="Modified" v={formatRelativeTime(editor.updatedAt)} />
+      </Block>
+
+      <Block label="Vitals">
+        <KV k="Words" v={wordCount > 0 ? wordCount : "—"} />
+        <KV k="Backlinks" v={backlinks?.length ?? 0} />
+        <KV k="Links" v={outlinks?.length ?? 0} />
+      </Block>
+
+      {(() => {
+        const Extras = presentation.metaExtras;
+        return Extras ? (
+          <Block label={presentation.metaExtrasLabel ?? "Details"}>
+            <Extras path={path} tabId={tabId} isDraft={editor.isDraft} />
+          </Block>
+        ) : null;
+      })()}
+
+      <OpenFilesAccordion activeTabId={tabId} />
+    </>
+  );
+
+  const contents = (
+    <Block label={`Contents · ${toc.length}`}>
+      {toc.length === 0 ? (
+        <p className="cl-marg m-0">No headings yet.</p>
+      ) : (
+        <div className="cl-mono">
+          {toc.map((h, i) => {
+            const active = i === activeIndex;
+            return (
+              <button
+                key={`${h.text}-${i}`}
+                type="button"
+                onClick={() => scrollTo(i)}
+                className={cn(
+                  "flex w-full cursor-pointer items-baseline gap-1.5 py-[2px] pr-1 text-left text-[11px]",
+                  active
+                    ? "border-l-2 border-accent bg-highlight pl-2 text-ink"
+                    : "border-l-2 border-transparent pl-2 text-ink-mute hover:text-ink",
+                )}
+                style={{ paddingLeft: (h.depth - 1) * 8 + 8 }}
+              >
+                <span className="text-[9px] text-ink-mute">{h.number}</span>
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                  {h.text}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </Block>
+  );
+
+  const relationships = (
+    <>
+      <div className="flex items-stretch border-b border-rule">
+        <RTabBtn
+          label="Backlinks"
+          n={backlinks?.length ?? 0}
+          active={rTab === "backlinks"}
+          onClick={() => selectRTab("backlinks")}
+        />
+        <RTabBtn
+          label="Links"
+          n={outlinks?.length ?? 0}
+          active={rTab === "links"}
+          onClick={() => selectRTab("links")}
+        />
+        <RTabBtn
+          label="Tags"
+          n={(editor.tags ?? []).length}
+          active={rTab === "tags"}
+          onClick={() => selectRTab("tags")}
+        />
+        <span className="flex-1" />
+      </div>
+
+      <div className="px-3 py-3">
+        {rTab === "backlinks" && (
+          <LinkList
+            empty="No backlinks — this folio stands alone."
+            items={(backlinks ?? []).map((b) => ({
+              path: b.source_path,
+              title: b.source_title || b.source_path,
+            }))}
+          />
+        )}
+        {rTab === "links" && (
+          <>
+            <LinkList
+              empty="No outbound links yet."
+              items={(outlinks ?? [])
+                .filter((o): o is typeof o & { target_path: string } =>
+                  Boolean(o.target_path),
+                )
+                .map((o) => ({
+                  path: o.target_path,
+                  title: o.target_raw || o.target_path,
+                }))}
+            />
+            {(similar?.items.length ?? 0) > 0 && (
+              <>
+                <div className="cl-mono mt-4 mb-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+                  ≈ Similar
+                </div>
+                <LinkList
+                  empty=""
+                  items={(similar?.items ?? []).map((s) => ({
+                    path: s.path,
+                    title: s.title || s.path,
+                  }))}
+                />
+              </>
+            )}
+          </>
+        )}
+        {rTab === "tags" &&
+          ((editor.tags ?? []).length === 0 ? (
+            <p className="cl-marg m-0">∅ No tags.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {(editor.tags ?? []).map((t) => (
+                <span
+                  key={t}
+                  className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] uppercase tracking-[0.08em] text-ink-2"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          ))}
+      </div>
+    </>
+  );
+
+  const protection = protectionDialog && editor.pageId ? (
+    <Suspense fallback={null}>
+      <NoteProtectionDialog
+        mode={protectionDialog}
+        page={{
+          id: editor.pageId,
+          path,
+          title: editor.title,
+          tags: editor.tags ?? [],
+        }}
+        saveNow={editor.saveNow}
+        getPlaintext={editor.getPlaintext}
+        getRevision={editor.getRevision}
+        onComplete={() => setProtectionDialog(null)}
+        onDismiss={() => setProtectionDialog(null)}
+      />
+    </Suspense>
+  ) : null;
+
+  if (mobile) {
+    return (
+      <>
+        <MobileFolioLayout
+          header={dossierHeader}
+          document={
+            <div
+              ref={bodyRef}
+              onScroll={onScroll}
+              className="cl-noscroll h-full overflow-y-auto px-4 pt-1 pb-10"
+            >
+              {document}
+            </div>
+          }
+          details={
+            <>
+              {details}
+              {supplementalDetails}
+            </>
+          }
+          relationships={relationships}
+          contents={contents}
+          onBack={() => closeTab(tabId)}
+        />
+        {protection}
+      </>
+    );
+  }
+
+  return (
+    <DesktopFolioLayout
+      header={dossierHeader}
+      document={document}
+      details={details}
+      supplementalDetails={supplementalDetails}
+      relationships={relationships}
+      contents={contents}
+      bodyRef={bodyRef}
+      onScroll={onScroll}
+      toc={toc}
+      activeIndex={activeIndex}
+      onJump={scrollTo}
+      protection={protection}
+    />
+  );
+}
+
+function DesktopFolioLayout({
+  header,
+  document,
+  details,
+  relationships,
+  supplementalDetails,
+  contents,
+  bodyRef,
+  onScroll,
+  toc,
+  activeIndex,
+  onJump,
+  protection,
+}: {
+  header: React.ReactNode;
+  document: React.ReactNode;
+  details: React.ReactNode;
+  relationships: React.ReactNode;
+  contents: React.ReactNode;
+  supplementalDetails: React.ReactNode;
+  bodyRef: React.RefObject<HTMLDivElement | null>;
+  onScroll: () => void;
+  toc: TocEntry[];
+  activeIndex: number;
+  onJump: (index: number) => void;
+  protection: React.ReactNode;
+}) {
+  const left = useCollapsibleRail({
+    storageKey: "clp.folio.l",
+    side: "left",
+    defaultWidth: 240,
+    min: 180,
+    max: 480,
+  });
+  const right = useCollapsibleRail({
+    storageKey: "clp.folio.r",
+    side: "right",
+    defaultWidth: 280,
+    min: 220,
+    max: 480,
+  });
   const lw = left.collapsed ? 34 : left.width;
   const rw = right.collapsed ? 34 : right.width;
 
@@ -219,136 +586,18 @@ export function Folio({ tabId, path }: FolioProps) {
       className="grid h-full min-h-0"
       style={{ gridTemplateColumns: `${lw}px 1fr ${rw}px` }}
     >
-      {/* ── LEFT · META ──────────────────────────────────────────────── */}
       {left.collapsed ? (
         <RailStub label="META" side="left" onExpand={left.toggle} />
       ) : (
         <aside className="cl-noscroll relative overflow-auto border-r border-rule">
           <RailHeader label="META" onCollapse={left.toggle} side="left" />
-
-          <Block label="Document">
-            <KV k="ID" v={folioCode} />
-            <KV
-              k="Kind"
-              v={
-                <KindSelect
-                  value={kind}
-                  inferred={inferred}
-                  onAssign={(k) =>
-                    assign.mutate(
-                      { params: { path: { path } }, body: { kind: k } },
-                      { onSuccess: followMove },
-                    )
-                  }
-                />
-              }
-            />
-            <KV
-              k="Project"
-              v={
-                <ProjectCombo
-                  key={project ?? ""}
-                  value={project}
-                  options={projects}
-                  onAssign={(slug) =>
-                    assign.mutate(
-                      { params: { path: { path } }, body: { project: slug } },
-                      { onSuccess: followMove },
-                    )
-                  }
-                  onClear={() =>
-                    assign.mutate(
-                      {
-                        params: { path: { path } },
-                        body: { clear_project: true },
-                      },
-                      { onSuccess: followMove },
-                    )
-                  }
-                />
-              }
-            />
-            <KV
-              k="Path"
-              v={<span className="break-all text-ink-mute">{path}</span>}
-            />
-            <KV
-              k="Protection"
-              v={
-                <button
-                  type="button"
-                  className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
-                  disabled={!editor.pageId}
-                  onClick={() =>
-                    setProtectionDialog(encrypted ? "unprotect" : "protect")
-                  }
-                >
-                  {encrypted ? "encrypted · remove" : "plaintext · protect"}
-                </button>
-              }
-            />
-          </Block>
-
-          <Block label={`Contents · ${toc.length}`}>
-            {toc.length === 0 ? (
-              <p className="cl-marg m-0">No headings yet.</p>
-            ) : (
-              <div className="cl-mono">
-                {toc.map((h, i) => {
-                  const active = i === activeIndex;
-                  return (
-                    <button
-                      key={`${h.text}-${i}`}
-                      type="button"
-                      onClick={() => scrollTo(i)}
-                      className={cn(
-                        "flex w-full cursor-pointer items-baseline gap-1.5 py-[2px] pr-1 text-left text-[11px]",
-                        active
-                          ? "border-l-2 border-accent bg-highlight pl-2 text-ink"
-                          : "border-l-2 border-transparent pl-2 text-ink-mute hover:text-ink",
-                      )}
-                      style={{ paddingLeft: (h.depth - 1) * 8 + 8 }}
-                    >
-                      <span className="text-[9px] text-ink-mute">
-                        {h.number}
-                      </span>
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                        {h.text}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </Block>
-
-          <Block label="Chronology">
-            <KV k="Created" v={formatAbsoluteDate(editor.createdAt)} />
-            <KV k="Modified" v={formatRelativeTime(editor.updatedAt)} />
-          </Block>
-
-          <Block label="Vitals">
-            <KV k="Words" v={wordCount > 0 ? wordCount : "—"} />
-            <KV k="Backlinks" v={backlinks?.length ?? 0} />
-            <KV k="Links" v={outlinks?.length ?? 0} />
-          </Block>
-
-          {(() => {
-            const Extras = presentation.metaExtras;
-            return Extras ? (
-              <Block label={presentation.metaExtrasLabel ?? "Details"}>
-                <Extras path={path} tabId={tabId} isDraft={editor.isDraft} />
-              </Block>
-            ) : null;
-          })()}
-
-          <OpenFilesAccordion activeTabId={tabId} />
-
+          {details}
+          {contents}
+          {supplementalDetails}
           <Resizer onPointerDown={left.onResizeStart} side="right" />
         </aside>
       )}
 
-      {/* ── CENTER · DOSSIER ─────────────────────────────────────────── */}
       <div className="relative min-h-0">
         <div
           ref={bodyRef}
@@ -356,181 +605,30 @@ export function Folio({ tabId, path }: FolioProps) {
           className="cl-noscroll h-full overflow-auto"
         >
           <div className="mx-auto max-w-[900px] px-7 py-[18px] pb-10">
-            {/* dossier header */}
-            <div className="flex items-baseline justify-between">
-              <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-                FILE / {folioCode}
-              </span>
-              <div className="flex items-center gap-3">
-                <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                  <Pip kind={kind} />
-                  {kindLabel(kind)}
-                </span>
-                <SaveIndicator
-                  status={editor.saveStatus}
-                  error={editor.saveError}
-                  revisionConflict={editor.revisionConflict}
-                  onReloadAfterConflict={editor.reloadAfterConflict}
-                />
-              </div>
-            </div>
-            <hr className="cl-rule-dash mt-2" />
-
-            {/* title + tags + aliases */}
-            <div className="mt-4">
-              <PageEditorHeader
-                path={path}
-                title={editor.title}
-                onTitleChange={editor.setTitle}
-                readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
-                tags={editor.tags}
-                onTagsChange={editor.setTags}
-                aliases={editor.aliases}
-                onAliasesChange={editor.setAliases}
-                onSaveNow={editor.saveNow}
-                encrypted={encrypted}
-                onRequestLock={encryptionActions?.lock}
-              />
-            </div>
-
-            <hr className="cl-rule-dash mt-3" />
-
-            {/* body — Slate editor styled as dossier prose */}
-            <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
-              <WikilinkResolutionProvider path={path}>
-                <SlateEditor
-                  key={`${path}:${editor.editorRevision}`}
-                  initialValue={editor.initialValue}
-                  onChange={editor.onSlateChange}
-                  onSaveNow={editor.saveNow}
-                />
-              </WikilinkResolutionProvider>
-            </article>
-
-            {/* end of file */}
-            <hr className="cl-rule-dash mt-8" />
-            <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-              <span>END OF FILE</span>
-              <span>
-                {folioCode} · {wordCount > 0 ? `${wordCount} WD` : "—"}
-              </span>
-            </div>
+            {header}
+            {document}
           </div>
         </div>
-        <ReadingTicks toc={toc} activeIndex={activeIndex} onJump={scrollTo} />
+        <ReadingTicks toc={toc} activeIndex={activeIndex} onJump={onJump} />
       </div>
 
-      {/* ── RIGHT · APPARATUS ────────────────────────────────────────── */}
       {right.collapsed ? (
         <RailStub label="LINKS" side="right" onExpand={right.toggle} />
       ) : (
         <aside className="cl-noscroll relative overflow-auto border-l border-rule">
           <Resizer onPointerDown={right.onResizeStart} side="left" />
-          <div className="flex items-stretch border-b border-rule">
-            <RTabBtn
-              label="Backlinks"
-              n={backlinks?.length ?? 0}
-              active={rTab === "backlinks"}
-              onClick={() => selectRTab("backlinks")}
-            />
-            <RTabBtn
-              label="Links"
-              n={outlinks?.length ?? 0}
-              active={rTab === "links"}
-              onClick={() => selectRTab("links")}
-            />
-            <RTabBtn
-              label="Tags"
-              n={(editor.tags ?? []).length}
-              active={rTab === "tags"}
-              onClick={() => selectRTab("tags")}
-            />
-            <span className="flex-1" />
-            <button
-              type="button"
-              onClick={right.toggle}
-              className="cl-mono cursor-pointer px-2 text-[12px] text-ink-mute hover:text-ink"
-              aria-label="collapse panel"
-            >
-              ›
-            </button>
-          </div>
-
-          <div className="px-3 py-3">
-            {rTab === "backlinks" && (
-              <LinkList
-                empty="No backlinks — this folio stands alone."
-                items={(backlinks ?? []).map((b) => ({
-                  path: b.source_path,
-                  title: b.source_title || b.source_path,
-                }))}
-              />
-            )}
-            {rTab === "links" && (
-              <>
-                <LinkList
-                  empty="No outbound links yet."
-                  items={(outlinks ?? [])
-                    .filter((o): o is typeof o & { target_path: string } =>
-                      Boolean(o.target_path),
-                    )
-                    .map((o) => ({
-                      path: o.target_path,
-                      title: o.target_raw || o.target_path,
-                    }))}
-                />
-                {(similar?.items.length ?? 0) > 0 && (
-                  <>
-                    <div className="cl-mono mt-4 mb-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-                      ≈ Similar
-                    </div>
-                    <LinkList
-                      empty=""
-                      items={(similar?.items ?? []).map((s) => ({
-                        path: s.path,
-                        title: s.title || s.path,
-                      }))}
-                    />
-                  </>
-                )}
-              </>
-            )}
-            {rTab === "tags" &&
-              ((editor.tags ?? []).length === 0 ? (
-                <p className="cl-marg m-0">∅ No tags.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {(editor.tags ?? []).map((t) => (
-                    <span
-                      key={t}
-                      className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] uppercase tracking-[0.08em] text-ink-2"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              ))}
-          </div>
+          {relationships}
+          <button
+            type="button"
+            onClick={right.toggle}
+            className="cl-mono absolute top-0 right-0 cursor-pointer px-2 py-1.5 text-[12px] text-ink-mute hover:text-ink"
+            aria-label="collapse panel"
+          >
+            ›
+          </button>
         </aside>
       )}
-      {protectionDialog && editor.pageId ? (
-        <Suspense fallback={null}>
-          <NoteProtectionDialog
-            mode={protectionDialog}
-            page={{
-              id: editor.pageId,
-              path,
-              title: editor.title,
-              tags: editor.tags ?? [],
-            }}
-            saveNow={editor.saveNow}
-            getPlaintext={editor.getPlaintext}
-            getRevision={editor.getRevision}
-            onComplete={() => setProtectionDialog(null)}
-            onDismiss={() => setProtectionDialog(null)}
-          />
-        </Suspense>
-      ) : null}
+      {protection}
     </div>
   );
 }
