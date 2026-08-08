@@ -1,4 +1,5 @@
 import {
+  type InfiniteData,
   infiniteQueryOptions,
   useMutation,
   useQuery,
@@ -105,6 +106,47 @@ export interface EntryPatch {
   tags?: string[];
 }
 
+type EntriesCache = InfiniteData<EntriesResponse, string | null>;
+
+function entryMatchesFilters(entry: Entry, filters: EntryFilters): boolean {
+  if (filters.view === "unread" && entry.read) return false;
+  if (filters.view === "saved" && !entry.bookmarked) return false;
+  if (filters.tag && !entry.tags.includes(filters.tag)) return false;
+  return true;
+}
+
+export function updateEntryCache(
+  data: EntriesCache,
+  filters: EntryFilters,
+  id: number,
+  patch: EntryPatch,
+): EntriesCache {
+  const pageIndex = data.pages.findIndex((page) =>
+    page.entries.some((entry) => entry.id === id),
+  );
+  if (pageIndex === -1) return data;
+
+  const page = data.pages[pageIndex];
+  const entryIndex = page.entries.findIndex((entry) => entry.id === id);
+  const entry = page.entries[entryIndex];
+  const patchedEntry: Entry = {
+    ...entry,
+    read: patch.read ?? entry.read,
+    bookmarked: patch.bookmarked ?? entry.bookmarked,
+    tags: patch.tags ?? entry.tags,
+  };
+  const entries = page.entries.slice();
+  if (entryMatchesFilters(patchedEntry, filters)) {
+    entries[entryIndex] = patchedEntry;
+  } else {
+    entries.splice(entryIndex, 1);
+  }
+  const pages = data.pages.slice();
+  pages[pageIndex] = { ...page, entries };
+
+  return { ...data, pages };
+}
+
 /** Optimistically patch an entry across every cached river view. */
 export function useEntryPatch() {
   const qc = useQueryClient();
@@ -113,28 +155,23 @@ export function useEntryPatch() {
       api<void>(`/entries/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
     onMutate: async ({ id, patch }) => {
       await qc.cancelQueries({ queryKey: ["entries"] });
-      qc.setQueriesData<{ pages: EntriesResponse[]; pageParams: unknown[] }>(
-        { queryKey: ["entries"] },
-        (data) =>
-          data && {
-            ...data,
-            pages: data.pages.map((page) => ({
-              ...page,
-              entries: page.entries.map((e) =>
-                e.id === id
-                  ? {
-                      ...e,
-                      read: patch.read ?? e.read,
-                      bookmarked: patch.bookmarked ?? e.bookmarked,
-                      tags: patch.tags ?? e.tags,
-                    }
-                  : e,
-              ),
-            })),
-          },
-      );
+      const snapshots = qc.getQueriesData<EntriesCache>({
+        queryKey: ["entries"],
+      });
+
+      for (const [queryKey, data] of snapshots) {
+        if (!data) continue;
+        const filters = queryKey[1] as EntryFilters;
+        qc.setQueryData(queryKey, updateEntryCache(data, filters, id, patch));
+      }
+
+      return { snapshots };
     },
-    onError: () => qc.invalidateQueries({ queryKey: ["entries"] }),
+    onError: (_error, _variables, context) => {
+      for (const [queryKey, data] of context?.snapshots ?? []) {
+        qc.setQueryData(queryKey, data);
+      }
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: ["feeds"] }),
   });
 }
