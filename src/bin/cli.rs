@@ -3,6 +3,7 @@ use std::{io::Write, path::PathBuf};
 use clap::{Parser, Subcommand};
 
 use clepsydra::doctor::{self, DoctorOpts};
+use clepsydra::vault::backup::create_backup;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::new_note::create_new_note;
 use clepsydra::{ServeOverrides, open_vault_and_index, run_lsp_standalone, run_server};
@@ -13,7 +14,7 @@ use clepsydra::{ServeOverrides, open_vault_and_index, run_lsp_standalone, run_se
     version,
     about = "Clepsydra CLI",
     long_about = "CLI for managing Clepsydra vaults and running the API server.\n\nConfiguration lookup order (for commands that require config):\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml",
-    after_help = "Examples:\n  clepsydra init ~/vault\n  clepsydra serve\n  clepsydra new \"Project Plan\"\n  clepsydra new \"Inbox\" --body \"- [ ] follow up\"\n  clepsydra config show\n  clepsydra config show --origin\n  clepsydra config path\n  clepsydra config path --trace\n  clepsydra config create"
+    after_help = "Examples:\n  clepsydra init ~/vault\n  clepsydra serve\n  clepsydra new \"Project Plan\"\n  clepsydra new \"Inbox\" --body \"- [ ] follow up\"\n  clep backup --destination ~/Backups\n  clepsydra config show\n  clepsydra config show --origin\n  clepsydra config path\n  clepsydra config path --trace\n  clepsydra config create"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -64,6 +65,15 @@ enum Commands {
         title: String,
         #[arg(short, long, value_name = "TEXT", help = "Optional initial body text")]
         body: Option<String>,
+    },
+    #[command(about = "Create a local archive of the configured vault")]
+    Backup {
+        #[arg(
+            long,
+            value_name = "DIRECTORY",
+            help = "Directory in which to create the backup archive"
+        )]
+        destination: PathBuf,
     },
     #[command(
         about = "Inspect or create application config",
@@ -214,6 +224,15 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 created.vault_path.as_str(),
                 created.vault_root.display()
             );
+            Ok(0)
+        }
+        Commands::Backup { destination } => {
+            let cwd = std::env::current_dir()?;
+            let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+            let vault_root =
+                clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+            let archive = create_backup(&vault_root, &destination, chrono::Utc::now())?;
+            println!("{}", archive.display());
             Ok(0)
         }
         Commands::Config { command } => match command {
@@ -540,6 +559,40 @@ mod cli_tests {
         let code = run_cli(cli).await.unwrap();
         assert_eq!(code, 0);
         assert!(root.join(".clepsydra").exists());
+    }
+
+    #[test]
+    fn backup_accepts_a_required_destination() {
+        let cli =
+            Cli::try_parse_from(["clep", "backup", "--destination", "out"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Backup { destination } if destination == std::path::Path::new("out")
+        ));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn backup_creates_one_archive_in_the_destination() {
+        let (_dir, root) = vault_in_tempdir();
+        let destination = root.join("backups");
+        let cli = Cli::try_parse_from([
+            "clepsydra",
+            "backup",
+            "--destination",
+            destination.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let result = run_cli_in(&root, cli).await;
+
+        assert_eq!(result.unwrap(), 0);
+        let archives = std::fs::read_dir(&destination)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "tar"))
+            .collect::<Vec<_>>();
+        assert_eq!(archives.len(), 1);
     }
 
     #[tokio::test]

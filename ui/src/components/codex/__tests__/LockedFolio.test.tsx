@@ -64,6 +64,26 @@ describe("LockedFolio", () => {
     expect(document.body.textContent).not.toContain(armor);
   });
 
+  it("renders derived tags separately from persisted locked metadata", () => {
+    render(
+      <LockedFolio
+        path="journals/2026-08-08.md"
+        title="2026-08-08"
+        tags={["daily"]}
+        derivedTags={["journal"]}
+        state={{ status: "locked" }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Tags")).toHaveTextContent("#daily");
+    expect(screen.getByLabelText("Read-only Tags")).toHaveTextContent(
+      "#journal",
+    );
+    expect(
+      screen.getByLabelText("Read-only Tags").querySelector("button"),
+    ).toBeNull();
+  });
+
   it("keeps the folio locked after a wrong password", async () => {
     const user = userEvent.setup();
     unlockWithPasswordMock.mockRejectedValue(new Error("SENSITIVE DETAIL"));

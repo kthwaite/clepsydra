@@ -169,14 +169,41 @@ export function Folio({ tabId, path }: FolioProps) {
     () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
     [path, editor.kind, editor.bodyMarkdown],
   );
-  const presentation = presentationFor(kind);
-  const inferred = editor.inferred;
-  const project = editor.project;
+  const isJournal = kind === "JOURNAL";
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
+  const editableTags = useMemo(
+    () =>
+      isJournal
+        ? editor.tags.filter((tag) => tag.toLowerCase() !== "journal")
+        : editor.tags,
+    [isJournal, editor.tags],
+  );
+  const hasPersistedJournalTag =
+    isJournal && editableTags.length !== editor.tags.length;
+  useEffect(() => {
+    if (
+      editor.isLoading ||
+      (encrypted && encryptionState.status !== "plain") ||
+      !hasPersistedJournalTag
+    )
+      return;
+    editor.setTags(editableTags);
+  }, [
+    editor.isLoading,
+    editor.setTags,
+    editableTags,
+    encrypted,
+    encryptionState.status,
+    hasPersistedJournalTag,
+  ]);
+  const presentation = presentationFor(kind);
+  const inferred = editor.inferred;
+  const project = editor.project;
+
   const visibleEditorValue =
     encrypted && encryptionState.status !== "plain"
       ? EMPTY_EDITOR_VALUE
@@ -205,7 +232,8 @@ export function Folio({ tabId, path }: FolioProps) {
       <LockedFolio
         path={path}
         title={editor.title}
-        tags={editor.tags ?? []}
+        tags={editableTags}
+        derivedTags={isJournal ? ["journal"] : []}
         state={encryptionState}
       />
     );
@@ -383,7 +411,8 @@ export function Folio({ tabId, path }: FolioProps) {
                 title={editor.title}
                 onTitleChange={editor.setTitle}
                 readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
-                tags={editor.tags}
+                tags={editableTags}
+                derivedTags={isJournal ? ["journal"] : []}
                 onTagsChange={editor.setTags}
                 aliases={editor.aliases}
                 onAliasesChange={editor.setAliases}
@@ -688,11 +717,11 @@ function Block({
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div className="cl-mono grid grid-cols-[64px_1fr] gap-2 py-[1px] text-[11px]">
+    <div className="cl-mono grid grid-cols-[64px_1fr] items-center gap-2 py-[1px] text-[11px]">
       <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
         {k}
       </span>
-      <span className="min-w-0 text-ink-2">{v}</span>
+      <span className="flex min-w-0 items-center text-ink-2">{v}</span>
     </div>
   );
 }
