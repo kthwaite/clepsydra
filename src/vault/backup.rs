@@ -122,8 +122,8 @@ impl PartialArchive {
             .sync_all()
             .map_err(|source| io_error("sync backup archive", &self.path, source))?;
         drop(builder);
-        fs::rename(&self.path, final_path)
-            .map_err(|source| io_error("rename backup archive", final_path, source))?;
+        super::atomic_file::install_noreplace(&self.path, final_path)
+            .map_err(|source| io_error("install backup archive", final_path, source))?;
         self.committed = true;
         Ok(final_path.to_path_buf())
     }
@@ -268,6 +268,28 @@ mod tests {
         let error = create_backup(&vault, &destination, timestamp()).unwrap_err();
 
         assert!(matches!(error, BackupError::Io { path, .. } if path == destination));
+    }
+
+    #[test]
+    fn preserves_an_existing_archive_for_the_same_timestamp() {
+        let (_temp, vault) = populated_vault();
+        let destination = vault.parent().unwrap().join("backups");
+        fs::create_dir_all(&destination).unwrap();
+        let existing = destination.join("clepsydra-backup-20260808T123456Z.tar");
+        fs::write(&existing, b"existing archive").unwrap();
+
+        let error = create_backup(&vault, &destination, timestamp()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            BackupError::Io { path, source, .. }
+                if path == existing.canonicalize().unwrap()
+                    && source.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(fs::read(&existing).unwrap(), b"existing archive");
+        assert!(!destination
+            .join("clepsydra-backup-20260808T123456Z.tar.partial")
+            .exists());
     }
 
     #[test]
