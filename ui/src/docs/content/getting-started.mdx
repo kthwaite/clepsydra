@@ -156,6 +156,26 @@ curl -X POST http://localhost:3000/api/vault/pages/notes/first.md \
 
 (If TLS is enabled, use `https://localhost:3000/...`.)
 
+## Wikilinks
+
+Type `[[` to search for a page, then press Enter or Tab to insert the selected
+page. A normal link displays its page title:
+
+```markdown
+[[Clepsydra Design Notes]]
+```
+
+Add a custom display label after a pipe:
+
+```markdown
+[[Clepsydra Design Notes|the design doc]]
+```
+
+Only `the design doc` is shown, while the link still resolves to Clepsydra
+Design Notes. After completing a page from the dropdown, press Left to move
+back into the link and type `|the design doc`. Plain click edits a wikilink;
+Cmd-click on macOS or Ctrl-click elsewhere opens it.
+
 ## 8) Optional: Edit the vault from Neovim (LSP)
 
 `clep lsp` starts a standalone language server on stdio — completion for
