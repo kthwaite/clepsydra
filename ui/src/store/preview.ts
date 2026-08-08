@@ -58,6 +58,7 @@ type PreviewState = {
   pin: (id: string) => void;
   minimize: (id: string) => void;
   restore: (id: string) => void;
+  close: (id: string) => void;
   closePath: (path: string) => void;
   raise: (id: string) => void;
   move: (id: string, x: number, y: number) => void;
