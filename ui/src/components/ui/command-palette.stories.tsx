@@ -15,8 +15,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const MOCK_RESULTS = [
-  { id: "1", title: "Getting Started", path: "docs/getting-started.md" },
-  { id: "2", title: "Configuration", path: "docs/configuration.md" },
+  { id: "1", title: "Getting Started", path: "/docs/getting-started" },
+  { id: "2", title: "Configuration", path: "/docs/configuration" },
   { id: "3", title: "API Reference", path: "docs/api.md" },
   { id: "4", title: "Changelog", path: "docs/changelog.md" },
 ];

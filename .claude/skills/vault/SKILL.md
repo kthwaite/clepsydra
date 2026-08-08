@@ -93,4 +93,4 @@ this repo):
 
 `clep mcp` finds the server via the usual config lookup (`./config.toml`,
 then `~/.config/clepsydra/config.toml`) and refuses non-loopback hosts
-unless passed `--allow-remote`. See docs/mcp.md for details.
+unless passed `--allow-remote`. See `ui/src/docs/content/mcp.mdx` for details.
