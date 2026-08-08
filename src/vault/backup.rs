@@ -34,6 +34,18 @@ pub fn create_backup(
     let vault_root = vault_root
         .canonicalize()
         .map_err(|source| io_error("resolve vault root", vault_root, source))?;
+    let vault_metadata = fs::metadata(&vault_root)
+        .map_err(|source| io_error("inspect vault root", &vault_root, source))?;
+    if !vault_metadata.is_dir() {
+        return Err(io_error(
+            "validate vault root directory",
+            &vault_root,
+            std::io::Error::new(
+                std::io::ErrorKind::NotADirectory,
+                "vault root is not a directory",
+            ),
+        ));
+    }
 
     let filename = format!(
         "clepsydra-backup-{}.tar",
@@ -268,6 +280,35 @@ mod tests {
         let error = create_backup(&vault, &destination, timestamp()).unwrap_err();
 
         assert!(matches!(error, BackupError::Io { path, .. } if path == destination));
+    }
+
+    #[test]
+    fn rejects_a_file_valued_vault_root_without_archive_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault_root = temp.path().join("not-a-vault");
+        let destination = temp.path().join("backups");
+        fs::write(&vault_root, "not a directory").unwrap();
+
+        let error = create_backup(&vault_root, &destination, timestamp()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            BackupError::Io {
+                path,
+                source,
+                ..
+            } if path == vault_root.canonicalize().unwrap()
+                && matches!(
+                    source.kind(),
+                    std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
+                )
+        ));
+        assert!(!destination
+            .join("clepsydra-backup-20260808T123456Z.tar")
+            .exists());
+        assert!(!destination
+            .join("clepsydra-backup-20260808T123456Z.tar.partial")
+            .exists());
     }
 
     #[test]

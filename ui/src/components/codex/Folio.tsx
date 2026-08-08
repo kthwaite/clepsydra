@@ -154,6 +154,11 @@ export function Folio({ tabId, path }: FolioProps) {
     [path, editor.kind, editor.bodyMarkdown],
   );
   const isJournal = kind === "JOURNAL";
+  const encrypted = editor.encrypted === true;
+  const encryptionState = editor.encryptionState ?? {
+    status: "plain" as const,
+    body: editor.bodyMarkdown,
+  };
   const editableTags = useMemo(
     () =>
       isJournal
@@ -164,22 +169,25 @@ export function Folio({ tabId, path }: FolioProps) {
   const hasPersistedJournalTag =
     isJournal && editableTags.length !== editor.tags.length;
   useEffect(() => {
-    if (editor.isLoading || !hasPersistedJournalTag) return;
+    if (
+      editor.isLoading ||
+      (encrypted && encryptionState.status !== "plain") ||
+      !hasPersistedJournalTag
+    )
+      return;
     editor.setTags(editableTags);
   }, [
     editor.isLoading,
     editor.setTags,
     editableTags,
+    encrypted,
+    encryptionState.status,
     hasPersistedJournalTag,
   ]);
   const presentation = presentationFor(kind);
   const inferred = editor.inferred;
   const project = editor.project;
-  const encrypted = editor.encrypted === true;
-  const encryptionState = editor.encryptionState ?? {
-    status: "plain" as const,
-    body: editor.bodyMarkdown,
-  };
+
   const visibleEditorValue =
     encrypted && encryptionState.status !== "plain"
       ? EMPTY_EDITOR_VALUE
@@ -208,7 +216,8 @@ export function Folio({ tabId, path }: FolioProps) {
       <LockedFolio
         path={path}
         title={editor.title}
-        tags={editor.tags ?? []}
+        tags={editableTags}
+        derivedTags={isJournal ? ["journal"] : []}
         state={encryptionState}
       />
     );

@@ -7,10 +7,17 @@ type LockedFolioProps = {
   path: string;
   title: string;
   tags: string[];
+  derivedTags?: string[];
   state: Exclude<DecryptedBodyState, { status: "plain" }>;
 };
 
-export function LockedFolio({ path, title, tags, state }: LockedFolioProps) {
+export function LockedFolio({
+  path,
+  title,
+  tags,
+  derivedTags = [],
+  state,
+}: LockedFolioProps) {
   const config = useEncryptionConfig();
   const actions = useEncryptionActions();
   const [password, setPassword] = useState("");
@@ -58,8 +65,19 @@ export function LockedFolio({ path, title, tags, state }: LockedFolioProps) {
           {path}
         </p>
         {tags.length > 0 ? (
-          <p className="cl-mono mt-2 text-[11px] text-accent">
+          <p
+            aria-label="Tags"
+            className="cl-mono mt-2 text-[11px] text-accent"
+          >
             {tags.map((tag) => `#${tag}`).join(" ")}
+          </p>
+        ) : null}
+        {derivedTags.length > 0 ? (
+          <p
+            aria-label="Read-only Tags"
+            className="cl-mono mt-2 text-[11px] text-accent"
+          >
+            {derivedTags.map((tag) => `#${tag}`).join(" ")}
           </p>
         ) : null}
 

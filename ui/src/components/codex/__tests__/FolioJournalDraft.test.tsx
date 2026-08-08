@@ -19,6 +19,20 @@ vi.mock("#/api/index", () => ({
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
+vi.mock("#/api/encryption", () => ({
+  useEncryptionConfig: () => ({
+    data: { initialized: true, wrapped_identity: "wrapped" },
+    isPending: false,
+    error: null,
+  }),
+}));
+vi.mock("#/crypto/EncryptionProvider", () => ({
+  useOptionalEncryptionActions: () => ({ lock: vi.fn() }),
+  useEncryptionActions: () => ({
+    unlockWithPassword: vi.fn(),
+    unlockWithImportedIdentity: vi.fn(),
+  }),
+}));
 vi.mock("#/api/journal", () => ({
   useJournalEditorOptions: () => undefined,
   useJournalToday: useJournalTodayMock,
@@ -150,6 +164,48 @@ describe("Folio journal draft", () => {
     expect(within(derivedTags).getByText("journal")).toBeInTheDocument();
     expect(within(editableTags).getByText("daily")).toBeInTheDocument();
     expect(within(editableTags).getByRole("button")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(setTags).toHaveBeenCalledOnce();
+      expect(setTags).toHaveBeenCalledWith(["daily"]);
+    });
+  });
+
+  it("defers encrypted journal-tag cleanup until the plain body baseline is adopted", async () => {
+    const setTags = vi.fn();
+    let editor: Record<string, unknown> = {
+      ...draftEditor(),
+      kind: "JOURNAL",
+      tags: ["journal", "daily"],
+      setTags,
+      encrypted: true,
+      encryptionState: { status: "locked" as const },
+    };
+    usePageEditorMock.mockImplementation(() => editor);
+
+    const view = render(
+      <Folio tabId="t1" path="journals/2026-08-07.md" />,
+    );
+
+    expect(setTags).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Tags")).toHaveTextContent("#daily");
+    expect(screen.getByLabelText("Read-only Tags")).toHaveTextContent(
+      "#journal",
+    );
+
+    editor = {
+      ...editor,
+      bodyMarkdown: "# Friday",
+      initialValue: [
+        {
+          type: "heading-one" as const,
+          children: [{ text: "Friday" }],
+        },
+      ],
+      editorRevision: 1,
+      encryptionState: { status: "plain" as const, body: "# Friday" },
+    };
+    view.rerender(<Folio tabId="t1" path="journals/2026-08-07.md" />);
+
     await waitFor(() => {
       expect(setTags).toHaveBeenCalledOnce();
       expect(setTags).toHaveBeenCalledWith(["daily"]);

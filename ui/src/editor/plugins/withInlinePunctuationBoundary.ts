@@ -24,13 +24,24 @@ export function withInlinePunctuationBoundary(editor: Editor): Editor {
         !editor.isVoid(node),
     });
 
+    let shouldClearMarks = false;
     if (inline && Editor.isEnd(editor, selection.anchor, inline[1])) {
       const after = Editor.after(editor, inline[1]);
-      if (after) Transforms.select(editor, after);
+      if (after) {
+        Transforms.select(editor, after);
+        shouldClearMarks = true;
+      }
+    } else {
+      const [leaf] = Editor.leaf(editor, selection.anchor);
+      shouldClearMarks =
+        selection.anchor.offset === leaf.text.length &&
+        Object.keys(leaf).some((key) => key !== "text");
     }
 
-    for (const mark of Object.keys(Editor.marks(editor) ?? {})) {
-      Editor.removeMark(editor, mark);
+    if (shouldClearMarks) {
+      for (const mark of Object.keys(Editor.marks(editor) ?? {})) {
+        Editor.removeMark(editor, mark);
+      }
     }
     insertText(text);
   };

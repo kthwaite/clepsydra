@@ -70,6 +70,56 @@ describe("withInlinePunctuationBoundary", () => {
     },
   );
 
+  it.each([
+    ["bold", { bold: true }, "**bo,ld**"],
+    ["italic", { italic: true }, "*it,alic*"],
+  ] as const)(
+    "keeps punctuation %s when inserted in the middle of a marked leaf",
+    (_mark, leafMarks, expected) => {
+      const editor = makeEditor([
+        {
+          type: "paragraph",
+          children: [{ text: _mark, ...leafMarks }],
+        },
+      ]);
+      editor.selection = {
+        anchor: { path: [0, 0], offset: 2 },
+        focus: { path: [0, 0], offset: 2 },
+      };
+
+      editor.insertText(",");
+
+      expect(slateToMarkdown(editor.children).trim()).toBe(expected);
+    },
+  );
+
+  it("keeps an explicitly active mark away from a leaf boundary", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [{ text: "plain" }],
+      },
+    ]);
+    editor.selection = {
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 2 },
+    };
+    editor.addMark("bold", true);
+
+    editor.insertText(",");
+
+    expect(editor.children).toEqual([
+      {
+        type: "paragraph",
+        children: [
+          { text: "pl" },
+          { text: ",", bold: true },
+          { text: "ain" },
+        ],
+      },
+    ]);
+  });
+
   it("keeps punctuation inside a link when inserted before its end", () => {
     const editor = makeEditor([
       {
