@@ -1,7 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import type { BaseMutationResponse, CreateBaseRequest } from "#/api/bases";
+import type {
+  BaseFilter,
+  BaseMutationResponse,
+  CreateBaseRequest,
+} from "#/api/bases";
 import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -12,6 +16,7 @@ import {
   slugifyBaseName,
   toWire,
 } from "./definition-model";
+import { MembershipEditor } from "./MembershipEditor";
 
 export interface CreateBaseDialogProps {
   isOpen: boolean;
@@ -36,6 +41,7 @@ export function CreateBaseDialog({
   const [slugError, setSlugError] = useState<string>();
   const [requestError, setRequestError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const [filter, setFilter] = useState<BaseFilter>();
   const busy = isPending || submitting;
 
   useEffect(() => {
@@ -46,6 +52,7 @@ export function CreateBaseDialog({
       setNameError(undefined);
       setSlugError(undefined);
       setRequestError(undefined);
+      setFilter(undefined);
       setSubmitting(false);
     }
   }, [isOpen]);
@@ -83,7 +90,7 @@ export function CreateBaseDialog({
     setSubmitting(true);
     try {
       const definition = toWire(
-        createMinimalDraft(normalizedName, undefined, undefined),
+        createMinimalDraft(normalizedName, undefined, filter),
       );
       const response = await onCreate({ slug: normalizedSlug, definition });
       onClose();
@@ -156,8 +163,15 @@ export function CreateBaseDialog({
           >
             Membership
           </h3>
-          <p className="mt-2 text-sm text-foreground">All pages</p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <div className="mt-3">
+            <MembershipEditor
+              value={filter}
+              properties={[]}
+              onChange={setFilter}
+              registerFocus={() => {}}
+            />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
             Default view: All · Table · Title
           </p>
         </section>

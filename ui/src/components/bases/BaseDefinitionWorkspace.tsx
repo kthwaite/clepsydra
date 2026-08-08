@@ -12,6 +12,7 @@ import {
 } from "./DefinitionHeader";
 import { type BaseDraft, fromWire, toWire } from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
+import { MembershipEditor } from "./MembershipEditor";
 import { ValidationSummary } from "./ValidationSummary";
 
 export type BaseDiagnostic = BaseDetailResponse["diagnostics"][number];
@@ -371,12 +372,32 @@ export function BaseDefinitionWorkspace({
             <GeneralEditor slug={slug} {...editorProps} />
           )}
           {selectedSection === "filter" && (
-            <SectionPlaceholder
-              section="filter"
-              heading="Filter"
-              message="Filter editing is added in Task 8."
-              {...editorProps}
-            />
+            <section
+              ref={(element) => registerFocusTarget("filter", element)}
+              tabIndex={-1}
+              aria-labelledby="filter-editor-heading"
+              className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            >
+              <h2
+                id="filter-editor-heading"
+                className="text-sm font-bold uppercase tracking-widest text-foreground"
+              >
+                Filter
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Membership rules choose the pages included in every view.
+              </p>
+              <div className="mt-5">
+                <MembershipEditor
+                  value={draft.filter}
+                  properties={draft.properties}
+                  onChange={(filter) =>
+                    changeDraft((current) => ({ ...current, filter }))
+                  }
+                  registerFocus={registerFocusTarget}
+                />
+              </div>
+            </section>
           )}
           {selectedSection === "properties" && (
             <SectionPlaceholder

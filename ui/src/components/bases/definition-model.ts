@@ -38,6 +38,100 @@ export interface BaseDraft {
 
 export type AggregateFunction = "count" | "sum" | "avg" | "min" | "max";
 
+export type FilterPathSegment = "all" | "any" | "not" | number;
+export type FilterPath = readonly FilterPathSegment[];
+
+function replaceFilterAtOffset(
+  filter: BaseFilter,
+  path: FilterPath,
+  offset: number,
+  replacement: BaseFilter,
+): BaseFilter {
+  if (offset === path.length) return replacement;
+  const branch = path[offset];
+  if (branch === "not" && "not" in filter) {
+    return {
+      not: replaceFilterAtOffset(filter.not, path, offset + 1, replacement),
+    };
+  }
+  const childIndex = path[offset + 1];
+  if (typeof childIndex !== "number") return filter;
+  if (branch === "all" && "all" in filter) {
+    if (childIndex < 0 || childIndex >= filter.all.length) return filter;
+    return {
+      all: filter.all.map((child, index) =>
+        index === childIndex
+          ? replaceFilterAtOffset(child, path, offset + 2, replacement)
+          : child,
+      ),
+    };
+  }
+  if (branch === "any" && "any" in filter) {
+    if (childIndex < 0 || childIndex >= filter.any.length) return filter;
+    return {
+      any: filter.any.map((child, index) =>
+        index === childIndex
+          ? replaceFilterAtOffset(child, path, offset + 2, replacement)
+          : child,
+      ),
+    };
+  }
+  return filter;
+}
+
+export function replaceFilterAtPath(
+  filter: BaseFilter,
+  path: FilterPath,
+  replacement: BaseFilter,
+): BaseFilter {
+  return replaceFilterAtOffset(filter, path, 0, replacement);
+}
+
+function removeFilterChild(
+  children: BaseFilter[],
+  childIndex: number,
+  path: FilterPath,
+  offset: number,
+): BaseFilter[] | undefined {
+  if (childIndex < 0 || childIndex >= children.length) return children;
+  const child = removeFilterAtOffset(children[childIndex], path, offset + 2);
+  const nextChildren = [...children];
+  if (child) nextChildren[childIndex] = child;
+  else nextChildren.splice(childIndex, 1);
+  return nextChildren.length > 0 ? nextChildren : undefined;
+}
+
+function removeFilterAtOffset(
+  filter: BaseFilter,
+  path: FilterPath,
+  offset: number,
+): BaseFilter | undefined {
+  if (offset === path.length) return undefined;
+  const branch = path[offset];
+  if (branch === "not" && "not" in filter) {
+    const child = removeFilterAtOffset(filter.not, path, offset + 1);
+    return child ? { not: child } : undefined;
+  }
+  const childIndex = path[offset + 1];
+  if (typeof childIndex !== "number") return filter;
+  if (branch === "all" && "all" in filter) {
+    const children = removeFilterChild(filter.all, childIndex, path, offset);
+    return children ? { all: children } : undefined;
+  }
+  if (branch === "any" && "any" in filter) {
+    const children = removeFilterChild(filter.any, childIndex, path, offset);
+    return children ? { any: children } : undefined;
+  }
+  return filter;
+}
+
+export function removeFilterAtPath(
+  filter: BaseFilter,
+  path: FilterPath,
+): BaseFilter | undefined {
+  return removeFilterAtOffset(filter, path, 0);
+}
+
 function cloneFilter(filter: BaseFilter | null | undefined) {
   return filter == null ? undefined : structuredClone(filter);
 }
@@ -127,32 +221,15 @@ export function operatorsFor(
 ): FilterOp[] {
   switch (type) {
     case "system-multi":
+      return ["contains", "in", "is_empty", "not_empty"];
     case "multi_select":
       return ["eq", "ne", "contains", "in", "is_empty", "not_empty"];
     case "number":
     case "date":
     case "datetime":
-      return [
-        "eq",
-        "ne",
-        "lt",
-        "lte",
-        "gt",
-        "gte",
-        "in",
-        "is_empty",
-        "not_empty",
-      ];
+      return ["eq", "ne", "lt", "lte", "gt", "gte"];
     case "relation":
-      return [
-        "eq",
-        "ne",
-        "contains",
-        "in",
-        "links_to",
-        "is_empty",
-        "not_empty",
-      ];
+      return ["eq", "ne", "links_to", "is_empty", "not_empty"];
     case "bool":
       return ["eq", "ne", "in", "is_empty", "not_empty"];
     case "select":
