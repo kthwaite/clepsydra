@@ -50,6 +50,21 @@ pub enum BaseDocumentError {
     Io(#[from] io::Error),
 }
 
+pub fn load(root: &Path, slug: &str) -> Result<StoredBase, BaseDocumentError> {
+    let path = base_path(root, slug)?;
+    load_stored(&path, slug)
+}
+
+#[cfg(test)]
+fn load_with_after_read(
+    root: &Path,
+    slug: &str,
+    after_read: impl FnOnce(),
+) -> Result<StoredBase, BaseDocumentError> {
+    let path = base_path(root, slug)?;
+    load_stored_with_after_read(&path, slug, after_read)
+}
+
 pub fn create(root: &Path, slug: &str, file: &BaseFile) -> Result<StoredBase, BaseDocumentError> {
     let path = base_path(root, slug)?;
     let _writer = lock_writer();
@@ -204,7 +219,16 @@ fn serialize_managed(file: &BaseFile) -> Result<String, BaseDocumentError> {
 }
 
 fn load_stored(path: &Path, slug: &str) -> Result<StoredBase, BaseDocumentError> {
+    load_stored_with_after_read(path, slug, || {})
+}
+
+fn load_stored_with_after_read(
+    path: &Path,
+    slug: &str,
+    after_read: impl FnOnce(),
+) -> Result<StoredBase, BaseDocumentError> {
     let raw = fs::read_to_string(path).map_err(|error| map_read_error(slug, error))?;
+    after_read();
     let (definition, diagnostics) = parse_base(path, &raw);
     let definition = definition.ok_or_else(|| {
         let message = diagnostics
@@ -959,6 +983,21 @@ mod tests {
     }
 
     #[test]
+    fn load_keeps_definition_and_revision_on_one_raw_snapshot() {
+        let fixture = fixture_base(MINIMAL_BASE);
+        let external = "name = \"Externally edited\"\nproperties = {}\n";
+
+        let stored = load_with_after_read(fixture.root(), "reading", || {
+            fs::write(fixture.path(), external).unwrap();
+        })
+        .unwrap();
+
+        assert_eq!(stored.definition.file.name, "Reading");
+        assert_eq!(stored.revision, revision(MINIMAL_BASE));
+        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), external);
+    }
+
+    #[test]
     fn unsafe_slugs_are_rejected_before_filesystem_access() {
         let root = tempfile::tempdir().unwrap();
         let unusable_root = root.path().join("not-a-directory");
@@ -975,6 +1014,10 @@ mod tests {
             ));
             assert!(matches!(
                 delete(&unusable_root, slug, "stale"),
+                Err(BaseDocumentError::InvalidSlug(value)) if value == slug
+            ));
+            assert!(matches!(
+                load(&unusable_root, slug),
                 Err(BaseDocumentError::InvalidSlug(value)) if value == slug
             ));
         }

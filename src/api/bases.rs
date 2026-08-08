@@ -214,39 +214,23 @@ pub async fn list_bases(State(state): State<Arc<AppState>>) -> Json<BaseListResp
     path = "/{slug}",
     context_path = "/api/vault/bases",
     tag = "Bases",
-    params(("slug" = String, Path, description = "Base slug (filename stem)")),
     responses(
         (status = 200, body = BaseDetailResponse),
-        (status = 404, description = "Unknown base")
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError),
+        (status = 500, body = ApiError)
     )
 )]
 pub async fn get_base(
     State(state): State<Arc<AppState>>,
     Path(slug): Path<String>,
 ) -> Result<Json<BaseDetailResponse>, ApiError> {
-    let registry = BaseRegistry::load(state.vault.root());
-    let base = registry
-        .get(&slug)
-        .cloned()
-        .ok_or_else(|| ApiError::not_found(format!("no base with slug `{slug}`")))?;
-    let document_path = state
-        .vault
-        .root()
-        .join("bases")
-        .join(format!("{}.base.toml", base.slug));
-    let raw = std::fs::read_to_string(document_path)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    let revision = base_document::revision(&raw);
-    let diagnostics = registry
-        .diagnostics
-        .iter()
-        .filter(|d| d.slug == slug)
-        .cloned()
-        .collect();
+    let stored = base_document::load(state.vault.root(), &slug).map_err(document_error)?;
     Ok(Json(BaseDetailResponse {
-        definition: base,
-        diagnostics,
-        revision,
+        definition: stored.definition,
+        diagnostics: stored.diagnostics,
+        revision: stored.revision,
     }))
 }
 
