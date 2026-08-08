@@ -9,6 +9,7 @@ import {
 import { HistoryEditor } from "slate-history";
 import { makeFootnoteDef } from "#/editor/schema/elements/footnoteDef";
 import { makeFootnoteRef } from "#/editor/schema/elements/footnoteRef";
+import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import type { CustomElement } from "#/editor/types";
 
 type MarkType = "bold" | "italic" | "strikethrough" | "code";
@@ -216,11 +217,51 @@ function tryMarkTransform(
   return true;
 }
 
+
+function tryWikilinkTransform(
+  editor: Editor,
+  textBefore: string,
+  path: number[],
+  closerConsumed: boolean,
+): boolean {
+  const closeStart = textBefore.length - (closerConsumed ? 2 : 1);
+  const expectedCloser = closerConsumed ? "]]" : "]";
+  if (!textBefore.endsWith(expectedCloser)) return false;
+
+  const openerStart = textBefore.lastIndexOf("[[", closeStart - 1);
+  if (openerStart === -1) return false;
+
+  const inner = textBefore.slice(openerStart + 2, closeStart);
+  if (inner.includes("[") || inner.includes("]")) return false;
+
+  const dividerIndex = inner.indexOf("|");
+  const target = dividerIndex === -1 ? inner : inner.slice(0, dividerIndex);
+  const alias = dividerIndex === -1 ? undefined : inner.slice(dividerIndex + 1);
+  if (target.trim().length === 0 || alias?.trim().length === 0) return false;
+
+  const rangeStart: Point = { path, offset: openerStart };
+  const rangeEnd: Point = { path, offset: textBefore.length };
+  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+    Editor.withoutNormalizing(editor, () => {
+      Transforms.select(editor, { anchor: rangeStart, focus: rangeEnd });
+      Transforms.delete(editor);
+      Transforms.insertNodes(editor, makeWikilink({ target, alias }));
+      const wikilinkPath = editor.selection?.anchor.path.slice(0, -1);
+      if (wikilinkPath) selectTextAfterInline(editor, wikilinkPath);
+    });
+  });
+  return true;
+}
+
 function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
   const info = getTextBefore(editor);
   if (!info) return false;
 
   const { text: textBefore, path } = info;
+  if (tryWikilinkTransform(editor, textBefore, path, closerConsumed)) {
+    return true;
+  }
+
   if (closerConsumed && !textBefore.endsWith("]")) return false;
   const contentEnd = textBefore.length - (closerConsumed ? 1 : 0);
   const openBracketIdx = textBefore.lastIndexOf("[", contentEnd - 1);

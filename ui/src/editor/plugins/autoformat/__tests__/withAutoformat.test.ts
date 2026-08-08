@@ -118,6 +118,22 @@ describe("withAutoformat integration", () => {
       expect(leaves.some((l: any) => l.code && l.text === "code")).toBe(true);
     });
 
+    it("converts a typed labeled wikilink into a wikilink element", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "[[My Page|display text]]");
+
+      const children = elementChildren(editor.children[0]);
+      expect(children).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "wikilink",
+            target: "My Page",
+            alias: "display text",
+          }),
+        ]),
+      );
+    });
+
     it("`text` inside parentheses applies code mark", () => {
       const editor = makeEditor();
       type(editor, "(`foo bar`");
