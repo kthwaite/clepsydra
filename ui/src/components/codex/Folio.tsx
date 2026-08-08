@@ -166,10 +166,11 @@ export function Folio({ tabId, path }: FolioProps) {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
+  const currentEditorValue = editor.editorValue ?? editor.initialValue;
   const visibleEditorValue =
     encrypted && encryptionState.status !== "plain"
       ? EMPTY_EDITOR_VALUE
-      : editor.initialValue;
+      : currentEditorValue;
   const wordCount = useMemo(
     () => countWordsFromSlate(visibleEditorValue),
     [visibleEditorValue],
@@ -178,6 +179,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const { activeIndex, scrollTo } = useScrollSpy(
     bodyRef,
     editor.editorRevision,
+    mobile,
   );
 
   if (isTodayDraftPath && (isJournalTodayLoading || journalToday)) {
@@ -247,7 +249,7 @@ export function Folio({ tabId, path }: FolioProps) {
         <WikilinkResolutionProvider path={path}>
           <SlateEditor
             key={`${path}:${editor.editorRevision}`}
-            initialValue={editor.initialValue}
+            initialValue={currentEditorValue}
             onChange={editor.onSlateChange}
             onSaveNow={editor.saveNow}
           />

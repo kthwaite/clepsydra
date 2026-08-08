@@ -78,6 +78,8 @@ interface PageEditorState {
   error: unknown;
   isDraft: boolean;
   initialValue: Descendant[];
+  /** Latest live Slate AST, including edits that have not saved yet. */
+  editorValue: Descendant[];
   editorRevision: number;
   title: string;
   setTitle: (t: string) => void;
@@ -661,6 +663,10 @@ export function usePageEditor(
     error: pageNotFound && canDraft ? null : error,
     isDraft,
     initialValue,
+    editorValue:
+      previousPathRef.current === path && editorValueRef.current.length > 0
+        ? editorValueRef.current
+        : initialValue,
     editorRevision,
     title,
     setTitle,

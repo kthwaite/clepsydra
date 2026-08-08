@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,17 +6,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
 // early-return branch renders FolioNotFound. Mock the editor + data hooks so
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
-const { mobileLayoutState, useCollapsibleRailMock, usePageEditorMock } =
-  vi.hoisted(() => ({
-    mobileLayoutState: { matches: false },
-    useCollapsibleRailMock: vi.fn(() => ({
-      collapsed: false,
-      width: 240,
-      toggle: vi.fn(),
-      onResizeStart: vi.fn(),
-    })),
-    usePageEditorMock: vi.fn(),
-  }));
+const {
+  mobileLayoutState,
+  useCollapsibleRailMock,
+  usePageEditorMock,
+  useScrollSpyMock,
+} = vi.hoisted(() => ({
+  mobileLayoutState: { matches: false },
+  useCollapsibleRailMock: vi.fn(() => ({
+    collapsed: false,
+    width: 240,
+    toggle: vi.fn(),
+    onResizeStart: vi.fn(),
+  })),
+  usePageEditorMock: vi.fn(),
+  useScrollSpyMock: vi.fn(() => ({
+    activeIndex: -1,
+    scrollTo: vi.fn(),
+  })),
+}));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
 }));
@@ -25,6 +33,9 @@ vi.mock("#/hooks/useMobileLayout", () => ({
 }));
 vi.mock("#/components/codex/useCollapsibleRail", () => ({
   useCollapsibleRail: useCollapsibleRailMock,
+}));
+vi.mock("#/components/codex/useScrollSpy", () => ({
+  useScrollSpy: useScrollSpyMock,
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
@@ -49,7 +60,27 @@ vi.mock("#/crypto/EncryptionProvider", () => ({
   }),
 }));
 vi.mock("#/editor/SlateEditor", () => ({
-  SlateEditor: () => <div data-testid="slate-editor">Slate editor</div>,
+  SlateEditor: ({
+    initialValue,
+    onChange,
+  }: {
+    initialValue: Array<{ children?: Array<{ text?: string }> }>;
+    onChange: (value: Array<{ type: string; children: Array<{ text: string }> }>) => void;
+  }) => (
+    <textarea
+      aria-label="Page body"
+      data-testid="slate-editor"
+      defaultValue={initialValue[0]?.children?.[0]?.text ?? ""}
+      onChange={(event) =>
+        onChange([
+          {
+            type: "paragraph",
+            children: [{ text: event.currentTarget.value }],
+          },
+        ])
+      }
+    />
+  ),
 }));
 vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, isLoading: false }),
@@ -78,6 +109,15 @@ function errorEditor() {
   };
 }
 function editableEditor() {
+  const initialValue = [
+    { type: "paragraph", children: [{ text: "Editable body" }] },
+  ];
+  let editorValue = initialValue;
+  const onSlateChange = vi.fn(
+    (value: Array<{ type: string; children: Array<{ text: string }> }>) => {
+      editorValue = value;
+    },
+  );
   return {
     isLoading: false,
     error: null,
@@ -88,7 +128,7 @@ function editableEditor() {
     setTags: vi.fn(),
     aliases: [],
     setAliases: vi.fn(),
-    saveNow: vi.fn(),
+    saveNow: vi.fn().mockResolvedValue(undefined),
     saveStatus: "saved" as const,
     saveError: null,
     revisionConflict: null,
@@ -97,10 +137,11 @@ function editableEditor() {
     bodyMarkdown: "Editable body",
     inferred: false,
     project: null,
-    initialValue: [
-      { type: "paragraph", children: [{ text: "Editable body" }] },
-    ],
-    onSlateChange: vi.fn(),
+    initialValue,
+    get editorValue() {
+      return editorValue;
+    },
+    onSlateChange,
     editorRevision: 1,
     createdAt: "2026-08-08T00:00:00Z",
     updatedAt: "2026-08-08T00:00:00Z",
@@ -201,5 +242,58 @@ describe("Folio mobile presentation", () => {
       screen.getByRole("dialog", { name: "Page relationships" }),
     ).toBeVisible();
     expect(screen.getByText("Backlinks")).toBeVisible();
+  });
+
+  it("rehydrates unsaved body state across breakpoint changes", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    mobileLayoutState.matches = false;
+    const { rerender } = render(
+      <Folio tabId="t1" path="notes/alpha.md" />,
+    );
+
+    const desktopBody = screen.getByRole("textbox", { name: "Page body" });
+    await user.clear(desktopBody);
+    await user.type(desktopBody, "Unsaved across layouts");
+    expect(editor.onSlateChange).toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+
+    mobileLayoutState.matches = true;
+    rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveValue(
+      "Unsaved across layouts",
+    );
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    expect(editor.saveNow).toHaveBeenCalledOnce();
+
+    mobileLayoutState.matches = false;
+    rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveValue(
+      "Unsaved across layouts",
+    );
+  });
+
+  it("passes breakpoint changes as the scroll-spy reattach discriminator", () => {
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    mobileLayoutState.matches = false;
+    const { rerender } = render(
+      <Folio tabId="t1" path="notes/alpha.md" />,
+    );
+    expect(useScrollSpyMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      1,
+      false,
+    );
+
+    mobileLayoutState.matches = true;
+    rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    expect(useScrollSpyMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      1,
+      true,
+    );
   });
 });
