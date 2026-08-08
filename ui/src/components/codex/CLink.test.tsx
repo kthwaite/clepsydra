@@ -29,9 +29,14 @@ const unrelated: PreviewWindow = {
   minimized: false,
   z: 202,
 };
+let windowsAtOpen: PreviewWindow[] | undefined;
 
 beforeEach(() => {
   openTabMock.mockReset();
+  windowsAtOpen = undefined;
+  openTabMock.mockImplementation(() => {
+    windowsAtOpen = usePreviewStore.getState().windows;
+  });
   usePreviewStore.setState({
     windows: [matching, unrelated],
     topZ: 202,
@@ -46,6 +51,7 @@ describe("CLink navigation", () => {
 
     await user.click(screen.getByRole("link", { name: "Target" }));
 
+    expect(windowsAtOpen).toEqual([unrelated]);
     expect(usePreviewStore.getState().windows).toEqual([unrelated]);
     expect(openTabMock).toHaveBeenCalledOnce();
     expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md");
