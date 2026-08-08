@@ -52,6 +52,7 @@ export function CLink({
   const delayRef = useRef<number | null>(null);
   const openTab = useOpenTab();
   const openHover = usePreviewStore((s) => s.openHover);
+  const closePath = usePreviewStore((s) => s.closePath);
 
   // Path-backed links route through the window manager; payload-only links
   // (e.g. tag chips) keep the lightweight inline card.
@@ -86,6 +87,7 @@ export function CLink({
       return;
     }
     if (path && !noNavigate) {
+      closePath(path);
       openTab("page", path);
     }
   };
