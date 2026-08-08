@@ -147,6 +147,7 @@ impl Modify for FilterSchema {
         crate::api::deeplink::resolve_url,
         // Bases
         crate::api::bases::list_bases,
+        crate::api::bases::preview_base,
         crate::api::bases::get_base,
         crate::api::bases::evaluate_view,
         crate::api::bases::create_base,
@@ -183,6 +184,8 @@ impl Modify for FilterSchema {
             crate::api::bases::UpdateBaseRequest,
             crate::api::bases::DeleteBaseRequest,
             crate::api::bases::BaseMutationResponse,
+            crate::api::bases::BasePreviewRequest,
+            crate::api::bases::BasePreviewResponse,
             crate::api::query::QueryRequest,
             crate::api::properties::PropertyPatchRequest,
             crate::api::properties::PropertyPatchResponse,

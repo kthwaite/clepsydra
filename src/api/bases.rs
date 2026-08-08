@@ -12,7 +12,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -20,7 +20,8 @@ use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
-    BaseDefinition, BaseDiagnostic, BaseFile, BaseRegistry, Filter, SortDir, SortKey,
+    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
+    SortDir, SortKey, ViewDefinition, validate_definition,
 };
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
 use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
@@ -34,6 +35,7 @@ pub struct BaseSummary {
     pub description: Option<String>,
     pub views: Vec<String>,
     pub diagnostic_count: usize,
+    pub match_count: Option<u32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -97,6 +99,57 @@ pub struct ViewParams {
     pub dir: Option<String>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BasePreviewRequest {
+    pub definition: BaseFile,
+    pub view: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BasePreviewResponse {
+    pub diagnostics: Vec<BaseDiagnostic>,
+    pub output: Option<QueryOutput>,
+    pub evaluation_error: Option<String>,
+}
+
+fn query_spec(
+    base: &BaseDefinition,
+    view: Option<&ViewDefinition>,
+    limit: Option<u32>,
+    offset: u32,
+    sort_override: Option<&str>,
+    sort_dir: Option<&str>,
+) -> QuerySpec {
+    let view_filter = view.and_then(|view| view.filter.clone());
+    let filter = match (base.file.filter.clone(), view_filter) {
+        (Some(membership), Some(view)) => Some(Filter::All(vec![membership, view])),
+        (membership, view) => membership.or(view),
+    };
+    let sort = match sort_override {
+        Some(field) => vec![SortKey {
+            field: field.to_owned(),
+            dir: match sort_dir {
+                Some("desc") => SortDir::Desc,
+                _ => SortDir::Asc,
+            },
+        }],
+        None => view.map_or_else(Vec::new, |view| view.sort.clone()),
+    };
+
+    QuerySpec {
+        filter,
+        sort,
+        group_by: view.and_then(|view| view.group_by.clone()),
+        aggregates: view.map_or_else(Vec::new, |view| view.aggregates.clone()),
+        columns: view.map_or_else(Vec::new, |view| view.columns.clone()),
+        limit,
+        offset,
+        group_row_limit: None,
+    }
+}
+
 /// List every base with its views and diagnostic count.
 #[utoipa::path(
     get,
@@ -107,10 +160,29 @@ pub struct ViewParams {
 )]
 pub async fn list_bases(State(state): State<Arc<AppState>>) -> Json<BaseListResponse> {
     let registry = BaseRegistry::load(state.vault.root());
+    let count_bases = registry.bases.clone();
+    let base_count = count_bases.len();
+    let match_counts = state
+        .index
+        .with_index(move |index, _vault| {
+            count_bases
+                .iter()
+                .map(|base| {
+                    let spec = query_spec(base, None, Some(0), 0, None, None);
+                    match evaluate(index.connection(), &spec, &QueryContext::for_base(base)) {
+                        Ok(QueryOutput::Flat { total, .. }) => u32::try_from(total).ok(),
+                        Ok(QueryOutput::Grouped { .. }) | Err(_) => None,
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_else(|_| vec![None; base_count]);
     let bases = registry
         .bases
         .iter()
-        .map(|base| BaseSummary {
+        .zip(match_counts)
+        .map(|(base, match_count)| BaseSummary {
             slug: base.slug.clone(),
             name: base.file.name.clone(),
             description: base.file.description.clone(),
@@ -120,6 +192,7 @@ pub async fn list_bases(State(state): State<Arc<AppState>>) -> Json<BaseListResp
                 .iter()
                 .filter(|d| d.slug == base.slug)
                 .count(),
+            match_count,
         })
         .collect();
     let orphan_diagnostics = registry
@@ -268,6 +341,80 @@ fn document_error(error: BaseDocumentError) -> ApiError {
     }
 }
 
+/// Evaluate an unsaved definition without mutating vault files or the index.
+#[utoipa::path(
+    post,
+    path = "/preview",
+    context_path = "/api/vault/bases",
+    tag = "Bases",
+    request_body = BasePreviewRequest,
+    responses((status = 200, body = BasePreviewResponse))
+)]
+pub async fn preview_base(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BasePreviewRequest>,
+) -> Json<BasePreviewResponse> {
+    let validation = validate_definition("__preview__", request.definition);
+    let diagnostics = validation.diagnostics;
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+    {
+        return Json(BasePreviewResponse {
+            diagnostics,
+            output: None,
+            evaluation_error: None,
+        });
+    }
+
+    let base = validation.definition;
+    let selected_view = match request.view {
+        Some(view_name) => match base
+            .file
+            .views
+            .iter()
+            .find(|view| view.name.eq_ignore_ascii_case(&view_name))
+            .cloned()
+        {
+            Some(view) => Some(view),
+            None => {
+                return Json(BasePreviewResponse {
+                    diagnostics,
+                    output: None,
+                    evaluation_error: Some(format!("base preview has no view named `{view_name}`")),
+                });
+            }
+        },
+        None => None,
+    };
+    let limit = Some(request.limit.unwrap_or(100).min(100));
+    let spec = query_spec(
+        &base,
+        selected_view.as_ref(),
+        limit,
+        request.offset.unwrap_or(0),
+        None,
+        None,
+    );
+    let evaluation = state
+        .index
+        .with_index(move |index, _vault| {
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base))
+        })
+        .await;
+    let (output, evaluation_error) = match evaluation {
+        Ok(Ok(output)) => (Some(output), None),
+        Ok(Err(error)) => (None, Some(format!("query error: {error}"))),
+        Err(error) => (None, Some(format!("index error: {error}"))),
+    };
+
+    Json(BasePreviewResponse {
+        diagnostics,
+        output,
+        evaluation_error,
+    })
+}
+
 /// Evaluate a saved view, honoring its filter, sort, grouping, and
 /// aggregates, with per-request pagination and sort overrides.
 #[utoipa::path(
@@ -308,32 +455,14 @@ pub async fn evaluate_view(
             ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
         })?;
 
-    // Membership filter AND view filter.
-    let filter = match (base.file.filter.clone(), view.filter.clone()) {
-        (Some(a), Some(b)) => Some(Filter::All(vec![a, b])),
-        (a, b) => a.or(b),
-    };
-    let sort = match &params.sort {
-        Some(field) => vec![SortKey {
-            field: field.clone(),
-            dir: match params.dir.as_deref() {
-                Some("desc") => SortDir::Desc,
-                _ => SortDir::Asc,
-            },
-        }],
-        None => view.sort.clone(),
-    };
-
-    let spec = QuerySpec {
-        filter,
-        sort,
-        group_by: view.group_by.clone(),
-        aggregates: view.aggregates.clone(),
-        columns: view.columns.clone(),
-        limit: params.limit,
-        offset: params.offset.unwrap_or(0),
-        group_row_limit: None,
-    };
+    let spec = query_spec(
+        &base,
+        Some(&view),
+        params.limit,
+        params.offset.unwrap_or(0),
+        params.sort.as_deref(),
+        params.dir.as_deref(),
+    );
 
     let output = state
         .index
@@ -350,6 +479,7 @@ pub async fn evaluate_view(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_bases).post(create_base))
+        .route("/preview", post(preview_base))
         .route(
             "/{slug}",
             get(get_base).put(update_base).delete(delete_base),
