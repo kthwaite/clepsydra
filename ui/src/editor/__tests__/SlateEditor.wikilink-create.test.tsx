@@ -112,6 +112,13 @@ function renderEditor() {
         Transforms.insertText(editor, text);
       });
     },
+    replaceText: (text: string) => {
+      const editor = editorRef.current;
+      if (!editor) throw new Error("Slate editor is not active");
+      Transforms.select(editor, Editor.range(editor, []));
+      Transforms.delete(editor);
+      Transforms.insertText(editor, text);
+    },
   };
 }
 
@@ -131,16 +138,32 @@ it("creates in the background and inserts the requested wikilink", async () => {
     expect(resolveOrCreateMock).toHaveBeenCalledWith("New Topic"),
   );
   expect(screen.queryByText('Create “New Topic”')).toBeNull();
-  expect(findWikilinks(latestChanges())).toContainEqual({
-    type: "wikilink",
-    target: "New Topic",
-  });
+  expect(latestChanges()).toEqual([
+    {
+      type: "paragraph",
+      children: [
+        { text: "" },
+        {
+          type: "wikilink",
+          target: "New Topic",
+          alias: undefined,
+          children: [{ text: "" }],
+        },
+        { text: "" },
+      ],
+    },
+  ]);
   expect(editable).toHaveFocus();
   expect(openTabMock).not.toHaveBeenCalled();
 });
 
-it("keeps the chooser and inserts nothing when creation fails", async () => {
-  resolveOrCreateMock.mockRejectedValue(new Error("create failed"));
+it("retries after failure and inserts only after the retry succeeds", async () => {
+  resolveOrCreateMock
+    .mockRejectedValueOnce(new Error("create failed"))
+    .mockResolvedValueOnce({
+      path: "notes/new-topic.md",
+      title: "New Topic",
+    });
   const { user, editable, latestChanges, typeText } = renderEditor();
   await user.click(editable);
   await typeText("[[New Topic");
@@ -149,6 +172,17 @@ it("keeps the chooser and inserts nothing when creation fails", async () => {
   await screen.findByText("Creation failed — press Enter to retry");
   expect(findWikilinks(latestChanges())).toEqual([]);
   expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(resolveOrCreateMock).toHaveBeenCalledTimes(2));
+  expect(resolveOrCreateMock).toHaveBeenNthCalledWith(2, "New Topic");
+  expect(findWikilinks(latestChanges())).toEqual([
+    { type: "wikilink", target: "New Topic" },
+  ]);
+  expect(
+    screen.queryByText("Creation failed — press Enter to retry"),
+  ).toBeNull();
+  expect(screen.queryByRole("listbox")).toBeNull();
   expect(editable).toHaveFocus();
   expect(openTabMock).not.toHaveBeenCalled();
 });
@@ -168,7 +202,7 @@ it("ignores repeat activation while creation is pending", async () => {
   });
 });
 
-it("does not insert into a trigger that changed while creation was pending", async () => {
+it("does not insert after the initiating trigger closes", async () => {
   const pending = deferred<ResolvedWikilinkTarget>();
   resolveOrCreateMock.mockReturnValue(pending.promise);
   const { user, editable, latestChanges, typeText } = renderEditor();
@@ -180,5 +214,29 @@ it("does not insert into a trigger that changed while creation was pending", asy
   pending.resolve({ path: "notes/first.md", title: "First" });
   await act(async () => pending.promise);
   expect(findWikilinks(latestChanges())).toEqual([]);
+  expect(openTabMock).not.toHaveBeenCalled();
+});
+
+it("does not insert into a different live trigger", async () => {
+  const pending = deferred<ResolvedWikilinkTarget>();
+  resolveOrCreateMock.mockReturnValue(pending.promise);
+  const { user, editable, latestChanges, replaceText, typeText } =
+    renderEditor();
+  await user.click(editable);
+  await typeText("[[First");
+  await user.keyboard("{Enter}");
+  expect(resolveOrCreateMock).toHaveBeenCalledWith("First");
+
+  await act(async () => {
+    replaceText("[[Second");
+    pending.resolve({ path: "notes/first.md", title: "First" });
+    await pending.promise;
+  });
+
+  expect(findWikilinks(latestChanges())).toEqual([]);
+  expect(latestChanges()).toEqual([
+    { type: "paragraph", children: [{ text: "[[Second" }] },
+  ]);
+  expect(screen.getByText('Create “Second”')).toBeInTheDocument();
   expect(openTabMock).not.toHaveBeenCalled();
 });

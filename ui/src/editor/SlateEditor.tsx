@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   type BasePoint,
   createEditor,
   type Descendant,
   Editor,
   Node,
+  Point,
   Range,
   Element as SlateElement,
   Text,
@@ -156,24 +157,32 @@ export function SlateEditor({
     null,
   );
 
-  useEffect(() => {
-    wikilinkTriggerRef.current = wikilinkTrigger;
-    setWikilinkCreateError(null);
-  }, [wikilinkTrigger]);
+  const updateWikilinkTrigger = (next: ComboboxTrigger | null) => {
+    const previous = wikilinkTriggerRef.current;
+    const triggerChanged =
+      previous === null
+        ? next !== null
+        : next === null ||
+          previous.query !== next.query ||
+          !Point.equals(previous.anchor, next.anchor);
+    wikilinkTriggerRef.current = next;
+    setWikilinkTrigger(next);
+    if (triggerChanged) setWikilinkCreateError(null);
+  };
 
   const handleChange = (value: Descendant[]) => {
     onChange(value, editor);
 
     const { selection } = editor;
     if (!selection || !Range.isCollapsed(selection)) {
-      setWikilinkTrigger(null);
+      updateWikilinkTrigger(null);
       setBlockRefTrigger(null);
       return;
     }
 
     const [node] = Editor.node(editor, selection.anchor.path);
     if (!Text.isText(node)) {
-      setWikilinkTrigger(null);
+      updateWikilinkTrigger(null);
       setBlockRefTrigger(null);
       return;
     }
@@ -185,7 +194,7 @@ export function SlateEditor({
     if (wikiTriggerIndex !== -1) {
       const afterTrigger = textBefore.slice(wikiTriggerIndex + 2);
       if (!afterTrigger.includes("]]")) {
-        setWikilinkTrigger({
+        updateWikilinkTrigger({
           anchor: { path: selection.anchor.path, offset: wikiTriggerIndex },
           query: afterTrigger,
         });
@@ -193,7 +202,7 @@ export function SlateEditor({
         return;
       }
     }
-    setWikilinkTrigger(null);
+    updateWikilinkTrigger(null);
 
     // Check for (( block ref trigger
     const blockRefTriggerIndex = textBefore.lastIndexOf("((");
@@ -249,7 +258,7 @@ export function SlateEditor({
     Transforms.delete(editor);
     Transforms.insertNodes(editor, makeWikilink({ target }));
     Transforms.move(editor);
-    setWikilinkTrigger(null);
+    updateWikilinkTrigger(null);
   };
 
   const insertWikilink = (page: {
@@ -536,7 +545,7 @@ export function SlateEditor({
           reference={createSelectionReference(editor)}
           onSelect={insertWikilink}
           onCreate={(title) => void createWikilinkTarget(title)}
-          onClose={() => setWikilinkTrigger(null)}
+          onClose={() => updateWikilinkTrigger(null)}
           isCreating={wikilinkCreatePending}
           createError={wikilinkCreateError}
         />
