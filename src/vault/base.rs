@@ -196,7 +196,7 @@ pub struct BaseFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
     /// Declared properties in file order (serialized as a key → definition map).
-    #[serde(with = "property_map")]
+    #[serde(default, with = "property_map")]
     #[schema(value_type = std::collections::HashMap<String, PropertyDefinition>)]
     pub properties: Vec<(String, PropertyDefinition)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -967,6 +967,12 @@ layout = "table"
                 .collect::<Vec<_>>(),
             vec!["status", "rating"]
         );
+    }
+
+    #[test]
+    fn structured_base_defaults_omitted_properties() {
+        let file: BaseFile = toml::from_str("name = \"Reading\"\n").unwrap();
+        assert!(file.properties.is_empty());
     }
 
     #[test]
