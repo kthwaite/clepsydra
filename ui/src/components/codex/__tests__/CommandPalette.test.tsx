@@ -1,4 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { Profiler } from "react";
+import { flushSync } from "react-dom";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -99,5 +101,31 @@ describe("CommandPalette keyboard navigation", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(useSearchMock).not.toHaveBeenCalled();
     expect(useTagsMock).not.toHaveBeenCalled();
+  });
+
+  it("resets selection in the same commit as a query change", () => {
+    const commits: string[] = [];
+    render(
+      <Profiler id="palette" onRender={() => commits.push("commit")}>
+        <CommandPalette />
+      </Profiler>,
+    );
+    const input = screen.getByRole("textbox");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    commits.length = 0;
+
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    flushSync(() => {
+      setValue?.call(input, "open");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(commits).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /Open Atrium/ })).toHaveClass(
+      "bg-ink",
+    );
   });
 });
