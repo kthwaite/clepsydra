@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { type ComponentProps, useCallback, useMemo, useState } from "react";
 import {
   type BasePoint,
   createEditor,
@@ -46,6 +46,12 @@ import {
 } from "./transforms/journalTime";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
+import {
+  findAdjacentWikilink,
+  type WikilinkEditingController,
+  WikilinkEditingProvider,
+  useWikilinkEditing,
+} from "./wikilinkEditing";
 
 export function slashCommandToConversion(id: string): BlockConversion | null {
   switch (id) {
@@ -107,6 +113,29 @@ interface SlateEditorProps {
 interface ComboboxTrigger {
   anchor: BasePoint;
   query: string;
+}
+
+type WikilinkEditingEditableProps = Omit<
+  ComponentProps<typeof Editable>,
+  "onKeyDown"
+> & {
+  onKeyDown(
+    event: React.KeyboardEvent,
+    controller: WikilinkEditingController,
+  ): void;
+};
+
+function WikilinkEditingEditable({
+  onKeyDown,
+  ...props
+}: WikilinkEditingEditableProps) {
+  const wikilinkEditing = useWikilinkEditing();
+  return (
+    <Editable
+      {...props}
+      onKeyDown={(event) => onKeyDown(event, wikilinkEditing)}
+    />
+  );
 }
 
 export function SlateEditor({
@@ -331,7 +360,10 @@ export function SlateEditor({
     setSlashTrigger(null);
   }, [slashTrigger, editor]);
 
-  const handleKeyDown = (event: React.KeyboardEvent) => {
+  const handleKeyDown = (
+    event: React.KeyboardEvent,
+    wikilinkEditing: WikilinkEditingController,
+  ) => {
     if (wikilinkTrigger || blockRefTrigger || slashTrigger) {
       if (
         ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)
@@ -349,6 +381,18 @@ export function SlateEditor({
     }
     if (vim.handleKeyDown(event)) {
       return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const adjacent = findAdjacentWikilink(editor, event.key);
+      if (adjacent) {
+        event.preventDefault();
+        wikilinkEditing.begin(
+          adjacent.path,
+          adjacent.caret,
+          adjacent.returnSide,
+        );
+        return;
+      }
     }
 
     if (matchesChord(event, SHORTCUTS["editor.timeHeading"].chord)) {
@@ -483,22 +527,26 @@ export function SlateEditor({
         initialValue={initialValue}
         onChange={handleChange}
       >
-        <Editable
-          renderElement={renderElement}
-          renderLeaf={renderLeaf}
-          decorate={decorateCode}
-          onKeyDown={handleKeyDown}
-          onDOMBeforeInput={(event) => {
-            vim.handleDOMBeforeInput(event);
-          }}
-          onMouseDown={() => {
-            vim.handleMouseDown();
-          }}
-          placeholder="Start writing..."
-          className="min-h-[200px] outline-none"
-          spellCheck
-        />
-        {isVimEnabled && <VimStatusBar mode={vim.mode} pending={vim.pending} />}
+        <WikilinkEditingProvider editor={editor}>
+          <WikilinkEditingEditable
+            renderElement={renderElement}
+            renderLeaf={renderLeaf}
+            decorate={decorateCode}
+            onKeyDown={handleKeyDown}
+            onDOMBeforeInput={(event) => {
+              vim.handleDOMBeforeInput(event);
+            }}
+            onMouseDown={() => {
+              vim.handleMouseDown();
+            }}
+            placeholder="Start writing..."
+            className="min-h-[200px] outline-none"
+            spellCheck
+          />
+          {isVimEnabled && (
+            <VimStatusBar mode={vim.mode} pending={vim.pending} />
+          )}
+        </WikilinkEditingProvider>
       </Slate>
 
       {wikilinkTrigger && (
