@@ -2,6 +2,7 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
+import { classifyLinkResource } from "#/lib/linkResource";
 
 // Shared remark config with the full-page MarkdownRenderer, minus the
 // interactive link handling — preview cards are pointer-events:none, so links
@@ -57,11 +58,17 @@ const components: Components = {
     </ol>
   ),
   li: ({ children }) => <li className="my-[1px]">{children}</li>,
-  a: ({ children }) => (
-    <span className="text-accent underline decoration-1 underline-offset-2">
-      {children}
-    </span>
-  ),
+  a: ({ href, children }) => {
+    const resource = href ? classifyLinkResource(href) : null;
+    return (
+      <span
+        className="text-accent underline decoration-1 underline-offset-2"
+        data-link-resource={resource ?? undefined}
+      >
+        {children}
+      </span>
+    );
+  },
   strong: ({ children }) => (
     <strong className="font-bold text-ink">{children}</strong>
   ),
