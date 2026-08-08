@@ -48,6 +48,11 @@ import {
 } from "./transforms/journalTime";
 import { useVim, VimStatusBar } from "./vim";
 import { WikilinkCombobox } from "./WikilinkCombobox";
+import {
+  findAdjacentWikilink,
+  useWikilinkEditingController,
+  WikilinkEditingProvider,
+} from "./wikilinkEditing";
 
 export function slashCommandToConversion(id: string): BlockConversion | null {
   switch (id) {
@@ -129,6 +134,7 @@ export function SlateEditor({
       ),
     [],
   );
+  const wikilinkEditing = useWikilinkEditingController(editor);
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
@@ -405,6 +411,18 @@ export function SlateEditor({
     if (vim.handleKeyDown(event)) {
       return;
     }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const adjacent = findAdjacentWikilink(editor, event.key);
+      if (adjacent) {
+        event.preventDefault();
+        wikilinkEditing.begin(
+          adjacent.path,
+          adjacent.caret,
+          adjacent.returnSide,
+        );
+        return;
+      }
+    }
 
     if (matchesChord(event, SHORTCUTS["editor.timeHeading"].chord)) {
       event.preventDefault();
@@ -538,22 +556,22 @@ export function SlateEditor({
         initialValue={initialValue}
         onChange={handleChange}
       >
-        <Editable
-          renderElement={renderElement}
-          renderLeaf={renderLeaf}
-          decorate={decorateCode}
-          onKeyDown={handleKeyDown}
-          onDOMBeforeInput={(event) => {
-            vim.handleDOMBeforeInput(event);
-          }}
-          onMouseDown={() => {
-            vim.handleMouseDown();
-          }}
-          placeholder="Start writing..."
-          className="min-h-[200px] outline-none"
-          spellCheck
-        />
-        {isVimEnabled && <VimStatusBar mode={vim.mode} pending={vim.pending} />}
+        <WikilinkEditingProvider value={wikilinkEditing}>
+          <Editable
+            renderElement={renderElement}
+            renderLeaf={renderLeaf}
+            decorate={decorateCode}
+            onKeyDown={handleKeyDown}
+            onDOMBeforeInput={vim.handleDOMBeforeInput}
+            onMouseDown={vim.handleMouseDown}
+            placeholder="Start writing..."
+            className="min-h-[200px] outline-none"
+            spellCheck
+          />
+          {isVimEnabled && (
+            <VimStatusBar mode={vim.mode} pending={vim.pending} />
+          )}
+        </WikilinkEditingProvider>
       </Slate>
 
       {wikilinkTrigger && (
