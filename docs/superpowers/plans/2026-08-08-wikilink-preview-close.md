@@ -103,7 +103,7 @@ A production change that should make this test fail later: removing `closePath` 
 Run from `ui/`:
 
 ```bash
-bun test src/store/preview.test.ts
+bun run test -- src/store/preview.test.ts
 ```
 
 Expected: FAIL because `PreviewState` and the store do not yet define `closePath`.
@@ -141,7 +141,7 @@ This keeps unrelated hover identity intact, removes all matching states, and use
 Run:
 
 ```bash
-bun test src/store/preview.test.ts
+bun run test -- src/store/preview.test.ts
 ```
 
 Expected: both `closePath` tests PASS with no warnings.
@@ -232,7 +232,7 @@ A production change that should make this test fail later: removing the `closePa
 Run from `ui/`:
 
 ```bash
-bun test src/components/codex/CLink.test.tsx
+bun run test -- src/components/codex/CLink.test.tsx
 ```
 
 Expected: FAIL because clicking opens the page but leaves both preview windows in the store.
@@ -261,7 +261,7 @@ Do not call `closePath` in the custom `onClick` branch or for `noNavigate` links
 Run:
 
 ```bash
-bun test src/store/preview.test.ts src/components/codex/CLink.test.tsx
+bun run test -- src/store/preview.test.ts src/components/codex/CLink.test.tsx
 ```
 
 Expected: all tests PASS with no warnings.
@@ -289,7 +289,7 @@ git commit -m "fix(ui): dismiss wikilink preview on open"
 From `ui/`:
 
 ```bash
-bun test src/store/preview.test.ts src/components/codex/CLink.test.tsx
+bun run test -- src/store/preview.test.ts src/components/codex/CLink.test.tsx
 ```
 
 Expected: PASS.
@@ -313,7 +313,7 @@ Expected: exit 0 with no diagnostics attributable to this change.
 - [ ] **Step 4: Run the full UI test suite**
 
 ```bash
-bun test
+bun run test
 ```
 
 Expected: exit 0; all UI tests pass.

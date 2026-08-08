@@ -59,6 +59,7 @@ type PreviewState = {
   minimize: (id: string) => void;
   restore: (id: string) => void;
   close: (id: string) => void;
+  closePath: (path: string) => void;
   raise: (id: string) => void;
   move: (id: string, x: number, y: number) => void;
 };
@@ -133,6 +134,20 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       const windows = s.windows.filter((w) => w.id !== id);
       savePinned(windows);
       return { windows, hoverId: s.hoverId === id ? null : s.hoverId };
+    });
+  },
+
+  closePath(path) {
+    set((s) => {
+      const windows = s.windows.filter((w) => w.path !== path);
+      savePinned(windows);
+      return {
+        windows,
+        hoverId:
+          s.hoverId && s.windows.some((w) => w.id === s.hoverId && w.path === path)
+            ? null
+            : s.hoverId,
+      };
     });
   },
 
