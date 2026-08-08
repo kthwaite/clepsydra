@@ -172,3 +172,24 @@ Use TDD for observable classification and rendering contracts.
 - Importing Gwern's complete link-icon catalog.
 - Adding user-configurable or per-link icon overrides.
 - Changing how external links open.
+
+
+## User documentation
+
+Add a concise “External resource marks” section immediately after
+“Wikilinks” in `ui/src/docs/content/getting-started.mdx`.
+
+The section documents:
+
+- Resource marks are automatic, decorative web-UI affordances.
+- Stored Markdown, link labels, URLs, accessibility names, and copied text
+  remain unchanged.
+- Representative Wikipedia and arXiv PDF examples.
+- Recognized service families: Wikipedia/Wikimedia, arXiv, bioRxiv, DOI,
+  PubMed, Semantic Scholar, GitHub, GitLab, Internet Archive, YouTube, and
+  Vimeo.
+- Direct PDF, audio, video, and image links receive file-type marks.
+- Service identity takes precedence over a generic file-extension mark.
+
+The documentation does not introduce `!W` authoring syntax, claim that marks
+are stored in Markdown, or enumerate implementation-only metadata.
