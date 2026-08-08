@@ -42,3 +42,20 @@ Inline \`code\` here.
 `,
   },
 };
+
+export const LinkResourceMarks: Story = {
+  args: {
+    content: `## Resource marks
+
+[Wikipedia](https://en.wikipedia.org/wiki/Hypertext) · [arXiv](https://arxiv.org/abs/2401.00001) · [bioRxiv](https://biorxiv.org/content/10.1101/example) · [DOI](https://doi.org/10.1000/example) · [PubMed](https://pubmed.ncbi.nlm.nih.gov/12345678/) · [Semantic Scholar](https://semanticscholar.org/paper/example)
+
+[GitHub](https://github.com/example/project) · [GitLab](https://gitlab.com/example/project) · [Internet Archive](https://archive.org/details/example) · [YouTube](https://youtube.com/watch?v=example) · [Vimeo](https://vimeo.com/123)
+
+[PDF](https://example.com/paper.pdf) · [audio](https://example.com/audio.flac) · [video](https://example.com/movie.webm) · [image](https://example.com/image.avif) · [ordinary external](https://example.com/page) · [internal](/pages/notes/example.md)
+
+Wrapped sentence: Read [a deliberately long Wikipedia link label that approaches the edge of its container](https://en.wikipedia.org/wiki/Hypertext), then continue after punctuation. Adjacent: [one](https://github.com/a)[two](https://gitlab.com/b).`,
+  },
+  parameters: {
+    layout: "padded",
+  },
+};

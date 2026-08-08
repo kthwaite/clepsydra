@@ -488,6 +488,70 @@ ul {
     background: var(--highlight);
 }
 
+[data-link-resource]::after {
+    content: "";
+    display: inline-block;
+    width: var(--link-resource-size, 0.65em);
+    height: var(--link-resource-size, 0.65em);
+    margin-inline-start: var(--link-resource-gap, 0.18em);
+    vertical-align: var(--link-resource-align, -0.05em);
+    background-color: currentColor;
+    opacity: var(--link-resource-opacity, 0.6);
+    pointer-events: none;
+    -webkit-mask: var(--link-resource-mask) center / contain no-repeat;
+    mask: var(--link-resource-mask) center / contain no-repeat;
+}
+
+[data-link-resource]:is(:hover, :focus-visible)::after {
+    opacity: 1;
+}
+
+[data-link-resource="wikipedia"] {
+    --link-resource-mask: url("./assets/link-marks/wikipedia.svg");
+}
+[data-link-resource="arxiv"] {
+    --link-resource-mask: url("./assets/link-marks/arxiv.svg");
+}
+[data-link-resource="biorxiv"] {
+    --link-resource-mask: url("./assets/link-marks/biorxiv.svg");
+}
+[data-link-resource="doi"] {
+    --link-resource-mask: url("./assets/link-marks/doi.svg");
+}
+[data-link-resource="pubmed"] {
+    --link-resource-mask: url("./assets/link-marks/pubmed.svg");
+}
+[data-link-resource="semantic-scholar"] {
+    --link-resource-mask: url("./assets/link-marks/semantic-scholar.svg");
+}
+[data-link-resource="github"] {
+    --link-resource-mask: url("./assets/link-marks/github.svg");
+}
+[data-link-resource="gitlab"] {
+    --link-resource-mask: url("./assets/link-marks/gitlab.svg");
+}
+[data-link-resource="internet-archive"] {
+    --link-resource-mask: url("./assets/link-marks/internet-archive.svg");
+}
+[data-link-resource="youtube"] {
+    --link-resource-mask: url("./assets/link-marks/youtube.svg");
+}
+[data-link-resource="vimeo"] {
+    --link-resource-mask: url("./assets/link-marks/vimeo.svg");
+}
+[data-link-resource="pdf"] {
+    --link-resource-mask: url("./assets/link-marks/pdf.svg");
+}
+[data-link-resource="audio"] {
+    --link-resource-mask: url("./assets/link-marks/audio.svg");
+}
+[data-link-resource="video"] {
+    --link-resource-mask: url("./assets/link-marks/video.svg");
+}
+[data-link-resource="image"] {
+    --link-resource-mask: url("./assets/link-marks/image.svg");
+}
+
 /* Button — hard rect, mono uppercase */
 .cl-btn {
     display: inline-flex;
