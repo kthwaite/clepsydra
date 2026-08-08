@@ -16,6 +16,7 @@ interface FieldCapability {
 
 const SYSTEM_FIELDS: readonly FieldCapability[] = [
   { key: "kind", label: "Kind", type: "system-scalar" },
+  { key: "id", label: "ID", type: "system-scalar" },
   { key: "title", label: "Title", type: "system-scalar" },
   { key: "path", label: "Path", type: "system-scalar" },
   { key: "project", label: "Project", type: "system-scalar" },
@@ -69,6 +70,7 @@ export function FilterComparisonEditor({
   registerFocus,
 }: FilterComparisonEditorProps) {
   const [relationSuggestions, setRelationSuggestions] = useState<string[]>([]);
+  const [freeformDraft, setFreeformDraft] = useState<string>();
   const relationListId = useId();
 
   const declaredFields: FieldCapability[] = properties
@@ -87,32 +89,46 @@ export function FilterComparisonEditor({
     "field" in value
       ? value
       : ({ field: "kind", op: "eq", value: "" } satisfies BaseFilter);
+  const knownCapability = fields.find(
+    (field) => field.key === filterValue.field,
+  );
   const capability =
-    fields.find((field) => field.key === filterValue.field) ??
+    knownCapability ??
     ({
       key: filterValue.field,
       label: filterValue.field,
       type: "system-scalar",
     } satisfies FieldCapability);
   const operators = operatorsFor(capability.type);
-  const activeOperator = operators.includes(filterValue.op)
-    ? filterValue.op
-    : operators[0];
+  const operatorOptions = operators.includes(filterValue.op)
+    ? operators
+    : [...operators, filterValue.op];
+  const activeOperator = filterValue.op;
   const hasValue = !VALUELESS_OPERATORS[activeOperator];
   const valueText = Array.isArray(filterValue.value)
     ? filterValue.value.join(", ")
     : filterValue.value == null
       ? ""
       : String(filterValue.value);
+  const displayValueText = freeformDraft ?? valueText;
+  const declaredOptions = capability.options ?? [];
+  const selectedOptionValues = Array.isArray(filterValue.value)
+    ? filterValue.value.map(String)
+    : valueText === ""
+      ? []
+      : [valueText];
+  const missingOptions = selectedOptionValues.filter(
+    (option) => !declaredOptions.includes(option),
+  );
 
   useEffect(() => {
     let cancelled = false;
-    if (capability.type !== "relation" || valueText.trim() === "") {
+    if (capability.type !== "relation" || displayValueText.trim() === "") {
       setRelationSuggestions([]);
       return;
     }
     void fetch(
-      `/api/vault/index/search?q=${encodeURIComponent(valueText.trim())}&limit=8`,
+      `/api/vault/index/search?q=${encodeURIComponent(displayValueText.trim())}&limit=8`,
     )
       .then((response) => (response.ok ? response.json() : []))
       .then((rows: Array<{ title?: string | null; path: string }>) => {
@@ -128,7 +144,7 @@ export function FilterComparisonEditor({
     return () => {
       cancelled = true;
     };
-  }, [capability.type, valueText]);
+  }, [capability.type, displayValueText]);
 
   if (!("field" in value)) return null;
 
@@ -171,6 +187,11 @@ export function FilterComparisonEditor({
           }}
           className={controlClass}
         >
+          {!knownCapability && (
+            <option value={filterValue.field}>
+              {filterValue.field} (undeclared)
+            </option>
+          )}
           <optgroup label="Page fields">
             {SYSTEM_FIELDS.map((field) => (
               <option key={field.key} value={field.key}>
@@ -197,7 +218,7 @@ export function FilterComparisonEditor({
           aria-label={`Operator for condition ${position}`}
           value={activeOperator}
           onChange={(event) => {
-            const nextOperator = operators.find(
+            const nextOperator = operatorOptions.find(
               (operator) => operator === event.target.value,
             );
             if (!nextOperator) return;
@@ -217,9 +238,11 @@ export function FilterComparisonEditor({
           }}
           className={controlClass}
         >
-          {operators.map((operator) => (
+          {operatorOptions.map((operator) => (
             <option key={operator} value={operator}>
-              {operator.replace("_", " ")}
+              {operators.includes(operator)
+                ? operator.replace("_", " ")
+                : `${operator} (unsupported)`}
             </option>
           ))}
         </select>
@@ -234,13 +257,27 @@ export function FilterComparisonEditor({
                 registerFocus(diagnosticPath(path, "value"), element)
               }
               aria-label={`Value for condition ${position}`}
-              value={filterValue.value === false ? "false" : "true"}
+              multiple={activeOperator === "in"}
+              value={
+                activeOperator === "in"
+                  ? Array.isArray(filterValue.value)
+                    ? filterValue.value.map(String)
+                    : []
+                  : filterValue.value === false
+                    ? "false"
+                    : "true"
+              }
               onChange={(event) =>
                 onChange(
                   comparison(
                     filterValue.field,
                     activeOperator,
-                    event.target.value === "true",
+                    activeOperator === "in"
+                      ? Array.from(
+                          event.target.selectedOptions,
+                          (option) => option.value === "true",
+                        )
+                      : event.target.value === "true",
                   ),
                 )
               }
@@ -249,7 +286,7 @@ export function FilterComparisonEditor({
               <option value="true">True</option>
               <option value="false">False</option>
             </select>
-          ) : capability.options && capability.options.length > 0 ? (
+          ) : declaredOptions.length > 0 ? (
             <select
               ref={(element) =>
                 registerFocus(diagnosticPath(path, "value"), element)
@@ -279,9 +316,14 @@ export function FilterComparisonEditor({
               }
               className={controlClass}
             >
-              {capability.options.map((option) => (
+              {declaredOptions.map((option) => (
                 <option key={option} value={option}>
                   {option}
+                </option>
+              ))}
+              {missingOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option} (not declared)
                 </option>
               ))}
             </select>
@@ -296,8 +338,10 @@ export function FilterComparisonEditor({
                 list={
                   capability.type === "relation" ? relationListId : undefined
                 }
-                value={valueText}
-                onChange={(event) =>
+                value={displayValueText}
+                onBlur={() => setFreeformDraft(undefined)}
+                onChange={(event) => {
+                  setFreeformDraft(event.target.value);
                   onChange(
                     comparison(
                       filterValue.field,
@@ -313,8 +357,8 @@ export function FilterComparisonEditor({
                             : event.target.valueAsNumber
                           : event.target.value,
                     ),
-                  )
-                }
+                  );
+                }}
                 className={controlClass}
               />
               {capability.type === "relation" && (

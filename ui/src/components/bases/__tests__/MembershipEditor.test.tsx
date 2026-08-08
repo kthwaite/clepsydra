@@ -46,7 +46,7 @@ function latest(mock: Mock): BaseFilter | undefined {
 
 function renderEditor(value?: BaseFilter, registerFocus = vi.fn()) {
   const onChange = vi.fn();
-  render(
+  const view = render(
     <MembershipEditor
       value={value}
       properties={properties}
@@ -54,7 +54,7 @@ function renderEditor(value?: BaseFilter, registerFocus = vi.fn()) {
       registerFocus={registerFocus}
     />,
   );
-  return { onChange, registerFocus };
+  return { ...view, onChange, registerFocus };
 }
 
 describe("MembershipEditor", () => {
@@ -168,6 +168,10 @@ describe("MembershipEditor", () => {
       op: "contains",
       value: "research",
     });
+    expect(screen.getByRole("option", { name: "ID" })).toHaveAttribute(
+      "value",
+      "id",
+    );
 
     const operator = screen.getByLabelText("Operator for condition 1");
     expect(
@@ -226,6 +230,76 @@ describe("MembershipEditor", () => {
     expect(screen.getByLabelText("Value for condition 1")).toHaveAttribute(
       "list",
     );
+  });
+
+  it("stores bool in values as arrays and preserves freeform comma entry", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      field: "published",
+      op: "eq",
+      value: true,
+    });
+
+    await user.selectOptions(
+      screen.getByLabelText("Operator for condition 1"),
+      "in",
+    );
+    const boolValues = screen.getByLabelText("Value for condition 1");
+    expect(boolValues).toHaveRole("listbox");
+    await user.selectOptions(boolValues, ["true", "false"]);
+    expect(latest(onChange)).toEqual({
+      field: "published",
+      op: "in",
+      value: [true, false],
+    });
+
+    await user.selectOptions(
+      screen.getByLabelText("Field for condition 1"),
+      "tags",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Operator for condition 1"),
+      "in",
+    );
+    const freeform = screen.getByLabelText("Value for condition 1");
+    await user.clear(freeform);
+    await user.type(freeform, "alpha, beta");
+    expect(freeform).toHaveValue("alpha, beta");
+    expect(latest(onChange)).toEqual({
+      field: "tags",
+      op: "in",
+      value: ["alpha", "beta"],
+    });
+  });
+
+  it("keeps unsupported wire fields, operators, and option values visible", () => {
+    const view = renderEditor({
+      field: "legacy_relation",
+      op: "links_to",
+      value: "Old Page",
+    });
+
+    expect(screen.getByLabelText("Field for condition 1")).toHaveValue(
+      "legacy_relation",
+    );
+    expect(
+      screen.getByRole("option", { name: "legacy_relation (undeclared)" }),
+    ).toHaveValue("legacy_relation");
+    expect(screen.getByLabelText("Operator for condition 1")).toHaveValue(
+      "links_to",
+    );
+    expect(
+      screen.getByRole("option", { name: "links_to (unsupported)" }),
+    ).toHaveValue("links_to");
+
+    view.unmount();
+    renderEditor({ field: "status", op: "eq", value: "retired" });
+    expect(screen.getByLabelText("Value for condition 1")).toHaveValue(
+      "retired",
+    );
+    expect(
+      screen.getByRole("option", { name: "retired (not declared)" }),
+    ).toHaveValue("retired");
   });
 
   it("registers exact recursive diagnostic focus paths", () => {
