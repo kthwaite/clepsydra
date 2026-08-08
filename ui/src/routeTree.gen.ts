@@ -21,6 +21,7 @@ import { Route as BasesIndexRouteImport } from './routes/bases.index'
 import { Route as PagesSplatRouteImport } from './routes/pages/$'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
+import { Route as BasesSlugEditRouteImport } from './routes/bases.$slug.edit'
 
 const WorkspaceRoute = WorkspaceRouteImport.update({
   id: '/workspace',
@@ -82,6 +83,11 @@ const BasesSlugRoute = BasesSlugRouteImport.update({
   path: '/bases/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BasesSlugEditRoute = BasesSlugEditRouteImport.update({
+  id: '/edit',
+  path: '/edit',
+  getParentRoute: () => BasesSlugRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -92,10 +98,11 @@ export interface FileRoutesByFullPath {
   '/link-miss': typeof LinkMissRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
-  '/bases/$slug': typeof BasesSlugRoute
+  '/bases/$slug': typeof BasesSlugRouteWithChildren
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
   '/bases/': typeof BasesIndexRoute
+  '/bases/$slug/edit': typeof BasesSlugEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -106,10 +113,11 @@ export interface FileRoutesByTo {
   '/link-miss': typeof LinkMissRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
-  '/bases/$slug': typeof BasesSlugRoute
+  '/bases/$slug': typeof BasesSlugRouteWithChildren
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
   '/bases': typeof BasesIndexRoute
+  '/bases/$slug/edit': typeof BasesSlugEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -121,10 +129,11 @@ export interface FileRoutesById {
   '/link-miss': typeof LinkMissRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
-  '/bases/$slug': typeof BasesSlugRoute
+  '/bases/$slug': typeof BasesSlugRouteWithChildren
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
   '/bases/': typeof BasesIndexRoute
+  '/bases/$slug/edit': typeof BasesSlugEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/docs/$slug'
     | '/pages/$'
     | '/bases/'
+    | '/bases/$slug/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -155,6 +165,7 @@ export interface FileRouteTypes {
     | '/docs/$slug'
     | '/pages/$'
     | '/bases'
+    | '/bases/$slug/edit'
   id:
     | '__root__'
     | '/'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
     | '/docs/$slug'
     | '/pages/$'
     | '/bases/'
+    | '/bases/$slug/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -180,7 +192,7 @@ export interface RootRouteChildren {
   LinkMissRoute: typeof LinkMissRoute
   TaskingRoute: typeof TaskingRoute
   WorkspaceRoute: typeof WorkspaceRoute
-  BasesSlugRoute: typeof BasesSlugRoute
+  BasesSlugRoute: typeof BasesSlugRouteWithChildren
   PagesSplatRoute: typeof PagesSplatRoute
   BasesIndexRoute: typeof BasesIndexRoute
 }
@@ -271,6 +283,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BasesSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bases/$slug/edit': {
+      id: '/bases/$slug/edit'
+      path: '/edit'
+      fullPath: '/bases/$slug/edit'
+      preLoaderRoute: typeof BasesSlugEditRouteImport
+      parentRoute: typeof BasesSlugRoute
+    }
   }
 }
 
@@ -284,6 +303,18 @@ const DocsRouteChildren: DocsRouteChildren = {
 
 const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren)
 
+interface BasesSlugRouteChildren {
+  BasesSlugEditRoute: typeof BasesSlugEditRoute
+}
+
+const BasesSlugRouteChildren: BasesSlugRouteChildren = {
+  BasesSlugEditRoute: BasesSlugEditRoute,
+}
+
+const BasesSlugRouteWithChildren = BasesSlugRoute._addFileChildren(
+  BasesSlugRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgendaRoute: AgendaRoute,
@@ -293,7 +324,7 @@ const rootRouteChildren: RootRouteChildren = {
   LinkMissRoute: LinkMissRoute,
   TaskingRoute: TaskingRoute,
   WorkspaceRoute: WorkspaceRoute,
-  BasesSlugRoute: BasesSlugRoute,
+  BasesSlugRoute: BasesSlugRouteWithChildren,
   PagesSplatRoute: PagesSplatRoute,
   BasesIndexRoute: BasesIndexRoute,
 }
