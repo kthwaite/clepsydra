@@ -11,6 +11,8 @@ import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import {
@@ -51,6 +53,7 @@ export function Gazetteer({ initialTag }: Props) {
     );
   const { data: tagsData } = useTags();
   const { data: content } = useContentIndex(500);
+  const isMobile = useMobileLayout();
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
   const projects = useProjects();
@@ -119,6 +122,23 @@ export function Gazetteer({ initialTag }: Props) {
     selectedTags.length > 0
       ? ` · ${selectedTags.map((t) => `#${t}`).join(" ")}`
       : "";
+
+  if (isMobile) {
+    return (
+      <MobileGazetteer
+        query={query}
+        selectedTags={selectedTags}
+        sort={sort}
+        rows={rows}
+        tags={tags}
+        totalCount={items.length}
+        onQueryChange={setQuery}
+        onSelectedTagsChange={setSelectedTags}
+        onSortChange={setSort}
+        onOpen={(path, title) => openTab("page", path, title)}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
