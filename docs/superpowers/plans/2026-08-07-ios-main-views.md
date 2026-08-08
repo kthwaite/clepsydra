@@ -1,4 +1,5 @@
 # iOS Main Views Implementation Plan
+> **Superseded (2026-08-08):** The native iOS client was replaced by the responsive web application specified in [`2026-08-08-responsive-mobile-web-design.md`](../specs/2026-08-08-responsive-mobile-web-design.md). This document is retained as historical context and must not be executed.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -1,4 +1,5 @@
 # iPhone Vault Client — Design
+> **Superseded (2026-08-08):** The native iOS client was replaced by the responsive web application specified in [`2026-08-08-responsive-mobile-web-design.md`](./2026-08-08-responsive-mobile-web-design.md). This document is retained as historical context and must not be executed.
 
 **Date:** 2026-08-03
 **Status:** Approved (design)
