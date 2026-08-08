@@ -50,10 +50,14 @@ function renderCombobox(
 
 
 describe("WikilinkCombobox", () => {
-  it("does not render when no reference is available", () => {
-    renderCombobox({ pages, query: "des", reference: null });
+  it("does not render or create when no reference is available", () => {
+    const onCreate = vi.fn();
+    renderCombobox({ reference: null, onCreate });
 
-    expect(screen.queryByText("Design Notes")).toBeNull();
+    expect(screen.queryByText('Create “New Topic”')).toBeNull();
+    fireEvent.keyDown(document, { key: "Enter" });
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(onCreate).not.toHaveBeenCalled();
   });
 
   it("offers creation only for a non-empty zero-match query", () => {

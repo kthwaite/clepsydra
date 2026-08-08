@@ -50,6 +50,7 @@ export function WikilinkCombobox({
         : [];
 
   const selectSuggestion = (suggestion: WikilinkSuggestion) => {
+    if (!reference) return;
     if (suggestion.kind === "page") onSelect(suggestion.page);
     else if (!isCreating) onCreate(suggestion.title);
   };
