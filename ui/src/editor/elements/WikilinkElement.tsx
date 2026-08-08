@@ -24,9 +24,10 @@ export function WikilinkElement({ attributes, children, element }: Props) {
 
   const resolved = lookup(element.target);
 
-  const id = element.target;
-  const label =
-    element.alias && element.alias !== element.target ? element.alias : null;
+  const displayText =
+    element.alias && element.alias !== element.target
+      ? element.alias
+      : element.target;
 
   const handleDanglingClick = async () => {
     if (inFlightRef.current) return;
@@ -92,15 +93,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
           <span aria-hidden className={bracketClassName}>
             ⟦
           </span>
-          <span className="px-[2px]">{id}</span>
-          {label && (
-            <>
-              <span aria-hidden className="text-ink-mute">
-                ·
-              </span>
-              <span className="px-[2px] not-italic">{label}</span>
-            </>
-          )}
+          <span className="px-[2px] not-italic">{displayText}</span>
           <span aria-hidden className={bracketClassName}>
             ⟧
           </span>

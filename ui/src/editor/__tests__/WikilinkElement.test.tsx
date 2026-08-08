@@ -138,12 +138,19 @@ describe("WikilinkElement resolved", () => {
     expect(link.className).toContain("text-ink");
   });
 
-  it("shows the alias alongside the target", () => {
+  it("shows only the alias when a custom label exists", () => {
     lookupMock.mockReturnValue("notes/clepsydra-design.md");
     renderWikilink("Clepsydra Design Notes", "the design doc");
 
-    expect(screen.getByText("Clepsydra Design Notes")).toBeDefined();
-    expect(screen.getByText("the design doc")).toBeDefined();
+    expect(screen.getByText("the design doc")).toBeInTheDocument();
+    expect(screen.queryByText("Clepsydra Design Notes")).toBeNull();
+  });
+
+  it("shows the target when no custom label exists", () => {
+    lookupMock.mockReturnValue("notes/clepsydra-design.md");
+    renderWikilink("Clepsydra Design Notes");
+
+    expect(screen.getByText("Clepsydra Design Notes")).toBeInTheDocument();
   });
 });
 
@@ -160,11 +167,11 @@ describe("WikilinkElement dangling", () => {
     expect(link.className).toContain("decoration-dashed");
   });
 
-  it("shows the alias alongside the target", () => {
+  it("shows only the alias for a dangling labeled link", () => {
     renderWikilink("Unwritten Page", "someday");
 
-    expect(screen.getByText("Unwritten Page")).toBeDefined();
-    expect(screen.getByText("someday")).toBeDefined();
+    expect(screen.getByText("someday")).toBeInTheDocument();
+    expect(screen.queryByText("Unwritten Page")).toBeNull();
   });
 });
 
