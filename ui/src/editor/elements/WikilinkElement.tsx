@@ -1,9 +1,12 @@
-import { useRef } from "react";
-import type { RenderElementProps } from "slate-react";
+import { type MouseEvent, useRef } from "react";
+import { Path } from "slate";
+import { ReactEditor, type RenderElementProps, useSlateStatic } from "slate-react";
 import { fetchClient } from "#/api/client";
 import { useCreatePage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
+import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
+import { useWikilinkEditing } from "#/editor/wikilinkEditing";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
@@ -16,12 +19,18 @@ function titleKey(s: string): string {
 }
 
 export function WikilinkElement({ attributes, children, element }: Props) {
+  const editor = useSlateStatic();
+  const controller = useWikilinkEditing();
   const { lookup, refetchAndLookup } = useWikilinkResolution();
   const openTab = useOpenTab();
   const create = useCreatePage();
-  // Guards the dangling-click flow against double-fire while in flight.
+  // Guards the navigation flow against double-fire while in flight.
   const inFlightRef = useRef(false);
 
+  const path = ReactEditor.findPath(editor, element);
+  const active =
+    controller.active !== null &&
+    Path.equals(controller.active.path, path);
   const resolved = lookup(element.target);
 
   const displayText =
@@ -29,10 +38,16 @@ export function WikilinkElement({ attributes, children, element }: Props) {
       ? element.alias
       : element.target;
 
-  const handleDanglingClick = async () => {
+  const openTarget = async (target: string) => {
     if (inFlightRef.current) return;
+
+    const current = lookup(target);
+    if (current) {
+      openTab("page", current);
+      return;
+    }
+
     inFlightRef.current = true;
-    const target = element.target;
     try {
       // 1. The index may lag a just-typed link — refetch outlinks once.
       const fresh = await refetchAndLookup(target);
@@ -54,7 +69,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
         return;
       }
       // 3. Truly dangling: create the page (Obsidian convention) and open it.
-      const path = intakePath({
+      const newPath = intakePath({
         kind: "NOTE",
         project: null,
         title: target,
@@ -62,10 +77,10 @@ export function WikilinkElement({ attributes, children, element }: Props) {
         now: new Date(),
       });
       await create.mutateAsync({
-        params: { path: { path } },
+        params: { path: { path: newPath } },
         body: { title: target },
       });
-      openTab("page", path);
+      openTab("page", newPath);
     } catch {
       // Best-effort flow — on failure the link simply stays dangling.
     } finally {
@@ -73,23 +88,63 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     }
   };
 
+  if (active) {
+    const draft =
+      element.alias === undefined
+        ? element.target
+        : `${element.target}|${element.alias}`;
+    return (
+      <span {...attributes}>
+        <span
+          contentEditable={false}
+          className="cl-mono align-baseline text-[0.95em] text-ink"
+        >
+          <span aria-hidden className="text-accent">
+            ⟦
+          </span>
+          <WikilinkInlineEditor
+            initialDraft={draft}
+            initialCaret={controller.active.initialCaret}
+            returnSide={controller.active.returnSide}
+            onCommit={(parsed, exit) => controller.commit(parsed, exit)}
+            onCancel={(exit) => controller.cancel(exit)}
+            onOpen={(target) => {
+              void openTarget(target);
+            }}
+          />
+          <span aria-hidden className="text-accent">
+            ⟧
+          </span>
+        </span>
+        {children}
+      </span>
+    );
+  }
+
   const dangling = resolved === null;
-  const clinkProps = dangling
-    ? {
-        onClick: () => {
-          void handleDanglingClick();
-        },
-      }
-    : { path: resolved };
   const linkClassName = dangling
     ? "cl-mono align-baseline text-[0.95em] text-ink-mute underline decoration-dashed underline-offset-2 hover:text-accent"
     : "cl-mono align-baseline text-[0.95em] text-ink hover:text-accent";
   const bracketClassName = dangling ? "text-ink-mute" : "text-accent";
 
+  const handleClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.metaKey || event.ctrlKey) {
+      void openTarget(element.target);
+    } else {
+      controller.begin(path, "end", "after");
+    }
+  };
+
   return (
     <span {...attributes}>
       <span contentEditable={false}>
-        <CLink {...clinkProps} className={linkClassName}>
+        <CLink
+          path={resolved ?? undefined}
+          onClick={handleClick}
+          className={linkClassName}
+        >
           <span aria-hidden className={bracketClassName}>
             ⟦
           </span>

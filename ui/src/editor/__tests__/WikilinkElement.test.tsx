@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import type { RenderElementProps } from "slate-react";
+import { createEditor, type Descendant } from "slate";
+import { Editable, type RenderElementProps, Slate, withReact } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
-
+import { withSchema } from "#/editor/schema/withSchema";
+import type * as WikilinkEditingExports from "#/editor/wikilinkEditing";
 type CapturedCLinkProps = {
   path?: string;
   onClick?: (e: unknown) => void;
@@ -18,20 +19,42 @@ const {
   openTabMock,
   createMutateAsyncMock,
   searchGetMock,
+  beginMock,
+  commitMock,
+  cancelMock,
+  editingController,
   clinkCalls,
-} = vi.hoisted(() => ({
-  lookupMock: vi.fn(),
-  refetchAndLookupMock: vi.fn(),
-  openTabMock: vi.fn(),
-  createMutateAsyncMock: vi.fn(),
-  searchGetMock: vi.fn(),
-  clinkCalls: [] as Array<{
-    path?: string;
-    onClick?: (e: unknown) => void;
-    className?: string;
-    children?: unknown;
-  }>,
-}));
+} = vi.hoisted(() => {
+  const begin = vi.fn();
+  const commit = vi.fn();
+  const cancel = vi.fn();
+  return {
+    lookupMock: vi.fn(),
+    refetchAndLookupMock: vi.fn(),
+    openTabMock: vi.fn(),
+    createMutateAsyncMock: vi.fn(),
+    searchGetMock: vi.fn(),
+    beginMock: begin,
+    commitMock: commit,
+    cancelMock: cancel,
+    editingController: {
+      active: null as {
+        path: number[];
+        initialCaret: "start" | "end";
+        returnSide: "before" | "after";
+      } | null,
+      begin,
+      commit,
+      cancel,
+    },
+    clinkCalls: [] as Array<{
+      path?: string;
+      onClick?: (e: unknown) => void;
+      className?: string;
+      children?: unknown;
+    }>,
+  };
+});
 
 vi.mock("#/editor/wikilinkResolution", () => ({
   useWikilinkResolution: () => ({
@@ -53,6 +76,13 @@ vi.mock("#/api/pages", () => ({
 vi.mock("#/api/client", () => ({
   fetchClient: { GET: searchGetMock },
 }));
+vi.mock("#/editor/wikilinkEditing", async (importOriginal) => {
+  const actual = await importOriginal<typeof WikilinkEditingExports>();
+  return {
+    ...actual,
+    useWikilinkEditing: () => editingController,
+  };
+});
 vi.mock("#/components/codex/CLink", () => ({
   CLink: (props: CapturedCLinkProps) => {
     clinkCalls.push(props);
@@ -72,25 +102,42 @@ vi.mock("#/components/codex/CLink", () => ({
 
 import { WikilinkElement } from "#/editor/elements/WikilinkElement";
 
-const attributes = {
-  "data-slate-node": "element",
-  "data-slate-inline": true,
-  "data-slate-void": true,
-  ref: () => {},
-} as unknown as RenderElementProps["attributes"];
-
-function renderWikilink(target: string, alias?: string) {
+function renderWikilink(
+  target: string,
+  alias?: string,
+  { active = false }: { active?: boolean } = {},
+) {
+  const editor = withReact(withSchema(createEditor()));
   const element: WikilinkElementType = {
     type: "wikilink",
     target,
     alias,
     children: [{ text: "" }],
   };
-  return render(
-    <WikilinkElement attributes={attributes} element={element}>
-      {null}
-    </WikilinkElement>,
+  const value: Descendant[] = [
+    {
+      type: "paragraph",
+      children: [{ text: "" }, element, { text: "" }],
+    },
+  ];
+  editingController.active = active
+    ? { path: [0, 1], initialCaret: "end", returnSide: "after" }
+    : null;
+  const renderElement = (props: RenderElementProps) =>
+    props.element.type === "wikilink" ? (
+      <WikilinkElement
+        {...props}
+        element={props.element as WikilinkElementType}
+      />
+    ) : (
+      <p {...props.attributes}>{props.children}</p>
+    );
+  const result = render(
+    <Slate editor={editor} initialValue={value}>
+      <Editable renderElement={renderElement} />
+    </Slate>,
   );
+  return { ...result, editor, element };
 }
 
 function lastCLink() {
@@ -111,6 +158,7 @@ function searchEntry(path: string, title: string | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   clinkCalls.length = 0;
+  editingController.active = null;
   lookupMock.mockReturnValue(null);
   refetchAndLookupMock.mockResolvedValue(null);
   searchGetMock.mockResolvedValue({ data: [] });
@@ -125,7 +173,7 @@ describe("WikilinkElement resolved", () => {
     expect(lookupMock).toHaveBeenCalledWith("Clepsydra Design Notes");
     const clink = lastCLink();
     expect(clink.path).toBe("notes/clepsydra-design.md");
-    expect(clink.onClick).toBeUndefined();
+    expect(typeof clink.onClick).toBe("function");
   });
 
   it("keeps the standard styling without dangling classes", () => {
@@ -175,13 +223,79 @@ describe("WikilinkElement dangling", () => {
   });
 });
 
+describe("WikilinkElement editing and navigation", () => {
+  it("begins inline editing on plain click without navigating", () => {
+    lookupMock.mockReturnValue("notes/target.md");
+    renderWikilink("Target");
+
+    fireEvent.click(screen.getByRole("link"));
+
+    expect(beginMock).toHaveBeenCalledWith([0, 1], "end", "after");
+    expect(openTabMock).not.toHaveBeenCalled();
+    expect(refetchAndLookupMock).not.toHaveBeenCalled();
+    expect(searchGetMock).not.toHaveBeenCalled();
+    expect(createMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Cmd", { metaKey: true }],
+    ["Ctrl", { ctrlKey: true }],
+  ])(
+    "opens a resolved target on %s-click without beginning editing",
+    (_modifier, eventInit) => {
+      lookupMock.mockReturnValue("notes/target.md");
+      renderWikilink("Target");
+
+      fireEvent.click(screen.getByRole("link"), eventInit);
+
+      expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md");
+      expect(beginMock).not.toHaveBeenCalled();
+      expect(refetchAndLookupMock).not.toHaveBeenCalled();
+      expect(searchGetMock).not.toHaveBeenCalled();
+      expect(createMutateAsyncMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders the active draft as an inline textbox instead of a passive link", () => {
+    lookupMock.mockReturnValue("notes/target.md");
+    renderWikilink("Target", "Label", { active: true });
+
+    expect(screen.getByRole("textbox", { name: "Edit wikilink" })).toHaveValue(
+      "Target|Label",
+    );
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("delegates an active commit to the editing controller", async () => {
+    const user = userEvent.setup();
+    renderWikilink("Target", "Label", { active: true });
+
+    await user.keyboard("{Enter}");
+
+    expect(commitMock).toHaveBeenCalledWith(
+      { target: "Target", alias: "Label" },
+      "after",
+    );
+    expect(cancelMock).not.toHaveBeenCalled();
+  });
+
+  it("delegates an active cancel to the editing controller", async () => {
+    const user = userEvent.setup();
+    renderWikilink("Target", "Label", { active: true });
+
+    await user.keyboard("{Escape}");
+
+    expect(cancelMock).toHaveBeenCalledWith("after");
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("WikilinkElement dangling click", () => {
   it("opens the tab at the refreshed path on a refetch hit, without search or create", async () => {
-    const user = userEvent.setup();
     refetchAndLookupMock.mockResolvedValue("notes/refreshed.md");
     renderWikilink("Late Indexed Page");
 
-    await user.click(screen.getByRole("link"));
+    fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
     await waitFor(() =>
       expect(openTabMock).toHaveBeenCalledWith("page", "notes/refreshed.md"),
@@ -192,7 +306,6 @@ describe("WikilinkElement dangling click", () => {
   });
 
   it("opens a case-insensitive exact-title search match instead of creating", async () => {
-    const user = userEvent.setup();
     searchGetMock.mockResolvedValue({
       data: [
         searchEntry("notes/decoy.md", "Something Else Entirely"),
@@ -202,7 +315,7 @@ describe("WikilinkElement dangling click", () => {
     });
     renderWikilink("Clepsydra Design Notes");
 
-    await user.click(screen.getByRole("link"));
+    fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
     await waitFor(() =>
       expect(openTabMock).toHaveBeenCalledWith("page", "notes/existing.md"),
@@ -214,14 +327,13 @@ describe("WikilinkElement dangling click", () => {
   });
 
   it("matches search titles after NFC normalization", async () => {
-    const user = userEvent.setup();
     // Target uses precomposed é; the index returns decomposed e + ́.
     searchGetMock.mockResolvedValue({
       data: [searchEntry("notes/cafe.md", "Cafe\u{301} Notes")],
     });
     renderWikilink("Caf\u{e9} Notes");
 
-    await user.click(screen.getByRole("link"));
+    fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
     await waitFor(() =>
       expect(openTabMock).toHaveBeenCalledWith("page", "notes/cafe.md"),
@@ -230,7 +342,6 @@ describe("WikilinkElement dangling click", () => {
   });
 
   it("creates the page at the intake-derived path on a full miss, then opens it", async () => {
-    const user = userEvent.setup();
     searchGetMock.mockResolvedValue({
       data: [
         searchEntry("notes/near-miss.md", "Clepsydra Design Notes Extended"),
@@ -238,7 +349,7 @@ describe("WikilinkElement dangling click", () => {
     });
     renderWikilink("Clepsydra Design Notes");
 
-    await user.click(screen.getByRole("link"));
+    fireEvent.click(screen.getByRole("link"), { metaKey: true });
 
     await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(1));
     expect(createMutateAsyncMock).toHaveBeenCalledTimes(1);
@@ -252,7 +363,6 @@ describe("WikilinkElement dangling click", () => {
   });
 
   it("ignores clicks while a previous dangling-click flow is in flight", async () => {
-    const user = userEvent.setup();
     let resolveRefetch: (value: string | null) => void = () => {};
     refetchAndLookupMock.mockImplementation(
       () =>
@@ -263,8 +373,8 @@ describe("WikilinkElement dangling click", () => {
     renderWikilink("Unwritten Page");
     const link = screen.getByRole("link");
 
-    await user.click(link);
-    await user.click(link);
+    fireEvent.click(link, { metaKey: true });
+    fireEvent.click(link, { metaKey: true });
     expect(refetchAndLookupMock).toHaveBeenCalledTimes(1);
 
     resolveRefetch("notes/finally.md");
@@ -272,7 +382,7 @@ describe("WikilinkElement dangling click", () => {
     expect(openTabMock).toHaveBeenCalledWith("page", "notes/finally.md");
 
     // Once the flow settles, a new click starts a fresh flow.
-    await user.click(link);
+    fireEvent.click(link, { metaKey: true });
     expect(refetchAndLookupMock).toHaveBeenCalledTimes(2);
     resolveRefetch("notes/finally.md");
     await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(2));
