@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type React from "react";
+import { describe, expect, it, vi } from "vitest";
 import type { PageSummary } from "#/api/types";
 import { WikilinkCombobox } from "../WikilinkCombobox";
 
@@ -96,7 +97,7 @@ describe("WikilinkCombobox", () => {
     expect(onCreate).toHaveBeenCalledWith("New Topic");
   });
 
-  it.each(["Enter", "Tab"])("activates creation with %s", (key) => {
+  it.each(["Enter", "Tab"])("activates creation with %s", (key: string) => {
     const onCreate = vi.fn();
     renderCombobox({ onCreate });
     fireEvent.keyDown(document, { key });
