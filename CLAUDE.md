@@ -32,7 +32,7 @@ Rust 2024 edition. Axum 0.8 + Tokio; rusqlite (bundled, FTS5 powers `grep`); pul
 
 - `src/bin/cli.rs` — clap dispatch → `src/lib.rs` (settings layering, `open_vault_and_index`, `run_server`)
 - `src/vault/` — the domain layer, independent of HTTP: paths (`VaultPath`, NFC-normalized), page/frontmatter parsing, SQLite index + derivation chain (`derivers/`), link extraction/rewriting, mutation coordinator, filesystem sync/reconcile, content-addressed attachment storage (`cas.rs`), academic imports (DOI/ISBN/Zotero), hooks
-- `src/api/` — one module per resource (pages, blocks, tasks, journal, agenda, board, folders, attachments, archive, academic, …); `events.rs` is the SSE stream the UI's sync indicator consumes; `frontend.rs` serves the embedded UI; `openapi.rs` + Swagger UI at `/docs`
+- `src/api/` — one module per resource (pages, blocks, tasks, journal, agenda, board, folders, attachments, archive, academic, …); `events.rs` is the SSE stream the UI's sync indicator consumes; `frontend.rs` serves the embedded UI; `openapi.rs` + Swagger UI at `/api/docs`
 - `src/lsp/` — tower-lsp server (completion, hover, references, rename, diagnostics, code actions) over its own private, read-only vault index; started standalone with `clep lsp` (see `ui/src/docs/content/lsp.mdx`)
 - `tests/` — integration tests using axum-test, wiremock, serial_test
 
