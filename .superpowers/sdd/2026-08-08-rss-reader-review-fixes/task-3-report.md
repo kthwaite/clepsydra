@@ -32,8 +32,26 @@ Per the task constraint, no package installation, formatter, linter, build, type
 
 ## Self-review
 
-Reviewed the mutation lifecycle and query-key handling against the task contract. Snapshots are captured before any optimistic writes; every snapshot, including one with undefined data, remains in the rollback context; every defined cache is updated using filters from that cache's query key; rollback writes each original value back to its original key; feed invalidation remains unchanged.
+Reviewed the mutation lifecycle and query-key handling against the task contract. Snapshots are captured before any optimistic writes; every snapshot, including one with undefined data, remains in the rollback context; every defined cache is updated using filters from that cache's query key; rollback writes each original value back to its original key; settled mutations invalidate entry and feed caches for final reconciliation.
 
 ## Concerns
 
 The lockfile update is source-matched and structurally checked but intentionally not verified by Bun because package installation and validation were prohibited. Runtime and type-level confirmation therefore remains deferred.
+
+## Review-fix round 1
+
+Addressed all three Important findings from `task-3-review.md`:
+
+- Added settled-mutation reconciliation for both `['entries']` and `['feeds']`, preventing a whole-cache rollback from leaving state stale after overlapping mutations complete.
+- Extracted `optimisticallyUpdateEntryCaches`, `restoreEntryCaches`, and `reconcileEntryPatchQueries` QueryClient helpers. `useEntryPatch` now delegates snapshot/apply, rollback, and settlement behavior to these helpers while retaining immediate optimistic updates.
+- Undefined snapshots are kept in the complete snapshot set; restoration removes a cache whose original data was undefined so later data cannot survive rollback.
+- Strengthened every unread, saved, and tag removal case to assert remaining page IDs/order, unchanged cursors and `pageParams`, unaffected entry identity, and unaffected page identity.
+
+Added test names:
+
+- `snapshots every entries cache and applies each query key's filters`
+- `restores every cache snapshot and removes an originally undefined cache`
+- `invalidates entry and feed caches when a patch settles`
+- The parameterized unread, saved, and tag removal tests now share pagination and identity assertions in addition to membership assertions.
+
+Validation remains deferred under the task constraint; no installation, test, typecheck, lint, build, or formatter command was run during this fix round.

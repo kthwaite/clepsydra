@@ -1,10 +1,13 @@
-import type { InfiniteData } from "@tanstack/react-query";
+import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
   type EntriesResponse,
   type Entry,
   type EntryFilters,
   type EntryPatch,
+  optimisticallyUpdateEntryCaches,
+  reconcileEntryPatchQueries,
+  restoreEntryCaches,
   updateEntryCache,
 } from "./api";
 
@@ -99,12 +102,27 @@ const membershipCases: MembershipCase[] = [
 
 describe("updateEntryCache", () => {
   it.each(membershipCases)("$name", ({ filters, patch, retained }) => {
-    const result = updateEntryCache(cache(), filters, 1, patch);
+    const original = cache();
+    const unaffectedEntry = original.pages[0].entries[1];
+    const unaffectedPage = original.pages[1];
+    const result = updateEntryCache(original, filters, 1, patch);
     const patched = result.pages[0].entries.find(({ id }) => id === 1);
 
     expect(patched !== undefined).toBe(retained);
     if (patched) {
       expect(patched).toMatchObject(patch);
+    } else {
+      expect(result.pages.map((page) => page.entries.map(({ id }) => id))).toEqual([
+        [2],
+        [3],
+      ]);
+      expect(result.pages.map(({ next_cursor }) => next_cursor)).toEqual([
+        "page-2",
+        null,
+      ]);
+      expect(result.pageParams).toBe(original.pageParams);
+      expect(result.pages[0].entries[0]).toBe(unaffectedEntry);
+      expect(result.pages[1]).toBe(unaffectedPage);
     }
   });
 
@@ -128,5 +146,112 @@ describe("updateEntryCache", () => {
     expect(result.pageParams).toBe(original.pageParams);
     expect(result.pages[0].entries[1]).toBe(unaffectedEntry);
     expect(result.pages[1]).toBe(unaffectedPage);
+  });
+});
+
+describe("entry cache snapshots", () => {
+  const unreadKey = ["entries", { view: "unread" }] as const;
+  const savedKey = ["entries", { view: "saved" }] as const;
+  const tagKey = ["entries", { view: "all", tag: "rust" }] as const;
+  const allKey = ["entries", { view: "all" }] as const;
+  const undefinedKey = ["entries", { view: "all", feed: 99 }] as const;
+
+  function populatedClient() {
+    const queryClient = new QueryClient();
+    const originals = {
+      unread: cache(),
+      saved: cache(),
+      tag: cache(),
+      all: cache(),
+    };
+    queryClient.setQueryData(unreadKey, originals.unread);
+    queryClient.setQueryData(savedKey, originals.saved);
+    queryClient.setQueryData(tagKey, originals.tag);
+    queryClient.setQueryData(allKey, originals.all);
+    const undefinedQuery = queryClient.getQueryCache().build(queryClient, {
+      queryKey: undefinedKey,
+      queryFn: async () => cache(),
+    });
+
+    return { queryClient, originals, undefinedQuery };
+  }
+
+  it("snapshots every entries cache and applies each query key's filters", () => {
+    const { queryClient, originals, undefinedQuery } = populatedClient();
+
+    const snapshots = optimisticallyUpdateEntryCaches(queryClient, 1, {
+      read: true,
+      bookmarked: false,
+      tags: [],
+    });
+    const snapshotByKey = new Map(
+      snapshots.map(([queryKey, data]) => [JSON.stringify(queryKey), data]),
+    );
+
+    expect(snapshotByKey.get(JSON.stringify(unreadKey))).toBe(originals.unread);
+    expect(snapshotByKey.get(JSON.stringify(savedKey))).toBe(originals.saved);
+    expect(snapshotByKey.get(JSON.stringify(tagKey))).toBe(originals.tag);
+    expect(snapshotByKey.get(JSON.stringify(allKey))).toBe(originals.all);
+    expect(snapshotByKey.has(JSON.stringify(undefinedKey))).toBe(true);
+    expect(snapshotByKey.get(JSON.stringify(undefinedKey))).toBeUndefined();
+    expect(queryClient.getQueryData<EntriesCache>(unreadKey)?.pages[0].entries).toHaveLength(
+      1,
+    );
+    expect(queryClient.getQueryData<EntriesCache>(savedKey)?.pages[0].entries).toHaveLength(
+      1,
+    );
+    expect(queryClient.getQueryData<EntriesCache>(tagKey)?.pages[0].entries).toHaveLength(
+      1,
+    );
+    expect(
+      queryClient.getQueryData<EntriesCache>(allKey)?.pages[0].entries[0],
+    ).toMatchObject({
+      id: 1,
+      read: true,
+      bookmarked: false,
+      tags: [],
+    });
+    expect(queryClient.getQueryData(undefinedKey)).toBeUndefined();
+    expect(
+      queryClient.getQueryCache().find({ queryKey: undefinedKey, exact: true }),
+    ).toBe(undefinedQuery);
+  });
+
+  it("restores every cache snapshot and removes an originally undefined cache", () => {
+    const { queryClient, originals } = populatedClient();
+    const snapshots = optimisticallyUpdateEntryCaches(queryClient, 1, {
+      read: true,
+      bookmarked: false,
+      tags: [],
+    });
+    queryClient.setQueryData(undefinedKey, cache());
+
+    restoreEntryCaches(queryClient, snapshots);
+
+    expect(queryClient.getQueryData(unreadKey)).toBe(originals.unread);
+    expect(queryClient.getQueryData(savedKey)).toBe(originals.saved);
+    expect(queryClient.getQueryData(tagKey)).toBe(originals.tag);
+    expect(queryClient.getQueryData(allKey)).toBe(originals.all);
+    expect(queryClient.getQueryData(undefinedKey)).toBeUndefined();
+    expect(
+      queryClient.getQueryCache().find({ queryKey: undefinedKey, exact: true }),
+    ).toBeUndefined();
+  });
+
+  it("invalidates entry and feed caches when a patch settles", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(unreadKey, cache());
+    queryClient.setQueryData(["feeds"], { feeds: [], warnings: [] });
+
+    await reconcileEntryPatchQueries(queryClient);
+
+    expect(
+      queryClient.getQueryCache().find({ queryKey: unreadKey, exact: true })?.state
+        .isInvalidated,
+    ).toBe(true);
+    expect(
+      queryClient.getQueryCache().find({ queryKey: ["feeds"], exact: true })?.state
+        .isInvalidated,
+    ).toBe(true);
   });
 });

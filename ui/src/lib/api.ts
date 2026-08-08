@@ -1,6 +1,8 @@
 import {
   type InfiniteData,
   infiniteQueryOptions,
+  type QueryClient,
+  type QueryKey,
   useMutation,
   useQuery,
   useQueryClient,
@@ -147,6 +149,50 @@ export function updateEntryCache(
   return { ...data, pages };
 }
 
+export type EntryCacheSnapshots = Array<
+  [queryKey: QueryKey, data: EntriesCache | undefined]
+>;
+
+export function optimisticallyUpdateEntryCaches(
+  queryClient: QueryClient,
+  id: number,
+  patch: EntryPatch,
+): EntryCacheSnapshots {
+  const snapshots = queryClient.getQueriesData<EntriesCache>({
+    queryKey: ["entries"],
+  });
+
+  for (const [queryKey, data] of snapshots) {
+    if (!data) continue;
+    const filters = queryKey[1] as EntryFilters;
+    queryClient.setQueryData(queryKey, updateEntryCache(data, filters, id, patch));
+  }
+
+  return snapshots;
+}
+
+export function restoreEntryCaches(
+  queryClient: QueryClient,
+  snapshots: EntryCacheSnapshots,
+): void {
+  for (const [queryKey, data] of snapshots) {
+    if (data === undefined) {
+      queryClient.removeQueries({ queryKey, exact: true });
+    } else {
+      queryClient.setQueryData(queryKey, data);
+    }
+  }
+}
+
+export async function reconcileEntryPatchQueries(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["entries"] }),
+    queryClient.invalidateQueries({ queryKey: ["feeds"] }),
+  ]);
+}
+
 /** Optimistically patch an entry across every cached river view. */
 export function useEntryPatch() {
   const qc = useQueryClient();
@@ -155,24 +201,14 @@ export function useEntryPatch() {
       api<void>(`/entries/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
     onMutate: async ({ id, patch }) => {
       await qc.cancelQueries({ queryKey: ["entries"] });
-      const snapshots = qc.getQueriesData<EntriesCache>({
-        queryKey: ["entries"],
-      });
-
-      for (const [queryKey, data] of snapshots) {
-        if (!data) continue;
-        const filters = queryKey[1] as EntryFilters;
-        qc.setQueryData(queryKey, updateEntryCache(data, filters, id, patch));
-      }
-
-      return { snapshots };
+      return {
+        snapshots: optimisticallyUpdateEntryCaches(qc, id, patch),
+      };
     },
     onError: (_error, _variables, context) => {
-      for (const [queryKey, data] of context?.snapshots ?? []) {
-        qc.setQueryData(queryKey, data);
-      }
+      if (context) restoreEntryCaches(qc, context.snapshots);
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["feeds"] }),
+    onSettled: () => reconcileEntryPatchQueries(qc),
   });
 }
 
