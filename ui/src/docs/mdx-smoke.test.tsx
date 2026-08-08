@@ -42,6 +42,14 @@ it("renders self-contained browser extension setup", () => {
   ).toBeInTheDocument();
   expect(screen.getByText("extension/dist", { exact: true })).toBeInTheDocument();
   expect(screen.getByText("Connected", { exact: true })).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", {
+      name: "Firefox: rebuild before reloading",
+    }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("HTTP 409", { exact: true })).toBeInTheDocument();
+  expect(screen.getByText("notification only", { exact: true })).toBeInTheDocument();
+  expect(screen.getByText("on_content_changed", { exact: true })).toBeInTheDocument();
 });
 
 it("renders GFM tables as semantic HTML", () => {

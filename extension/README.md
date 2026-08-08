@@ -75,16 +75,29 @@ bun run build:firefox
 
 ## Dev workflow notes
 
-- Watch build:
+- Chromium watch build:
 
 ```bash
 cd extension
 bun run dev
 ```
 
-- After code changes, reload the extension in your browser:
-  - Chromium: extensions page -> **Reload**
-  - Firefox: load temporary add-on again if needed
+`bun run dev` watches only the Chromium bundle and writes changes to
+`extension/dist/`. After a change, return to the Chromium extensions page and
+select **Reload**.
+
+- Firefox rebuild and reload:
+
+`bun run dev` does not update `extension/dist-firefox/`. After every extension
+code change you want to test in Firefox, rebuild before reloading:
+
+```bash
+cd extension
+bun run build:firefox
+```
+
+Then reload the temporary add-on from
+`about:debugging#/runtime/this-firefox`, loading it again if needed.
 
 ## Troubleshooting
 
@@ -95,4 +108,5 @@ bun run dev
   - Reload extension after rebuild
   - Ensure you are on a normal web page (`http://` or `https://`)
 - **Conflict notification (“Content Changed”)**
-  - The URL already exists with different content; update behavior is controlled in extension settings
+  - When `POST /api/vault/archive` returns `HTTP 409`, current behavior is notification only: the extension shows **Content Changed** and does not update or retry the existing archive
+  - Settings saves an `on_content_changed` value, but capture does not consume it, so changing it currently has no effect on conflict behavior

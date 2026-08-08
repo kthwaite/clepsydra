@@ -85,16 +85,29 @@ You can also use the keyboard shortcut:
 
 ## Development workflow
 
-Start the watch build from the repository root:
+`bun run dev` watches only the Chromium bundle and writes changes to
+`extension/dist/`:
 
 ```bash
 cd extension
 bun run dev
 ```
 
-After a code change, reload the extension in the browser. On Chromium-based
-browsers, return to the browser's extensions page and select **Reload**. On
-Firefox, reload the temporary add-on, loading it again if needed.
+After a change, return to the Chromium-based browser's extensions page and
+select **Reload**.
+
+### Firefox: rebuild before reloading
+
+The watch command does not update `extension/dist-firefox/`. After every
+extension code change you want to test in Firefox, rebuild the Firefox bundle:
+
+```bash
+cd extension
+bun run build:firefox
+```
+
+Then reload the temporary add-on from
+`about:debugging#/runtime/this-firefox`, loading it again if needed.
 
 ## Troubleshooting
 
@@ -117,6 +130,8 @@ Reload the extension after rebuilding it. Capture only works on a normal
 
 ### Content Changed conflict
 
-A **Content Changed** notification means that the URL already exists in the
-vault with different content. Whether the extension updates the existing
-archive is controlled by the extension settings.
+When `POST /api/vault/archive` returns `HTTP 409`, the current extension
+behavior is **notification only**: it shows **Content Changed** and does not
+update or retry the existing archive. The Settings page saves an
+`on_content_changed` value, but the capture path does not consume that setting,
+so changing it currently has no effect on conflict behavior.
