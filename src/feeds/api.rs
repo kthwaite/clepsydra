@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
 pub enum ApiError {
     NotFound,
     BadRequest(String),
+    Conflict(String),
     Internal(anyhow::Error),
 }
 
@@ -37,6 +38,7 @@ impl IntoResponse for ApiError {
         let (status, msg) = match self {
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
+            ApiError::Conflict(m) => (StatusCode::CONFLICT, m),
             ApiError::Internal(e) => {
                 tracing::error!("internal error: {e:#}");
                 (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
@@ -53,6 +55,23 @@ impl<E: Into<anyhow::Error>> From<E> for ApiError {
 }
 
 type ApiResult<T> = Result<T, ApiError>;
+
+fn manifest_api_error(error: super::ManifestUpdateError) -> ApiError {
+    match error {
+        super::ManifestUpdateError::InvalidSource(warnings) => {
+            ApiError::Conflict(format!("manifest contains warnings: {}", warnings.join("; ")))
+        }
+        super::ManifestUpdateError::InvalidCandidate(warnings) => {
+            ApiError::BadRequest(format!("manifest update is invalid: {}", warnings.join("; ")))
+        }
+        super::ManifestUpdateError::Conflict => {
+            ApiError::Conflict("manifest changed during update".to_string())
+        }
+        super::ManifestUpdateError::Rejected(message) => ApiError::BadRequest(message),
+        super::ManifestUpdateError::ItemNotFound => ApiError::NotFound,
+        super::ManifestUpdateError::Internal(error) => ApiError::Internal(error),
+    }
+}
 
 // ---------------------------------------------------------------- feeds
 
@@ -126,13 +145,26 @@ async fn subscribe(
         .await
         .map_err(|e| ApiError::BadRequest(format!("{e:#}")))?;
 
-    let text = super::read_manifest(&state).await?;
-    if manifest::parse(&text).feeds.iter().any(|f| f.url == feed_url) {
-        return Err(ApiError::BadRequest(format!("already subscribed: {feed_url}")));
-    }
-    let group = body.group.as_deref().filter(|g| !g.trim().is_empty()).unwrap_or("Feeds");
-    let new_text = manifest::add_item(&text, group.trim(), &feed_url);
-    super::write_manifest(&state, &new_text).await?;
+    let group = body
+        .group
+        .as_deref()
+        .filter(|group| !group.trim().is_empty())
+        .unwrap_or("Feeds")
+        .trim();
+    super::update_manifest(&state, |text| {
+        if manifest::parse(text)
+            .feeds
+            .iter()
+            .any(|feed| feed.url == feed_url)
+        {
+            return Err(super::ManifestUpdateError::Rejected(format!(
+                "already subscribed: {feed_url}"
+            )));
+        }
+        Ok((manifest::add_item(text, group, &feed_url), ()))
+    })
+    .await
+    .map_err(manifest_api_error)?;
 
     let id: i64 = sqlx::query_scalar("SELECT id FROM feed WHERE url = ?")
         .bind(&feed_url)
@@ -175,17 +207,24 @@ async fn update_feed(
     Json(body): Json<FeedPatch>,
 ) -> ApiResult<StatusCode> {
     let url = feed_url_by_id(&state, id).await?;
-    let mut text = super::read_manifest(&state).await?;
-    if let Some(title) = &body.title {
-        let title = (!title.trim().is_empty()).then_some(title.trim());
-        text = manifest::set_title(&text, &url, title);
-    }
-    if let Some(group) = &body.group
-        && !group.trim().is_empty()
-    {
-        text = manifest::move_item(&text, &url, group.trim());
-    }
-    super::write_manifest(&state, &text).await?;
+    super::update_manifest(&state, |source| {
+        if !manifest::parse(source).feeds.iter().any(|feed| feed.url == url) {
+            return Err(super::ManifestUpdateError::ItemNotFound);
+        }
+        let mut text = source.to_string();
+        if let Some(title) = &body.title {
+            let title = (!title.trim().is_empty()).then_some(title.trim());
+            text = manifest::set_title(&text, &url, title);
+        }
+        if let Some(group) = &body.group
+            && !group.trim().is_empty()
+        {
+            text = manifest::move_item(&text, &url, group.trim());
+        }
+        Ok((text, ()))
+    })
+    .await
+    .map_err(manifest_api_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -194,12 +233,15 @@ async fn unsubscribe(
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
     let url = feed_url_by_id(&state, id).await?;
-    let text = super::read_manifest(&state).await?;
-    let (new_text, removed) = manifest::remove_item(&text, &url);
-    if removed.is_none() {
-        return Err(ApiError::NotFound);
-    }
-    super::write_manifest(&state, &new_text).await?;
+    super::update_manifest(&state, |text| {
+        let (new_text, removed) = manifest::remove_item(text, &url);
+        if removed.is_none() {
+            return Err(super::ManifestUpdateError::ItemNotFound);
+        }
+        Ok((new_text, ()))
+    })
+    .await
+    .map_err(manifest_api_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -261,8 +303,21 @@ struct EntriesResponse {
 }
 
 fn parse_cursor(cursor: &str) -> Option<(String, i64)> {
-    let (ts, id) = cursor.rsplit_once('|')?;
-    Some((ts.to_string(), id.parse().ok()?))
+    let (timestamp, id) = cursor.rsplit_once('|')?;
+    chrono::DateTime::parse_from_rfc3339(timestamp).ok()?;
+    Some((timestamp.to_string(), id.parse().ok()?))
+}
+
+fn parse_required_cursor(cursor: Option<&str>) -> ApiResult<Option<(String, i64)>> {
+    cursor
+        .map(|value| {
+            parse_cursor(value).ok_or_else(|| {
+                ApiError::BadRequest(
+                    "invalid cursor; expected RFC 3339 timestamp|entry id".to_string(),
+                )
+            })
+        })
+        .transpose()
 }
 
 async fn list_entries(
@@ -270,6 +325,7 @@ async fn list_entries(
     Query(q): Query<EntriesQuery>,
 ) -> ApiResult<Json<EntriesResponse>> {
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let cursor = parse_required_cursor(q.cursor.as_deref())?;
 
     let mut qb = QueryBuilder::new(
         "SELECT e.id, e.feed_id, e.url, e.title, e.author, e.content_html,
@@ -297,13 +353,13 @@ async fn list_entries(
             .push_bind(tag)
             .push("))");
     }
-    if let Some(cursor) = q.cursor.as_deref().and_then(parse_cursor) {
+    if let Some((timestamp, id)) = cursor {
         qb.push(" AND (coalesce(e.published_at, e.fetched_at) < ")
-            .push_bind(cursor.0.clone())
+            .push_bind(timestamp.clone())
             .push(" OR (coalesce(e.published_at, e.fetched_at) = ")
-            .push_bind(cursor.0)
+            .push_bind(timestamp)
             .push(" AND e.id < ")
-            .push_bind(cursor.1)
+            .push_bind(id)
             .push("))");
     }
     qb.push(" ORDER BY sort_ts DESC, e.id DESC LIMIT ").push_bind(limit);
@@ -432,6 +488,7 @@ async fn mark_read(
     body: Option<Json<MarkReadIn>>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let body = body.map(|Json(b)| b).unwrap_or_default();
+    let cursor = parse_required_cursor(body.before.as_deref())?;
     let mut qb = QueryBuilder::new("UPDATE entry SET read_at = ");
     qb.push_bind(Utc::now());
     qb.push(" WHERE read_at IS NULL");
@@ -443,11 +500,11 @@ async fn mark_read(
             .push_bind(group)
             .push(")");
     }
-    if let Some((ts, id)) = body.before.as_deref().and_then(parse_cursor) {
+    if let Some((timestamp, id)) = cursor {
         qb.push(" AND (coalesce(published_at, fetched_at) < ")
-            .push_bind(ts.clone())
+            .push_bind(timestamp.clone())
             .push(" OR (coalesce(published_at, fetched_at) = ")
-            .push_bind(ts)
+            .push_bind(timestamp)
             .push(" AND id <= ")
             .push_bind(id)
             .push("))");
@@ -526,33 +583,59 @@ async fn export_opml(State(state): State<AppState>) -> ApiResult<Response> {
         .into_response())
 }
 
-async fn import_opml(State(state): State<AppState>, body: String) -> ApiResult<Json<serde_json::Value>> {
-    let discovered = parse_opml(&body).map_err(|e| ApiError::BadRequest(format!("invalid OPML: {e}")))?;
+#[derive(Debug)]
+struct OpmlItem {
+    group: Option<String>,
+    title: Option<String>,
+    url: String,
+}
+
+async fn import_opml(
+    State(state): State<AppState>,
+    body: String,
+) -> ApiResult<Json<serde_json::Value>> {
+    let discovered =
+        parse_opml(&body).map_err(|error| ApiError::BadRequest(format!("invalid OPML: {error}")))?;
     if discovered.is_empty() {
         return Err(ApiError::BadRequest("no feeds found in OPML".into()));
     }
 
-    let mut text = super::read_manifest(&state).await?;
-    let existing: std::collections::HashSet<String> =
-        manifest::parse(&text).feeds.into_iter().map(|f| f.url).collect();
-
-    let mut added = 0;
-    for (group, title, url) in discovered {
-        if existing.contains(&url) {
-            continue;
-        }
-        let item = manifest::render_item(&url, title.as_deref(), &[]);
-        text = manifest::add_item(&text, group.as_deref().unwrap_or("Feeds"), &item);
-        added += 1;
+    let added = super::update_manifest(&state, move |text| {
+        let (updated, added) = merge_opml(text, discovered);
+        Ok((updated, added))
+    })
+    .await
+    .map_err(manifest_api_error)?;
+    if added > 0 {
+        state.refresh.notify_one();
     }
-    super::write_manifest(&state, &text).await?;
-    state.refresh.notify_one();
     Ok(Json(serde_json::json!({ "added": added })))
 }
 
+fn merge_opml(text: &str, discovered: Vec<OpmlItem>) -> (String, usize) {
+    let mut existing: std::collections::HashSet<String> =
+        manifest::parse(text).feeds.into_iter().map(|feed| feed.url).collect();
+    let mut updated = text.to_string();
+    let mut added = 0;
+
+    for OpmlItem { group, title, url } in discovered {
+        if !existing.insert(url.clone()) {
+            continue;
+        }
+        let item = manifest::render_item(&url, title.as_deref(), &[]);
+        updated = manifest::add_item(
+            &updated,
+            group.as_deref().unwrap_or("Feeds"),
+            &item,
+        );
+        added += 1;
+    }
+    (updated, added)
+}
+
 /// OPML outlines: an `<outline>` without `xmlUrl` is a folder (→ section);
-/// one with `xmlUrl` is a feed. Returns (group, title, xml_url).
-fn parse_opml(body: &str) -> anyhow::Result<Vec<(Option<String>, Option<String>, String)>> {
+/// one with `xmlUrl` is a feed.
+fn parse_opml(body: &str) -> anyhow::Result<Vec<OpmlItem>> {
     use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(body);
     reader.config_mut().trim_text(true);
@@ -561,7 +644,7 @@ fn parse_opml(body: &str) -> anyhow::Result<Vec<(Option<String>, Option<String>,
 
     let handle = |e: &quick_xml::events::BytesStart,
                   folders: &[String],
-                  feeds: &mut Vec<(Option<String>, Option<String>, String)>|
+                  feeds: &mut Vec<OpmlItem>|
      -> anyhow::Result<Option<String>> {
         let mut xml_url = None;
         let mut title = None;
@@ -577,7 +660,11 @@ fn parse_opml(body: &str) -> anyhow::Result<Vec<(Option<String>, Option<String>,
         }
         match xml_url {
             Some(url) => {
-                feeds.push((folders.last().cloned(), title, url));
+                feeds.push(OpmlItem {
+                    group: folders.last().cloned(),
+                    title,
+                    url,
+                });
                 Ok(None)
             }
             None => Ok(Some(title.unwrap_or_default())),
@@ -622,16 +709,47 @@ mod tests {
         </body></opml>"#;
         let feeds = parse_opml(opml).unwrap();
         assert_eq!(feeds.len(), 2);
-        assert_eq!(feeds[0].0.as_deref(), Some("News"));
-        assert_eq!(feeds[0].2, "https://n.example/rss");
-        assert_eq!(feeds[1].0, None);
+        assert_eq!(feeds[0].group.as_deref(), Some("News"));
+        assert_eq!(feeds[0].url, "https://n.example/rss");
+        assert_eq!(feeds[1].group, None);
     }
 
     #[test]
-    fn cursor_roundtrip() {
-        let (ts, id) = parse_cursor("2026-01-01T00:00:00+00:00|42").unwrap();
-        assert_eq!(ts, "2026-01-01T00:00:00+00:00");
-        assert_eq!(id, 42);
-        assert!(parse_cursor("garbage").is_none());
+    fn required_cursor_distinguishes_missing_valid_and_invalid_values() {
+        assert!(matches!(parse_required_cursor(None), Ok(None)));
+
+        let parsed = parse_required_cursor(Some("2026-01-01T00:00:00+00:00|42")).unwrap();
+        assert_eq!(
+            parsed,
+            Some(("2026-01-01T00:00:00+00:00".to_string(), 42))
+        );
+        assert!(matches!(
+            parse_required_cursor(Some("garbage")),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn opml_merge_deduplicates_urls_within_import() {
+        let original = "# feeds\n\n## Feeds\n";
+        let feeds = vec![
+            OpmlItem {
+                group: Some("News".to_string()),
+                title: Some("First".to_string()),
+                url: "https://duplicate.example/feed".to_string(),
+            },
+            OpmlItem {
+                group: Some("Other".to_string()),
+                title: Some("Second".to_string()),
+                url: "https://duplicate.example/feed".to_string(),
+            },
+        ];
+
+        let (updated, added) = merge_opml(original, feeds);
+
+        assert_eq!(added, 1);
+        let parsed = manifest::parse(&updated);
+        assert_eq!(parsed.feeds.len(), 1);
+        assert_eq!(parsed.feeds[0].url, "https://duplicate.example/feed");
     }
 }

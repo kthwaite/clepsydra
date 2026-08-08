@@ -75,6 +75,7 @@ pub struct AppState {
     pub refresh: Arc<Notify>,
     pub http: reqwest::Client,
     pub manifest_warnings: Arc<Mutex<Vec<String>>>,
+    pub manifest_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[tokio::main]
@@ -117,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
         refresh: Arc::new(Notify::new()),
         http,
         manifest_warnings: Arc::new(Mutex::new(Vec::new())),
+        manifest_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     if let Err(e) = feeds::reconcile(&state).await {
