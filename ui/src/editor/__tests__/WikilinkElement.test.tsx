@@ -12,46 +12,30 @@ type CapturedCLinkProps = {
   children?: ReactNode;
 };
 
-const {
-  lookupMock,
-  refetchAndLookupMock,
-  openTabMock,
-  createMutateAsyncMock,
-  searchGetMock,
-  clinkCalls,
-} = vi.hoisted(() => ({
-  lookupMock: vi.fn(),
-  refetchAndLookupMock: vi.fn(),
-  openTabMock: vi.fn(),
-  createMutateAsyncMock: vi.fn(),
-  searchGetMock: vi.fn(),
-  clinkCalls: [] as Array<{
-    path?: string;
-    onClick?: (e: unknown) => void;
-    className?: string;
-    children?: unknown;
-  }>,
-}));
+const { lookupMock, openTabMock, resolveOrCreateMock, clinkCalls } = vi.hoisted(
+  () => ({
+    lookupMock: vi.fn(),
+    openTabMock: vi.fn(),
+    resolveOrCreateMock: vi.fn(),
+    clinkCalls: [] as Array<{
+      path?: string;
+      onClick?: (e: unknown) => void;
+      className?: string;
+      children?: unknown;
+    }>,
+  }),
+);
 
 vi.mock("#/editor/wikilinkResolution", () => ({
-  useWikilinkResolution: () => ({
-    lookup: lookupMock,
-    refetchAndLookup: refetchAndLookupMock,
+  useWikilinkResolution: () => ({ lookup: lookupMock }),
+}));
+vi.mock("#/editor/useResolveOrCreateWikilinkTarget", () => ({
+  useResolveOrCreateWikilinkTarget: () => ({
+    resolveOrCreate: resolveOrCreateMock,
   }),
 }));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
-}));
-vi.mock("#/api/pages", () => ({
-  // TanStack mutation results are unstable per render — return a fresh object
-  // on every call; only mutateAsync identity is stable.
-  useCreatePage: () => ({
-    mutateAsync: createMutateAsyncMock,
-    isPending: false,
-  }),
-}));
-vi.mock("#/api/client", () => ({
-  fetchClient: { GET: searchGetMock },
 }));
 vi.mock("#/components/codex/CLink", () => ({
   CLink: (props: CapturedCLinkProps) => {
@@ -99,22 +83,22 @@ function lastCLink() {
   return props;
 }
 
-function searchEntry(path: string, title: string | null) {
-  return {
-    page_id: "0195e9aa-0000-7000-8000-000000000001",
-    path,
-    snippet: "",
-    title,
-  };
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   clinkCalls.length = 0;
   lookupMock.mockReturnValue(null);
-  refetchAndLookupMock.mockResolvedValue(null);
-  searchGetMock.mockResolvedValue({ data: [] });
-  createMutateAsyncMock.mockResolvedValue({});
+  resolveOrCreateMock.mockResolvedValue({
+    path: "notes/new-topic.md",
+    title: "New Topic",
+  });
 });
 
 describe("WikilinkElement resolved", () => {
@@ -169,105 +153,52 @@ describe("WikilinkElement dangling", () => {
 });
 
 describe("WikilinkElement dangling click", () => {
-  it("opens the tab at the refreshed path on a refetch hit, without search or create", async () => {
+  it("opens the path returned by the shared resolver", async () => {
     const user = userEvent.setup();
-    refetchAndLookupMock.mockResolvedValue("notes/refreshed.md");
-    renderWikilink("Late Indexed Page");
+    resolveOrCreateMock.mockResolvedValue({
+      path: "notes/new-topic.md",
+      title: "New Topic",
+    });
+    renderWikilink("New Topic");
 
     await user.click(screen.getByRole("link"));
 
     await waitFor(() =>
-      expect(openTabMock).toHaveBeenCalledWith("page", "notes/refreshed.md"),
+      expect(openTabMock).toHaveBeenCalledWith("page", "notes/new-topic.md"),
     );
-    expect(refetchAndLookupMock).toHaveBeenCalledWith("Late Indexed Page");
-    expect(searchGetMock).not.toHaveBeenCalled();
-    expect(createMutateAsyncMock).not.toHaveBeenCalled();
+    expect(resolveOrCreateMock).toHaveBeenCalledWith("New Topic");
   });
 
-  it("opens a case-insensitive exact-title search match instead of creating", async () => {
+  it("coalesces pending clicks and allows activation after settlement", async () => {
     const user = userEvent.setup();
-    searchGetMock.mockResolvedValue({
-      data: [
-        searchEntry("notes/decoy.md", "Something Else Entirely"),
-        searchEntry("notes/untitled.md", null),
-        searchEntry("notes/existing.md", "clepsydra design notes"),
-      ],
-    });
-    renderWikilink("Clepsydra Design Notes");
-
-    await user.click(screen.getByRole("link"));
-
-    await waitFor(() =>
-      expect(openTabMock).toHaveBeenCalledWith("page", "notes/existing.md"),
-    );
-    expect(searchGetMock).toHaveBeenCalledWith("/api/vault/index/search", {
-      params: { query: { q: "Clepsydra Design Notes" } },
-    });
-    expect(createMutateAsyncMock).not.toHaveBeenCalled();
-  });
-
-  it("matches search titles after NFC normalization", async () => {
-    const user = userEvent.setup();
-    // Target uses precomposed é; the index returns decomposed e + ́.
-    searchGetMock.mockResolvedValue({
-      data: [searchEntry("notes/cafe.md", "Cafe\u{301} Notes")],
-    });
-    renderWikilink("Caf\u{e9} Notes");
-
-    await user.click(screen.getByRole("link"));
-
-    await waitFor(() =>
-      expect(openTabMock).toHaveBeenCalledWith("page", "notes/cafe.md"),
-    );
-    expect(createMutateAsyncMock).not.toHaveBeenCalled();
-  });
-
-  it("creates the page at the intake-derived path on a full miss, then opens it", async () => {
-    const user = userEvent.setup();
-    searchGetMock.mockResolvedValue({
-      data: [
-        searchEntry("notes/near-miss.md", "Clepsydra Design Notes Extended"),
-      ],
-    });
-    renderWikilink("Clepsydra Design Notes");
-
-    await user.click(screen.getByRole("link"));
-
-    await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(1));
-    expect(createMutateAsyncMock).toHaveBeenCalledTimes(1);
-    const [vars] = createMutateAsyncMock.mock.calls[0];
-    expect(vars.body).toEqual({ title: "Clepsydra Design Notes" });
-    const derivedPath = vars.params.path.path;
-    expect(derivedPath).toMatch(
-      /^notes\/\d{8}\.clepsydra-design-notes\.[0-9A-Za-z]{8}\.md$/,
-    );
-    expect(openTabMock).toHaveBeenCalledWith("page", derivedPath);
-  });
-
-  it("ignores clicks while a previous dangling-click flow is in flight", async () => {
-    const user = userEvent.setup();
-    let resolveRefetch: (value: string | null) => void = () => {};
-    refetchAndLookupMock.mockImplementation(
-      () =>
-        new Promise<string | null>((resolve) => {
-          resolveRefetch = resolve;
-        }),
-    );
-    renderWikilink("Unwritten Page");
+    const pending = deferred<{ path: string; title: string }>();
+    resolveOrCreateMock.mockReturnValue(pending.promise);
+    renderWikilink("New Topic");
     const link = screen.getByRole("link");
 
     await user.click(link);
     await user.click(link);
-    expect(refetchAndLookupMock).toHaveBeenCalledTimes(1);
+    expect(resolveOrCreateMock).toHaveBeenCalledTimes(1);
 
-    resolveRefetch("notes/finally.md");
+    pending.resolve({ path: "notes/new-topic.md", title: "New Topic" });
     await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(1));
-    expect(openTabMock).toHaveBeenCalledWith("page", "notes/finally.md");
+    expect(openTabMock).toHaveBeenCalledWith("page", "notes/new-topic.md");
 
-    // Once the flow settles, a new click starts a fresh flow.
     await user.click(link);
-    expect(refetchAndLookupMock).toHaveBeenCalledTimes(2);
-    resolveRefetch("notes/finally.md");
     await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(2));
+    expect(resolveOrCreateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the link dangling when resolution or creation fails", async () => {
+    const user = userEvent.setup();
+    resolveOrCreateMock.mockRejectedValue(new Error("create failed"));
+    renderWikilink("New Topic");
+
+    await user.click(screen.getByRole("link"));
+
+    await waitFor(() =>
+      expect(resolveOrCreateMock).toHaveBeenCalledWith("New Topic"),
+    );
+    expect(openTabMock).not.toHaveBeenCalled();
   });
 });

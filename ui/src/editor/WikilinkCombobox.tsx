@@ -8,18 +8,28 @@ interface WikilinkComboboxProps {
   query: string;
   reference: VirtualElement | null;
   onSelect: (page: PageSummary) => void;
+  onCreate: (title: string) => void;
   onClose: () => void;
+  isCreating?: boolean;
+  createError?: string | null;
 }
+
+type WikilinkSuggestion =
+  | { kind: "page"; page: PageSummary }
+  | { kind: "create"; title: string };
 
 export function WikilinkCombobox({
   pages,
   query,
   reference,
   onSelect,
+  onCreate,
   onClose,
+  isCreating = false,
+  createError = null,
 }: WikilinkComboboxProps) {
   const lowerQuery = query.toLowerCase();
-  const filtered = useMemo(
+  const filteredPages = useMemo(
     () =>
       pages
         .filter(
@@ -31,22 +41,50 @@ export function WikilinkCombobox({
         .slice(0, 8),
     [pages, lowerQuery],
   );
+  const trimmedQuery = query.trim();
+  const suggestions: WikilinkSuggestion[] =
+    filteredPages.length > 0
+      ? filteredPages.map((page) => ({ kind: "page", page }))
+      : trimmedQuery
+        ? [{ kind: "create", title: trimmedQuery }]
+        : [];
+
+  const selectSuggestion = (suggestion: WikilinkSuggestion) => {
+    if (!reference) return;
+    if (suggestion.kind === "page") onSelect(suggestion.page);
+    else if (!isCreating) onCreate(suggestion.title);
+  };
 
   return (
     <EditorSuggestionPopover
-      items={filtered}
+      items={suggestions}
       query={query}
       reference={reference}
-      onSelect={onSelect}
+      onSelect={selectSuggestion}
       onClose={onClose}
-      getItemKey={(p) => p.id}
-      emptyMessage="No pages found"
-      renderItem={(page) => (
-        <>
-          <div className="font-medium">{page.title ?? page.canonical_name}</div>
-          <div className="text-xs text-muted-foreground">{page.path}</div>
-        </>
-      )}
+      getItemKey={(suggestion) =>
+        suggestion.kind === "page"
+          ? `page:${suggestion.page.id}`
+          : `create:${suggestion.title}`
+      }
+      emptyMessage={trimmedQuery ? undefined : "Type a page name"}
+      renderItem={(suggestion) => {
+        if (suggestion.kind === "page") {
+          const { page } = suggestion;
+          return (
+            <>
+              <div className="font-medium">
+                {page.title ?? page.canonical_name}
+              </div>
+              <div className="text-xs text-muted-foreground">{page.path}</div>
+            </>
+          );
+        }
+
+        if (isCreating) return "Creating…";
+        if (createError) return "Creation failed — press Enter to retry";
+        return `Create “${suggestion.title}”`;
+      }}
     />
   );
 }
