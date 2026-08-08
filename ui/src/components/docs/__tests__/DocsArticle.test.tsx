@@ -49,6 +49,10 @@ function FixtureGuide({ components = {} }: { components?: MDXComponents }) {
         <Anchor href="/docs/bases#fields">Bases</Anchor>
         {" · "}
         <Anchor href="https://example.com">External</Anchor>
+        {" · "}
+        <Anchor href="https://en.wikipedia.org/wiki/Hypertext">
+          Wikipedia
+        </Anchor>
       </Paragraph>
       <Pre>
         <Code className="language-ts">const field = true;</Code>
@@ -131,14 +135,17 @@ describe("DocsArticle", () => {
       "href",
       "/docs/bases#fields",
     );
-    expect(screen.getByRole("link", { name: "External" })).toHaveAttribute(
-      "target",
-      "_blank",
-    );
-    expect(screen.getByRole("link", { name: "External" })).toHaveAttribute(
-      "rel",
-      "noreferrer",
-    );
+    const ordinaryExternal = screen.getByRole("link", { name: "External" });
+    expect(ordinaryExternal).not.toHaveAttribute("data-link-resource");
+    expect(ordinaryExternal).toHaveTextContent("↗");
+    expect(ordinaryExternal).toHaveAttribute("target", "_blank");
+    expect(ordinaryExternal).toHaveAttribute("rel", "noreferrer");
+
+    const wikipedia = screen.getByRole("link", { name: "Wikipedia" });
+    expect(wikipedia).toHaveAttribute("data-link-resource", "wikipedia");
+    expect(wikipedia).not.toHaveTextContent("↗");
+    expect(wikipedia).toHaveAttribute("target", "_blank");
+    expect(wikipedia).toHaveAttribute("rel", "noreferrer");
 
     await user.click(screen.getByRole("link", { name: "Bases" }));
     await waitFor(() => {
