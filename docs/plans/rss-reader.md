@@ -224,12 +224,23 @@ silently swallowed.
 
 ## UI
 
+### Shell
+
+**Decision:** clepsydra has a persistent frame. Today's `__root.tsx` is only
+an empty full-viewport `<main>` wrapper, so the frame is built as part of this
+work, not retrofitted: `__root.tsx` owns an app shell — a persistent sidebar
+with top-level navigation (Home, the future note-browsing surface, Feeds) —
+and every route renders inside it. Feed groups and their unread counts live
+in this shared sidebar, not privately inside the river panel, so they remain
+visible from any surface.
+
 ### Routes
 
-- `/` — **the start page.** A grid/stack of panels. First panel: the feed
-  river. The panel contract is deliberately minimal (a title, a body
-  component, a data hook) — enough structure that the second panel type slots
-  in without redesign, no speculative plugin machinery.
+- `/` — **the start page**, rendered inside the shell. A grid/stack of
+  panels. First panel: the feed river. The panel contract is deliberately
+  minimal (a title, a body component, a data hook) — enough structure that
+  the second panel type slots in without redesign, no speculative plugin
+  machinery.
 - `/feeds` — subscription management: add (paste URL, pick group), rename,
   regroup, unsubscribe, OPML import/export, and per-feed health (last fetch,
   error state, backoff). All subscription edits route through `feeds.md`.
@@ -239,9 +250,9 @@ silently swallowed.
 - Unread-first, newest-first, grouped by day; infinite scroll on the entry
   cursor. Compact rows (feed name · title · age) expanding in place to the
   sanitized content — reading happens on the home surface, no navigation away.
-- **Groups as the primary filter**, Reeder-style: a sidebar listing groups
-  (from `feeds.md` sections) with per-group unread counts, then feeds within;
-  selecting scopes the river. Tag filtering rides the same control.
+- **Groups as the primary filter**, Reeder-style: the shell sidebar lists
+  groups (from `feeds.md` sections) with per-group unread counts, then feeds
+  within; selecting scopes the river. Tag filtering rides the same control.
 - **Bookmarks view**: a filter of the river (`bookmarked=true`) showing kept
   entries with their tags; tag-editing inline.
 - **Read state**: explicit toggle plus mark-on-expand. Optimistic updates via
@@ -260,7 +271,7 @@ silently swallowed.
 |---|---|---|
 | 0 | axum + sqlx + migrations + static serving + vite proxy | backend skeleton the subsystem sits on |
 | 1 | `feeds.md` parser + reconciler, schema, subscribe (incl. discovery), fetch/parse/sanitize pipeline, scheduler, prune job, entries API | working subsystem, testable via curl and by hand-editing `feeds.md` |
-| 2 | start page with river panel + group sidebar, `/feeds` management, read state, bookmarking | the TODO's desired outcome, end to end |
+| 2 | app shell in `__root.tsx` (persistent sidebar/nav), start page with river panel, `/feeds` management, read state, bookmarking | the TODO's desired outcome, end to end |
 | 3 | OPML import/export, mark-all-read, entry tags UI, annotations, keyboard nav, per-feed health polish | daily-drivable; Reeder migration possible |
 
 Each phase leaves the repo in a coherent, shippable state.
@@ -272,11 +283,6 @@ Each phase leaves the repo in a coherent, shippable state.
 2. ~~Retention?~~ **Prune after N days; bookmarking retains indefinitely**
    and brings note affordances (tags now, annotations soon, vault capture
    eventually); see above.
-
-## Open question
-
-3. **What shell should the start page assume?** When clepsydra grows its
-   note-browsing UI, does the app have persistent chrome (sidebar/nav shared
-   by home, notes, feeds) that `/` renders inside, or is the start page the
-   full-bleed root surface? The panel design is agnostic, but `__root.tsx`
-   ownership and the `/` layout depend on the answer.
+3. ~~What shell should the start page assume?~~ **A persistent frame.** The
+   current `__root.tsx` is an empty wrapper, so the shell is built here
+   (phase 2) rather than retrofitted; see *Shell* above.
