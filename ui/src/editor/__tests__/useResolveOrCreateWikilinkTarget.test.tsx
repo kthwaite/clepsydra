@@ -79,6 +79,18 @@ it("reuses an NFC-normalized case-insensitive exact title", async () => {
   expect(createMutateAsyncMock).not.toHaveBeenCalled();
 });
 
+it("propagates search failure without creating a page", async () => {
+  const searchError = { error: "search unavailable", status: 500 };
+  searchGetMock.mockResolvedValue({ data: undefined, error: searchError });
+  const { result } = renderHook(() => useResolveOrCreateWikilinkTarget());
+
+  await expect(result.current.resolveOrCreate("New Topic")).rejects.toBe(
+    searchError,
+  );
+  expect(generateShortIdMock).not.toHaveBeenCalled();
+  expect(createMutateAsyncMock).not.toHaveBeenCalled();
+});
+
 it("creates one blank canonical note when the target is unresolved", async () => {
   generateShortIdMock.mockReturnValue("a1B2c3D4");
   createMutateAsyncMock.mockResolvedValue({});

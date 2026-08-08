@@ -83,6 +83,14 @@ function lastCLink() {
   return props;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   clinkCalls.length = 0;
@@ -159,6 +167,26 @@ describe("WikilinkElement dangling click", () => {
       expect(openTabMock).toHaveBeenCalledWith("page", "notes/new-topic.md"),
     );
     expect(resolveOrCreateMock).toHaveBeenCalledWith("New Topic");
+  });
+
+  it("coalesces pending clicks and allows activation after settlement", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<{ path: string; title: string }>();
+    resolveOrCreateMock.mockReturnValue(pending.promise);
+    renderWikilink("New Topic");
+    const link = screen.getByRole("link");
+
+    await user.click(link);
+    await user.click(link);
+    expect(resolveOrCreateMock).toHaveBeenCalledTimes(1);
+
+    pending.resolve({ path: "notes/new-topic.md", title: "New Topic" });
+    await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(1));
+    expect(openTabMock).toHaveBeenCalledWith("page", "notes/new-topic.md");
+
+    await user.click(link);
+    await waitFor(() => expect(openTabMock).toHaveBeenCalledTimes(2));
+    expect(resolveOrCreateMock).toHaveBeenCalledTimes(2);
   });
 
   it("leaves the link dangling when resolution or creation fails", async () => {

@@ -37,9 +37,13 @@ export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarge
         const refreshedPath = await refetchAndLookup(title);
         if (refreshedPath) return { path: refreshedPath, title };
 
-        const { data } = await fetchClient.GET("/api/vault/index/search", {
-          params: { query: { q: title } },
-        });
+        const { data, error } = await fetchClient.GET(
+          "/api/vault/index/search",
+          {
+            params: { query: { q: title } },
+          },
+        );
+        if (error) throw error;
         const exact = (data ?? []).find(
           (entry) => entry.title != null && titleKey(entry.title) === key,
         );

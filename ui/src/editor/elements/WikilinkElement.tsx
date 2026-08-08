@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { RenderElementProps } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
@@ -11,6 +12,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const { lookup } = useWikilinkResolution();
   const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
   const openTab = useOpenTab();
+  const inFlightRef = useRef(false);
 
   const resolved = lookup(element.target);
 
@@ -19,11 +21,15 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     element.alias && element.alias !== element.target ? element.alias : null;
 
   const handleDanglingClick = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const target = await resolveOrCreate(element.target);
       openTab("page", target.path);
     } catch {
       // Best effort: leave the link dangling.
+    } finally {
+      inFlightRef.current = false;
     }
   };
 
