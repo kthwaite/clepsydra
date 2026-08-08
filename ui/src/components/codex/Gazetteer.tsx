@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import {
   ListBox,
   ListBoxItem,
@@ -24,6 +24,7 @@ import {
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
+import { useGazetteerStore } from "#/store/gazetteer";
 import { filterAndSortRows, type GazetteerSort } from "./gazetteer-filter";
 
 /** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
@@ -39,17 +40,25 @@ type Props = {
 };
 
 export function Gazetteer({ initialTag }: Props) {
-  const [selectedTags, setSelectedTags] = useState<string[]>(
-    initialTag ? [initialTag] : [],
-  );
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<GazetteerSort>("ts");
+  const {
+    query,
+    selectedTags,
+    sort,
+    enter,
+    setQuery,
+    setSelectedTags,
+    setSort,
+  } = useGazetteerStore();
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [failures, setFailures] = useState<[string, string][]>([]);
 
+  useLayoutEffect(() => enter(initialTag), [enter, initialTag]);
+
   const toggleTag = (t: string) =>
-    setSelectedTags((cur) =>
-      cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t],
+    setSelectedTags(
+      selectedTags.includes(t)
+        ? selectedTags.filter((x) => x !== t)
+        : [...selectedTags, t],
     );
   const { data: tagsData } = useTags();
   const { data: content } = useContentIndex(500);
