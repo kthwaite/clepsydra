@@ -17,6 +17,10 @@ import {
 } from "./blockTransforms";
 import { tryInlineTransform } from "./inlineTransforms";
 import { tryListContinuation } from "./listContinuation";
+import {
+  tryPrefixedLinkBreakTransform,
+  tryPrefixedLinkTextTransform,
+} from "./prefixedLinkTransform";
 
 const INLINE_CLOSERS: Record<string, true> = {
   "`": true,
@@ -47,22 +51,31 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
 
-    // Step 1: overtype -> inline transform -> return
+    // Step 1: overtype -> prefixed link -> inline transform -> return
     // After overtype the closer is already in the text, so pass closerConsumed.
     if (tryOvertype(editor, ch)) {
+      if (
+        ch === '"' &&
+        tryPrefixedLinkTextTransform(editor, ch, /* closerConsumed */ true)
+      )
+        return;
       tryInlineTransform(editor, ch, /* closerConsumed */ true);
       return;
     }
     // Step 2: thematic break
     if (ch === "-" && tryThematicBreak(editor)) return;
-    // Step 3: block transforms
+    // Step 3: prefixed link on Space
+    if (ch === " " && tryPrefixedLinkTextTransform(editor, ch)) return;
+    // Step 4: block transforms
     if (ch === " " && Range.isCollapsed(selection) && tryBlockTransform(editor))
       return;
-    // Step 4: inline transform
+    // Step 5: inline transform
     if (tryInlineTransform(editor, ch)) return;
-    // Step 5: auto-pair
+    // Step 6: prefixed link on a non-overtype closing quote
+    if (ch === '"' && tryPrefixedLinkTextTransform(editor, ch)) return;
+    // Step 7: auto-pair
     if (tryAutoPair(editor, ch)) return;
-    // Step 6: fallback
+    // Step 8: fallback
     insertText(ch);
   };
 
@@ -77,6 +90,7 @@ export function withAutoformat(editor: Editor): Editor {
     if (tryBlockquoteContinuation(editor)) return;
     if (tryHeadingExit(editor)) return;
     if (tryCodeFence(editor)) return;
+    if (tryPrefixedLinkBreakTransform(editor, insertBreak)) return;
     insertBreak();
   };
 
