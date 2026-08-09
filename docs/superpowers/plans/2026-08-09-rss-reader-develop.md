@@ -199,7 +199,9 @@ Define `snapshot_database(source: &Path, destination: &Path) -> Result<(), FeedS
 
 - [ ] **Step 4: Run store and backup tests GREEN**
 
-Run: `cargo test feeds::store::tests vault::backup::tests --lib`
+Run: `cargo test feeds::store::tests --lib`
+
+Run: `cargo test vault::backup::tests --lib`
 
 Expected: all focused tests pass.
 
@@ -260,7 +262,9 @@ Use local wiremock fixtures to cover HTML alternate discovery, safe redirect, re
 
 - [ ] **Step 2: Run fetch tests RED**
 
-Run: `cargo test feeds::network::tests feeds::fetch::tests --lib`
+Run: `cargo test feeds::network::tests --lib`
+
+Run: `cargo test feeds::fetch::tests --lib`
 
 Expected: compilation fails because the checked client and parser are absent.
 
@@ -272,7 +276,9 @@ Disable automatic redirects. Resolve and validate every address, then bind the v
 
 - [ ] **Step 4: Run fetch tests GREEN**
 
-Run: `cargo test feeds::network::tests feeds::fetch::tests --lib`
+Run: `cargo test feeds::network::tests --lib`
+
+Run: `cargo test feeds::fetch::tests --lib`
 
 Expected: all focused tests pass.
 
@@ -355,7 +361,9 @@ Also cover unconditional `feeds.md` exclusion, exact reserved-manifest CAS witho
 
 - [ ] **Step 2: Run API/config tests RED**
 
-Run: `cargo test api::feeds::tests feeds::scheduler::tests --lib`
+Run: `cargo test api::feeds::tests --lib`
+
+Run: `cargo test feeds::scheduler::tests --lib`
 
 Expected: compilation fails because settings, state, scheduler, and router are absent.
 
@@ -387,7 +395,9 @@ Update the config template/reference and README with the `[feeds]` section, `fee
 
 - [ ] **Step 4: Run focused backend integration tests GREEN**
 
-Run: `cargo test api::feeds::tests feeds::scheduler::tests --lib`
+Run: `cargo test api::feeds::tests --lib`
+
+Run: `cargo test feeds::scheduler::tests --lib`
 
 Run: the repository's focused OpenAPI schema test target.
 
