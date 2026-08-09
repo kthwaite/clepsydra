@@ -1416,6 +1416,80 @@ async fn member_index_failure_rolls_back_generated_page_without_notification() {
     assert_no_notification(&mut notifications);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_member_request_still_emits_one_event_after_commit() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let (publication_entered_tx, publication_entered_rx) = tokio::sync::oneshot::channel();
+    let publication_entered_tx =
+        Arc::new(parking_lot::Mutex::new(Some(publication_entered_tx)));
+    let (publication_release_tx, publication_release_rx) = std::sync::mpsc::channel();
+    let publication_release_rx = Arc::new(parking_lot::Mutex::new(publication_release_rx));
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new({
+            let publication_entered_tx = Arc::clone(&publication_entered_tx);
+            let publication_release_rx = Arc::clone(&publication_release_rx);
+            move |path, content| {
+                if let Some(entered) = publication_entered_tx.lock().take() {
+                    let _ = entered.send(());
+                }
+                publication_release_rx.lock().recv().unwrap();
+                clepsydra::vault::atomic_file::atomic_create(path, content)
+            }
+        })));
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let (server, _temp_dir, state) = fixture.into_parts();
+    let server = Arc::new(server);
+    let request = tokio::spawn(async move {
+        server
+            .post("/api/vault/bases/reading/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": "Continues",
+                "title": "Cancelled caller",
+                "fields": { "kind": "BOOK", "status": "reading" }
+            }))
+            .await
+    });
+
+    publication_entered_rx.await.unwrap();
+    request.abort();
+    let _ = request.await;
+    publication_release_tx.send(()).unwrap();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), notifications.recv())
+        .await
+        .expect("committed member did not emit an event after request cancellation")
+        .unwrap();
+    let upserted = match event {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert!(removed.is_empty());
+            upserted
+        }
+        other => panic!("unexpected notification: {other:?}"),
+    };
+    assert_eq!(upserted.len(), 1);
+    let created_path = clepsydra::vault::path::VaultPath::new(&upserted[0]).unwrap();
+    assert!(state.vault.resolve(&created_path).exists());
+    let indexed: i64 = state
+        .index
+        .with_index(move |index, _| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pages WHERE path = ?1",
+                    [created_path.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(indexed, 1);
+}
+
 #[tokio::test]
 async fn member_internal_failure_is_generic_and_leaves_no_artifact_or_event() {
     let fixture = member_fixture(seed);
