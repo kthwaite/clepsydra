@@ -1,5 +1,5 @@
 import type { BaseDetailResponse } from "#/api/bases";
-import type { BaseDraft } from "./definition-model";
+import { type BaseDraft, canSort } from "./definition-model";
 
 type BaseDiagnostic = BaseDetailResponse["diagnostics"][number];
 
@@ -23,6 +23,12 @@ export function validateBaseDraftStructure(
   }
 
   const indexesByName = new Map<string, number[]>();
+  const propertyTypes = new Map(
+    draft.properties.map((property) => [
+      property.key,
+      property.definition.type,
+    ]),
+  );
   for (const [index, view] of draft.views.entries()) {
     if (view.name.trim().length === 0) {
       diagnostics.push({
@@ -45,6 +51,18 @@ export function validateBaseDraftStructure(
         path: `views[${index}].layout`,
         message: `Unsupported layout “${view.layout}”. Choose Table to repair it.`,
       });
+    }
+
+    for (const [sortIndex, sort] of view.sort.entries()) {
+      const propertyType = propertyTypes.get(sort.field);
+      if (propertyType !== undefined && !canSort(propertyType)) {
+        diagnostics.push({
+          slug,
+          severity: "error",
+          path: `views[${index}].sort[${sortIndex}].field`,
+          message: `Sort field “${sort.field}” cannot be sorted because ${propertyType} values are not scalar.`,
+        });
+      }
     }
   }
 

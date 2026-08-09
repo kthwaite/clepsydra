@@ -11,7 +11,12 @@ import {
   DefinitionHeader,
   type DefinitionSaveStatus,
 } from "./DefinitionHeader";
-import { type BaseDraft, fromWire, toWire } from "./definition-model";
+import {
+  type BaseDraft,
+  fromWire,
+  toViewOrigins,
+  toWire,
+} from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
 import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
 import { MembershipEditor } from "./MembershipEditor";
@@ -265,9 +270,29 @@ export function BaseDefinitionWorkspace({
         body: {
           expected_revision: submittedRevision,
           definition: toWire(submittedDraft),
+          view_origins: toViewOrigins(submittedDraft),
         },
       });
-      const serverDraft = fromWire(response);
+      const submittedPropertyIds = new Map(
+        submittedDraft.properties.map((property) => [
+          property.key,
+          property.id,
+        ]),
+      );
+      const responseDraft = fromWire(response);
+      const serverDraft = {
+        ...responseDraft,
+        properties: responseDraft.properties.map((property) => ({
+          ...property,
+          id: submittedPropertyIds.get(property.key) ?? property.id,
+        })),
+      };
+      const persistedViewOrigins = new Map(
+        submittedDraft.views.map((view, index) => [
+          view.id,
+          serverDraft.views[index]?.name,
+        ]),
+      );
       setBaseline(serverDraft);
       setRevision(response.revision);
       setDiagnostics(response.diagnostics);
@@ -307,6 +332,18 @@ export function BaseDefinitionWorkspace({
           selectedViewRef.current = nextSelection;
           setSelectedView(nextSelection);
         }
+      } else {
+        setDraftState((current) =>
+          current
+            ? {
+                ...current,
+                views: current.views.map((view) => {
+                  const origin = persistedViewOrigins.get(view.id);
+                  return origin === undefined ? view : { ...view, origin };
+                }),
+              }
+            : current,
+        );
       }
     } catch (error) {
       const nextDiagnostics = diagnosticsFromError(error);
@@ -422,7 +459,7 @@ export function BaseDefinitionWorkspace({
             (diagnostic) => diagnostic.severity === "error",
           )
         }
-        canDiscard={isDirty && !saving}
+        canDiscard={isDirty && !saving && !conflictMessage}
         onSave={() => void save()}
         onDiscard={discard}
       />

@@ -1,12 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   BaseFilter,
   BaseMutationResponse,
   CreateBaseRequest,
 } from "#/api/bases";
-import { formatApiError } from "#/api/error";
+import { formatApiError, isApiConflict } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
@@ -41,6 +41,7 @@ export function CreateBaseDialog({
   const [slugError, setSlugError] = useState<string>();
   const [requestError, setRequestError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const slugInput = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<BaseFilter>();
   const busy = isPending || submitting;
 
@@ -56,6 +57,10 @@ export function CreateBaseDialog({
       setSubmitting(false);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (slugError) slugInput.current?.focus();
+  }, [slugError]);
 
   function changeName(nextName: string) {
     setName(nextName);
@@ -101,7 +106,12 @@ export function CreateBaseDialog({
       };
       await navigate(destination as never);
     } catch (error) {
-      setRequestError(formatApiError(error, "Base could not be created."));
+      const message = formatApiError(error, "Base could not be created.");
+      if (isApiConflict(error)) {
+        setSlugError(message);
+      } else {
+        setRequestError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -148,6 +158,7 @@ export function CreateBaseDialog({
           value={slug}
           onChange={changeSlug}
           isDisabled={busy}
+          inputRef={slugInput}
           isInvalid={!!slugError}
           errorMessage={slugError}
           description="Vault filename: letters, numbers, underscores, and hyphens."

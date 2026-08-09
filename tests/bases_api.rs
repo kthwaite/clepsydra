@@ -31,6 +31,25 @@ filter = { field = "status", op = "eq", value = "reading" }
 sort = [ { field = "started", dir = "desc" } ]
 columns = ["title", "author", "rating"]
 "#;
+const IDENTITY_BASE: &str = r#"name = "Identity"
+
+# logical a
+[[views]]
+name = "A"
+layout = "table"
+plugin_view = "for-a"
+
+# logical b
+[[views]]
+name = "B"
+layout = "table"
+plugin_view = "for-b"
+"#;
+
+fn seed_identity_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(root.join("bases/identity.base.toml"), IDENTITY_BASE).unwrap();
+}
 
 fn seed(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
@@ -524,7 +543,8 @@ async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
                     "status": { "type": "select", "options": [] }
                 },
                 "views": [{ "name": "All", "layout": "table" }]
-            }
+            },
+            "view_origins": [{ "kind": "existing", "name": "All" }]
         }))
         .await;
     stale_update.assert_status(StatusCode::CONFLICT);
@@ -547,7 +567,8 @@ async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
                     "status": { "type": "select", "options": [] }
                 },
                 "views": [{ "name": "All", "layout": "table" }]
-            }
+            },
+            "view_origins": [{ "kind": "existing", "name": "All" }]
         }))
         .await;
     update.assert_status_ok();
@@ -584,6 +605,54 @@ async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
     assert!(!root.join("bases/books.base.toml").exists());
     assert_base_registry_changed(&mut notifications);
     assert_eq!(fs::read_to_string(page_path).unwrap(), page_before);
+}
+
+#[tokio::test]
+async fn update_view_origins_are_validated_and_drive_raw_table_identity() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_identity_base)
+        .build();
+    let path = fixture.state.vault.root().join("bases/identity.base.toml");
+    let before = fs::read_to_string(&path).unwrap();
+    let detail = fixture
+        .server
+        .get("/api/vault/bases/identity")
+        .await
+        .json::<serde_json::Value>();
+    let revision = detail["revision"].as_str().unwrap();
+
+    let malformed = fixture
+        .server
+        .put("/api/vault/bases/identity")
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "definition": {
+                "name": "Identity",
+                "views": [{ "name": "B", "layout": "table" }]
+            },
+            "view_origins": []
+        }))
+        .await;
+    malformed.assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    fixture
+        .server
+        .put("/api/vault/bases/identity")
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "definition": {
+                "name": "Identity",
+                "views": [{ "name": "B", "layout": "table" }]
+            },
+            "view_origins": [{ "kind": "existing", "name": "A" }]
+        }))
+        .await
+        .assert_status_ok();
+    let after = fs::read_to_string(path).unwrap();
+    assert!(after.contains("# logical a\n[[views]]\nname = \"B\""));
+    assert!(after.contains("plugin_view = \"for-a\""));
+    assert!(!after.contains("plugin_view = \"for-b\""));
 }
 
 #[tokio::test]

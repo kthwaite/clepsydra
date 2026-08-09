@@ -138,6 +138,7 @@ describe("BaseDefinitionWorkspace", () => {
       body: {
         expected_revision: "revision-1",
         definition: expect.objectContaining({ name: "My Reading" }),
+        view_origins: [{ kind: "existing", name: "All" }],
       },
     });
     expect(await screen.findByText("Saved")).toBeInTheDocument();
@@ -189,6 +190,7 @@ describe("BaseDefinitionWorkspace", () => {
       body: {
         expected_revision: "revision-1",
         definition: expect.objectContaining({ filter }),
+        view_origins: [{ kind: "existing", name: "All" }],
       },
     });
   });
@@ -211,6 +213,74 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Typed during save");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(screen.getByText("revision-2")).toBeInTheDocument();
+  });
+
+  it("rebases view identity after edits made during a save", async () => {
+    const pending = deferred<BaseMutationResponse>();
+    const originalView = detail.views?.[0];
+    if (!originalView) throw new Error("test fixture requires one view");
+    updateMock.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(
+      mutationResponse({
+        views: [{ ...originalView, name: "Typed during save" }],
+        revision: "revision-3",
+      }),
+    );
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    const viewName = screen.getByLabelText("View name");
+    await user.clear(viewName);
+    await user.type(viewName, "Submitted view");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.clear(viewName);
+    await user.type(viewName, "Typed during save");
+    await act(async () => {
+      pending.resolve(
+        mutationResponse({
+          views: [{ ...originalView, name: "Submitted view" }],
+          revision: "revision-2",
+        }),
+      );
+      await pending.promise;
+    });
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        body: expect.objectContaining({
+          expected_revision: "revision-2",
+          view_origins: [{ kind: "existing", name: "Submitted view" }],
+        }),
+      }),
+    );
+  });
+
+  it("keeps persisted property identity after edits made during a save", async () => {
+    const pending = deferred<BaseMutationResponse>();
+    const properties = { status: { type: "text" as const } };
+    baseState.data = { ...detail, properties };
+    updateMock.mockReturnValue(pending.promise);
+    renderWorkspace();
+    const user = await renameBase("Submitted name");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.selectOptions(screen.getByLabelText("Type for status"), "url");
+    await act(async () => {
+      pending.resolve(
+        mutationResponse({
+          name: "Submitted name",
+          properties,
+          revision: "revision-2",
+        }),
+      );
+      await pending.promise;
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove status" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Remove status");
   });
 
   it("discards local edits back to the last server baseline", async () => {
@@ -279,6 +349,7 @@ describe("BaseDefinitionWorkspace", () => {
       body: {
         expected_revision: "revision-2",
         definition: expect.objectContaining({ name: "Second save" }),
+        view_origins: [{ kind: "existing", name: "All" }],
       },
     });
     expect(await screen.findByText("revision-3")).toBeInTheDocument();
@@ -389,9 +460,11 @@ describe("BaseDefinitionWorkspace", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Discard" }));
-    expect(screen.getByLabelText("Name")).toHaveValue("Reading Log");
-    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+    expect(screen.getByLabelText("Name")).toHaveValue("My conflicted draft");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed outside clepsydra/i,
+    );
   });
 
   it("guards browser and internal navigation while dirty", async () => {
@@ -526,6 +599,55 @@ describe("BaseDefinitionWorkspace", () => {
     expect(name).toHaveFocus();
     expect(updateMock).not.toHaveBeenCalled();
   });
+  it("blocks a stale sort after a scalar property becomes a relation and focuses its field", async () => {
+    baseState.data = {
+      ...detail,
+      properties: { status: { type: "text" } },
+      views: [
+        {
+          name: "All",
+          layout: "table",
+          columns: ["title", "status"],
+          sort: [{ field: "status", dir: "asc" }],
+        },
+      ],
+    };
+    renderWorkspace();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.selectOptions(
+      screen.getByLabelText("Type for status"),
+      "relation",
+    );
+
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(updateMock).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /status.*cannot be sorted/i,
+      }),
+    );
+    const sortField = screen.getByLabelText("Sort field 1");
+    expect(sortField).toHaveValue("status");
+    expect(sortField).toHaveFocus();
+    expect(sortField).toHaveAttribute("aria-invalid", "true");
+    expect(sortField).toHaveAttribute(
+      "aria-describedby",
+      "view-sort-field-error-0-0",
+    );
+    expect(
+      sortField.ownerDocument.getElementById("view-sort-field-error-0-0"),
+    ).toHaveTextContent(/status.*cannot be sorted/i);
+    expect(
+      screen.getByRole("option", {
+        name: "status (unsupported for sorting)",
+      }),
+    ).toBeInTheDocument();
+  });
 
   it("saves the exact authored view while previewing the unsaved definition", async () => {
     updateMock.mockResolvedValue(
@@ -596,6 +718,7 @@ describe("BaseDefinitionWorkspace", () => {
             }),
           ],
         }),
+        view_origins: [{ kind: "existing", name: "All" }],
       },
     });
   });
@@ -678,6 +801,7 @@ describe("BaseDefinitionWorkspace", () => {
             }),
           ],
         }),
+        view_origins: [{ kind: "existing", name: "Board" }],
       },
     });
   });

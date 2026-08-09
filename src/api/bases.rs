@@ -23,6 +23,7 @@ use crate::vault::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
     SortDir, SortKey, ViewDefinition, validate_definition,
 };
+use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
 use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
 
@@ -64,6 +65,7 @@ pub struct CreateBaseRequest {
 pub struct UpdateBaseRequest {
     pub expected_revision: String,
     pub definition: BaseFile,
+    pub view_origins: Vec<ViewOrigin>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -282,6 +284,7 @@ pub async fn update_base(
         &slug,
         &request.expected_revision,
         &request.definition,
+        &request.view_origins,
     )
     .map_err(document_error)?;
     let _ = state.change_tx.send(SyncNotification::BaseRegistryChanged);

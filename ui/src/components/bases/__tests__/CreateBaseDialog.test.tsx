@@ -105,9 +105,12 @@ describe("CreateBaseDialog", () => {
     await user.type(screen.getByLabelText("Name"), "Books");
     await user.click(screen.getByRole("button", { name: "Create base" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "base already exists",
+    expect(await screen.findByText("base already exists")).toBeInTheDocument();
+    expect(screen.getByLabelText("Slug")).toHaveAttribute(
+      "aria-invalid",
+      "true",
     );
+    expect(screen.getByLabelText("Slug")).toHaveFocus();
     expect(screen.getByLabelText("Name")).toHaveValue("Books");
     expect(screen.getByLabelText("Slug")).toHaveValue("books");
     expect(navigateMock).not.toHaveBeenCalled();

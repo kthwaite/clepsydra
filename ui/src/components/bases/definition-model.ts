@@ -20,6 +20,7 @@ export interface DraftProperty {
 export interface DraftView {
   id: string;
   name: string;
+  origin?: string;
   layout: string;
   filter?: BaseFilter;
   sort: SortKey[];
@@ -158,6 +159,7 @@ export function fromWire(detail: BaseDetailResponse): BaseDraft {
     views: (detail.views ?? []).map((view) => ({
       id: crypto.randomUUID(),
       name: view.name,
+      origin: view.name,
       layout: view.layout ?? "table",
       filter: cloneFilter(view.filter),
       sort: (view.sort ?? []).map((sort) => ({ ...sort })),
@@ -192,6 +194,13 @@ export function toWire(draft: BaseDraft): BaseFile {
     })),
   };
   return wire;
+}
+export function toViewOrigins(draft: BaseDraft) {
+  return draft.views.map((view) =>
+    view.origin === undefined
+      ? ({ kind: "fresh" } as const)
+      : ({ kind: "existing", name: view.origin } as const),
+  );
 }
 
 export function createMinimalDraft(

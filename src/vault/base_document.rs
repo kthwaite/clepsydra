@@ -7,12 +7,14 @@
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard};
 
+use serde::Deserialize;
 use thiserror::Error;
 use toml_edit::{Array, ArrayOfTables, Decor, DocumentMut, InlineTable, Item, Table, Value};
+use utoipa::ToSchema;
 
 use super::atomic_file::{AtomicPublicationError, atomic_create, atomic_replace};
 use super::base::{
@@ -28,6 +30,17 @@ pub struct StoredBase {
     pub definition: BaseDefinition,
     pub diagnostics: Vec<BaseDiagnostic>,
     pub revision: String,
+}
+
+/// Revision-guarded identity for one desired view in an update.
+///
+/// Existing views name the persisted view they originated from; fresh views
+/// intentionally receive a newly serialized raw table with no source metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ViewOrigin {
+    Existing { name: String },
+    Fresh,
 }
 
 #[derive(Debug, Error)]
@@ -83,8 +96,9 @@ pub fn update(
     slug: &str,
     expected_revision: &str,
     file: &BaseFile,
+    view_origins: &[ViewOrigin],
 ) -> Result<StoredBase, BaseDocumentError> {
-    update_with_before_publication(root, slug, expected_revision, file, || {})
+    update_with_before_publication(root, slug, expected_revision, file, view_origins, || {})
 }
 
 fn update_with_before_publication(
@@ -92,6 +106,7 @@ fn update_with_before_publication(
     slug: &str,
     expected_revision: &str,
     file: &BaseFile,
+    view_origins: &[ViewOrigin],
     before_publication: impl FnOnce(),
 ) -> Result<StoredBase, BaseDocumentError> {
     let path = base_path(root, slug)?;
@@ -101,6 +116,7 @@ fn update_with_before_publication(
         slug,
         expected_revision,
         file,
+        view_origins,
         writer,
         before_publication,
     )
@@ -112,6 +128,7 @@ fn update_with_contention_ack(
     slug: &str,
     expected_revision: &str,
     file: &BaseFile,
+    view_origins: &[ViewOrigin],
     contention_ack: impl FnOnce(),
 ) -> Result<StoredBase, BaseDocumentError> {
     let path = base_path(root, slug)?;
@@ -125,7 +142,15 @@ fn update_with_contention_ack(
             panic!("expected a live holder, not a poisoned writer lock")
         }
     };
-    update_locked(&path, slug, expected_revision, file, writer, || {})
+    update_locked(
+        &path,
+        slug,
+        expected_revision,
+        file,
+        view_origins,
+        writer,
+        || {},
+    )
 }
 
 fn update_locked(
@@ -133,12 +158,13 @@ fn update_locked(
     slug: &str,
     expected_revision: &str,
     file: &BaseFile,
+    view_origins: &[ViewOrigin],
     _writer: MutexGuard<'static, ()>,
     before_publication: impl FnOnce(),
 ) -> Result<StoredBase, BaseDocumentError> {
     let raw = read_matching_revision(path, slug, expected_revision)?;
     reject_blocking_diagnostics(validate_definition(slug, file.clone()))?;
-    let content = merge_document(&raw, file)?;
+    let content = merge_document(&raw, file, view_origins)?;
     before_publication();
     read_matching_revision(path, slug, expected_revision)?;
     atomic_replace(path, content.as_bytes()).map_err(map_publication_error)?;
@@ -168,11 +194,9 @@ pub fn revision(raw: &str) -> String {
 }
 
 fn base_path(root: &Path, slug: &str) -> Result<PathBuf, BaseDocumentError> {
-    let safe = !slug.is_empty()
-        && !slug.starts_with('.')
-        && slug
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    let mut components = Path::new(slug).components();
+    let safe =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
     if !safe {
         return Err(BaseDocumentError::InvalidSlug(slug.to_owned()));
     }
@@ -276,12 +300,17 @@ fn map_publication_error(error: AtomicPublicationError) -> BaseDocumentError {
     }
 }
 
-fn merge_document(raw: &str, desired_file: &BaseFile) -> Result<String, BaseDocumentError> {
+fn merge_document(
+    raw: &str,
+    desired_file: &BaseFile,
+    view_origins: &[ViewOrigin],
+) -> Result<String, BaseDocumentError> {
     let current_file: BaseFile = toml::from_str(raw).map_err(|error| {
         BaseDocumentError::UnsupportedDocument(format!(
             "current managed values cannot be represented safely: {error}"
         ))
     })?;
+    let view_mapping = validate_view_origins(&current_file, desired_file, view_origins)?;
     let mut document = DocumentMut::from_str(raw).map_err(|error| {
         BaseDocumentError::UnsupportedDocument(format!("current TOML cannot be edited: {error}"))
     })?;
@@ -300,7 +329,13 @@ fn merge_document(raw: &str, desired_file: &BaseFile) -> Result<String, BaseDocu
         let current_item = current.as_table().get(key);
         let desired_item = desired.as_table().get(key);
         if *key == "views" {
-            merge_views_key(document.as_table_mut(), key, current_item, desired_item)?;
+            merge_views_key(
+                document.as_table_mut(),
+                key,
+                current_item,
+                desired_item,
+                &view_mapping,
+            )?;
         } else {
             merge_table_key(
                 document.as_table_mut(),
@@ -312,6 +347,60 @@ fn merge_document(raw: &str, desired_file: &BaseFile) -> Result<String, BaseDocu
         }
     }
     Ok(document.to_string())
+}
+
+fn validate_view_origins(
+    current: &BaseFile,
+    desired: &BaseFile,
+    origins: &[ViewOrigin],
+) -> Result<Vec<Option<usize>>, BaseDocumentError> {
+    if origins.len() != desired.views.len() {
+        return Err(unsupported(
+            "view_origins",
+            "must contain exactly one identity for each desired view",
+        ));
+    }
+
+    for (index, view) in current.views.iter().enumerate() {
+        if current.views[..index]
+            .iter()
+            .any(|known| known.name.eq_ignore_ascii_case(&view.name))
+        {
+            return Err(unsupported(
+                "view_origins",
+                "current view names are not unique, so identities are ambiguous",
+            ));
+        }
+    }
+
+    let mut claimed = vec![false; current.views.len()];
+    origins
+        .iter()
+        .enumerate()
+        .map(|(index, origin)| match origin {
+            ViewOrigin::Fresh => Ok(None),
+            ViewOrigin::Existing { name } => {
+                let current_index = current
+                    .views
+                    .iter()
+                    .position(|view| view.name == *name)
+                    .ok_or_else(|| {
+                        unsupported(
+                            &format!("view_origins[{index}]"),
+                            "existing name does not match a current persisted view",
+                        )
+                    })?;
+                if claimed[current_index] {
+                    return Err(unsupported(
+                        &format!("view_origins[{index}]"),
+                        "a current persisted view may be claimed only once",
+                    ));
+                }
+                claimed[current_index] = true;
+                Ok(Some(current_index))
+            }
+        })
+        .collect()
 }
 
 fn merge_table_key(
@@ -365,8 +454,20 @@ fn merge_views_key(
     key: &str,
     current: Option<&Item>,
     desired: Option<&Item>,
+    mapping: &[Option<usize>],
 ) -> Result<(), BaseDocumentError> {
-    if canonical_items_equal(current, desired) {
+    let identity_unchanged = mapping.len()
+        == match current {
+            Some(Item::ArrayOfTables(views)) => views.len(),
+            Some(Item::Value(Value::Array(views))) => views.len(),
+            None => 0,
+            _ => usize::MAX,
+        }
+        && mapping
+            .iter()
+            .enumerate()
+            .all(|(desired_index, current_index)| *current_index == Some(desired_index));
+    if identity_unchanged && canonical_items_equal(current, desired) {
         return Ok(());
     }
 
@@ -393,7 +494,19 @@ fn merge_views_key(
         }
     }
 
-    merge_table_key(raw, key, current, desired, key)
+    match (raw.get_mut(key), current, desired) {
+        (
+            Some(Item::ArrayOfTables(raw_views)),
+            Some(Item::ArrayOfTables(current_views)),
+            Some(Item::ArrayOfTables(desired_views)),
+        ) => merge_named_view_tables(raw_views, current_views, desired_views, key, mapping),
+        (
+            Some(Item::ArrayOfTables(raw_views)),
+            Some(Item::Value(Value::Array(current_views))),
+            Some(Item::Value(Value::Array(desired_views))),
+        ) => merge_named_view_tables_inline(raw_views, current_views, desired_views, key, mapping),
+        _ => merge_table_key(raw, key, current, desired, key),
+    }
 }
 
 fn merge_item(
@@ -593,9 +706,6 @@ fn merge_array_tables_inline(
     desired: &Array,
     path: &str,
 ) -> Result<(), BaseDocumentError> {
-    if path == "views" {
-        return merge_named_view_tables_inline(raw, current, desired, path);
-    }
     merge_array_tables_inline_positionally(raw, current, desired, path)
 }
 
@@ -604,6 +714,7 @@ fn merge_named_view_tables_inline(
     current: &Array,
     desired: &Array,
     path: &str,
+    mappings: &[Option<usize>],
 ) -> Result<(), BaseDocumentError> {
     if raw.len() != current.len() {
         return Err(unsupported(
@@ -611,10 +722,6 @@ fn merge_named_view_tables_inline(
             "the current array-of-tables shape is not safely addressable",
         ));
     }
-
-    let current_names = unique_inline_view_names(current, path)?;
-    let desired_names = unique_inline_view_names(desired, path)?;
-    let mappings = view_identity_mapping(&current_names, &desired_names, path)?;
     let structurally_changed = mappings.len() != current.len()
         || mappings
             .iter()
@@ -638,7 +745,7 @@ fn merge_named_view_tables_inline(
         .map(Some)
         .collect::<Vec<_>>();
     let mut merged = Vec::with_capacity(desired.len());
-    for (desired_index, current_index) in mappings.into_iter().enumerate() {
+    for (desired_index, current_index) in mappings.iter().copied().enumerate() {
         let desired_table = inline_view_table(desired, desired_index, path)?;
         let mut raw_table = match current_index {
             Some(current_index) => {
@@ -833,6 +940,25 @@ fn merge_array(
     }
 
     let shared = current.len().min(desired.len());
+    let changed = (0..shared)
+        .filter(|&index| {
+            current.get(index).expect("length checked").to_string()
+                != desired.get(index).expect("length checked").to_string()
+        })
+        .collect::<Vec<_>>();
+    if current.len() != desired.len() || changed.len() > 1 {
+        for index in &changed {
+            let raw_value = raw.get(*index).expect("length checked");
+            let current_value = current.get(*index).expect("length checked");
+            if raw_value.to_string() != current_value.to_string() {
+                return Err(unsupported(
+                    &format!("{path}[{index}]"),
+                    "structural array edits cannot safely retain decorated or unsupported content",
+                ));
+            }
+        }
+    }
+
     for index in 0..shared {
         let current_value = current.get(index).expect("length checked");
         let desired_value = desired.get(index).expect("length checked");
@@ -922,9 +1048,6 @@ fn merge_array_of_tables(
     desired: &ArrayOfTables,
     path: &str,
 ) -> Result<(), BaseDocumentError> {
-    if path == "views" {
-        return merge_named_view_tables(raw, current, desired, path);
-    }
     merge_array_of_tables_positionally(raw, current, desired, path)
 }
 
@@ -933,6 +1056,7 @@ fn merge_named_view_tables(
     current: &ArrayOfTables,
     desired: &ArrayOfTables,
     path: &str,
+    mappings: &[Option<usize>],
 ) -> Result<(), BaseDocumentError> {
     if raw.len() != current.len() {
         return Err(unsupported(
@@ -940,11 +1064,6 @@ fn merge_named_view_tables(
             "the current array-of-tables shape is not safely addressable",
         ));
     }
-
-    let current_names = unique_view_names(current, path)?;
-    let desired_names = unique_view_names(desired, path)?;
-    let mappings = view_identity_mapping(&current_names, &desired_names, path)?;
-
     let structurally_changed = mappings.len() != current.len()
         || mappings
             .iter()
@@ -968,7 +1087,7 @@ fn merge_named_view_tables(
         .map(Some)
         .collect::<Vec<_>>();
     let mut merged = Vec::with_capacity(desired.len());
-    for (desired_index, current_index) in mappings.into_iter().enumerate() {
+    for (desired_index, current_index) in mappings.iter().copied().enumerate() {
         let desired_table = desired.get(desired_index).expect("name collected");
         let mut raw_table = match current_index {
             Some(current_index) => {
@@ -992,54 +1111,6 @@ fn merge_named_view_tables(
     Ok(())
 }
 
-fn unique_view_names<'a>(
-    tables: &'a ArrayOfTables,
-    path: &str,
-) -> Result<Vec<&'a str>, BaseDocumentError> {
-    let mut names = Vec::with_capacity(tables.len());
-    for (index, table) in tables.iter().enumerate() {
-        let name = table
-            .get("name")
-            .and_then(Item::as_str)
-            .ok_or_else(|| unsupported(&format!("{path}[{index}].name"), "expected a string"))?;
-        if names
-            .iter()
-            .any(|known: &&str| known.eq_ignore_ascii_case(name))
-        {
-            return Err(unsupported(
-                &format!("{path}[{index}].name"),
-                "duplicate view names make identity mapping ambiguous",
-            ));
-        }
-        names.push(name);
-    }
-    Ok(names)
-}
-
-fn unique_inline_view_names<'a>(
-    views: &'a Array,
-    path: &str,
-) -> Result<Vec<&'a str>, BaseDocumentError> {
-    let mut names = Vec::with_capacity(views.len());
-    for index in 0..views.len() {
-        let name = inline_view_table(views, index, path)?
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| unsupported(&format!("{path}[{index}].name"), "expected a string"))?;
-        if names
-            .iter()
-            .any(|known: &&str| known.eq_ignore_ascii_case(name))
-        {
-            return Err(unsupported(
-                &format!("{path}[{index}].name"),
-                "duplicate view names make identity mapping ambiguous",
-            ));
-        }
-        names.push(name);
-    }
-    Ok(names)
-}
-
 fn inline_view_table<'a>(
     views: &'a Array,
     index: usize,
@@ -1049,35 +1120,6 @@ fn inline_view_table<'a>(
         .get(index)
         .and_then(Value::as_inline_table)
         .ok_or_else(|| unsupported(&format!("{path}[{index}]"), "expected a table"))
-}
-
-fn view_identity_mapping(
-    current_names: &[&str],
-    desired_names: &[&str],
-    path: &str,
-) -> Result<Vec<Option<usize>>, BaseDocumentError> {
-    let mut matched_current = vec![false; current_names.len()];
-    let mappings = desired_names
-        .iter()
-        .map(|desired_name| {
-            let current_index = current_names
-                .iter()
-                .position(|current_name| current_name.eq_ignore_ascii_case(desired_name));
-            if let Some(current_index) = current_index {
-                matched_current[current_index] = true;
-            }
-            current_index
-        })
-        .collect::<Vec<_>>();
-    if mappings.iter().any(|mapping| mapping.is_none())
-        && matched_current.iter().any(|matched| !matched)
-    {
-        return Err(unsupported(
-            path,
-            "unmatched current and desired view names could represent an ambiguous rename",
-        ));
-    }
-    Ok(mappings)
 }
 
 fn item_table_position(item: &Item) -> Option<usize> {
@@ -1380,13 +1422,13 @@ mod tests {
         let unusable_root = root.path().join("not-a-directory");
         fs::write(&unusable_root, b"sentinel").unwrap();
 
-        for slug in ["../escape", "/absolute", "a/b", ".", "", ".hidden"] {
+        for slug in ["../escape", "/absolute", "a/b", ".", ""] {
             assert!(matches!(
                 create(&unusable_root, slug, &minimal_file()),
                 Err(BaseDocumentError::InvalidSlug(value)) if value == slug
             ));
             assert!(matches!(
-                update(&unusable_root, slug, "stale", &minimal_file()),
+                update(&unusable_root, slug, "stale", &minimal_file(), &[]),
                 Err(BaseDocumentError::InvalidSlug(value)) if value == slug
             ));
             assert!(matches!(
@@ -1402,6 +1444,23 @@ mod tests {
         assert_eq!(fs::read(&unusable_root).unwrap(), b"sentinel");
     }
 
+    #[test]
+    fn existing_registry_compatible_slugs_remain_authorable() {
+        let root = tempfile::tempdir().unwrap();
+        let bases = root.path().join("bases");
+        fs::create_dir(&bases).unwrap();
+
+        for slug in ["reading list", "café", ".hidden"] {
+            let path = bases.join(format!("{slug}.base.toml"));
+            fs::write(&path, MINIMAL_BASE).unwrap();
+            let stored = load(root.path(), slug).unwrap();
+            let mut next = stored.definition.file;
+            next.name.push_str(" Updated");
+            let updated = update(root.path(), slug, &stored.revision, &next, &[]).unwrap();
+            delete(root.path(), slug, &updated.revision).unwrap();
+            assert!(!path.exists());
+        }
+    }
     #[test]
     fn create_uses_stable_canonical_serialization() {
         let root = tempfile::tempdir().unwrap();
@@ -1431,7 +1490,7 @@ mod tests {
         let fixture = fixture_base(MINIMAL_BASE);
         let before = fs::read(fixture.path()).unwrap();
 
-        let error = update(fixture.root(), "reading", "stale", &minimal_file()).unwrap_err();
+        let error = update(fixture.root(), "reading", "stale", &minimal_file(), &[]).unwrap_err();
 
         assert!(matches!(
             error,
@@ -1454,6 +1513,7 @@ mod tests {
             "reading",
             &revision(&before),
             &next,
+            &[],
             || fs::write(fixture.path(), external).unwrap(),
         )
         .unwrap_err();
@@ -1483,16 +1543,28 @@ mod tests {
         let (second_contending_tx, second_contending_rx) = mpsc::channel();
 
         let first_writer = thread::spawn(move || {
-            update_with_before_publication(&first_root, "reading", &first_revision, &first, || {
-                first_ready_tx.send(()).unwrap();
-                release_first_rx.recv().unwrap();
-            })
+            update_with_before_publication(
+                &first_root,
+                "reading",
+                &first_revision,
+                &first,
+                &[],
+                || {
+                    first_ready_tx.send(()).unwrap();
+                    release_first_rx.recv().unwrap();
+                },
+            )
         });
         first_ready_rx.recv().unwrap();
         let second_writer = thread::spawn(move || {
-            update_with_contention_ack(&second_root, "reading", &second_revision, &second, || {
-                second_contending_tx.send(()).unwrap()
-            })
+            update_with_contention_ack(
+                &second_root,
+                "reading",
+                &second_revision,
+                &second,
+                &[],
+                || second_contending_tx.send(()).unwrap(),
+            )
         });
         second_contending_rx.recv().unwrap();
         release_first_tx.send(()).unwrap();
@@ -1560,8 +1632,14 @@ mod tests {
         let mut invalid = minimal_file();
         invalid.name.clear();
 
-        let error =
-            update(fixture.root(), "reading", &revision(MINIMAL_BASE), &invalid).unwrap_err();
+        let error = update(
+            fixture.root(),
+            "reading",
+            &revision(MINIMAL_BASE),
+            &invalid,
+            &[],
+        )
+        .unwrap_err();
 
         assert!(matches!(error, BaseDocumentError::InvalidDefinition(_)));
         assert_eq!(fs::read(fixture.path()).unwrap(), before);
@@ -1577,7 +1655,14 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.description = Some("Books".into());
 
-        update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[ViewOrigin::Existing { name: "All".into() }],
+        )
+        .unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert!(after.contains("# owner note\nname = \"Reading\""));
@@ -1599,7 +1684,7 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.properties[0].1.options.push("done".into());
 
-        update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert!(after.contains("plugin_key = \"keep\""));
@@ -1617,7 +1702,7 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.properties.swap(0, 1);
 
-        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let stored = update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert_eq!(
@@ -1647,11 +1732,34 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.properties[0].1.options.push("done".into());
 
-        update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert!(after.contains("# keep queued"));
         assert!(after.contains("\"done\""));
+    }
+
+    #[test]
+    fn reordering_decorated_sort_entries_is_rejected_without_touching_the_file() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n[[views]]\nname = \"All\"\nlayout = \"table\"\nsort = [\n  { field = \"title\", dir = \"asc\", plugin_sort = \"for-title\" },\n  { field = \"created\", dir = \"desc\", plugin_sort = \"for-created\" },\n]\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let before = fs::read_to_string(fixture.path()).unwrap();
+        let mut next = current.definition.file.clone();
+        next.views[0].sort.swap(0, 1);
+
+        let error = update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[ViewOrigin::Existing { name: "All".into() }],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, BaseDocumentError::UnsupportedDocument(_)));
+        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), before);
     }
 
     #[test]
@@ -1663,7 +1771,19 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.views.swap(0, 1);
 
-        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let stored = update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[
+                ViewOrigin::Existing {
+                    name: "Queued".into(),
+                },
+                ViewOrigin::Existing { name: "All".into() },
+            ],
+        )
+        .unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert_eq!(
@@ -1693,7 +1813,19 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.views.remove(1);
 
-        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let stored = update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[
+                ViewOrigin::Existing { name: "All".into() },
+                ViewOrigin::Existing {
+                    name: "Done".into(),
+                },
+            ],
+        )
+        .unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert_eq!(
@@ -1727,7 +1859,17 @@ mod tests {
         duplicate.name = "All copy".into();
         next.views.push(duplicate);
 
-        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let stored = update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[
+                ViewOrigin::Existing { name: "All".into() },
+                ViewOrigin::Fresh,
+            ],
+        )
+        .unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert_eq!(
@@ -1756,7 +1898,14 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.views[0].name = "ALL".into();
 
-        update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[ViewOrigin::Existing { name: "All".into() }],
+        )
+        .unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
         assert!(after.contains("# saved view\nname = \"ALL\""));
@@ -1764,19 +1913,106 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_view_rename_is_rejected_without_touching_the_file() {
+    fn deleting_b_then_renaming_a_to_b_preserves_a_metadata() {
         let fixture = fixture_base(
-            "name = \"Reading\"\n\n[[views]]\n# saved view\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"keep\"\n",
+            "name = \"Reading\"\n\n# logical a\n[[views]]\nname = \"A\"\nlayout = \"table\"\nplugin_view = \"for-a\"\n\n# logical b\n[[views]]\nname = \"B\"\nlayout = \"table\"\nplugin_view = \"for-b\"\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.views.remove(1);
+        next.views[0].name = "B".into();
+
+        update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[ViewOrigin::Existing { name: "A".into() }],
+        )
+        .unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        assert!(after.contains("# logical a\n[[views]]\nname = \"B\""));
+        assert!(after.contains("plugin_view = \"for-a\""));
+        assert!(!after.contains("plugin_view = \"for-b\""));
+        assert!(!after.contains("# logical b"));
+    }
+
+    #[test]
+    fn renaming_a_then_adding_fresh_a_keeps_source_metadata_on_renamed_view() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n# logical a\n[[views]]\nname = \"A\"\nlayout = \"table\"\nplugin_view = \"for-a\"\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.views[0].name = "C".into();
+        let mut fresh = next.views[0].clone();
+        fresh.name = "A".into();
+        next.views.push(fresh);
+
+        update(
+            fixture.root(),
+            "reading",
+            &current.revision,
+            &next,
+            &[ViewOrigin::Existing { name: "A".into() }, ViewOrigin::Fresh],
+        )
+        .unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        let renamed =
+            "# logical a\n[[views]]\nname = \"C\"\nlayout = \"table\"\nplugin_view = \"for-a\"";
+        let fresh = "[[views]]\nname = \"A\"\nlayout = \"table\"";
+        assert!(after.contains(renamed));
+        assert!(after.contains(fresh));
+        assert!(after.find(renamed).unwrap() < after.find(fresh).unwrap());
+        assert_eq!(after.matches("plugin_view = \"for-a\"").count(), 1);
+    }
+
+    #[test]
+    fn malformed_view_origins_are_rejected_without_touching_the_file() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n[[views]]\nname = \"A\"\nlayout = \"table\"\n\n[[views]]\nname = \"B\"\nlayout = \"table\"\n",
         );
         let before = fs::read_to_string(fixture.path()).unwrap();
         let current = load_for_test(fixture.root(), "reading");
-        let mut next = current.definition.file.clone();
-        next.views[0].name = "Library".into();
+        let mut two_desired = current.definition.file.clone();
+        two_desired.views[1].name = "C".into();
+        let cases = [
+            (
+                current.definition.file.clone(),
+                vec![ViewOrigin::Existing { name: "A".into() }],
+            ),
+            (
+                current.definition.file.clone(),
+                vec![
+                    ViewOrigin::Existing {
+                        name: "missing".into(),
+                    },
+                    ViewOrigin::Existing { name: "B".into() },
+                ],
+            ),
+            (
+                two_desired,
+                vec![
+                    ViewOrigin::Existing { name: "A".into() },
+                    ViewOrigin::Existing { name: "A".into() },
+                ],
+            ),
+        ];
 
-        let error = update(fixture.root(), "reading", &current.revision, &next).unwrap_err();
-
-        assert!(matches!(error, BaseDocumentError::UnsupportedDocument(_)));
-        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), before);
+        for (desired, origins) in cases {
+            let error = update(
+                fixture.root(),
+                "reading",
+                &current.revision,
+                &desired,
+                &origins,
+            )
+            .unwrap_err();
+            assert!(matches!(error, BaseDocumentError::UnsupportedDocument(_)));
+            assert_eq!(fs::read_to_string(fixture.path()).unwrap(), before);
+        }
     }
 
     #[test]
@@ -1789,7 +2025,7 @@ mod tests {
         let mut next = current.definition.file.clone();
         next.description = None;
 
-        let error = update(fixture.root(), "reading", &current.revision, &next).unwrap_err();
+        let error = update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap_err();
 
         assert!(matches!(error, BaseDocumentError::UnsupportedDocument(_)));
         assert_eq!(fs::read_to_string(fixture.path()).unwrap(), before);
@@ -1805,6 +2041,7 @@ mod tests {
             "reading",
             &revision(&before),
             &minimal_file(),
+            &[],
         )
         .unwrap_err();
 
@@ -1869,7 +2106,7 @@ mod tests {
             },
         ));
 
-        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let stored = update(fixture.root(), "reading", &current.revision, &next, &[]).unwrap();
 
         assert_eq!(stored.definition.file.properties.len(), 1);
         assert_eq!(stored.definition.file.properties[0].0, "status");

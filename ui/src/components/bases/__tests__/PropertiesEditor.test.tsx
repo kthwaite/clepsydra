@@ -474,6 +474,7 @@ describe("properties workspace integration", () => {
             },
           ],
         },
+        view_origins: [{ kind: "existing", name: "All" }],
       },
     });
   });

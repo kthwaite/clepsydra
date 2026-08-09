@@ -48,10 +48,8 @@ export function useDeleteBase() {
   return $api.useMutation("delete", "/api/vault/bases/{slug}", { onSuccess });
 }
 
-export function usePreviewBase() {
-  const onSuccess = useInvalidateBaseQueries();
-  return $api.useMutation("post", "/api/vault/bases/preview", { onSuccess });
-}
+export const usePreviewBase = () =>
+  $api.useMutation("post", "/api/vault/bases/preview");
 
 export function useBase(slug: string) {
   return $api.useQuery(

@@ -102,6 +102,7 @@ export function ViewsEditor({
   function duplicate(source: DraftView) {
     const copy = structuredClone(source);
     copy.id = crypto.randomUUID();
+    delete copy.origin;
     copy.name = uniqueName(views, `${source.name} copy`);
     const sourceIndex = views.findIndex((view) => view.id === source.id);
     const next = [...views];

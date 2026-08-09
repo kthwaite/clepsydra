@@ -174,6 +174,7 @@ impl Modify for FilterSchema {
             crate::vault::base::BaseFile,
             crate::vault::base::BaseDefinition,
             crate::vault::base::BaseDiagnostic,
+            crate::vault::base_document::ViewOrigin,
             crate::vault::query::QueryRow,
             crate::vault::query::GroupResult,
             crate::vault::query::QueryOutput,
@@ -505,6 +506,22 @@ mod tests {
                 "{schema_name}.expected_revision should be a string"
             );
         }
+        let update_schema = &json["components"]["schemas"]["UpdateBaseRequest"];
+        let update_required = update_schema["required"]
+            .as_array()
+            .expect("UpdateBaseRequest.required should be an array");
+        assert!(
+            update_required.iter().any(|field| field == "view_origins"),
+            "UpdateBaseRequest should require view_origins"
+        );
+        assert_eq!(
+            update_schema["properties"]["view_origins"]["type"], "array",
+            "UpdateBaseRequest.view_origins should be an array"
+        );
+        assert!(
+            json["components"]["schemas"].get("ViewOrigin").is_some(),
+            "ViewOrigin should be a named schema"
+        );
 
         let detail_schema = &json["components"]["schemas"]["BaseDetailResponse"];
         let detail_fields = detail_schema["allOf"]
