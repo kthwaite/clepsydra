@@ -30,6 +30,7 @@ interface MathSourceEditorProps {
   initialTex: string;
   onCommit(tex: string): void;
   onClose(): void;
+  onEscapeClose(): void;
   onExit(side: "before" | "after", tex: string): void;
 }
 
@@ -38,6 +39,7 @@ function MathSourceEditor({
   initialTex,
   onCommit,
   onClose,
+  onEscapeClose,
   onExit,
 }: MathSourceEditorProps) {
   const [draft, setDraft] = useState(initialTex);
@@ -76,7 +78,8 @@ function MathSourceEditor({
     event.stopPropagation();
     if (event.key === "Escape") {
       event.preventDefault();
-      finish();
+      onCommit(draft);
+      if (valid) onEscapeClose();
       return;
     }
 
@@ -187,12 +190,18 @@ export function MathElement({
     queueMicrotask(() => ReactEditor.focus(editor));
   };
 
+  const closeFromEscape = () => {
+    controller.close();
+    queueMicrotask(() => ReactEditor.focus(editor));
+  };
+
   const sourceOrExpression = active ? (
     <MathSourceEditor
       display={display}
       initialTex={element.tex}
       onCommit={controller.commit}
       onClose={controller.close}
+      onEscapeClose={closeFromEscape}
       onExit={exit}
     />
   ) : (

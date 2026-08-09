@@ -128,11 +128,14 @@ describe("MathElement", () => {
     ).toBeNull();
   });
 
-  it("commits valid source and closes on Escape", async () => {
+  it("restores Slate focus and usable navigation after valid Escape", async () => {
     const user = userEvent.setup();
     const editor = renderMathEditor();
+    const editable = screen.getByRole("textbox");
+    const math = screen.getByTestId("inline-math");
 
-    await user.click(screen.getByTestId("inline-math"));
+    math.focus();
+    await user.keyboard("{Enter}");
     const source = screen.getByRole("textbox", { name: "Edit inline math" });
     await user.clear(source);
     await user.type(source, "y");
@@ -142,6 +145,35 @@ describe("MathElement", () => {
     expect(
       screen.queryByRole("textbox", { name: "Edit inline math" }),
     ).toBeNull();
+    await waitFor(() => expect(editable).toHaveFocus());
+
+    expect(editor.selection?.anchor).toEqual({
+      path: [0, 1, 0],
+      offset: 0,
+    });
+    act(() => {
+      Transforms.move(editor, { distance: 1, unit: "offset" });
+      Transforms.insertText(editor, "!");
+    });
+    expect(Node.get(editor, [0, 2])).toEqual({ text: "!after" });
+  });
+
+  it("keeps invalid source open and focused on Escape", async () => {
+    const user = userEvent.setup();
+    const editor = renderMathEditor();
+    const invalidTex = String.raw`\notACommand{`;
+
+    await user.click(screen.getByTestId("inline-math"));
+    const source = screen.getByRole("textbox", { name: "Edit inline math" });
+    fireEvent.change(source, { target: { value: invalidTex } });
+    await user.keyboard("{Escape}");
+
+    expect(Node.get(editor, [0, 1])).toMatchObject({ tex: invalidTex });
+    expect(source).toHaveAttribute("aria-invalid", "true");
+    expect(source).toHaveFocus();
+    expect(
+      screen.getByRole("textbox", { name: "Edit inline math" }),
+    ).toBe(source);
   });
 
   it("commits invalid TeX but keeps its described source editor visible", async () => {
