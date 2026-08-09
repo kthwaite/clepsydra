@@ -326,6 +326,36 @@ x
     ]);
   });
 
+  it.each([
+    [
+      String.raw`a\$$b`,
+      String.raw`\(a\$$b\)`,
+      String.raw`\(`,
+    ],
+    [String.raw`a\\$$b`, String.raw`$a\\$$b$`, "$"],
+  ])(
+    "round-trips a two-dollar streak after escaped-backslash parity: %s",
+    (body, expected, delimiter) => {
+      const root: Root = {
+        type: "root",
+        children: [{ type: "paragraph", children: [inlineNode(body)] }],
+      };
+
+      const output = serialize(root).trimEnd();
+      expect(output).toBe(expected);
+      expect(findMath(parse(output))).toMatchObject([
+        {
+          type: "inlineMath",
+          value: body,
+          data: {
+            folioDelimiter: delimiter,
+            folioSourceBody: body,
+          },
+        },
+      ]);
+    },
+  );
+
   it("falls back to backslash display syntax on dollar collisions", () => {
     const body = "a $$ b";
     const root: Root = {

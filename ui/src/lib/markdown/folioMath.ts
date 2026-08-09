@@ -299,14 +299,15 @@ function longestDollarStreak(value: string): number {
 
 function hasInlineDollarCollision(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
-    if (
-      value[index] === "$" &&
-      value[index - 1] !== "$" &&
-      value[index + 1] !== "$" &&
-      !hasOddBackslashRunBefore(value, index)
-    ) {
-      return true;
+    if (value[index] !== "$") continue;
+
+    let unescaped = 0;
+    while (index < value.length && value[index] === "$") {
+      if (!hasOddBackslashRunBefore(value, index)) unescaped++;
+      index++;
     }
+    if (unescaped === 1) return true;
+    index--;
   }
   return false;
 }
