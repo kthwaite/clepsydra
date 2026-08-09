@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   decodeBaseMemberDiagnostics,
   useBase,
@@ -24,9 +24,9 @@ interface BaseTableProps {
 
 type MemberCreationLifecycle =
   | { phase: "idle" }
-  | { phase: "submitting" }
-  | { phase: "refreshing"; createdId: string }
-  | { phase: "resolving"; createdId: string };
+  | { phase: "submitting"; operation: number; view: string }
+  | { phase: "refreshing"; operation: number; createdId: string; view: string }
+  | { phase: "resolving"; operation: number; createdId: string; view: string };
 
 const IDLE_MEMBER_CREATION: MemberCreationLifecycle = { phase: "idle" };
 
@@ -45,10 +45,14 @@ export function BaseTable({ slug }: BaseTableProps) {
     IDLE_MEMBER_CREATION,
   );
   const [memberNotice, setMemberNotice] = useState<string>();
+  const currentMemberOperation = useRef<number>();
+  const nextMemberOperation = useRef(0);
 
   const activeView = viewName ?? detail.data?.views?.[0]?.name;
   const viewQuery = useBaseView(slug, activeView, sortOverride);
   const commit = usePropertyCommit();
+  const activeViewRef = useRef(activeView);
+  activeViewRef.current = activeView;
   const createMemberMutation = useCreateBaseMember();
   const projects = useProjects();
   const activeViewDefinition = useMemo(
@@ -75,9 +79,32 @@ export function BaseTable({ slug }: BaseTableProps) {
     [activeView, detail.data, memberCapability],
   );
 
+  const finishMemberOperation = useCallback(
+    (operation: number, notice?: string) => {
+      if (currentMemberOperation.current !== operation) return;
+      currentMemberOperation.current = undefined;
+      setMemberCreation((current) =>
+        current.phase !== "idle" && current.operation === operation
+          ? IDLE_MEMBER_CREATION
+          : current,
+      );
+      setMemberNotice(notice);
+    },
+    [],
+  );
+
   useEffect(() => {
+    if (memberCreation.phase !== "resolving") return;
     if (
-      memberCreation.phase !== "resolving" ||
+      asciiCaseFold(memberCreation.view) !== asciiCaseFold(activeView ?? "")
+    ) {
+      finishMemberOperation(
+        memberCreation.operation,
+        "The member was created, but focus was skipped because the active view changed.",
+      );
+      return;
+    }
+    if (
       viewQuery.isFetching ||
       viewQuery.isLoading ||
       viewQuery.error ||
@@ -94,21 +121,23 @@ export function BaseTable({ slug }: BaseTableProps) {
             group.rows.some((row) => row.id === memberCreation.createdId),
           );
     if (!createdIsPresent) {
-      setMemberCreation(IDLE_MEMBER_CREATION);
-      setMemberNotice(
+      finishMemberOperation(
+        memberCreation.operation,
         "The member was created, but it is not included in the current view.",
       );
       return;
     }
     const columns = activeViewDefinition?.columns;
     if (columns && columns.length > 0 && !columns.includes("title")) {
-      setMemberCreation(IDLE_MEMBER_CREATION);
-      setMemberNotice(
+      finishMemberOperation(
+        memberCreation.operation,
         "The member was created, but this view does not display its title.",
       );
     }
   }, [
+    activeView,
     activeViewDefinition?.columns,
+    finishMemberOperation,
     memberCreation,
     viewQuery.data,
     viewQuery.error,
@@ -116,15 +145,28 @@ export function BaseTable({ slug }: BaseTableProps) {
     viewQuery.isLoading,
   ]);
 
-  const handleCreatedRowFocused = useCallback(() => {
-    setMemberCreation((current) =>
-      current.phase === "resolving" ? IDLE_MEMBER_CREATION : current,
-    );
-    setMemberNotice(undefined);
-  }, []);
+  const handleCreatedRowFocused = useCallback(
+    (createdId: string) => {
+      if (
+        memberCreation.phase === "resolving" &&
+        memberCreation.createdId === createdId
+      ) {
+        finishMemberOperation(memberCreation.operation);
+      }
+    },
+    [finishMemberOperation, memberCreation],
+  );
 
   async function createMember(value: BaseMemberDraftValue) {
-    setMemberCreation({ phase: "submitting" });
+    const operation = nextMemberOperation.current + 1;
+    nextMemberOperation.current = operation;
+    currentMemberOperation.current = operation;
+    const operationView = activeView!;
+    setMemberCreation({
+      phase: "submitting",
+      operation,
+      view: operationView,
+    });
     setMemberError(undefined);
     setMemberDiagnostics([]);
     let created;
@@ -133,46 +175,72 @@ export function BaseTable({ slug }: BaseTableProps) {
         params: { path: { slug } },
         body: {
           base_revision: detail.data!.revision,
-          view: activeView!,
+          view: operationView,
           title: value.title.trim(),
           fields: value.fields,
         },
       });
     } catch (error) {
+      if (currentMemberOperation.current !== operation) return;
       setMemberError(formatApiError(error, "Member could not be created."));
       setMemberDiagnostics(decodeBaseMemberDiagnostics(error));
-      if (
+      const isRevisionConflict =
         isApiError(error) &&
         error.status === 409 &&
-        error.error === "base_revision_conflict"
-      ) {
+        typeof error.detail === "object" &&
+        error.detail !== null &&
+        "code" in error.detail &&
+        error.detail.code === "base_revision_conflict";
+      if (isRevisionConflict) {
         try {
           await detail.refetch();
         } finally {
-          setMemberCreation(IDLE_MEMBER_CREATION);
+          finishMemberOperation(operation);
         }
       } else {
-        setMemberCreation(IDLE_MEMBER_CREATION);
+        finishMemberOperation(operation);
       }
       return;
     }
 
+    if (currentMemberOperation.current !== operation) return;
     setMemberDraftOpen(false);
-    setMemberCreation({ phase: "refreshing", createdId: created.id });
+    setMemberCreation({
+      phase: "refreshing",
+      operation,
+      createdId: created.id,
+      view: operationView,
+    });
     setMemberNotice(undefined);
     try {
       const refreshed = await viewQuery.refetch();
+      if (currentMemberOperation.current !== operation) return;
       if (refreshed.error) {
-        setMemberCreation(IDLE_MEMBER_CREATION);
-        setMemberNotice(
+        finishMemberOperation(
+          operation,
           "The member was created, but the current view could not be refreshed.",
         );
         return;
       }
-      setMemberCreation({ phase: "resolving", createdId: created.id });
+      if (
+        asciiCaseFold(activeViewRef.current ?? "") !==
+        asciiCaseFold(operationView)
+      ) {
+        finishMemberOperation(
+          operation,
+          "The member was created, but focus was skipped because the active view changed.",
+        );
+        return;
+      }
+      setMemberCreation({
+        phase: "resolving",
+        operation,
+        createdId: created.id,
+        view: operationView,
+      });
     } catch {
-      setMemberCreation(IDLE_MEMBER_CREATION);
-      setMemberNotice(
+      finishMemberOperation(
+        operation,
         "The member was created, but the current view could not be refreshed.",
       );
     }
@@ -203,7 +271,6 @@ export function BaseTable({ slug }: BaseTableProps) {
         setMemberDraftOpen(false);
         setMemberError(undefined);
         setMemberDiagnostics([]);
-        setMemberCreation(IDLE_MEMBER_CREATION);
         setMemberNotice(undefined);
       }}
       output={viewQuery.data}
@@ -224,7 +291,8 @@ export function BaseTable({ slug }: BaseTableProps) {
       onAddMember={() => {
         if (
           memberCapability?.enabled !== true ||
-          memberCreation.phase !== "idle"
+          memberCreation.phase !== "idle" ||
+          currentMemberOperation.current !== undefined
         ) {
           return;
         }
@@ -240,14 +308,14 @@ export function BaseTable({ slug }: BaseTableProps) {
         setMemberDraftOpen(false);
         setMemberError(undefined);
         setMemberDiagnostics([]);
-        setMemberCreation(IDLE_MEMBER_CREATION);
       }}
       onMemberEdit={() => {
         setMemberError(undefined);
         setMemberDiagnostics([]);
       }}
       focusCreatedId={
-        memberCreation.phase === "resolving"
+        memberCreation.phase === "resolving" &&
+        asciiCaseFold(memberCreation.view) === asciiCaseFold(activeView)
           ? memberCreation.createdId
           : undefined
       }

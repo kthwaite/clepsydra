@@ -51,6 +51,11 @@ const definition: BaseDetailResponse = {
       group_by: "status",
       columns: ["title", "kind", "status", "rating"],
     },
+    {
+      name: "Shelf",
+      layout: "table",
+      columns: ["title", "status"],
+    },
   ],
   diagnostics: [],
   member_creation: [
@@ -61,6 +66,12 @@ const definition: BaseDetailResponse = {
         { field: "sys.kind", membership: true, view: false },
         { field: "prop.status", membership: false, view: true },
       ],
+      blockers: [],
+    },
+    {
+      view: "Shelf",
+      enabled: true,
+      fields: [],
       blockers: [],
     },
   ],
@@ -328,7 +339,8 @@ describe("BaseTable member creation", () => {
     mocks.createMember
       .mockRejectedValueOnce({
         status: 409,
-        error: "base_revision_conflict",
+        error: "Base revision conflict",
+        detail: { code: "base_revision_conflict" },
       })
       .mockResolvedValueOnce({
         id: "created",
@@ -353,7 +365,7 @@ describe("BaseTable member creation", () => {
     await waitFor(() => expect(mocks.refetchBase).toHaveBeenCalledTimes(1));
     expect(title).toHaveValue("The Dispossessed");
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "base_revision_conflict",
+      "Base revision conflict",
     );
 
     await user.click(screen.getByRole("button", { name: "Save new member" }));
@@ -361,5 +373,61 @@ describe("BaseTable member creation", () => {
     expect(mocks.createMember.mock.calls[1][0].body.base_revision).toBe(
       "base-rev-2",
     );
+  });
+
+  it("keeps the original operation busy and settles without stale focus after a view switch", async () => {
+    const user = userEvent.setup();
+    mocks.viewState.data = groupedOutput();
+    mocks.viewState.error = null;
+    mocks.viewState.isLoading = false;
+    mocks.viewState.isFetching = false;
+    mocks.createMember.mockReset();
+    mocks.refetchView.mockReset();
+    mocks.createMember.mockResolvedValue({
+      id: "created",
+      path: "the-dispossessed.md",
+      title: "The Dispossessed",
+      revision: "page-rev-1",
+    });
+    let resolveRefresh: (() => void) | undefined;
+    mocks.refetchView.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = () => {
+            mocks.viewState.data = groupedOutput([createdRow, existingRow]);
+            resolve({ data: mocks.viewState.data });
+          };
+        }),
+    );
+
+    render(<BaseTable slug="reading" />);
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await fillMemberDraft(user);
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    await waitFor(() => expect(mocks.refetchView).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Shelf" }));
+    const add = screen.getByRole("button", { name: "Add member" });
+    expect(add).toBeDisabled();
+    await user.click(add);
+    expect(
+      screen.queryByRole("textbox", { name: "New member — Title" }),
+    ).not.toBeInTheDocument();
+
+    resolveRefresh?.();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "The member was created, but focus was skipped because the active view changed.",
+    );
+    const oldCreatedTitle = screen.getByRole("button", {
+      name: "The Dispossessed",
+    });
+    expect(oldCreatedTitle).not.toHaveFocus();
+    expect(add).toBeEnabled();
+
+    await user.click(add);
+    expect(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+    ).toHaveFocus();
+    expect(oldCreatedTitle).not.toHaveFocus();
   });
 });

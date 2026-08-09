@@ -63,7 +63,7 @@ interface BaseTableViewProps {
   onCancelMember?: () => void;
   onMemberEdit?: () => void;
   focusCreatedId?: string;
-  onCreatedRowFocused?: () => void;
+  onCreatedRowFocused?: (createdId: string) => void;
 }
 
 /**
@@ -155,7 +155,7 @@ export function BaseTableView({
       ) {
         focusedCreatedId.current = focusCreatedId;
         node.focus();
-        onCreatedRowFocused?.();
+        onCreatedRowFocused?.(focusCreatedId);
       }
     },
     [focusCreatedId, onCreatedRowFocused],
@@ -230,7 +230,10 @@ export function BaseTableView({
           );
         })}
       </TableHeader>
-      <TableBody key={memberDraftOpen ? "draft" : "active"} items={rows}>
+      <TableBody
+        key={`${activeView}:${memberDraftOpen ? "draft" : "active"}`}
+        items={rows}
+      >
         {(row) => (
           <Row
             id={row.id}

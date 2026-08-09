@@ -57,6 +57,23 @@ Tests       39 passed (39)
 Duration    3.10s
 ```
 
+## Review Round 2
+
+Resolved both remaining Important findings:
+
+- Detects the native conflict envelope at HTTP 409 with `detail.code === "base_revision_conflict"`, refetches Base detail, preserves the draft/error, and retries with the refreshed revision.
+- Carries operation identity and origin view through submit, refresh, and focus resolution. View changes no longer reset a live lifecycle; Add stays disabled, old-view focus is skipped non-destructively, and guarded async completions cannot settle a newer operation.
+- Keyed React Aria table collections by active view as well as draft mode so differing saved-view column counts reconcile safely during a switch.
+
+Latest focused evidence:
+
+```text
+bun run --cwd ui test src/components/bases/__tests__/BaseTable.test.tsx src/components/bases/__tests__/BaseTableView.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/member-draft.test.ts
+Test Files  4 passed (4)
+Tests       40 passed (40)
+Duration    3.61s
+```
+
 ## Concerns
 
 None known within focused Task 6 coverage. Controller-owned gates and browser smoke remain intentionally pending.
