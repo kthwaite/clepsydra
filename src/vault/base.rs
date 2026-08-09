@@ -351,6 +351,13 @@ pub fn validate_definition(slug: &str, file: BaseFile) -> ValidationResult {
 // In-memory filter matching (LSP path: cheap, no SQL)
 // ---------------------------------------------------------------------------
 
+pub(crate) struct MetaFilterContext<'a> {
+    pub meta: &'a crate::vault::page::PageMeta,
+    pub path: &'a str,
+    pub word_count: Option<u32>,
+    pub journal_date: Option<chrono::NaiveDate>,
+}
+
 /// Evaluate a base's membership filter against a parsed page's metadata —
 /// the completion/diagnostics path, where hitting SQLite per keystroke is
 /// not warranted. Semantics mirror the SQL compilation for the common ops;
@@ -360,18 +367,31 @@ pub fn base_matches_meta(
     meta: &crate::vault::page::PageMeta,
     path: &str,
 ) -> bool {
+    let context = MetaFilterContext {
+        meta,
+        path,
+        word_count: None,
+        journal_date: None,
+    };
     match &base.file.filter {
-        Some(filter) => filter_matches_meta(filter, meta, path),
+        Some(filter) => filter_matches_meta(filter, &context),
         None => true,
     }
 }
 
-fn filter_matches_meta(filter: &Filter, meta: &crate::vault::page::PageMeta, path: &str) -> bool {
+pub(crate) fn filter_matches_meta(
+    filter: &Filter,
+    context: &MetaFilterContext<'_>,
+) -> bool {
     match filter {
-        Filter::All(children) => children.iter().all(|c| filter_matches_meta(c, meta, path)),
-        Filter::Any(children) => children.iter().any(|c| filter_matches_meta(c, meta, path)),
-        Filter::Not(child) => !filter_matches_meta(child, meta, path),
-        Filter::Cmp { field, op, value } => cmp_matches_meta(field, *op, value, meta, path),
+        Filter::All(children) => children
+            .iter()
+            .all(|child| filter_matches_meta(child, context)),
+        Filter::Any(children) => children
+            .iter()
+            .any(|child| filter_matches_meta(child, context)),
+        Filter::Not(child) => !filter_matches_meta(child, context),
+        Filter::Cmp { field, op, value } => cmp_matches_meta(field, *op, value, context),
     }
 }
 
@@ -379,8 +399,7 @@ fn cmp_matches_meta(
     field: &str,
     op: Op,
     value: &serde_json::Value,
-    meta: &crate::vault::page::PageMeta,
-    path: &str,
+    context: &MetaFilterContext<'_>,
 ) -> bool {
     let bare = field
         .strip_prefix("sys.")
@@ -391,8 +410,8 @@ fn cmp_matches_meta(
     if is_system {
         // Multi-valued system fields: membership semantics.
         let list: Option<Vec<String>> = match bare {
-            "tags" => Some(meta.tags.clone()),
-            "aliases" => Some(meta.aliases.clone()),
+            "tags" => Some(context.meta.tags.clone()),
+            "aliases" => Some(context.meta.aliases.clone()),
             _ => None,
         };
         if let Some(items) = list {
@@ -412,27 +431,42 @@ fn cmp_matches_meta(
             };
         }
 
+        if bare == "word_count" {
+            if let Some(word_count) = context.word_count {
+                return match op {
+                    Op::IsEmpty => false,
+                    Op::NotEmpty => true,
+                    _ => toml_value_matches(
+                        &toml::Value::Integer(i64::from(word_count)),
+                        op,
+                        value,
+                    ),
+                };
+            }
+        }
+
         let scalar: Option<String> = match bare {
-            "id" => Some(meta.id.to_string()),
-            "path" => Some(path.to_string()),
-            "title" => meta.title.clone(),
+            "id" => Some(context.meta.id.to_string()),
+            "path" => Some(context.path.to_string()),
+            "title" => context.meta.title.clone(),
             "kind" => Some(
-                crate::vault::kind::resolve(path, meta.kind)
+                crate::vault::kind::resolve(context.path, context.meta.kind)
                     .0
                     .as_str()
                     .to_string(),
             ),
-            "project" => meta.project.clone(),
-            "created_at" => meta.created_at.map(|dt| dt.to_rfc3339()),
-            "updated_at" => meta.updated_at.map(|dt| dt.to_rfc3339()),
-            // journal_date / word_count are index-derived; unknowable here.
+            "project" => context.meta.project.clone(),
+            "created_at" => context.meta.created_at.map(|dt| dt.to_rfc3339()),
+            "updated_at" => context.meta.updated_at.map(|dt| dt.to_rfc3339()),
+            "word_count" => context.word_count.map(|value| value.to_string()),
+            "journal_date" => context.journal_date.map(|value| value.to_string()),
             _ => None,
         };
         return scalar_matches(scalar.as_deref(), op, value);
     }
 
     // Property: native TOML value from extras.
-    let current = meta.extra.get(bare);
+    let current = context.meta.extra.get(bare);
     match op {
         Op::IsEmpty => current.is_none_or(toml_value_is_empty),
         Op::NotEmpty => current.is_some_and(|v| !toml_value_is_empty(v)),
