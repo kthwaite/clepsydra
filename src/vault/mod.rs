@@ -41,6 +41,7 @@ pub mod page;
 pub mod page_filename;
 pub mod path;
 pub mod projection;
+pub mod property_value;
 pub mod query;
 pub mod reconcile;
 pub mod relabel;
