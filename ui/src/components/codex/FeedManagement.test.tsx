@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
 
 type FeedList = components["schemas"]["FeedListResponse"];
+type FeedListWithCounts = FeedList & {
+  counts: { unread: number; all: number; saved: number };
+};
 
 const managementMocks = vi.hoisted(() => ({
   feedsQuery: {
@@ -81,7 +84,7 @@ vi.mock("#/api/feeds", () => ({
 
 import { FeedManagement } from "#/components/codex/FeedManagement";
 
-const feedList: FeedList = {
+const feedList: FeedListWithCounts = {
   diagnostics: [
     {
       line: 12,
@@ -110,6 +113,7 @@ const feedList: FeedList = {
     },
   ],
   manifest_revision: "revision-1",
+  counts: { unread: 1, all: 1, saved: 0 },
 };
 
 function renderManagement() {
@@ -204,7 +208,8 @@ describe("FeedManagement", () => {
       diagnostics: [],
       groups: [],
       manifest_revision: "empty-revision",
-    };
+      counts: { unread: 0, all: 0, saved: 0 },
+    } satisfies FeedListWithCounts;
 
     renderManagement();
 
@@ -564,5 +569,60 @@ describe("FeedManagement", () => {
         screen.queryByRole("dialog", { name: /unsubscribe one example/i }),
       ).toBeNull();
     });
+  });
+  it("starts an absent title override blank and submits a group-only edit as null", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(screen.getByRole("button", { name: /edit one example/i }));
+    const dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    const title = within(dialog).getByRole("textbox", { name: /^title$/i });
+    const group = within(dialog).getByRole("textbox", { name: /^group$/i });
+    expect(title).toHaveValue("");
+
+    await user.clear(group);
+    await user.type(group, "Research");
+    await user.click(
+      within(dialog).getByRole("button", { name: /save changes/i }),
+    );
+
+    expect(managementMocks.updateFeed).toHaveBeenCalledWith({
+      id: 7,
+      title: null,
+      group: "Research",
+    });
+  });
+
+  it.each([
+    "success",
+    "failure",
+  ] as const)("resets the OPML picker after %s so the same file can be retried", async (outcome) => {
+    managementMocks.importOpml.mockImplementation(() => {
+      if (outcome === "failure") throw new Error("Import failed");
+    });
+    const user = userEvent.setup();
+    const opml = '<?xml version="1.0"?><opml version="2.0"><body /></opml>';
+    const file = new File([opml], "subscriptions.opml", {
+      type: "text/x-opml",
+    });
+    Object.defineProperty(file, "text", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(opml),
+    });
+    renderManagement();
+    const input = screen.getByLabelText(/import opml/i);
+
+    await user.upload(input, file);
+    await waitFor(() =>
+      expect(managementMocks.importOpml).toHaveBeenCalledTimes(1),
+    );
+    expect(input).toHaveValue("");
+
+    await user.upload(input, file);
+    await waitFor(() =>
+      expect(managementMocks.importOpml).toHaveBeenCalledTimes(2),
+    );
+    expect(managementMocks.importOpml).toHaveBeenLastCalledWith({ opml });
+    expect(input).toHaveValue("");
   });
 });

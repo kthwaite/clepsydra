@@ -293,6 +293,7 @@ impl Modify for FilterSchema {
             crate::api::feeds::FeedDto,
             crate::api::feeds::FeedGroupDto,
             crate::api::feeds::FeedDiagnosticDto,
+            crate::api::feeds::FeedEntryCountsDto,
             crate::api::feeds::FeedListResponse,
             crate::api::feeds::SubscribeFeedRequest,
             crate::api::feeds::UpdateFeedRequest,
@@ -677,7 +678,7 @@ mod tests {
         let required = list_schema["required"]
             .as_array()
             .expect("GET feeds response should declare required fields");
-        for field in ["groups", "diagnostics", "manifest_revision"] {
+        for field in ["groups", "diagnostics", "manifest_revision", "counts"] {
             assert!(
                 required.iter().any(|required| required == field),
                 "GET feeds response should require {field}"
@@ -691,5 +692,30 @@ mod tests {
             list_schema["properties"]["manifest_revision"]["type"],
             "string"
         );
+
+        let counts_reference = list_schema["properties"]["counts"]["$ref"]
+            .as_str()
+            .expect("GET feeds counts should use a named response schema");
+        let counts_schema_name = counts_reference
+            .strip_prefix("#/components/schemas/")
+            .expect("unexpected feed counts schema reference");
+        let counts_schema = &json["components"]["schemas"][counts_schema_name];
+        let counts_required = counts_schema["required"]
+            .as_array()
+            .expect("feed counts should declare required fields");
+        for field in ["unread", "all", "saved"] {
+            assert!(
+                counts_required.iter().any(|required| required == field),
+                "feed counts should require {field}"
+            );
+            assert_eq!(
+                counts_schema["properties"][field]["type"], "integer",
+                "feed count {field} should be an integer"
+            );
+            assert_eq!(
+                counts_schema["properties"][field]["format"], "int64",
+                "feed count {field} should retain the backend u64 width"
+            );
+        }
     }
 }

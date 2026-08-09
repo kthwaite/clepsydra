@@ -24,7 +24,7 @@ const {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
   const mediaQuery = {
     matches: false,
-    media: "(max-width: 1199px)",
+    media: "(max-width: 767px)",
     onchange: null,
     addEventListener: (
       _type: string,
@@ -62,7 +62,7 @@ const {
       query: vi.fn(() => mediaQuery),
       setMatches,
       setWidth(width: number) {
-        setMatches(width <= 1199);
+        setMatches(width <= 767);
       },
     },
     navigateMock: vi.fn(),
@@ -255,12 +255,43 @@ describe("CodexFrame real breakpoint transitions", () => {
     });
   });
 
-  it("keeps intermediate widths compact without hiding Status or theme", async () => {
+  it.each([
+    768, 1024,
+  ])("keeps desktop-only routes and actions reachable at %ipx", async (width) => {
     const user = userEvent.setup();
-    matchMediaController.setWidth(1024);
+    matchMediaController.setWidth(width);
     render(
       <CodexFrame forceView="atrium">
         <div>Responsive content</div>
+      </CodexFrame>,
+    );
+
+    expect(matchMediaController.query).toHaveBeenCalledWith(
+      "(max-width: 767px)",
+    );
+    const primary = screen.getByRole("navigation", {
+      name: "Primary navigation",
+    });
+    expect(
+      within(primary).getByRole("button", { name: /06.*feeds/i }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("navigation", { name: "Mobile roots" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /08.*status/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Switch to dark mode" }),
+    );
+    expect(openSettingsMock).toHaveBeenCalledWith("appearance");
+    expect(toggleThemeMock).toHaveBeenCalledOnce();
+  });
+
+  it("switches to mobile roots at the shared 767px boundary", () => {
+    matchMediaController.setWidth(767);
+    render(
+      <CodexFrame forceView="atrium">
+        <div>Phone content</div>
       </CodexFrame>,
     );
 
@@ -270,26 +301,7 @@ describe("CodexFrame real breakpoint transitions", () => {
     expect(
       screen.queryByRole("navigation", { name: "Primary navigation" }),
     ).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Status" }));
-    await user.click(
-      screen.getByRole("button", { name: "Switch to dark mode" }),
-    );
-    expect(openSettingsMock).toHaveBeenCalledWith("appearance");
-    expect(toggleThemeMock).toHaveBeenCalledOnce();
-
-    act(() => matchMediaController.setWidth(1200));
-
-    expect(
-      screen.queryByRole("navigation", { name: "Mobile roots" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: /08.*STATUS/i })).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Switch to dark mode" }),
-    ).toBeVisible();
+    expect(screen.getByRole("group", { name: "Global actions" })).toBeVisible();
   });
 
   it("keeps every global action reachable in the compact phone header", () => {

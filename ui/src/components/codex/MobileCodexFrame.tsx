@@ -15,12 +15,14 @@ type MobileRoot = Extract<
   "atrium" | "gazetteer" | "bases" | "feeds" | "constellation"
 >;
 
-const ROOTS: ReadonlyArray<readonly [MobileRoot, string]> = [
-  ["atrium", "Atrium"],
-  ["gazetteer", "Gazetteer"],
-  ["bases", "Bases"],
-  ["feeds", "Feeds"],
-  ["constellation", "Constellation"],
+const ROOTS: ReadonlyArray<
+  readonly [MobileRoot, accessibleName: string, visualLabel: string]
+> = [
+  ["atrium", "Atrium", "ATR"],
+  ["gazetteer", "Gazetteer", "GAZ"],
+  ["bases", "Bases", "BASE"],
+  ["feeds", "Feeds", "FEED"],
+  ["constellation", "Constellation", "GRAPH"],
 ];
 
 export function MobileCodexFrame({
@@ -105,13 +107,14 @@ export function MobileCodexFrame({
               aria-label="Mobile roots"
               className="cl-mobile-bottom order-3 flex flex-shrink-0 border-t border-rule bg-bar-bg"
             >
-              {ROOTS.map(([root, label]) => {
+              {ROOTS.map(([root, accessibleName, visualLabel]) => {
                 const active = view === root;
                 return (
                   <button
                     key={root}
                     type="button"
                     onClick={() => navigateToRoot(root)}
+                    aria-label={accessibleName}
                     aria-current={active ? "page" : undefined}
                     className={cn(
                       "cl-mono min-h-12 flex-1 px-2 py-2 text-[10px] uppercase tracking-[0.12em]",
@@ -120,7 +123,7 @@ export function MobileCodexFrame({
                         : "text-bar-fg/65",
                     )}
                   >
-                    {label}
+                    {visualLabel}
                   </button>
                 );
               })}

@@ -102,9 +102,17 @@ impl From<ManifestWarning> for FeedDiagnosticDto {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub struct FeedEntryCountsDto {
+    pub unread: u64,
+    pub all: u64,
+    pub saved: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub struct FeedListResponse {
     pub groups: Vec<FeedGroupDto>,
     pub diagnostics: Vec<FeedDiagnosticDto>,
+    pub counts: FeedEntryCountsDto,
     pub manifest_revision: String,
 }
 
@@ -402,7 +410,8 @@ pub async fn list_feeds(
     reconcile_feed_manifest_bytes_locked(&state, &snapshot.bytes)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let feeds = state.feeds.list_feeds().await.map_err(feed_store_error)?;
+    let (feeds, counts) = tokio::try_join!(state.feeds.list_feeds(), state.feeds.entry_counts())
+        .map_err(feed_store_error)?;
     let diagnostics = state
         .feed_manifest_diagnostics
         .read()
@@ -413,6 +422,11 @@ pub async fn list_feeds(
     let response = FeedListResponse {
         groups: grouped_feeds(feeds),
         diagnostics,
+        counts: FeedEntryCountsDto {
+            unread: counts.unread,
+            all: counts.all,
+            saved: counts.saved,
+        },
         manifest_revision: snapshot.revision,
     };
     #[cfg(test)]
@@ -1453,6 +1467,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn feed_list_counts_follow_entry_read_and_bookmark_mutations() {
+        let fixture = feed_test_app("").await;
+        seed_unread_entries(
+            &fixture.state,
+            vec![fetched_entry("older", 10), fetched_entry("newer", 11)],
+        )
+        .await;
+
+        let (status, initial) =
+            request_json(&fixture.app, Method::GET, "/api/vault/feeds", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            initial["counts"],
+            json!({ "unread": 2, "all": 2, "saved": 0 })
+        );
+
+        let older = unread_entries(&fixture.state)
+            .await
+            .into_iter()
+            .find(|entry| entry.guid == "older")
+            .unwrap();
+        let (status, _) = request_json(
+            &fixture.app,
+            Method::PATCH,
+            &format!("/api/vault/feeds/entries/{}", older.id),
+            Some(json!({ "read": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, after_read) =
+            request_json(&fixture.app, Method::GET, "/api/vault/feeds", None).await;
+        assert_eq!(
+            after_read["counts"],
+            json!({ "unread": 1, "all": 2, "saved": 0 })
+        );
+
+        let (status, _) = request_json(
+            &fixture.app,
+            Method::PATCH,
+            &format!("/api/vault/feeds/entries/{}", older.id),
+            Some(json!({ "read": false, "bookmarked": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, after_unread_and_bookmark) =
+            request_json(&fixture.app, Method::GET, "/api/vault/feeds", None).await;
+        assert_eq!(
+            after_unread_and_bookmark["counts"],
+            json!({ "unread": 2, "all": 2, "saved": 1 })
+        );
+
+        let (status, marked) = request_json(
+            &fixture.app,
+            Method::POST,
+            "/api/vault/feeds/entries/mark-read",
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(marked["marked"], 2);
+        let (_, after_mark_all_read) =
+            request_json(&fixture.app, Method::GET, "/api/vault/feeds", None).await;
+        assert_eq!(
+            after_mark_all_read["counts"],
+            json!({ "unread": 0, "all": 2, "saved": 1 })
+        );
+    }
+
+    #[tokio::test]
     async fn membership_mutations_return_structured_current_revision_conflicts() {
         let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
         let fixture = feed_test_app(manifest).await;
@@ -2074,6 +2157,7 @@ mod tests {
             .unwrap();
         let notified = fixture.state.feed_refresh.notified();
         tokio::pin!(notified);
+        let mut changes = fixture.state.change_tx.subscribe();
 
         let (status, _) = request_json(
             &fixture.app,
@@ -2090,6 +2174,17 @@ mod tests {
         let due = fixture.state.feeds.due_feeds(Utc::now()).await.unwrap();
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, feed_id);
+        let feed = fixture.state.feeds.list_feeds().await.unwrap().remove(0);
+        assert_eq!(
+            feed.last_fetch_at,
+            Some(fixture_time(12)),
+            "202 Accepted schedules work; it must not claim a completed fetch"
+        );
+        assert_eq!(feed.last_error.as_deref(), Some("fixture bookkeeping"));
+        assert!(matches!(
+            changes.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]

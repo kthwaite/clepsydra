@@ -22,6 +22,7 @@ import {
   feedEntriesInfiniteOptions,
   updateCachedEntryPages,
   useDeleteFeed,
+  useFeeds,
   useImportOpml,
   usePatchFeedEntry,
   useSubscribeFeed,
@@ -101,8 +102,12 @@ function makePages(
   };
 }
 
-function makeFeedList(manifestRevision: string): FeedList {
+function makeFeedList(
+  manifestRevision: string,
+  counts = { unread: 4, all: 7, saved: 2 },
+): FeedList {
   return {
+    counts,
     diagnostics: [],
     groups: [
       {
@@ -167,6 +172,28 @@ async function requestBody(
   }
   return JSON.parse(String(init?.body));
 }
+
+describe("useFeeds", () => {
+  it("returns the generated unread, all, and saved count shape", async () => {
+    const response = makeFeedList("revision-counts", {
+      unread: 12,
+      all: 45,
+      saved: 6,
+    });
+    fetchMock.mockResolvedValue(jsonResponse(response));
+
+    const { result } = renderHook(() => useFeeds(), {
+      wrapper: wrapper(freshClient()),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.counts).toEqual({
+      unread: 12,
+      all: 45,
+      saved: 6,
+    });
+  });
+});
 
 describe("updateCachedEntryPages", () => {
   it("removes a read entry from unread caches but updates it in all-entry caches", () => {
@@ -476,6 +503,48 @@ describe("usePatchFeedEntry", () => {
 
     unsubscribeFeed();
     unsubscribeTag();
+  });
+
+  it("refreshes global counts through the existing entry invalidation", async () => {
+    const entry = makeEntry({ read: false, bookmarked: false });
+    const client = freshClient();
+    let feedSummaryFetches = 0;
+    const feedObserver = new QueryObserver(client, {
+      queryKey: feedsKey,
+      queryFn: async () => {
+        feedSummaryFetches += 1;
+        return makeFeedList(
+          `revision-${feedSummaryFetches}`,
+          feedSummaryFetches === 1
+            ? { unread: 1, all: 1, saved: 0 }
+            : { unread: 0, all: 1, saved: 1 },
+        );
+      },
+    });
+    const unsubscribeFeed = feedObserver.subscribe(() => undefined);
+    await waitFor(() => expect(feedSummaryFetches).toBe(1));
+
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ...entry, read: true, bookmarked: true }),
+    );
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    await result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+      bookmarked: true,
+    });
+
+    await waitFor(() => expect(feedSummaryFetches).toBe(2));
+    expect(feedObserver.getCurrentResult().data?.counts).toEqual({
+      unread: 0,
+      all: 1,
+      saved: 1,
+    });
+
+    unsubscribeFeed();
   });
 
   it.each([

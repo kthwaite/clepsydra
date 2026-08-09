@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 
 use super::AppState;
 
-/// A notification emitted after the vault index changes.
+/// A notification emitted after persisted vault data changes.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncNotification {
@@ -22,6 +22,8 @@ pub enum SyncNotification {
     },
     /// A base definition file changed; open views should refetch.
     BaseRegistryChanged,
+    /// Persisted feed data changed; open feed views should refetch.
+    FeedChanged,
 }
 
 /// SSE endpoint that streams [`SyncNotification`] events to connected clients.

@@ -102,4 +102,28 @@ describe("feeds route controls", () => {
       expect.objectContaining({ tag: "systems" }),
     );
   });
+
+  it("composes inside the shell without adding a second main landmark", () => {
+    render(
+      <main aria-label="Application content">
+        <FeedsPage />
+      </main>,
+    );
+
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("synchronizes the tag draft when browser history changes the URL search", () => {
+    const view = render(<FeedsPage />);
+    const tag = screen.getByRole("textbox", { name: /^tag$/i });
+    expect(tag).toHaveValue("rust");
+
+    routeMocks.search.tag = "systems";
+    view.rerender(<FeedsPage />);
+    expect(tag).toHaveValue("systems");
+
+    routeMocks.search.tag = undefined;
+    view.rerender(<FeedsPage />);
+    expect(tag).toHaveValue("");
+  });
 });

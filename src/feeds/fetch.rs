@@ -10,6 +10,11 @@ use thiserror::Error;
 
 use super::network::{CheckedHttpClient, CheckedHttpError, ConditionalRequest};
 use super::types::{FeedSummary, FetchOutcome, FetchedEntry};
+const MAX_ENTRIES_PER_FETCH: usize = 500;
+const MAX_ENTRY_GUID_BYTES: usize = 2_048;
+const MAX_ENTRY_TITLE_BYTES: usize = 4_096;
+const MAX_ENTRY_AUTHOR_BYTES: usize = 1_024;
+const MAX_ENTRY_URL_BYTES: usize = 8_192;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedFeed {
@@ -52,6 +57,7 @@ pub fn parse_feed(body: &[u8], max_entry_content_bytes: usize) -> Result<ParsedF
     let entries = feed
         .entries
         .into_iter()
+        .take(MAX_ENTRIES_PER_FETCH)
         .map(|entry| parsed_entry(entry, max_entry_content_bytes))
         .collect();
 
@@ -208,31 +214,33 @@ fn parsed_entry(entry: feed_rs::model::Entry, max_entry_content_bytes: usize) ->
         published,
         ..
     } = entry;
-    let url = preferred_link(&links).map(ToOwned::to_owned);
-    let title = title
+    let url = preferred_link(&links)
+        .filter(|url| url.len() <= MAX_ENTRY_URL_BYTES)
+        .map(ToOwned::to_owned);
+    let mut title = title
         .map(|title| title.content)
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| url.clone().unwrap_or_else(|| "Untitled".to_owned()));
     let author = authors
         .into_iter()
         .map(|author| author.name)
-        .find(|author| !author.trim().is_empty());
+        .find(|author| !author.trim().is_empty())
+        .map(|mut author| {
+            truncate_utf8(&mut author, MAX_ENTRY_AUTHOR_BYTES);
+            author
+        });
     let raw_content = content
         .and_then(|content| content.body)
         .or_else(|| summary.map(|summary| summary.content));
     let published_at = published.or(updated);
     let guid = if !id.trim().is_empty() {
-        id
+        bounded_guid(id)
     } else if let Some(url) = url.as_deref() {
-        url.to_owned()
+        bounded_guid(url.to_owned())
     } else {
-        stable_entry_guid(
-            &title,
-            author.as_deref(),
-            raw_content.as_deref(),
-            published_at.as_ref(),
-        )
+        stable_entry_guid(&title, published_at.as_ref())
     };
+    truncate_utf8(&mut title, MAX_ENTRY_TITLE_BYTES);
     let content_html = raw_content.and_then(|content| {
         if content.len() > max_entry_content_bytes {
             return None;
@@ -270,22 +278,28 @@ fn safe_web_link(href: &str) -> Option<&str> {
         .map(|_| href)
 }
 
-fn stable_entry_guid(
-    title: &str,
-    author: Option<&str>,
-    content: Option<&str>,
-    published_at: Option<&DateTime<Utc>>,
-) -> String {
+fn stable_entry_guid(title: &str, published_at: Option<&DateTime<Utc>>) -> String {
     let mut digest = Sha256::new();
     hash_component(&mut digest, title.as_bytes());
-    hash_component(&mut digest, author.unwrap_or_default().as_bytes());
-    hash_component(&mut digest, content.unwrap_or_default().as_bytes());
     if let Some(published_at) = published_at {
         hash_component(&mut digest, published_at.to_rfc3339().as_bytes());
     } else {
         hash_component(&mut digest, &[]);
     }
+    guid_from_digest(digest)
+}
 
+fn bounded_guid(guid: String) -> String {
+    if guid.len() <= MAX_ENTRY_GUID_BYTES {
+        return guid;
+    }
+
+    let mut digest = Sha256::new();
+    digest.update(guid.as_bytes());
+    guid_from_digest(digest)
+}
+
+fn guid_from_digest(digest: Sha256) -> String {
     let digest = digest.finalize();
     let mut guid = String::with_capacity(7 + digest.len() * 2);
     guid.push_str("sha256:");
@@ -293,6 +307,18 @@ fn stable_entry_guid(
         write!(&mut guid, "{byte:02x}").expect("writing to a String cannot fail");
     }
     guid
+}
+
+fn truncate_utf8(value: &mut String, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        return;
+    }
+
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
 }
 
 fn hash_component(digest: &mut Sha256, component: &[u8]) {
@@ -619,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn guid_falls_back_to_link_then_to_a_stable_content_hash() {
+    fn guid_falls_back_to_link_then_to_a_stable_identity_hash() {
         let xml = rss_document(
             r#"<item>
       <title>Linked fallback</title>
@@ -641,13 +667,93 @@ mod tests {
         );
         assert_eq!(
             first.entries[1].guid,
-            "sha256:9e808ca8822208885a4d7c0132089ed8f14d531fc43ff614187898d315d53a66"
+            "sha256:9b8b300d811ca823077987dea217de10d57a93049353a5851c98e80fd76a4fb5"
         );
         assert_eq!(first.entries[1].guid, second.entries[1].guid);
 
         let changed = xml.replace("Stable fallback", "Changed fallback");
         let changed = parse_feed(changed.as_bytes(), 1024).unwrap();
         assert_ne!(first.entries[1].guid, changed.entries[1].guid);
+    }
+
+    #[test]
+    fn fallback_guid_hashes_only_title_and_canonical_published_timestamp() {
+        let first = rss_document(
+            r#"<item>
+      <title>Stable fallback</title>
+      <dc:creator>Original Author</dc:creator>
+      <pubDate>Sun, 09 Aug 2026 09:00:00 +0000</pubDate>
+      <description>Original body.</description>
+    </item>"#,
+        );
+        let edited = rss_document(
+            r#"<item>
+      <title>Stable fallback</title>
+      <dc:creator>Replacement Author</dc:creator>
+      <pubDate>Sun, 09 Aug 2026 11:00:00 +0200</pubDate>
+      <description>Completely rewritten body.</description>
+    </item>"#,
+        );
+
+        let first = parse_feed(first.as_bytes(), 1024).unwrap();
+        let edited = parse_feed(edited.as_bytes(), 1024).unwrap();
+
+        assert_eq!(
+            first.entries[0].guid,
+            "sha256:9b8b300d811ca823077987dea217de10d57a93049353a5851c98e80fd76a4fb5"
+        );
+        assert_eq!(first.entries[0].guid, edited.entries[0].guid);
+    }
+
+    #[test]
+    fn parsing_admits_at_most_five_hundred_entries_per_fetch() {
+        let items = (0..501)
+            .map(|index| format!("<item><guid>guid-{index}</guid><title>{index}</title></item>"))
+            .collect::<String>();
+
+        let parsed = parse_feed(rss_document(&items).as_bytes(), 1_048_576).unwrap();
+
+        assert_eq!(parsed.entries.len(), 500);
+    }
+
+    #[test]
+    fn parsed_entry_metadata_respects_hard_byte_limits() {
+        const MAX_GUID_BYTES: usize = 2_048;
+        const MAX_TITLE_BYTES: usize = 4_096;
+        const MAX_AUTHOR_BYTES: usize = 1_024;
+        const MAX_URL_BYTES: usize = 8_192;
+
+        let guid = "g".repeat(MAX_GUID_BYTES + 1);
+        let title = "t".repeat(MAX_TITLE_BYTES + 1);
+        let author = "a".repeat(MAX_AUTHOR_BYTES + 1);
+        let url = format!("https://publisher.example/{}", "u".repeat(MAX_URL_BYTES));
+        let xml = rss_document(&format!(
+            r#"<item>
+      <guid isPermaLink="false">{guid}</guid>
+      <title>{title}</title>
+      <link>{url}</link>
+      <dc:creator>{author}</dc:creator>
+      <pubDate>Sun, 09 Aug 2026 09:00:00 +0000</pubDate>
+    </item>"#
+        ));
+
+        let parsed = parse_feed(xml.as_bytes(), 1_048_576).unwrap();
+        let entry = &parsed.entries[0];
+
+        assert!(entry.guid.len() <= MAX_GUID_BYTES);
+        assert!(entry.title.len() <= MAX_TITLE_BYTES);
+        assert!(
+            entry
+                .author
+                .as_deref()
+                .is_none_or(|value| value.len() <= MAX_AUTHOR_BYTES)
+        );
+        assert!(
+            entry
+                .url
+                .as_deref()
+                .is_none_or(|value| value.len() <= MAX_URL_BYTES)
+        );
     }
 
     #[test]

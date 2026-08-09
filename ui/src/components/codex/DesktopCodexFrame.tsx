@@ -91,7 +91,7 @@ export function DesktopCodexFrame({
   return (
     <>
       {/* ── HEADER RAIL ─────────────────────────────────────────────── */}
-      <header className="order-0 flex h-8 flex-shrink-0 items-stretch border-b border-rule text-[11px]">
+      <header className="order-0 flex h-8 min-w-0 flex-shrink-0 items-stretch border-b border-rule text-[11px]">
         <button
           type="button"
           onClick={() => navigate({ to: "/" })}
@@ -101,7 +101,10 @@ export function DesktopCodexFrame({
           <span className="text-accent">C</span>LEPSYDRA
         </button>
 
-        <nav aria-label="Primary navigation" className="flex items-stretch">
+        <nav
+          aria-label="Primary navigation"
+          className="flex min-w-0 items-stretch overflow-x-auto"
+        >
           {NAV.map(([key, label], i) => {
             const active = view === key;
             return (
@@ -111,7 +114,7 @@ export function DesktopCodexFrame({
                 aria-current={active ? "page" : undefined}
                 onClick={() => onNav(key)}
                 className={cn(
-                  "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
+                  "cl-mono flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
                   active
                     ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
                     : "text-ink-mute hover:text-ink",
@@ -127,7 +130,7 @@ export function DesktopCodexFrame({
         <div className="flex-1" />
 
         {/* HEADER META — minimal status that survives diegetic-off */}
-        <div className="cl-mono flex items-stretch text-[10px]">
+        <div className="cl-mono flex shrink-0 items-stretch text-[10px]">
           <span className="hidden items-center gap-1.5 border-l border-rule-soft px-3 sm:flex">
             <span
               className="inline-block h-[6px] w-[6px]"

@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
@@ -44,6 +44,7 @@ function FeedsPage() {
   const navigate = useNavigate({ from: "/feeds" });
   const feedsQuery = useFeeds();
   const [tagDraft, setTagDraft] = useState(search.tag ?? "");
+  useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
   const filters: FeedRiverFilters = {
     view: search.view,
     group: search.group,
@@ -58,7 +59,7 @@ function FeedsPage() {
   };
 
   return (
-    <main className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:px-4 md:py-4">
+    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:px-4 md:py-4">
       <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
         <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
           <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
@@ -194,7 +195,7 @@ function FeedsPage() {
           </Card>
         </>
       )}
-    </main>
+    </div>
   );
 }
 

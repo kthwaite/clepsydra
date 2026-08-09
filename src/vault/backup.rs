@@ -1,4 +1,6 @@
 use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -26,6 +28,11 @@ pub enum BackupError {
         path: PathBuf,
         #[source]
         source: FeedStoreError,
+    },
+    #[error("unsafe feed storage path `{path}`: expected {expected}")]
+    UnsafeFeedStorage {
+        path: PathBuf,
+        expected: &'static str,
     },
     #[error("no temporary directory outside vault `{root}` is available")]
     SnapshotLocation { root: PathBuf },
@@ -57,13 +64,12 @@ pub fn create_backup(
         ));
     }
 
-    let live_feed_database = vault_root.join(".clepsydra/feeds.db");
-    let feed_snapshot = if live_feed_database.is_file() {
+    let feed_snapshot = if let Some(live_feed_database) = verified_feed_database(&vault_root)? {
         let temporary = snapshot_tempdir(&vault_root, &destination)?;
         let snapshot = temporary.path().join("feeds.db");
-        snapshot_database(&live_feed_database, &snapshot).map_err(|source| {
+        snapshot_database(&live_feed_database.path, &snapshot).map_err(|source| {
             BackupError::FeedSnapshot {
-                path: live_feed_database.clone(),
+                path: live_feed_database.path.clone(),
                 source,
             }
         })?;
@@ -185,6 +191,116 @@ impl Drop for PartialArchive {
             let _ = fs::remove_file(&self.path);
         }
     }
+}
+
+struct VerifiedFeedDatabase {
+    path: PathBuf,
+    #[cfg(unix)]
+    _metadata_directory: OwnedFd,
+    #[cfg(unix)]
+    _database: OwnedFd,
+}
+
+#[cfg(unix)]
+fn verified_feed_database(vault_root: &Path) -> Result<Option<VerifiedFeedDatabase>, BackupError> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, open, openat};
+    use rustix::io::Errno;
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let vault = open(vault_root, directory_flags, Mode::empty()).map_err(|source| {
+        io_error(
+            "open vault root without following links",
+            vault_root,
+            source.into(),
+        )
+    })?;
+    let metadata_path = vault_root.join(".clepsydra");
+    let metadata_directory = match openat(&vault, ".clepsydra", directory_flags, Mode::empty()) {
+        Ok(directory) => directory,
+        Err(Errno::NOENT) => return Ok(None),
+        Err(source) => {
+            return Err(io_error(
+                "open feed metadata directory without following links",
+                &metadata_path,
+                source.into(),
+            ));
+        }
+    };
+
+    let database_path = metadata_path.join("feeds.db");
+    let database = match openat(
+        &metadata_directory,
+        "feeds.db",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    ) {
+        Ok(database) => database,
+        Err(Errno::NOENT) => return Ok(None),
+        Err(source) => {
+            return Err(io_error(
+                "open feed database without following links",
+                &database_path,
+                source.into(),
+            ));
+        }
+    };
+    let metadata = fstat(&database).map_err(|source| {
+        io_error(
+            "inspect opened feed database",
+            &database_path,
+            source.into(),
+        )
+    })?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(BackupError::UnsafeFeedStorage {
+            path: database_path,
+            expected: "regular file",
+        });
+    }
+
+    Ok(Some(VerifiedFeedDatabase {
+        path: database_path,
+        _metadata_directory: metadata_directory,
+        _database: database,
+    }))
+}
+
+#[cfg(not(unix))]
+fn verified_feed_database(vault_root: &Path) -> Result<Option<VerifiedFeedDatabase>, BackupError> {
+    let metadata_path = vault_root.join(".clepsydra");
+    let metadata = match fs::symlink_metadata(&metadata_path) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(io_error(
+                "inspect feed metadata directory",
+                &metadata_path,
+                source,
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(BackupError::UnsafeFeedStorage {
+            path: metadata_path,
+            expected: "non-symlink directory",
+        });
+    }
+
+    let database_path = metadata_path.join("feeds.db");
+    let metadata = match fs::symlink_metadata(&database_path) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(io_error("inspect feed database", &database_path, source)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(BackupError::UnsafeFeedStorage {
+            path: database_path,
+            expected: "non-symlink regular file",
+        });
+    }
+    Ok(Some(VerifiedFeedDatabase {
+        path: database_path,
+    }))
 }
 
 fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> BackupError {
@@ -349,6 +465,119 @@ mod tests {
             })
             .unwrap();
         assert_eq!(value, "committed-in-wal");
+    }
+
+    #[test]
+    fn rejects_non_directory_feed_metadata_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let destination = temp.path().join("backups");
+        fs::create_dir(&vault).unwrap();
+        fs::write(vault.join(".clepsydra"), "not a directory").unwrap();
+
+        assert!(
+            create_backup(&vault, &destination, timestamp()).is_err(),
+            "backup accepted a file in place of `.clepsydra`"
+        );
+    }
+
+    #[test]
+    fn rejects_non_regular_feed_database_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let destination = temp.path().join("backups");
+        fs::create_dir_all(vault.join(".clepsydra/feeds.db")).unwrap();
+
+        assert!(
+            create_backup(&vault, &destination, timestamp()).is_err(),
+            "backup accepted a directory in place of `feeds.db`"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_feed_metadata_directory() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let outside = temp.path().join("outside");
+        let destination = temp.path().join("backups");
+        fs::create_dir(&vault).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let external_database = outside.join("feeds.db");
+        let connection = Connection::open(&external_database).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE external_sentinel (
+                    value TEXT NOT NULL
+                );
+                INSERT INTO external_sentinel (value) VALUES ('outside');
+                ",
+            )
+            .unwrap();
+        drop(connection);
+        symlink(&outside, vault.join(".clepsydra")).unwrap();
+
+        assert!(
+            create_backup(&vault, &destination, timestamp()).is_err(),
+            "backup followed a symlinked `.clepsydra` directory"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_readable_feed_database() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let metadata = vault.join(".clepsydra");
+        let destination = temp.path().join("backups");
+        fs::create_dir_all(&metadata).unwrap();
+        let external_database = temp.path().join("readable.db");
+        let connection = Connection::open(&external_database).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE external_sentinel (
+                    value TEXT NOT NULL
+                );
+                INSERT INTO external_sentinel (value) VALUES ('outside');
+                ",
+            )
+            .unwrap();
+        drop(connection);
+        symlink(&external_database, metadata.join("feeds.db")).unwrap();
+
+        assert!(
+            create_backup(&vault, &destination, timestamp()).is_err(),
+            "backup copied a readable SQLite database through a symlink"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_dangling_feed_database_symlink_without_creating_its_writable_target() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let metadata = vault.join(".clepsydra");
+        let destination = temp.path().join("backups");
+        fs::create_dir_all(&metadata).unwrap();
+        let writable_target = temp.path().join("outside-created.db");
+        symlink(&writable_target, metadata.join("feeds.db")).unwrap();
+
+        assert!(
+            create_backup(&vault, &destination, timestamp()).is_err(),
+            "backup accepted a dangling `feeds.db` symlink"
+        );
+        assert!(
+            !writable_target.exists(),
+            "backup followed a dangling link and created its target"
+        );
     }
 
     #[test]

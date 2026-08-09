@@ -1462,6 +1462,14 @@ export interface components {
             title_override?: string | null;
             url: string;
         };
+        FeedEntryCountsDto: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            saved: number;
+            /** Format: int64 */
+            unread: number;
+        };
         FeedEntryDto: {
             author?: string | null;
             bookmarked: boolean;
@@ -1489,6 +1497,7 @@ export interface components {
             name: string;
         };
         FeedListResponse: {
+            counts: components["schemas"]["FeedEntryCountsDto"];
             diagnostics: components["schemas"]["FeedDiagnosticDto"][];
             groups: components["schemas"]["FeedGroupDto"][];
             manifest_revision: string;
@@ -1931,7 +1940,7 @@ export interface components {
             title?: string | null;
             url: string;
         };
-        /** @description A notification emitted after the vault index changes. */
+        /** @description A notification emitted after persisted vault data changes. */
         SyncNotification: {
             removed: string[];
             /** @enum {string} */
@@ -1940,6 +1949,9 @@ export interface components {
         } | {
             /** @enum {string} */
             type: "base_registry_changed";
+        } | {
+            /** @enum {string} */
+            type: "feed_changed";
         };
         TagCount: {
             /** Format: int64 */

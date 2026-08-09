@@ -116,6 +116,11 @@ const unreadEntriesKey = [
 ] as const;
 
 const feedList: FeedList = {
+  counts: {
+    unread: 1,
+    all: 1,
+    saved: 0,
+  },
   diagnostics: [],
   groups: [
     {

@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 
 use crate::api::AppState;
+use crate::api::events::SyncNotification;
 use crate::feeds::fetch::fetch_subscription;
 
 const MANIFEST_PATH: &str = "feeds.md";
@@ -38,7 +39,7 @@ pub enum SchedulerError {
 pub(crate) async fn reconcile_feed_manifest_bytes_locked(
     state: &AppState,
     bytes: &[u8],
-) -> Result<(), SchedulerError> {
+) -> Result<bool, SchedulerError> {
     let path = state.vault.root().join(MANIFEST_PATH);
     let source = String::from_utf8(bytes.to_vec())
         .map_err(|source| SchedulerError::ManifestEncoding { path, source })?;
@@ -49,23 +50,24 @@ pub(crate) async fn reconcile_feed_manifest_bytes_locked(
     }
     let is_valid = manifest.warnings.is_empty();
     *state.feed_manifest_diagnostics.write() = manifest.warnings;
-    if is_valid {
-        state.feeds.reconcile(manifest.feeds).await?;
+    if !is_valid {
+        return Ok(false);
     }
-    Ok(())
+    state.feeds.reconcile(manifest.feeds).await?;
+    Ok(true)
 }
 
 pub(crate) async fn reconcile_feed_manifest_locked(
     state: &AppState,
-) -> Result<Vec<u8>, SchedulerError> {
+) -> Result<(Vec<u8>, bool), SchedulerError> {
     let path = state.vault.root().join(MANIFEST_PATH);
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(source) => return Err(SchedulerError::ManifestIo { path, source }),
     };
-    reconcile_feed_manifest_bytes_locked(state, &bytes).await?;
-    Ok(bytes)
+    let persisted = reconcile_feed_manifest_bytes_locked(state, &bytes).await?;
+    Ok((bytes, persisted))
 }
 
 /// Reconcile the raw root manifest while serializing the complete snapshot,
@@ -84,8 +86,14 @@ pub(crate) fn set_before_reconcile_commit_hook(
 }
 
 async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
-    reconcile_feed_manifest(state).await?;
-
+    let persisted_reconciliation = {
+        let _manifest_guard = state.feed_manifest_lock.lock().await;
+        let (_, persisted) = reconcile_feed_manifest_locked(state).await?;
+        persisted
+    };
+    if persisted_reconciliation {
+        let _ = state.change_tx.send(SyncNotification::FeedChanged);
+    }
     let now = Utc::now();
     let due = state.feeds.due_feeds(now).await?;
     let concurrency = state.feed_settings.fetch_concurrency.max(1);
@@ -115,7 +123,9 @@ async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
         }
         while let Some(result) = tasks.join_next().await {
             match result {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => {
+                    let _ = state.change_tx.send(SyncNotification::FeedChanged);
+                }
                 Ok(Err(error)) => tracing::warn!("feed fetch persistence failed: {error}"),
                 Err(error) => tracing::warn!("feed fetch task failed: {error}"),
             }
@@ -202,7 +212,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use tempfile::TempDir;
 
-    use super::{reconcile_feed_manifest, spawn_scheduler};
+    use super::{reconcile_feed_manifest, run_due_sweep, spawn_scheduler};
     use crate::api::AppState;
     use crate::feeds::types::FetchOutcome;
     use crate::{FeedsSettings, build_app_state_with_feeds};
@@ -270,6 +280,87 @@ mod tests {
         .expect("refresh notification did not wake the scheduler");
 
         scheduler.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn persisted_reconciliation_and_every_due_fetch_broadcast_feed_changed() {
+        let fixture = scheduler_fixture(
+            "## Fixture\n\
+             - [Explicit](http://127.0.0.1:9/explicit.xml)\n\
+             - [Periodic](http://127.0.0.1:9/periodic.xml)\n",
+        )
+        .await;
+        let feeds = fixture.state.feeds.list_feeds().await.unwrap();
+        assert_eq!(feeds.len(), 2);
+        for feed in &feeds {
+            let periodic = feed.url.ends_with("/periodic.xml");
+            fixture
+                .state
+                .feeds
+                .apply_fetch(
+                    feed.id,
+                    FetchOutcome::Failure {
+                        fetched_at: Utc.with_ymd_and_hms(2026, 8, 9, 0, 0, 0).unwrap(),
+                        next_fetch_at: if periodic {
+                            Utc::now() - chrono::Duration::minutes(1)
+                        } else {
+                            Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap()
+                        },
+                        error: "pre-sweep fixture state".to_owned(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let explicit_id = feeds
+            .iter()
+            .find(|feed| feed.url.ends_with("/explicit.xml"))
+            .unwrap()
+            .id;
+        fixture
+            .state
+            .feeds
+            .schedule_refresh(Some(explicit_id), Utc::now())
+            .await
+            .unwrap();
+        std::fs::write(
+            fixture.state.vault.root().join("feeds.md"),
+            "## Fixture\n\
+             - [Explicit](http://127.0.0.1:9/explicit.xml)\n\
+             - [Periodic](http://127.0.0.1:9/periodic.xml)\n\
+             - [New subscription](http://127.0.0.1:9/new.xml)\n",
+        )
+        .unwrap();
+        let mut changes = fixture.state.change_tx.subscribe();
+
+        run_due_sweep(&fixture.state).await.unwrap();
+
+        let persisted = fixture.state.feeds.list_feeds().await.unwrap();
+        assert_eq!(persisted.len(), 3);
+        assert!(
+            persisted.iter().all(|feed| {
+                feed.last_error
+                    .as_deref()
+                    .is_some_and(|error| error != "pre-sweep fixture state")
+            }),
+            "explicit, periodic, and first-subscription fetch outcomes must be persisted"
+        );
+        for completion in [
+            "external manifest reconciliation",
+            "explicit refresh fetch",
+            "periodic fetch",
+            "new-subscription first fetch",
+        ] {
+            let notification = tokio::time::timeout(Duration::from_millis(100), changes.recv())
+                .await
+                .unwrap_or_else(|_| panic!("missing feed-changed event after {completion}"))
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(notification).unwrap(),
+                serde_json::json!({ "type": "feed_changed" }),
+                "{completion} must use the existing SyncNotification channel"
+            );
+        }
     }
 
     #[tokio::test]

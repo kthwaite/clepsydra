@@ -10,7 +10,8 @@ type SyncNotification =
       upserted: string[];
       removed: string[];
     }
-  | { type: "base_registry_changed" };
+  | { type: "base_registry_changed" }
+  | { type: "feed_changed" };
 
 export function useVaultEvents(): ConnectionStatus {
   const queryClient = useQueryClient();
@@ -44,6 +45,9 @@ export function useVaultEvents(): ConnectionStatus {
           if (data.type === "base_registry_changed") {
             invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
             invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+          }
+          if (data.type === "feed_changed") {
+            invalidateByPath(queryClient, queryKeys.feeds.pathPrefix);
           }
         } catch {
           // ignore malformed events

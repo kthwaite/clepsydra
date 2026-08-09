@@ -162,6 +162,7 @@ const feeds = {
     },
   ],
   manifest_revision: "revision-1",
+  counts: { unread: 1, all: 1, saved: 0 },
 };
 
 function entry(overrides: Partial<FeedEntry> = {}): FeedEntry {
@@ -246,6 +247,37 @@ describe("FeedRiver", () => {
     expect(
       screen.getByRole("link", { name: /open original/i }),
     ).toHaveAttribute("rel", "noreferrer");
+  });
+
+  it("hides the visual pip while keeping Read or Unread in the disclosure name and tree", async () => {
+    const user = userEvent.setup();
+    renderRiver();
+
+    const unreadTrigger = screen.getByRole("button", {
+      name: /unread entry.*cache semantics/i,
+    });
+    expect(
+      within(unreadTrigger).getByText("Unread entry", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
+    expect(
+      Array.from(unreadTrigger.querySelectorAll('[aria-hidden="true"]')).some(
+        (element) => element.classList.contains("h-[7px]"),
+      ),
+    ).toBe(true);
+
+    await user.click(unreadTrigger);
+
+    const readTrigger = await screen.findByRole("button", {
+      name: /^read entry.*cache semantics/i,
+    });
+    expect(
+      within(readTrigger).getByText("Read entry", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
+    expect(
+      Array.from(readTrigger.querySelectorAll('[aria-hidden="true"]')).some(
+        (element) => element.classList.contains("h-[7px]"),
+      ),
+    ).toBe(true);
   });
 
   it("groups newest-first entries under calendar-day headings", () => {
@@ -525,9 +557,17 @@ describe("FeedRiver", () => {
       name: /cache semantics/i,
     });
     await waitFor(() => {
+      const disclosure = within(pinnedArticle).getByRole("button", {
+        name: /^read entry.*cache semantics/i,
+      });
       expect(
-        within(pinnedArticle).getByLabelText(/^read entry$/i),
-      ).toBeVisible();
+        within(disclosure).getByText("Read entry", { selector: ".sr-only" }),
+      ).toBeInTheDocument();
+      expect(
+        Array.from(disclosure.querySelectorAll('[aria-hidden="true"]')).some(
+          (element) => element.classList.contains("h-[7px]"),
+        ),
+      ).toBe(true);
       expect(
         within(pinnedArticle).getByRole("button", {
           name: /^mark unread$/i,
@@ -725,5 +765,120 @@ describe("FeedRiver", () => {
         screen.queryByRole("textbox", { name: /tags for cache semantics/i }),
       ).toBeNull();
     });
+  });
+  it("reconciles an explicit read success into an expanded pinned snapshot", async () => {
+    const updated = entry({ read: false });
+    riverMocks.patchEntry.mockImplementation((_variables, options) => {
+      options?.onSuccess?.(updated);
+    });
+    riverMocks.patchEntryAsync.mockResolvedValue(updated);
+    const user = userEvent.setup();
+    setEntries([entry({ read: true })]);
+    const view = renderRiver({ view: "all" });
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+
+    await user.click(screen.getByRole("button", { name: /^mark unread$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /^mark read$/i }),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("button", {
+          name: /unread entry.*cache semantics/i,
+        }),
+      ).toHaveAttribute("aria-expanded", "true");
+    });
+  });
+
+  it("reconciles bookmark success into an expanded pinned snapshot", async () => {
+    const updated = entry({ read: true, bookmarked: true });
+    riverMocks.patchEntry.mockImplementation((_variables, options) => {
+      options?.onSuccess?.(updated);
+    });
+    riverMocks.patchEntryAsync.mockResolvedValue(updated);
+    const user = userEvent.setup();
+    setEntries([entry({ read: true })]);
+    const view = renderRiver({ view: "all" });
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /bookmark cache semantics/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: /remove bookmark from cache semantics/i,
+        }),
+      ).toBeVisible();
+      expect(screen.getByText("Saved")).toBeVisible();
+      expect(screen.getByText("The complete entry body.")).toBeVisible();
+    });
+  });
+
+  it("reconciles tag success into an expanded pinned snapshot", async () => {
+    const updated = entry({ read: true, tags: ["systems", "reading"] });
+    riverMocks.patchEntryAsync.mockResolvedValue(updated);
+    const user = userEvent.setup();
+    setEntries([entry({ read: true })]);
+    const view = renderRiver({ view: "all" });
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    await user.click(screen.getByRole("button", { name: /edit tags/i }));
+    const tags = screen.getByRole("textbox", {
+      name: /tags for cache semantics/i,
+    });
+    await user.clear(tags);
+    await user.type(tags, "systems, reading");
+
+    await user.click(screen.getByRole("button", { name: /save tags/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("textbox", { name: /tags for cache semantics/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("#systems")).toBeVisible();
+      expect(screen.getByText("#reading")).toBeVisible();
+      expect(screen.queryByText("#rust")).not.toBeInTheDocument();
+      expect(screen.getByText("The complete entry body.")).toBeVisible();
+    });
+  });
+
+  it("preserves the exact pinned snapshot when an explicit mutation rolls back", async () => {
+    const failure = new Error("Tags could not be saved");
+    riverMocks.patchEntryAsync.mockRejectedValue(failure);
+    const user = userEvent.setup();
+    setEntries([entry({ read: true, bookmarked: true })]);
+    const view = renderRiver({ view: "all" });
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    await user.click(screen.getByRole("button", { name: /edit tags/i }));
+    const tags = screen.getByRole("textbox", {
+      name: /tags for cache semantics/i,
+    });
+    await user.clear(tags);
+    await user.type(tags, "systems");
+
+    await user.click(screen.getByRole("button", { name: /save tags/i }));
+    riverMocks.patchState.error = failure;
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Tags could not be saved",
+    );
+    expect(screen.getByText("#rust")).toBeVisible();
+    expect(screen.queryByText("#systems")).not.toBeInTheDocument();
+    expect(screen.getByText("Saved")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /^mark unread$/i }),
+    ).toBeVisible();
+    expect(screen.getByText("The complete entry body.")).toBeVisible();
   });
 });

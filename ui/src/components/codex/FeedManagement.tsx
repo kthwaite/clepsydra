@@ -380,12 +380,15 @@ function OpmlActions({
           disabled={isImporting}
           className="sr-only"
           onChange={async (event) => {
-            const file = event.currentTarget.files?.[0];
+            const input = event.currentTarget;
+            const file = input.files?.[0];
             if (!file) return;
             try {
               onImport(await file.text());
             } catch {
               toast.error("Could not read the selected OPML file");
+            } finally {
+              input.value = "";
             }
           }}
         />
@@ -419,16 +422,16 @@ function EditFeedDialog({
     group: string | null;
   }) => Promise<void>;
 }) {
-  const title = feed.title_override || feed.title;
-  const [nextTitle, setNextTitle] = useState(title);
+  const displayTitle = feed.title_override || feed.title;
+  const [nextTitle, setNextTitle] = useState(feed.title_override ?? "");
   const [nextGroup, setNextGroup] = useState(feed.group);
   return (
     <CodexModalShell
-      ariaLabel={`Edit ${title}`}
+      ariaLabel={`Edit ${displayTitle}`}
       maxWidthClassName="max-w-lg"
       onDismiss={onDismiss}
     >
-      <DialogHeader eyebrow="Subscription" title={`Edit ${title}`} />
+      <DialogHeader eyebrow="Subscription" title={`Edit ${displayTitle}`} />
       <form
         className="grid gap-3 px-4 py-4"
         onSubmit={(event) => {

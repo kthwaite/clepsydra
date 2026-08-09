@@ -38,8 +38,8 @@ function installMatchMedia(initial: boolean) {
 }
 
 describe("useMobileLayout", () => {
-  it("keeps the compact shell through 1199px", () => {
-    expect(MOBILE_LAYOUT_QUERY).toBe("(max-width: 1199px)");
+  it("uses the shared phone boundary and leaves 768px routes in the desktop shell", () => {
+    expect(MOBILE_LAYOUT_QUERY).toBe("(max-width: 767px)");
     const setMobile = installMatchMedia(false);
     const { result, unmount } = renderHook(() => useMobileLayout());
     expect(matchMedia).toHaveBeenCalledWith(MOBILE_LAYOUT_QUERY);

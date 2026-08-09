@@ -61,7 +61,7 @@ export function FeedRiverPanel() {
     <section aria-label="Feed river panel" className="col-span-12">
       <Card
         label="Feed river"
-        caption={`${subscriptionCount} ${subscriptionCount === 1 ? "SOURCE" : "SOURCES"}`}
+        caption={`${feedsQuery.data.counts.unread} UNREAD · ${feedsQuery.data.counts.saved} SAVED · ${subscriptionCount} ${subscriptionCount === 1 ? "SOURCE" : "SOURCES"}`}
         pip={
           feedsQuery.isError || feedsQuery.data.diagnostics.length
             ? "hot"
@@ -149,7 +149,7 @@ export function FeedRiverPanel() {
                       : "bg-paper text-ink-mute hover:text-ink",
                   )}
                 >
-                  {label}
+                  {label} ({feedsQuery.data.counts[key]})
                 </Button>
               ))}
             </div>

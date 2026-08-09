@@ -430,6 +430,56 @@ describe("CodexFrame responsive shell", () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
   });
 
+  it("keeps the desktop rail at tablet widths by scoping overflow to primary navigation", () => {
+    mobileLayoutState.matches = false;
+    locationState.pathname = "/feeds";
+    renderFrame();
+
+    const header = screen.getByRole("banner");
+    const primary = screen.getByRole("navigation", {
+      name: "Primary navigation",
+    });
+    const feeds = within(primary).getByRole("button", {
+      name: /06.*feeds/i,
+    });
+
+    expect(header).toHaveClass("min-w-0");
+    expect(primary).toHaveClass("min-w-0", "overflow-x-auto");
+    expect(feeds).toHaveClass("shrink-0");
+    expect(feeds).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /08.*status/i })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Switch to dark mode" }),
+    ).toBeVisible();
+  });
+
+  it("fits five 44px mobile targets at 320px with short labels and full accessible names", () => {
+    mobileLayoutState.matches = true;
+    renderFrame();
+
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    const expectedRoots = [
+      ["Atrium", "ATR"],
+      ["Gazetteer", "GAZ"],
+      ["Bases", "BASE"],
+      ["Feeds", "FEED"],
+      ["Constellation", "GRAPH"],
+    ] as const;
+
+    expect(within(roots).getAllByRole("button")).toHaveLength(
+      expectedRoots.length,
+    );
+    for (const [accessibleName, visualLabel] of expectedRoots) {
+      const root = within(roots).getByRole("button", {
+        name: accessibleName,
+      });
+      expect(root).toHaveAttribute("aria-label", accessibleName);
+      expect(root).toHaveClass("min-h-12", "flex-1");
+      expect(root).toHaveTextContent(visualLabel);
+      expect(root.textContent?.trim()).toHaveLength(visualLabel.length);
+    }
+  });
+
   it("preserves the routed child instance and local state across desktop/mobile breakpoint changes", async () => {
     const user = userEvent.setup();
     const onMount = vi.fn();

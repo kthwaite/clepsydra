@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button, Disclosure, DisclosurePanel } from "react-aria-components";
 import {
   type EntryView,
@@ -31,6 +31,30 @@ export function FeedRiver({
   const markEntriesRead = useMarkFeedEntriesRead();
   const [expandedEntry, setExpandedEntry] = useState<FeedEntry | null>(null);
   const [tagEditorId, setTagEditorId] = useState<number | null>(null);
+  const expandedMutationVersion = useRef(0);
+
+  const reconcileExpandedMutation = async (
+    entryId: number,
+    mutation: {
+      read?: boolean;
+      bookmarked?: boolean;
+      tags?: string[];
+    },
+  ) => {
+    const version = expandedMutationVersion.current + 1;
+    expandedMutationVersion.current = version;
+    const updated = await patchEntry.mutateAsync({ id: entryId, ...mutation });
+    if (
+      !updated ||
+      updated.id !== entryId ||
+      expandedMutationVersion.current !== version
+    ) {
+      return;
+    }
+    setExpandedEntry((current) =>
+      current?.id === entryId ? updated : current,
+    );
+  };
 
   const entries = useMemo(
     () =>
@@ -45,13 +69,16 @@ export function FeedRiver({
     [entriesQuery.data],
   );
   const visibleEntries = useMemo(() => {
-    if (
-      !expandedEntry ||
-      entries.some((entry) => entry.id === expandedEntry.id)
-    ) {
-      return entries;
-    }
-    return [...entries, expandedEntry].sort((left, right) => {
+    if (!expandedEntry) return entries;
+
+    const mergedEntries = entries.slice();
+    const expandedIndex = mergedEntries.findIndex(
+      (entry) => entry.id === expandedEntry.id,
+    );
+    if (expandedIndex === -1) mergedEntries.push(expandedEntry);
+    else mergedEntries[expandedIndex] = expandedEntry;
+
+    return mergedEntries.sort((left, right) => {
       const timeDifference =
         Date.parse(right.published_at ?? right.fetched_at) -
         Date.parse(left.published_at ?? left.fetched_at);
@@ -191,18 +218,29 @@ export function FeedRiver({
                     isEditingTags={tagEditorId === entry.id}
                     isPatchPending={patchEntry.isPending}
                     onExpandedChange={(expanded) => {
+                      expandedMutationVersion.current += 1;
                       setExpandedEntry(expanded ? entry : null);
                       setTagEditorId(null);
                       if (expanded && !entry.read) {
                         patchEntry.reset();
+                        const version = expandedMutationVersion.current;
                         void patchEntry
                           .mutateAsync({ id: entry.id, read: true })
-                          .then(() => {
-                            setExpandedEntry((current) =>
-                              current?.id === entry.id
-                                ? { ...current, read: true }
-                                : current,
-                            );
+                          .then((updated) => {
+                            setExpandedEntry((current) => {
+                              if (
+                                current?.id !== entry.id ||
+                                expandedMutationVersion.current !== version
+                              ) {
+                                return current;
+                              }
+                              if (updated && updated.id === entry.id) {
+                                return updated;
+                              }
+                              return updated
+                                ? current
+                                : { ...current, read: true };
+                            });
                           })
                           .catch(() => {
                             // Keep the pinned unread snapshot aligned with rollback.
@@ -211,14 +249,19 @@ export function FeedRiver({
                     }}
                     onToggleBookmark={() => {
                       patchEntry.reset();
-                      patchEntry.mutate({
-                        id: entry.id,
+                      void reconcileExpandedMutation(entry.id, {
                         bookmarked: !entry.bookmarked,
+                      }).catch(() => {
+                        // The mutation error remains visible while the pinned snapshot stays unchanged.
                       });
                     }}
                     onToggleRead={() => {
                       patchEntry.reset();
-                      patchEntry.mutate({ id: entry.id, read: !entry.read });
+                      void reconcileExpandedMutation(entry.id, {
+                        read: !entry.read,
+                      }).catch(() => {
+                        // The mutation error remains visible while the pinned snapshot stays unchanged.
+                      });
                     }}
                     onEditTags={() => {
                       patchEntry.reset();
@@ -228,8 +271,10 @@ export function FeedRiver({
                     onSaveTags={async (tags) => {
                       patchEntry.reset();
                       try {
-                        await patchEntry.mutateAsync({ id: entry.id, tags });
-                        setTagEditorId(null);
+                        await reconcileExpandedMutation(entry.id, { tags });
+                        setTagEditorId((current) =>
+                          current === entry.id ? null : current,
+                        );
                       } catch {
                         // The generated mutation exposes the actionable error in-surface.
                       }
@@ -301,9 +346,12 @@ function EntryDisclosure({
             className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 text-left outline-none hover:bg-paper-edge focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
           >
             <span
-              aria-label={entry.read ? "Read entry" : "Unread entry"}
+              aria-hidden="true"
               className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
             />
+            <span className="sr-only">
+              {entry.read ? "Read entry" : "Unread entry"}
+            </span>
             <span className="min-w-0">
               <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
                 {entry.title}

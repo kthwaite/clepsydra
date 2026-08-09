@@ -8,7 +8,7 @@ use std::thread;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rusqlite::types::Value;
-use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params, params_from_iter};
 use tokio::sync::oneshot;
 
 use super::types::{
@@ -17,6 +17,11 @@ use super::types::{
 };
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const MAX_ENTRY_PAGE_BYTES: usize = 8 * 1_048_576;
+pub const MAX_RETAINED_ENTRIES_PER_FEED: usize = 5_000;
+pub const MAX_RETAINED_CONTENT_BYTES_PER_FEED: usize = 128 * 1_048_576;
+pub const MAX_RETAINED_ENTRIES_GLOBAL: usize = 50_000;
+pub const MAX_RETAINED_CONTENT_BYTES_GLOBAL: usize = 1_024 * 1_048_576;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FeedStoreError {
@@ -39,12 +44,19 @@ pub enum FeedStoreError {
     InvalidTimestamp(String),
     #[error("invalid entry cursor `{0}`")]
     InvalidCursor(String),
+    #[error("unsafe feed database path `{path}`: expected {expected}")]
+    UnsafePath {
+        path: PathBuf,
+        expected: &'static str,
+    },
     #[error("invalid feed database path `{0}`")]
     InvalidPath(PathBuf),
     #[error("feed {0} was not found")]
     FeedNotFound(i64),
     #[error("entry {0} was not found")]
     EntryNotFound(i64),
+    #[error("feed entry {0} exceeds the serialized entry-page byte limit")]
+    EntryPageItemTooLarge(i64),
     #[error("serialize feed tags: {0}")]
     SerializeTags(#[from] serde_json::Error),
 }
@@ -54,6 +66,13 @@ pub struct FeedStoreHandle {
     tx: mpsc::Sender<Command>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryCounts {
+    pub unread: u64,
+    pub all: u64,
+    pub saved: u64,
+}
+
 enum Command {
     Reconcile {
         feeds: Vec<ManifestFeed>,
@@ -61,6 +80,9 @@ enum Command {
     },
     ListFeeds {
         reply: oneshot::Sender<Result<Vec<FeedSummary>, FeedStoreError>>,
+    },
+    EntryCounts {
+        reply: oneshot::Sender<Result<EntryCounts, FeedStoreError>>,
     },
     DueFeeds {
         now: DateTime<Utc>,
@@ -120,7 +142,7 @@ impl FeedStoreHandle {
             .spawn(move || match open_connection(&worker_path) {
                 Ok(mut connection) => {
                     if ready_tx.send(Ok(())).is_ok() {
-                        worker_loop(&mut connection, &worker_path, rx);
+                        worker_loop(&mut connection, rx);
                     }
                 }
                 Err(error) => {
@@ -141,6 +163,10 @@ impl FeedStoreHandle {
 
     pub async fn list_feeds(&self) -> Result<Vec<FeedSummary>, FeedStoreError> {
         self.request(|reply| Command::ListFeeds { reply }).await
+    }
+
+    pub async fn entry_counts(&self) -> Result<EntryCounts, FeedStoreError> {
+        self.request(|reply| Command::EntryCounts { reply }).await
     }
 
     pub async fn due_feeds(&self, now: DateTime<Utc>) -> Result<Vec<FeedRecord>, FeedStoreError> {
@@ -252,7 +278,7 @@ fn observed_query_count() -> usize {
     OBSERVED_LIST_ENTRY_QUERIES.with(Cell::get)
 }
 
-fn worker_loop(connection: &mut Connection, source: &Path, rx: mpsc::Receiver<Command>) {
+fn worker_loop(connection: &mut Connection, rx: mpsc::Receiver<Command>) {
     while let Ok(command) = rx.recv() {
         match command {
             Command::Reconcile { feeds, reply } => {
@@ -260,6 +286,9 @@ fn worker_loop(connection: &mut Connection, source: &Path, rx: mpsc::Receiver<Co
             }
             Command::ListFeeds { reply } => {
                 let _ = reply.send(list_feeds(connection, None));
+            }
+            Command::EntryCounts { reply } => {
+                let _ = reply.send(entry_counts(connection));
             }
             Command::DueFeeds { now, reply } => {
                 let _ = reply.send(list_feeds(connection, Some(now)));
@@ -301,7 +330,7 @@ fn worker_loop(connection: &mut Connection, source: &Path, rx: mpsc::Receiver<Co
                 ));
             }
             Command::SnapshotTo { destination, reply } => {
-                let _ = reply.send(snapshot_database(source, &destination));
+                let _ = reply.send(snapshot_connection(connection, &destination));
             }
             #[cfg(test)]
             Command::ResetObservedQueries { reply } => {
@@ -316,7 +345,127 @@ fn worker_loop(connection: &mut Connection, source: &Path, rx: mpsc::Receiver<Co
     }
 }
 
-fn open_connection(path: &Path) -> Result<Connection, FeedStoreError> {
+#[cfg(unix)]
+fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
+    use rustix::fs::{FileType, Mode, OFlags, fchmod, fstat, mkdirat, open, openat};
+    use rustix::io::Errno;
+
+    let filename = path
+        .file_name()
+        .ok_or_else(|| FeedStoreError::InvalidPath(path.to_path_buf()))?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let is_metadata_directory = parent.file_name() == Some(Path::new(".clepsydra").as_os_str());
+    let trusted_parent = if is_metadata_directory {
+        parent
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+    } else {
+        parent
+    };
+    let trusted_parent =
+        std::fs::canonicalize(trusted_parent).map_err(|source| FeedStoreError::Io {
+            operation: "resolve trusted feed database parent",
+            path: trusted_parent.to_path_buf(),
+            source,
+        })?;
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let mut directory =
+        open(&trusted_parent, directory_flags, Mode::empty()).map_err(|source| {
+            FeedStoreError::Io {
+                operation: "open trusted feed database parent without following links",
+                path: trusted_parent.clone(),
+                source: source.into(),
+            }
+        })?;
+    let database_parent = if is_metadata_directory {
+        let metadata_name = Path::new(".clepsydra").as_os_str();
+        let metadata_path = trusted_parent.join(metadata_name);
+        let created = match mkdirat(&directory, metadata_name, Mode::RWXU) {
+            Ok(()) => true,
+            Err(Errno::EXIST) => false,
+            Err(source) => {
+                return Err(FeedStoreError::Io {
+                    operation: "create owner-only feed database directory",
+                    path: metadata_path,
+                    source: source.into(),
+                });
+            }
+        };
+        directory = openat(&directory, metadata_name, directory_flags, Mode::empty()).map_err(
+            |source| FeedStoreError::Io {
+                operation: "open feed database directory without following links",
+                path: metadata_path.clone(),
+                source: source.into(),
+            },
+        )?;
+        if created {
+            fchmod(&directory, Mode::RWXU).map_err(|source| FeedStoreError::Io {
+                operation: "set owner-only feed database directory mode",
+                path: metadata_path.clone(),
+                source: source.into(),
+            })?;
+        }
+        metadata_path
+    } else {
+        trusted_parent
+    };
+
+    let database_path = database_parent.join(filename);
+    let create_flags = OFlags::RDWR
+        | OFlags::CREATE
+        | OFlags::EXCL
+        | OFlags::CLOEXEC
+        | OFlags::NOFOLLOW
+        | OFlags::NONBLOCK;
+    let existing_flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
+    let (file, created) = match openat(&directory, filename, create_flags, Mode::RUSR | Mode::WUSR)
+    {
+        Ok(file) => (file, true),
+        Err(Errno::EXIST) => (
+            openat(&directory, filename, existing_flags, Mode::empty()).map_err(|source| {
+                FeedStoreError::Io {
+                    operation: "open existing feed database without following links",
+                    path: database_path.clone(),
+                    source: source.into(),
+                }
+            })?,
+            false,
+        ),
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "create feed database without following links",
+                path: database_path,
+                source: source.into(),
+            });
+        }
+    };
+    if created {
+        fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(|source| FeedStoreError::Io {
+            operation: "set owner-only feed database mode",
+            path: database_path.clone(),
+            source: source.into(),
+        })?;
+    }
+    let metadata = fstat(&file).map_err(|source| FeedStoreError::Io {
+        operation: "inspect opened feed database",
+        path: database_path.clone(),
+        source: source.into(),
+    })?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(FeedStoreError::UnsafePath {
+            path: database_path,
+            expected: "regular file",
+        });
+    }
+    Ok(database_path)
+}
+
+#[cfg(not(unix))]
+fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -327,7 +476,42 @@ fn open_connection(path: &Path) -> Result<Connection, FeedStoreError> {
             source,
         })?;
     }
-    let mut connection = Connection::open(path)?;
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(FeedStoreError::UnsafePath {
+                path: path.to_path_buf(),
+                expected: "regular file",
+            });
+        }
+        Ok(_) => return Ok(path.to_path_buf()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "inspect feed database",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map(|_| path.to_path_buf())
+        .map_err(|source| FeedStoreError::Io {
+            operation: "create feed database",
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+fn open_connection(path: &Path) -> Result<Connection, FeedStoreError> {
+    let path = prepare_database_path(path)?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let mut connection = Connection::open_with_flags(path, flags)?;
     let schema_version: i64 =
         connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version > CURRENT_SCHEMA_VERSION {
@@ -717,6 +901,7 @@ fn apply_fetch(
             )?;
             if changed != 0 {
                 upsert_entries(&transaction, feed_id, entries)?;
+                enforce_retention_quotas(&transaction, feed_id)?;
             }
             changed
         }
@@ -787,8 +972,7 @@ fn upsert_entries(
             title = excluded.title,
             author = excluded.author,
             content_html = excluded.content_html,
-            published_at = excluded.published_at,
-            fetched_at = excluded.fetched_at
+            published_at = COALESCE(entry.published_at, excluded.published_at)
         ",
     )?;
     for entry in entries {
@@ -804,6 +988,81 @@ fn upsert_entries(
         ])?;
     }
     Ok(())
+}
+fn enforce_retention_quotas(
+    transaction: &Transaction<'_>,
+    feed_id: i64,
+) -> Result<(), FeedStoreError> {
+    transaction.execute(
+        "
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY fetched_at DESC, id DESC) AS retained_count,
+                SUM(COALESCE(length(CAST(content_html AS BLOB)), 0)) OVER (
+                    ORDER BY fetched_at DESC, id DESC
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS retained_bytes
+            FROM entry
+            WHERE feed_id = ?1
+        )
+        DELETE FROM entry
+        WHERE id IN (
+            SELECT id
+            FROM ranked
+            WHERE retained_count > ?2 OR retained_bytes > ?3
+        )
+        ",
+        params![
+            feed_id,
+            MAX_RETAINED_ENTRIES_PER_FEED as i64,
+            MAX_RETAINED_CONTENT_BYTES_PER_FEED as i64
+        ],
+    )?;
+    transaction.execute(
+        "
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY fetched_at DESC, id DESC) AS retained_count,
+                SUM(COALESCE(length(CAST(content_html AS BLOB)), 0)) OVER (
+                    ORDER BY fetched_at DESC, id DESC
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS retained_bytes
+            FROM entry
+        )
+        DELETE FROM entry
+        WHERE id IN (
+            SELECT id
+            FROM ranked
+            WHERE retained_count > ?1 OR retained_bytes > ?2
+        )
+        ",
+        params![
+            MAX_RETAINED_ENTRIES_GLOBAL as i64,
+            MAX_RETAINED_CONTENT_BYTES_GLOBAL as i64
+        ],
+    )?;
+    Ok(())
+}
+
+fn entry_counts(connection: &Connection) -> Result<EntryCounts, FeedStoreError> {
+    connection
+        .query_row(
+            "
+            SELECT COUNT(*) - COUNT(read_at), COUNT(*), COUNT(bookmarked_at)
+            FROM entry
+            ",
+            [],
+            |row| {
+                Ok(EntryCounts {
+                    unread: row.get(0)?,
+                    all: row.get(1)?,
+                    saved: row.get(2)?,
+                })
+            },
+        )
+        .map_err(Into::into)
 }
 
 fn list_entries(
@@ -856,25 +1115,135 @@ fn list_entries(
     #[cfg(test)]
     increment_observed_query_count();
     let mut statement = connection.prepare(&sql)?;
-    let mut entries = statement
-        .query_map(params_from_iter(values), entry_from_row)?
-        .collect::<Result<Vec<_>, _>>()?;
-    let has_more = entries.len() > limit;
-    if has_more {
-        entries.truncate(limit);
+    let mut rows = statement.query(params_from_iter(values))?;
+    let mut entries = Vec::new();
+    let mut serialized_entries_bytes = 0_usize;
+    let mut has_more = false;
+    while let Some(row) = rows.next()? {
+        if entries.len() == limit {
+            has_more = true;
+            break;
+        }
+        let entry = entry_from_row(row)?;
+        let entry_bytes = serialized_entry_size(&entry);
+        let candidate_bytes = serialized_entries_bytes
+            .saturating_add(usize::from(!entries.is_empty()))
+            .saturating_add(entry_bytes);
+        if serialized_page_size(candidate_bytes, None) > MAX_ENTRY_PAGE_BYTES {
+            if entries.is_empty() {
+                return Err(FeedStoreError::EntryPageItemTooLarge(entry.id));
+            }
+            has_more = true;
+            break;
+        }
+        serialized_entries_bytes = candidate_bytes;
+        entries.push(entry);
     }
+    drop(rows);
+    drop(statement);
+
     load_entry_tags(connection, &mut entries)?;
-    let next_cursor = has_more
-        .then(|| entries.last())
-        .flatten()
-        .map(|entry| EntryCursor {
-            sort_ts: entry.published_at.unwrap_or(entry.fetched_at),
-            id: entry.id,
-        });
+    let mut entry_sizes = entries
+        .iter()
+        .map(serialized_entry_size)
+        .collect::<Vec<_>>();
+    serialized_entries_bytes = entry_sizes
+        .iter()
+        .copied()
+        .fold(0_usize, usize::saturating_add)
+        .saturating_add(entry_sizes.len().saturating_sub(1));
+    let next_cursor = loop {
+        let cursor = has_more.then(|| entries.last()).flatten().map(entry_cursor);
+        if serialized_page_size(serialized_entries_bytes, cursor.as_ref()) <= MAX_ENTRY_PAGE_BYTES {
+            break cursor;
+        }
+        if entries.len() == 1 {
+            return Err(FeedStoreError::EntryPageItemTooLarge(entries[0].id));
+        }
+        has_more = true;
+        let removed_bytes = entry_sizes
+            .pop()
+            .expect("entry sizes remain aligned with entries");
+        entries.pop();
+        serialized_entries_bytes = serialized_entries_bytes
+            .saturating_sub(removed_bytes)
+            .saturating_sub(usize::from(!entries.is_empty()));
+    };
     Ok(EntryPage {
         entries,
         next_cursor,
     })
+}
+
+#[derive(serde::Serialize)]
+struct SerializedEntry<'a> {
+    id: i64,
+    feed_id: i64,
+    guid: &'a str,
+    url: Option<&'a str>,
+    title: &'a str,
+    author: Option<&'a str>,
+    content_html: Option<&'a str>,
+    published_at: Option<&'a DateTime<Utc>>,
+    fetched_at: &'a DateTime<Utc>,
+    read: bool,
+    bookmarked: bool,
+    tags: &'a [String],
+}
+
+#[derive(Default)]
+struct ByteCounter {
+    bytes: usize,
+}
+
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(buffer.len());
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn serialized_entry_size(entry: &Entry) -> usize {
+    serialized_json_size(&SerializedEntry {
+        id: entry.id,
+        feed_id: entry.feed_id,
+        guid: &entry.guid,
+        url: entry.url.as_deref(),
+        title: &entry.title,
+        author: entry.author.as_deref(),
+        content_html: entry.content_html.as_deref(),
+        published_at: entry.published_at.as_ref(),
+        fetched_at: &entry.fetched_at,
+        read: entry.read,
+        bookmarked: entry.bookmarked,
+        tags: &entry.tags,
+    })
+}
+
+fn serialized_json_size<T: serde::Serialize + ?Sized>(value: &T) -> usize {
+    let mut counter = ByteCounter::default();
+    serde_json::to_writer(&mut counter, value)
+        .expect("serializing a feed entry into an infallible byte counter cannot fail");
+    counter.bytes
+}
+
+fn serialized_page_size(entries_bytes: usize, next_cursor: Option<&EntryCursor>) -> usize {
+    let cursor_bytes = next_cursor
+        .map(EntryCursor::encode)
+        .as_ref()
+        .map_or(4, serialized_json_size);
+    r#"{"entries":["#.len() + entries_bytes + r#"],"next_cursor":"#.len() + cursor_bytes + 1
+}
+
+fn entry_cursor(entry: &Entry) -> EntryCursor {
+    EntryCursor {
+        sort_ts: entry.published_at.unwrap_or(entry.fetched_at),
+        id: entry.id,
+    }
 }
 
 fn entry_from_row(row: &rusqlite::Row<'_>) -> Result<Entry, rusqlite::Error> {
@@ -1079,9 +1448,9 @@ fn prune(
         DELETE FROM entry
         WHERE bookmarked_at IS NULL
           AND (
-            (read_at IS NOT NULL AND COALESCE(published_at, fetched_at) < ?1)
+            (read_at IS NOT NULL AND fetched_at < ?1)
             OR
-            (read_at IS NULL AND COALESCE(published_at, fetched_at) < ?2)
+            (read_at IS NULL AND fetched_at < ?2)
           )
         ",
         params![datetime_to_db(read_cutoff), datetime_to_db(unread_cutoff)],
@@ -1123,27 +1492,199 @@ pub fn snapshot_database(source: &Path, destination: &Path) -> Result<(), FeedSt
     if source == destination {
         return Err(FeedStoreError::InvalidPath(destination.to_path_buf()));
     }
-    if let Some(parent) = destination
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let connection = Connection::open_with_flags(source, flags)?;
+    snapshot_connection(&connection, destination)
+}
+
+struct PreparedSnapshotDestination {
+    path: PathBuf,
+    #[cfg(unix)]
+    directory: std::os::fd::OwnedFd,
+    #[cfg(unix)]
+    filename: std::ffi::OsString,
+}
+
+#[cfg(unix)]
+fn prepare_snapshot_destination(
+    destination: &Path,
+) -> Result<PreparedSnapshotDestination, FeedStoreError> {
+    use rustix::fs::{AtFlags, Mode, OFlags, open, statat};
+    use rustix::io::Errno;
+
+    let filename = destination
+        .file_name()
+        .ok_or_else(|| FeedStoreError::InvalidPath(destination.to_path_buf()))?
+        .to_os_string();
+    let parent = destination
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = std::fs::canonicalize(parent).map_err(|source| FeedStoreError::Io {
+        operation: "resolve snapshot directory",
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let directory = open(
+        &parent,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|source| FeedStoreError::Io {
+        operation: "open snapshot directory without following links",
+        path: parent.clone(),
+        source: source.into(),
+    })?;
+    match statat(&directory, &filename, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(_) => {
+            return Err(FeedStoreError::UnsafePath {
+                path: parent.join(&filename),
+                expected: "absent snapshot target",
+            });
+        }
+        Err(Errno::NOENT) => {}
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "inspect snapshot target without following links",
+                path: parent.join(&filename),
+                source: source.into(),
+            });
+        }
+    }
+    Ok(PreparedSnapshotDestination {
+        path: parent.join(&filename),
+        directory,
+        filename,
+    })
+}
+
+#[cfg(not(unix))]
+fn prepare_snapshot_destination(
+    destination: &Path,
+) -> Result<PreparedSnapshotDestination, FeedStoreError> {
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = std::fs::canonicalize(parent).map_err(|source| FeedStoreError::Io {
+        operation: "resolve snapshot directory",
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let path = parent.join(
+        destination
+            .file_name()
+            .ok_or_else(|| FeedStoreError::InvalidPath(destination.to_path_buf()))?,
+    );
+    match std::fs::symlink_metadata(&path) {
+        Ok(_) => {
+            return Err(FeedStoreError::UnsafePath {
+                path,
+                expected: "absent snapshot target",
+            });
+        }
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "inspect snapshot target",
+                path,
+                source,
+            });
+        }
+    }
+    Ok(PreparedSnapshotDestination { path })
+}
+
+#[cfg(unix)]
+fn finish_snapshot_destination(
+    destination: &PreparedSnapshotDestination,
+) -> Result<(), FeedStoreError> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, fstat, openat, statat};
+
+    let file = openat(
+        &destination.directory,
+        &destination.filename,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|source| FeedStoreError::Io {
+        operation: "open completed snapshot without following links",
+        path: destination.path.clone(),
+        source: source.into(),
+    })?;
+    let metadata = fstat(&file).map_err(|source| FeedStoreError::Io {
+        operation: "inspect completed snapshot",
+        path: destination.path.clone(),
+        source: source.into(),
+    })?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(FeedStoreError::UnsafePath {
+            path: destination.path.clone(),
+            expected: "regular snapshot file",
+        });
+    }
+    fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(|source| FeedStoreError::Io {
+        operation: "set owner-only snapshot mode",
+        path: destination.path.clone(),
+        source: source.into(),
+    })?;
+    let path_metadata = statat(
+        &destination.directory,
+        &destination.filename,
+        AtFlags::SYMLINK_NOFOLLOW,
+    )
+    .map_err(|source| FeedStoreError::Io {
+        operation: "verify completed snapshot identity",
+        path: destination.path.clone(),
+        source: source.into(),
+    })?;
+    if path_metadata.st_dev != metadata.st_dev
+        || path_metadata.st_ino != metadata.st_ino
+        || FileType::from_raw_mode(path_metadata.st_mode) != FileType::RegularFile
     {
-        std::fs::create_dir_all(parent).map_err(|source| FeedStoreError::Io {
-            operation: "create snapshot directory",
-            path: parent.to_path_buf(),
+        return Err(FeedStoreError::UnsafePath {
+            path: destination.path.clone(),
+            expected: "unchanged regular snapshot file",
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn finish_snapshot_destination(
+    destination: &PreparedSnapshotDestination,
+) -> Result<(), FeedStoreError> {
+    let metadata =
+        std::fs::symlink_metadata(&destination.path).map_err(|source| FeedStoreError::Io {
+            operation: "inspect completed snapshot",
+            path: destination.path.clone(),
             source,
         })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(FeedStoreError::UnsafePath {
+            path: destination.path.clone(),
+            expected: "non-symlink regular snapshot file",
+        });
     }
-    let destination_text = destination
-        .to_str()
-        .ok_or_else(|| FeedStoreError::InvalidPath(destination.to_path_buf()))?;
-    let connection = Connection::open(source)?;
-    connection.execute("VACUUM INTO ?1", [destination_text])?;
     Ok(())
+}
+
+fn snapshot_connection(connection: &Connection, destination: &Path) -> Result<(), FeedStoreError> {
+    let destination = prepare_snapshot_destination(destination)?;
+    let destination_text = destination
+        .path
+        .to_str()
+        .ok_or_else(|| FeedStoreError::InvalidPath(destination.path.clone()))?;
+    connection.execute("VACUUM INTO ?1", [destination_text])?;
+    finish_snapshot_destination(&destination)
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fs;
     use std::path::Path;
 
     use chrono::{DateTime, Duration, SecondsFormat, Utc};
@@ -1230,6 +1771,201 @@ mod tests {
             .into_iter()
             .map(|entry| (entry.guid.clone(), entry))
             .collect()
+    }
+
+    fn seed_entries(path: &Path, feed_ids: &[i64], entries_per_feed: usize) {
+        let mut connection = Connection::open(path).unwrap();
+        let transaction = connection.transaction().unwrap();
+        {
+            let mut statement = transaction
+                .prepare(
+                    "
+                    INSERT INTO entry (feed_id, guid, title, fetched_at)
+                    VALUES (?1, ?2, ?2, ?3)
+                    ",
+                )
+                .unwrap();
+            for feed_id in feed_ids {
+                for index in 0..entries_per_feed {
+                    statement
+                        .execute(rusqlite::params![
+                            feed_id,
+                            format!("seed-{feed_id}-{index}"),
+                            "2026-01-01T00:00:00Z"
+                        ])
+                        .unwrap();
+                }
+            }
+        }
+        transaction.commit().unwrap();
+    }
+
+    fn persisted_entry_count(path: &Path) -> i64 {
+        Connection::open(path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM entry", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn ingestion_and_retention_limits_match_the_approved_hard_caps() {
+        assert_eq!(super::MAX_ENTRY_PAGE_BYTES, 8 * 1_048_576);
+        assert_eq!(super::MAX_RETAINED_ENTRIES_PER_FEED, 5_000);
+        assert_eq!(super::MAX_RETAINED_CONTENT_BYTES_PER_FEED, 128 * 1_048_576);
+        assert_eq!(super::MAX_RETAINED_ENTRIES_GLOBAL, 50_000);
+        assert_eq!(super::MAX_RETAINED_CONTENT_BYTES_GLOBAL, 1_024 * 1_048_576);
+    }
+
+    fn assert_store_open_rejected(path: &Path) {
+        if let Ok(store) = FeedStoreHandle::open(path) {
+            drop(store);
+            panic!("feed store accepted untrusted path `{}`", path.display());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_rejects_symlinked_or_non_directory_metadata_directory() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        let metadata = vault.join(".clepsydra");
+        let database = metadata.join("feeds.db");
+
+        fs::write(&metadata, "not a directory").unwrap();
+        assert_store_open_rejected(&database);
+        fs::remove_file(&metadata).unwrap();
+
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, &metadata).unwrap();
+        assert_store_open_rejected(&database);
+        assert!(
+            !outside.join("feeds.db").exists(),
+            "startup followed `.clepsydra` and created an external database"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_rejects_symlinked_or_non_regular_database() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join(".clepsydra");
+        fs::create_dir(&metadata).unwrap();
+        let database = metadata.join("feeds.db");
+
+        fs::create_dir(&database).unwrap();
+        assert_store_open_rejected(&database);
+        fs::remove_dir(&database).unwrap();
+
+        let readable_target = temp.path().join("readable.db");
+        let target = Connection::open(&readable_target).unwrap();
+        target
+            .execute_batch(
+                "
+                CREATE TABLE external_sentinel (
+                    value TEXT NOT NULL
+                );
+                INSERT INTO external_sentinel (value) VALUES ('outside');
+                ",
+            )
+            .unwrap();
+        drop(target);
+        symlink(&readable_target, &database).unwrap();
+
+        assert_store_open_rejected(&database);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_rejects_dangling_database_symlink_without_creating_its_writable_target() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join(".clepsydra");
+        fs::create_dir(&metadata).unwrap();
+        let writable_target = temp.path().join("outside-created.db");
+        let database = metadata.join("feeds.db");
+        symlink(&writable_target, &database).unwrap();
+
+        assert_store_open_rejected(&database);
+        assert!(
+            !writable_target.exists(),
+            "startup followed a dangling link and created its target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newly_created_feed_storage_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let metadata = temp.path().join(".clepsydra");
+        let database = metadata.join("feeds.db");
+
+        let store = FeedStoreHandle::open(&database).unwrap();
+
+        assert_eq!(
+            fs::metadata(&metadata).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "feed metadata directory must be owner-only"
+        );
+        assert_eq!(
+            fs::metadata(&database).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "feed database must be owner-only from first publication"
+        );
+        drop(store);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn worker_snapshot_uses_the_stable_open_database_identity() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let live_directory = temp.path().join("live");
+        fs::create_dir(&live_directory).unwrap();
+        let live_database = live_directory.join("feeds.db");
+        let store = FeedStoreHandle::open(&live_database).unwrap();
+        add_feed(
+            &store,
+            manifest_feed("https://trusted.example/feed", "Trusted", &[]),
+        )
+        .await;
+
+        let attacker_directory = temp.path().join("attacker");
+        fs::create_dir(&attacker_directory).unwrap();
+        let attacker_store = FeedStoreHandle::open(&attacker_directory.join("feeds.db")).unwrap();
+        add_feed(
+            &attacker_store,
+            manifest_feed("https://attacker.example/feed", "Attacker", &[]),
+        )
+        .await;
+        drop(attacker_store);
+
+        let displaced_directory = temp.path().join("displaced-live");
+        fs::rename(&live_directory, &displaced_directory).unwrap();
+        symlink(&attacker_directory, &live_directory).unwrap();
+
+        let snapshot = temp.path().join("snapshot.db");
+        store.snapshot_to(snapshot.clone()).await.unwrap();
+        let snapshot = Connection::open(snapshot).unwrap();
+        let mut statement = snapshot
+            .prepare("SELECT url FROM feed ORDER BY url")
+            .unwrap();
+        let urls = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(urls, vec!["https://trusted.example/feed"]);
     }
 
     fn create_legacy_database(path: &Path) {
@@ -1640,6 +2376,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn refetch_preserves_first_seen_fetched_at_and_known_published_at() {
+        let (store, _temp) = open_test_store().await;
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        let mut first = fetched_entry("stable-guid", Some(ts("2026-08-09T10:00:00Z")));
+        first.fetched_at = ts("2026-08-09T12:00:00Z");
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![first],
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let mut edited = fetched_entry("stable-guid", Some(ts("2026-08-09T10:05:00Z")));
+        edited.title = "Edited upstream title".to_owned();
+        edited.fetched_at = ts("2026-08-09T12:30:00Z");
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![edited],
+                    ts("2026-08-09T12:30:00Z"),
+                    ts("2026-08-09T13:00:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let stored = entries_by_guid(&store).await.remove("stable-guid").unwrap();
+        assert_eq!(stored.title, "Edited upstream title");
+        assert_eq!(stored.fetched_at, ts("2026-08-09T12:00:00Z"));
+        assert_eq!(stored.published_at, Some(ts("2026-08-09T10:00:00Z")));
+    }
+
+    #[tokio::test]
     async fn entry_pages_order_by_effective_timestamp_then_descending_id() {
         let (store, _temp) = open_test_store().await;
         let feed_id = add_feed(
@@ -1698,6 +2477,76 @@ mod tests {
             vec!["tie-a", "older"]
         );
         assert!(second.next_cursor.is_none());
+    }
+
+    #[tokio::test]
+    async fn entry_page_stays_below_eight_mebibytes_and_returns_a_cursor_when_byte_limited() {
+        const MAX_PAGE_BYTES: usize = 8 * 1_048_576;
+
+        let (store, _temp) = open_test_store().await;
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        let entries = (0..9)
+            .map(|index| {
+                let mut entry = fetched_entry(
+                    &format!("large-{index}"),
+                    Some(ts("2026-08-09T10:00:00Z") + Duration::seconds(index)),
+                );
+                entry.content_html = Some("x".repeat(1_048_576));
+                entry
+            })
+            .collect();
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    entries,
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let page = store
+            .list_entries(EntryFilters {
+                limit: 9,
+                ..filters(EntryView::All)
+            })
+            .await
+            .unwrap();
+        let serialized_entries = page
+            .entries
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "id": entry.id,
+                    "feed_id": entry.feed_id,
+                    "guid": entry.guid,
+                    "url": entry.url,
+                    "title": entry.title,
+                    "author": entry.author,
+                    "content_html": entry.content_html,
+                    "published_at": entry.published_at,
+                    "fetched_at": entry.fetched_at,
+                    "read": entry.read,
+                    "bookmarked": entry.bookmarked,
+                    "tags": entry.tags,
+                })
+            })
+            .collect::<Vec<_>>();
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "entries": serialized_entries,
+            "next_cursor": page.next_cursor.as_ref().map(EntryCursor::encode),
+        }))
+        .unwrap();
+
+        assert!(payload.len() <= MAX_PAGE_BYTES);
+        assert!(page.entries.len() < 9);
+        assert!(page.next_cursor.is_some());
     }
 
     #[test]
@@ -2346,6 +3195,118 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn future_publisher_timestamp_cannot_bypass_retention() {
+        let (store, _temp) = open_test_store().await;
+        let now = ts("2026-08-09T12:00:00Z");
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        let mut entry = fetched_entry("future-dated", Some(ts("2126-08-09T12:00:00Z")));
+        entry.fetched_at = now - Duration::days(91);
+        store
+            .apply_fetch(
+                feed_id,
+                success(vec![entry], now, now + Duration::minutes(30)),
+            )
+            .await
+            .unwrap();
+
+        let removed = store.prune(now, 30, 90).await.unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!entries_by_guid(&store).await.contains_key("future-dated"));
+    }
+
+    #[tokio::test]
+    async fn retained_entries_are_capped_per_feed_for_fresh_guid_growth() {
+        let (store, temp) = open_test_store().await;
+        let path = temp.path().join("feeds.db");
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        seed_entries(&path, &[feed_id], 5_000);
+        let fresh = fetched_entry("fresh-guid", Some(ts("2026-08-09T11:00:00Z")));
+
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![fresh],
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(persisted_entry_count(&path), 5_000);
+        let fresh_count: i64 = Connection::open(path)
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM entry WHERE feed_id = ?1 AND guid = 'fresh-guid'",
+                [feed_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fresh_count, 1);
+    }
+
+    #[tokio::test]
+    async fn retained_entries_are_capped_globally_for_fresh_guid_growth() {
+        let (store, temp) = open_test_store().await;
+        let path = temp.path().join("feeds.db");
+        store
+            .reconcile(
+                (0..11)
+                    .map(|index| {
+                        manifest_feed(&format!("https://feed-{index}.example/rss"), "News", &[])
+                    })
+                    .collect(),
+            )
+            .await
+            .unwrap();
+        let feed_ids = store
+            .list_feeds()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|feed| feed.id)
+            .collect::<Vec<_>>();
+        seed_entries(&path, &feed_ids[..10], 5_000);
+        let fresh_feed_id = feed_ids[10];
+
+        store
+            .apply_fetch(
+                fresh_feed_id,
+                success(
+                    vec![fetched_entry(
+                        "global-fresh-guid",
+                        Some(ts("2026-08-09T11:00:00Z")),
+                    )],
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(persisted_entry_count(&path), 50_000);
+        let fresh_count: i64 = Connection::open(path)
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM entry WHERE feed_id = ?1 AND guid = 'global-fresh-guid'",
+                [fresh_feed_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fresh_count, 1);
+    }
+
+    #[tokio::test]
     async fn worker_snapshot_reopens_as_a_consistent_database() {
         let (store, source_dir) = open_test_store().await;
         let feed_id = add_feed(
@@ -2387,5 +3348,150 @@ mod tests {
         assert_eq!(saved.entries.len(), 1);
         assert_eq!(saved.entries[0].guid, "saved");
         assert!(saved.entries[0].bookmarked);
+    }
+    #[tokio::test]
+    async fn global_counts_follow_upserts_entry_state_and_pruning() {
+        let (store, _temp) = open_test_store().await;
+        let initial = store.entry_counts().await.unwrap();
+        assert_eq!((initial.unread, initial.all, initial.saved), (0, 0, 0));
+
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://counts.example/feed", "Counts", &[]),
+        )
+        .await;
+        let first_fetch_at = ts("2026-08-09T12:00:00Z");
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![
+                        fetched_entry("one", Some(ts("2026-08-07T12:00:00Z"))),
+                        fetched_entry("two", Some(ts("2026-08-08T12:00:00Z"))),
+                    ],
+                    first_fetch_at,
+                    first_fetch_at + Duration::minutes(30),
+                ),
+            )
+            .await
+            .unwrap();
+        let after_fetch = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (after_fetch.unread, after_fetch.all, after_fetch.saved),
+            (2, 2, 0)
+        );
+
+        let second_fetch_at = ts("2026-08-09T13:00:00Z");
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![
+                        fetched_entry("one", Some(ts("2026-08-07T12:00:00Z"))),
+                        fetched_entry("three", Some(ts("2026-08-09T11:00:00Z"))),
+                    ],
+                    second_fetch_at,
+                    second_fetch_at + Duration::minutes(30),
+                ),
+            )
+            .await
+            .unwrap();
+        let after_upsert = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (after_upsert.unread, after_upsert.all, after_upsert.saved),
+            (3, 3, 0),
+            "updating one GUID and inserting another must not double-count the upsert"
+        );
+
+        let entries = entries_by_guid(&store).await;
+        store
+            .patch_entry(
+                entries["one"].id,
+                EntryPatch {
+                    read: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        let after_read = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (after_read.unread, after_read.all, after_read.saved),
+            (2, 3, 0)
+        );
+
+        store
+            .patch_entry(
+                entries["one"].id,
+                EntryPatch {
+                    read: Some(false),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .patch_entry(
+                entries["two"].id,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        let after_unread_and_bookmark = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (
+                after_unread_and_bookmark.unread,
+                after_unread_and_bookmark.all,
+                after_unread_and_bookmark.saved,
+            ),
+            (3, 3, 1)
+        );
+
+        assert_eq!(store.mark_read(MarkReadScope::default()).await.unwrap(), 3);
+        let after_mark_all_read = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (
+                after_mark_all_read.unread,
+                after_mark_all_read.all,
+                after_mark_all_read.saved,
+            ),
+            (0, 3, 1)
+        );
+
+        store
+            .patch_entry(
+                entries["three"].id,
+                EntryPatch {
+                    read: Some(false),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        let after_mark_unread = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (
+                after_mark_unread.unread,
+                after_mark_unread.all,
+                after_mark_unread.saved,
+            ),
+            (1, 3, 1)
+        );
+
+        assert_eq!(
+            store
+                .prune(ts("2027-01-09T13:00:00Z"), 30, 90)
+                .await
+                .unwrap(),
+            2
+        );
+        let after_prune = store.entry_counts().await.unwrap();
+        assert_eq!(
+            (after_prune.unread, after_prune.all, after_prune.saved),
+            (0, 1, 1)
+        );
     }
 }
