@@ -96,7 +96,6 @@ enum Commands {
         /// Emit the report as JSON instead of human-readable text
         #[arg(long)]
         json: bool,
-        after_help = "Examples:\n  clepsydra serve\n  clepsydra serve --tls                 # HTTPS on the configured port\n  clepsydra serve --tls --port 3443     # HTTPS alongside a plain server\n\nHTTPS uses certs from [server.tls], or generates localhost ones with mkcert."
         #[arg(long)]
         strict: bool,
         /// Run expensive checks (e.g. CAS stats)
