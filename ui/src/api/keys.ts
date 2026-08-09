@@ -10,7 +10,7 @@ export const queryKeys = {
 
   tasks: {
     all: ["tasks"] as const,
-    list: (params: Record<string, string>) => ["tasks", params] as const,
+    list: (params: object) => ["tasks", params] as const,
   },
 
   agenda: {

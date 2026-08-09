@@ -7,6 +7,7 @@ use axum::extract::{Query, State};
 use axum::routing::{get, put};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -20,7 +21,8 @@ use crate::vault::path::VaultPath;
 // Request / response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct TaskQueryParams {
     pub status: Option<String>,
     pub due_before: Option<String>,
@@ -36,7 +38,7 @@ pub struct TaskQueryParams {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TaskItem {
     pub block_id: Option<String>,
     pub content: String,
@@ -48,14 +50,14 @@ pub struct TaskItem {
     pub span_end: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TaskListResponse {
     pub tasks: Vec<TaskItem>,
     pub total: i64,
 }
 
 /// Request body for `PUT /tasks/status`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateStatusRequest {
     pub page_path: String,
     pub span_start: i64,
@@ -76,7 +78,18 @@ pub fn router() -> Router<Arc<AppState>> {
 // GET /tasks — list_tasks
 // ---------------------------------------------------------------------------
 
-async fn list_tasks(
+#[utoipa::path(
+    get,
+    path = "/tasks",
+    context_path = "/api/vault",
+    tag = "Tasks",
+    params(TaskQueryParams),
+    responses(
+        (status = 200, description = "Task list", body = TaskListResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_tasks(
     State(state): State<Arc<AppState>>,
     Query(params): Query<TaskQueryParams>,
 ) -> Result<Json<TaskListResponse>, ApiError> {
@@ -297,7 +310,21 @@ async fn list_tasks(
 // PUT /tasks/status — update_task_status
 // ---------------------------------------------------------------------------
 
-async fn update_task_status(
+#[utoipa::path(
+    put,
+    path = "/tasks/status",
+    context_path = "/api/vault",
+    tag = "Tasks",
+    request_body = UpdateStatusRequest,
+    responses(
+        (status = 200, description = "Updated task", body = TaskItem),
+        (status = 400, description = "Invalid task update", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Task target is stale or protected", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn update_task_status(
     State(state): State<Arc<AppState>>,
     Json(body): Json<UpdateStatusRequest>,
 ) -> Result<Json<TaskItem>, ApiError> {

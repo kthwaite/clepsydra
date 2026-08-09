@@ -1,43 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
+import type { components } from "#/api/schema";
 import type { PageEditorOptions } from "#/editor/usePageEditor";
 import { todayJournalPath } from "#/lib/journal";
+import { fetchClient } from "./client";
 import { invalidatePageContent, queryKeys } from "./keys";
 
-const API_BASE = "/api/vault/journal";
-
 /** Shape returned by journal detail endpoints (same as PageDetail). */
-export interface JournalDetail {
-  path: string;
-  canonical_name: string;
-  revision: string;
-  meta: {
-    id: string;
-    title?: string | null;
-    tags?: string[] | null;
-    aliases?: string[] | null;
-    created_at?: string | null;
-    updated_at?: string | null;
-  };
-  body: string;
-}
+export type JournalDetail = components["schemas"]["PageDetailResponse"];
+export type JournalSummary = components["schemas"]["JournalSummary"];
+export type JournalTodayResponse =
+  components["schemas"]["JournalTodayResponse"];
 
-export interface JournalSummary {
-  id: string;
-  path: string;
-  title: string | null;
-  journal_date: string;
+function apiError(error: components["schemas"]["ApiError"], fallback: string) {
+  return new Error(error.error || fallback);
 }
 
 export function useJournalToday(enabled = true) {
-  return useQuery<JournalDetail | null>({
+  return useQuery<JournalTodayResponse | null>({
     queryKey: queryKeys.journal.today,
     enabled,
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/today`);
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error("Failed to fetch journal");
-      return res.json();
+      const { data, error, response } = await fetchClient.GET(
+        "/api/vault/journal/today",
+      );
+      if (response.status === 404) return null;
+      if (error) throw apiError(error, "Failed to fetch journal");
+      if (!data) throw new Error("Journal response was empty");
+      return data;
     },
   });
 }
@@ -56,10 +46,13 @@ export function useEnsureJournalToday() {
   const qc = useQueryClient();
   return useMutation<EnsureJournalResult, Error, void>({
     mutationFn: async () => {
-      const res = await fetch(`${API_BASE}/today`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to create today's journal");
-      const page = (await res.json()) as JournalDetail;
-      return { page, created: res.status === 201 };
+      const { data, error, response } = await fetchClient.POST(
+        "/api/vault/journal/today",
+        {},
+      );
+      if (error) throw apiError(error, "Failed to create today's journal");
+      if (!data) throw new Error("Journal creation response was empty");
+      return { page: data, created: response.status === 201 };
     },
     onSuccess: ({ page }) => invalidatePageContent(qc, page.path),
   });
@@ -83,9 +76,12 @@ export function useJournalRecent(days = 7) {
   return useQuery<JournalSummary[]>({
     queryKey: queryKeys.journal.recent(days),
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/recent?days=${days}`);
-      if (!res.ok) throw new Error("Failed to fetch recent journals");
-      return res.json();
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/journal/recent",
+        { params: { query: { days } } },
+      );
+      if (error) throw apiError(error, "Failed to fetch recent journals");
+      return data ?? [];
     },
   });
 }
@@ -94,13 +90,13 @@ export function useQuickCapture() {
   const qc = useQueryClient();
   return useMutation<JournalDetail, Error, string>({
     mutationFn: async (content: string) => {
-      const res = await fetch(`${API_BASE}/today/capture`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
-      if (!res.ok) throw new Error("Capture failed");
-      return res.json();
+      const { data, error } = await fetchClient.POST(
+        "/api/vault/journal/today/capture",
+        { body: { content } },
+      );
+      if (error) throw apiError(error, "Capture failed");
+      if (!data) throw new Error("Capture response was empty");
+      return data;
     },
     // The capture response carries the journal page's own vault path, so we can
     // scope the body invalidation to it (journal.all below covers the digests).

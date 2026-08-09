@@ -8,6 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -22,7 +23,7 @@ use crate::vault::path::VaultPath;
 // Response / request types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct BlockResponse {
     pub block_id: Option<String>,
     pub content: String,
@@ -34,7 +35,8 @@ pub struct BlockResponse {
     pub span_end: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SearchQuery {
     pub q: String,
     #[serde(default = "default_limit")]
@@ -45,13 +47,13 @@ fn default_limit() -> i64 {
     8
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AssignIdRequest {
     pub page_path: String,
     pub span_start: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AssignIdResponse {
     pub block_id: String,
 }
@@ -61,7 +63,19 @@ pub struct AssignIdResponse {
 // ---------------------------------------------------------------------------
 
 /// GET /blocks/{block_id} — single block lookup
-async fn get_block(
+#[utoipa::path(
+    get,
+    path = "/blocks/{block_id}",
+    context_path = "/api/vault",
+    tag = "Blocks",
+    params(("block_id" = String, Path, description = "Block ID")),
+    responses(
+        (status = 200, description = "Block detail", body = BlockResponse),
+        (status = 404, description = "Block not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_block(
     State(state): State<Arc<AppState>>,
     Path(block_id): Path<String>,
 ) -> Result<Json<BlockResponse>, ApiError> {
@@ -139,7 +153,18 @@ async fn get_block(
 }
 
 /// GET /blocks/search?q=&limit= — block content search
-async fn search_blocks(
+#[utoipa::path(
+    get,
+    path = "/blocks/search",
+    context_path = "/api/vault",
+    tag = "Blocks",
+    params(SearchQuery),
+    responses(
+        (status = 200, description = "Matching blocks", body = [BlockResponse]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn search_blocks(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<Vec<BlockResponse>>, ApiError> {
@@ -212,7 +237,20 @@ async fn search_blocks(
 }
 
 /// POST /blocks/assign-id — auto-assign block ID
-async fn assign_block_id(
+#[utoipa::path(
+    post,
+    path = "/blocks/assign-id",
+    context_path = "/api/vault",
+    tag = "Blocks",
+    request_body = AssignIdRequest,
+    responses(
+        (status = 200, description = "Assigned block ID", body = AssignIdResponse),
+        (status = 400, description = "Invalid block target", body = ApiError),
+        (status = 409, description = "Block target is stale or protected", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn assign_block_id(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AssignIdRequest>,
 ) -> Result<Json<AssignIdResponse>, ApiError> {

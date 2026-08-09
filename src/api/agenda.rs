@@ -9,6 +9,7 @@ use axum::routing::get;
 use chrono::{Duration, Utc};
 use rusqlite::params;
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
@@ -18,23 +19,23 @@ use super::tasks::TaskItem;
 // Response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaTodayResponse {
     pub tasks: Vec<TaskItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaWeekResponse {
     pub days: Vec<AgendaDay>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaDay {
     pub date: String,
     pub tasks: Vec<TaskItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaOverdueResponse {
     pub tasks: Vec<TaskItem>,
 }
@@ -80,7 +81,17 @@ fn fill_properties(
 // GET /agenda/today
 // ---------------------------------------------------------------------------
 
-async fn agenda_today(
+#[utoipa::path(
+    get,
+    path = "/agenda/today",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    responses(
+        (status = 200, description = "Today's agenda", body = AgendaTodayResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn agenda_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgendaTodayResponse>, ApiError> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -175,7 +186,17 @@ async fn agenda_today(
 // GET /agenda/week
 // ---------------------------------------------------------------------------
 
-async fn agenda_week(
+#[utoipa::path(
+    get,
+    path = "/agenda/week",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    responses(
+        (status = 200, description = "Seven-day agenda", body = AgendaWeekResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn agenda_week(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgendaWeekResponse>, ApiError> {
     let today_date = Utc::now().date_naive();
@@ -304,7 +325,17 @@ async fn agenda_week(
 // GET /agenda/overdue
 // ---------------------------------------------------------------------------
 
-async fn agenda_overdue(
+#[utoipa::path(
+    get,
+    path = "/agenda/overdue",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    responses(
+        (status = 200, description = "Overdue tasks", body = AgendaOverdueResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn agenda_overdue(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgendaOverdueResponse>, ApiError> {
     let today = Utc::now().format("%Y-%m-%d").to_string();

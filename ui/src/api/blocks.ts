@@ -1,26 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { components } from "#/api/schema";
+import { fetchClient } from "./client";
 import { invalidatePageContent, queryKeys } from "./keys";
 
-const API_BASE = "/api/vault/blocks";
+export type BlockResponse = components["schemas"]["BlockResponse"];
 
-export interface BlockResponse {
-  block_id: string | null;
-  content: string;
-  block_type: string;
-  properties: Record<string, string>;
-  page_path: string;
-  page_title: string | null;
-  span_start: number;
-  span_end: number;
+function apiError(error: components["schemas"]["ApiError"], fallback: string) {
+  return new Error(error.error || fallback);
 }
 
 export function useBlock(blockId: string) {
   return useQuery({
     queryKey: queryKeys.blocks.detail(blockId),
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/${blockId}`);
-      if (!res.ok) throw new Error("Block not found");
-      return res.json() as Promise<BlockResponse>;
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/blocks/{block_id}",
+        { params: { path: { block_id: blockId } } },
+      );
+      if (error) throw apiError(error, "Block not found");
+      if (!data) throw new Error("Block response was empty");
+      return data;
     },
     enabled: !!blockId,
   });
@@ -30,11 +29,12 @@ export function useSearchBlocks(query: string, limit = 8) {
   return useQuery({
     queryKey: queryKeys.blocks.search(query, limit),
     queryFn: async () => {
-      const res = await fetch(
-        `${API_BASE}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/blocks/search",
+        { params: { query: { q: query, limit } } },
       );
-      if (!res.ok) throw new Error("Search failed");
-      return res.json() as Promise<BlockResponse[]>;
+      if (error) throw apiError(error, "Search failed");
+      return data ?? [];
     },
     enabled: query.length >= 2,
   });
@@ -44,13 +44,13 @@ export function useAssignBlockId() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: { page_path: string; span_start: number }) => {
-      const res = await fetch(`${API_BASE}/assign-id`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(params),
-      });
-      if (!res.ok) throw new Error("Failed to assign block ID");
-      return res.json() as Promise<{ block_id: string }>;
+      const { data, error } = await fetchClient.POST(
+        "/api/vault/blocks/assign-id",
+        { body: params },
+      );
+      if (error) throw apiError(error, "Failed to assign block ID");
+      if (!data) throw new Error("Block ID response was empty");
+      return data;
     },
     onSuccess: (_data, variables) =>
       invalidatePageContent(qc, variables.page_path),
