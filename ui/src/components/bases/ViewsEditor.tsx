@@ -6,6 +6,7 @@ import type {
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty, DraftView } from "./definition-model";
 import { moveItem } from "./definition-model";
+import { asciiCaseFold } from "./local-validation";
 import { ViewDefinitionEditor } from "./ViewDefinitionEditor";
 
 interface ViewsEditorProps {
@@ -19,10 +20,10 @@ interface ViewsEditorProps {
 }
 
 function uniqueName(views: readonly DraftView[], requested: string) {
-  const names = new Set(views.map((view) => view.name));
-  if (!names.has(requested)) return requested;
+  const names = new Set(views.map((view) => asciiCaseFold(view.name)));
+  if (!names.has(asciiCaseFold(requested))) return requested;
   let suffix = 2;
-  while (names.has(`${requested} ${suffix}`)) suffix += 1;
+  while (names.has(asciiCaseFold(`${requested} ${suffix}`))) suffix += 1;
   return `${requested} ${suffix}`;
 }
 

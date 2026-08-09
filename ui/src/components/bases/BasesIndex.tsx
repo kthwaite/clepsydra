@@ -48,7 +48,7 @@ function diagnosticLabel(count: number) {
 
 function BrokenBaseEntry({ diagnostic }: { diagnostic: BaseDiagnostic }) {
   const { copied, copy } = useCopyToClipboard();
-  const path = diagnostic.path;
+  const path = diagnostic.path ?? `bases/${diagnostic.slug}.base.toml`;
 
   return (
     <article className="flex flex-wrap items-start justify-between gap-3 border-b border-border py-4">
@@ -57,22 +57,18 @@ function BrokenBaseEntry({ diagnostic }: { diagnostic: BaseDiagnostic }) {
           {diagnostic.slug}
         </h3>
         <p className="mt-1 text-sm text-destructive">{diagnostic.message}</p>
-        {path && (
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-            {path}
-          </p>
-        )}
+        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+          {path}
+        </p>
       </div>
-      {path && (
-        <Button
-          variant="secondary"
-          onPress={() => void copy(path)}
-          aria-label={`${copied ? "Copied" : "Copy"} base file path for ${diagnostic.slug}`}
-        >
-          <Copy aria-hidden="true" className="h-3.5 w-3.5" />
-          {copied ? "Copied" : "Copy path"}
-        </Button>
-      )}
+      <Button
+        variant="secondary"
+        onPress={() => void copy(path)}
+        aria-label={`${copied ? "Copied" : "Copy"} base file path for ${diagnostic.slug}`}
+      >
+        <Copy aria-hidden="true" className="h-3.5 w-3.5" />
+        {copied ? "Copied" : "Copy path"}
+      </Button>
     </article>
   );
 }

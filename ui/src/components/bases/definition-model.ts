@@ -242,6 +242,22 @@ export function operatorsFor(
   }
 }
 
+export function canSort(
+  type: PropertyType | "system-multi" | "word_count" | undefined,
+) {
+  return (
+    type === undefined ||
+    type === "word_count" ||
+    type === "text" ||
+    type === "number" ||
+    type === "bool" ||
+    type === "date" ||
+    type === "datetime" ||
+    type === "select" ||
+    type === "url"
+  );
+}
+
 export function canGroup(type: PropertyType | undefined) {
   return !(type === "number" || type === "multi_select" || type === "relation");
 }

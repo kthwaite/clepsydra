@@ -19,7 +19,9 @@ import type {
 import { buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 import { type CellValue, formatCellValue } from "./cells/types";
+import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
+import { asciiCaseFold } from "./local-validation";
 
 interface BaseTableViewProps {
   definition: BaseDetailResponse;
@@ -47,19 +49,19 @@ interface BaseTableViewProps {
  * `SYSTEM_FIELDS` in `src/vault/base.rs`. Only *declared* properties reach
  * an editor; anything else (system metadata, undeclared keys) is inert.
  */
-const SYSTEM_COLUMNS = new Set([
-  "id",
-  "path",
-  "title",
-  "kind",
-  "project",
-  "tags",
-  "aliases",
-  "created_at",
-  "updated_at",
-  "journal_date",
-  "word_count",
-]);
+const SYSTEM_COLUMNS: Record<string, boolean> = {
+  id: true,
+  path: true,
+  title: true,
+  kind: true,
+  project: true,
+  tags: false,
+  aliases: false,
+  created_at: true,
+  updated_at: true,
+  journal_date: true,
+  word_count: true,
+};
 
 const EMPTY_PROPERTIES: NonNullable<BaseDetailResponse["properties"]> = {};
 
@@ -68,7 +70,10 @@ function aggregateLabel(
   viewName: string,
   index: number,
 ): string {
-  const view = definition.views?.find((v) => v.name === viewName);
+  const equivalentViewName = asciiCaseFold(viewName);
+  const view = definition.views?.find(
+    (candidate) => asciiCaseFold(candidate.name) === equivalentViewName,
+  );
   const agg = view?.aggregates?.[index];
   if (!agg) return "";
   return agg.field ? `${agg.fn}(${agg.field})` : agg.fn;
@@ -94,7 +99,10 @@ export function BaseTableView({
   onCommitCell,
   readOnly = false,
 }: BaseTableViewProps) {
-  const view = definition.views?.find((v) => v.name === activeView);
+  const equivalentActiveView = asciiCaseFold(activeView);
+  const view = definition.views?.find(
+    (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
+  );
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
   const properties = definition.properties ?? EMPTY_PROPERTIES;
@@ -125,29 +133,35 @@ export function BaseTableView({
       className="w-full border-collapse"
     >
       <TableHeader>
-        {columns.map((column) => (
-          <Column
-            key={column}
-            id={column}
-            isRowHeader={column === columns[0]}
-            allowsSorting={!readOnly}
-            className={cn(
-              "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
-              !readOnly && "cursor-pointer data-[hovered]:text-ink",
-            )}
-          >
-            {({ sortDirection }) => (
-              <span className="inline-flex items-center gap-1">
-                {column}
-                {sortDirection && (
-                  <span aria-hidden="true">
-                    {sortDirection === "ascending" ? "▲" : "▼"}
-                  </span>
-                )}
-              </span>
-            )}
-          </Column>
-        ))}
+        {columns.map((column) => {
+          const allowsSorting =
+            !readOnly &&
+            (SYSTEM_COLUMNS[column] === true ||
+              (properties[column] != null && canSort(properties[column].type)));
+          return (
+            <Column
+              key={column}
+              id={column}
+              isRowHeader={column === columns[0]}
+              allowsSorting={allowsSorting}
+              className={cn(
+                "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
+                allowsSorting && "cursor-pointer data-[hovered]:text-ink",
+              )}
+            >
+              {({ sortDirection }) => (
+                <span className="inline-flex items-center gap-1">
+                  {column}
+                  {sortDirection && (
+                    <span aria-hidden="true">
+                      {sortDirection === "ascending" ? "▲" : "▼"}
+                    </span>
+                  )}
+                </span>
+              )}
+            </Column>
+          );
+        })}
       </TableHeader>
       <TableBody items={rows.map((row) => ({ ...row, key: row.id }))}>
         {(row) => (
@@ -172,7 +186,7 @@ export function BaseTableView({
                     </button>
                   )
                 ) : !readOnly &&
-                  !SYSTEM_COLUMNS.has(column) &&
+                  SYSTEM_COLUMNS[column] === undefined &&
                   properties[column] ? (
                   <EditableCell
                     value={
@@ -216,7 +230,7 @@ export function BaseTableView({
                 key={v.name}
                 className={cn(
                   "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em]",
-                  v.name === activeView
+                  asciiCaseFold(v.name) === equivalentActiveView
                     ? "border-accent text-accent"
                     : "border-rule text-ink-mute",
                 )}
@@ -229,11 +243,15 @@ export function BaseTableView({
                 type="button"
                 className={cn(
                   "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  v.name === activeView
+                  asciiCaseFold(v.name) === equivalentActiveView
                     ? "border-accent text-accent"
                     : "border-rule text-ink-mute hover:text-ink",
                 )}
-                aria-current={v.name === activeView ? "page" : undefined}
+                aria-current={
+                  asciiCaseFold(v.name) === equivalentActiveView
+                    ? "page"
+                    : undefined
+                }
                 onClick={() => onViewChange(v.name)}
               >
                 {v.name}

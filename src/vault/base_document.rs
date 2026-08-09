@@ -297,13 +297,19 @@ fn merge_document(raw: &str, desired_file: &BaseFile) -> Result<String, BaseDocu
     })?;
 
     for key in MANAGED_KEYS {
-        merge_table_key(
-            document.as_table_mut(),
-            key,
-            current.as_table().get(key),
-            desired.as_table().get(key),
-            key,
-        )?;
+        let current_item = current.as_table().get(key);
+        let desired_item = desired.as_table().get(key);
+        if *key == "views" {
+            merge_views_key(document.as_table_mut(), key, current_item, desired_item)?;
+        } else {
+            merge_table_key(
+                document.as_table_mut(),
+                key,
+                current_item,
+                desired_item,
+                key,
+            )?;
+        }
     }
     Ok(document.to_string())
 }
@@ -352,6 +358,42 @@ fn merge_table_key(
             }
         },
     }
+}
+
+fn merge_views_key(
+    raw: &mut Table,
+    key: &str,
+    current: Option<&Item>,
+    desired: Option<&Item>,
+) -> Result<(), BaseDocumentError> {
+    if canonical_items_equal(current, desired) {
+        return Ok(());
+    }
+
+    if desired.is_none() {
+        let current_len = match current {
+            Some(Item::ArrayOfTables(current_views)) => Some(current_views.len()),
+            Some(Item::Value(Value::Array(current_views))) => Some(current_views.len()),
+            _ => None,
+        };
+        if let Some(current_len) = current_len {
+            match raw.get(key) {
+                Some(Item::ArrayOfTables(raw_views)) if raw_views.len() == current_len => {
+                    raw.remove(key);
+                    return Ok(());
+                }
+                Some(_) => {
+                    return Err(unsupported(
+                        key,
+                        "the current views syntax is not safely addressable",
+                    ));
+                }
+                None => return Ok(()),
+            }
+        }
+    }
+
+    merge_table_key(raw, key, current, desired, key)
 }
 
 fn merge_item(
@@ -411,7 +453,52 @@ fn merge_table(
         let child_path = format!("{path}.{key}");
         merge_table_key(raw, &key, current.get(&key), desired.get(&key), &child_path)?;
     }
+    if path == "properties"
+        && !current
+            .iter()
+            .map(|(key, _)| key)
+            .eq(desired.iter().map(|(key, _)| key))
+    {
+        let desired_keys = desired
+            .iter()
+            .map(|(key, _)| key.to_owned())
+            .collect::<Vec<_>>();
+        reorder_table_entries(raw, &desired_keys);
+    }
     Ok(())
+}
+
+fn reorder_table_entries(raw: &mut Table, desired_keys: &[String]) {
+    let raw_keys = raw
+        .iter()
+        .map(|(key, _)| key.to_owned())
+        .collect::<Vec<_>>();
+    let mut entries = raw_keys
+        .into_iter()
+        .filter_map(|name| raw.remove_entry(&name).map(|(key, item)| (name, key, item)))
+        .collect::<Vec<_>>();
+    let position = entries
+        .iter()
+        .filter(|(name, _, _)| desired_keys.iter().any(|desired| desired == name))
+        .filter_map(|(_, _, item)| item_table_position(item))
+        .min();
+    let mut ordered = Vec::with_capacity(entries.len());
+
+    for desired_key in desired_keys {
+        if let Some(index) = entries.iter().position(|(name, _, _)| name == desired_key) {
+            ordered.push(entries.remove(index));
+        }
+    }
+    ordered.extend(entries);
+
+    for (name, key, mut item) in ordered {
+        if desired_keys.iter().any(|desired| desired == &name)
+            && let Some(position) = position
+        {
+            set_item_table_position(&mut item, position);
+        }
+        raw.insert_formatted(&key, item);
+    }
 }
 
 fn merge_table_inline(
@@ -464,6 +551,18 @@ fn merge_table_inline(
             },
         }
     }
+    if path == "properties"
+        && !current
+            .iter()
+            .map(|(key, _)| key)
+            .eq(desired.iter().map(|(key, _)| key))
+    {
+        let desired_keys = desired
+            .iter()
+            .map(|(key, _)| key.to_owned())
+            .collect::<Vec<_>>();
+        reorder_table_entries(raw, &desired_keys);
+    }
     Ok(())
 }
 
@@ -489,6 +588,81 @@ fn merge_raw_value(
 }
 
 fn merge_array_tables_inline(
+    raw: &mut ArrayOfTables,
+    current: &Array,
+    desired: &Array,
+    path: &str,
+) -> Result<(), BaseDocumentError> {
+    if path == "views" {
+        return merge_named_view_tables_inline(raw, current, desired, path);
+    }
+    merge_array_tables_inline_positionally(raw, current, desired, path)
+}
+
+fn merge_named_view_tables_inline(
+    raw: &mut ArrayOfTables,
+    current: &Array,
+    desired: &Array,
+    path: &str,
+) -> Result<(), BaseDocumentError> {
+    if raw.len() != current.len() {
+        return Err(unsupported(
+            path,
+            "the current array-of-tables shape is not safely addressable",
+        ));
+    }
+
+    let current_names = unique_inline_view_names(current, path)?;
+    let desired_names = unique_inline_view_names(desired, path)?;
+    let mappings = view_identity_mapping(&current_names, &desired_names, path)?;
+    let structurally_changed = mappings.len() != current.len()
+        || mappings
+            .iter()
+            .enumerate()
+            .any(|(desired_index, current_index)| *current_index != Some(desired_index));
+    if !structurally_changed {
+        for index in 0..desired.len() {
+            merge_table_inline(
+                raw.get_mut(index).expect("length checked"),
+                inline_view_table(current, index, path)?,
+                inline_view_table(desired, index, path)?,
+                &format!("{path}[{index}]"),
+            )?;
+        }
+        return Ok(());
+    }
+
+    let position = raw.iter().filter_map(table_subtree_position).min();
+    let mut source = std::mem::take(raw)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    let mut merged = Vec::with_capacity(desired.len());
+    for (desired_index, current_index) in mappings.into_iter().enumerate() {
+        let desired_table = inline_view_table(desired, desired_index, path)?;
+        let mut raw_table = match current_index {
+            Some(current_index) => {
+                let mut raw_table = source[current_index].take().expect("identity is unique");
+                merge_table_inline(
+                    &mut raw_table,
+                    inline_view_table(current, current_index, path)?,
+                    desired_table,
+                    &format!("{path}[{desired_index}]"),
+                )?;
+                raw_table
+            }
+            None => desired_table.clone().into_table(),
+        };
+        if let Some(position) = position {
+            set_table_subtree_position(&mut raw_table, position);
+        }
+        merged.push(raw_table);
+    }
+    *raw = merged.into_iter().collect();
+    Ok(())
+}
+
+fn merge_array_tables_inline_positionally(
     raw: &mut ArrayOfTables,
     current: &Array,
     desired: &Array,
@@ -743,6 +917,209 @@ fn merge_inline_table(
 }
 
 fn merge_array_of_tables(
+    raw: &mut ArrayOfTables,
+    current: &ArrayOfTables,
+    desired: &ArrayOfTables,
+    path: &str,
+) -> Result<(), BaseDocumentError> {
+    if path == "views" {
+        return merge_named_view_tables(raw, current, desired, path);
+    }
+    merge_array_of_tables_positionally(raw, current, desired, path)
+}
+
+fn merge_named_view_tables(
+    raw: &mut ArrayOfTables,
+    current: &ArrayOfTables,
+    desired: &ArrayOfTables,
+    path: &str,
+) -> Result<(), BaseDocumentError> {
+    if raw.len() != current.len() {
+        return Err(unsupported(
+            path,
+            "the current array-of-tables shape is not safely addressable",
+        ));
+    }
+
+    let current_names = unique_view_names(current, path)?;
+    let desired_names = unique_view_names(desired, path)?;
+    let mappings = view_identity_mapping(&current_names, &desired_names, path)?;
+
+    let structurally_changed = mappings.len() != current.len()
+        || mappings
+            .iter()
+            .enumerate()
+            .any(|(desired_index, current_index)| *current_index != Some(desired_index));
+    if !structurally_changed {
+        for index in 0..desired.len() {
+            merge_table(
+                raw.get_mut(index).expect("length checked"),
+                current.get(index).expect("identity order checked"),
+                desired.get(index).expect("identity order checked"),
+                &format!("{path}[{index}]"),
+            )?;
+        }
+        return Ok(());
+    }
+
+    let position = raw.iter().filter_map(table_subtree_position).min();
+    let mut source = std::mem::take(raw)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    let mut merged = Vec::with_capacity(desired.len());
+    for (desired_index, current_index) in mappings.into_iter().enumerate() {
+        let desired_table = desired.get(desired_index).expect("name collected");
+        let mut raw_table = match current_index {
+            Some(current_index) => {
+                let mut raw_table = source[current_index].take().expect("identity is unique");
+                merge_table(
+                    &mut raw_table,
+                    current.get(current_index).expect("name collected"),
+                    desired_table,
+                    &format!("{path}[{desired_index}]"),
+                )?;
+                raw_table
+            }
+            None => desired_table.clone(),
+        };
+        if let Some(position) = position {
+            set_table_subtree_position(&mut raw_table, position);
+        }
+        merged.push(raw_table);
+    }
+    *raw = merged.into_iter().collect();
+    Ok(())
+}
+
+fn unique_view_names<'a>(
+    tables: &'a ArrayOfTables,
+    path: &str,
+) -> Result<Vec<&'a str>, BaseDocumentError> {
+    let mut names = Vec::with_capacity(tables.len());
+    for (index, table) in tables.iter().enumerate() {
+        let name = table
+            .get("name")
+            .and_then(Item::as_str)
+            .ok_or_else(|| unsupported(&format!("{path}[{index}].name"), "expected a string"))?;
+        if names
+            .iter()
+            .any(|known: &&str| known.eq_ignore_ascii_case(name))
+        {
+            return Err(unsupported(
+                &format!("{path}[{index}].name"),
+                "duplicate view names make identity mapping ambiguous",
+            ));
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
+fn unique_inline_view_names<'a>(
+    views: &'a Array,
+    path: &str,
+) -> Result<Vec<&'a str>, BaseDocumentError> {
+    let mut names = Vec::with_capacity(views.len());
+    for index in 0..views.len() {
+        let name = inline_view_table(views, index, path)?
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| unsupported(&format!("{path}[{index}].name"), "expected a string"))?;
+        if names
+            .iter()
+            .any(|known: &&str| known.eq_ignore_ascii_case(name))
+        {
+            return Err(unsupported(
+                &format!("{path}[{index}].name"),
+                "duplicate view names make identity mapping ambiguous",
+            ));
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
+fn inline_view_table<'a>(
+    views: &'a Array,
+    index: usize,
+    path: &str,
+) -> Result<&'a InlineTable, BaseDocumentError> {
+    views
+        .get(index)
+        .and_then(Value::as_inline_table)
+        .ok_or_else(|| unsupported(&format!("{path}[{index}]"), "expected a table"))
+}
+
+fn view_identity_mapping(
+    current_names: &[&str],
+    desired_names: &[&str],
+    path: &str,
+) -> Result<Vec<Option<usize>>, BaseDocumentError> {
+    let mut matched_current = vec![false; current_names.len()];
+    let mappings = desired_names
+        .iter()
+        .map(|desired_name| {
+            let current_index = current_names
+                .iter()
+                .position(|current_name| current_name.eq_ignore_ascii_case(desired_name));
+            if let Some(current_index) = current_index {
+                matched_current[current_index] = true;
+            }
+            current_index
+        })
+        .collect::<Vec<_>>();
+    if mappings.iter().any(|mapping| mapping.is_none())
+        && matched_current.iter().any(|matched| !matched)
+    {
+        return Err(unsupported(
+            path,
+            "unmatched current and desired view names could represent an ambiguous rename",
+        ));
+    }
+    Ok(mappings)
+}
+
+fn item_table_position(item: &Item) -> Option<usize> {
+    match item {
+        Item::Table(table) => table_subtree_position(table),
+        Item::ArrayOfTables(tables) => tables.iter().filter_map(table_subtree_position).min(),
+        _ => None,
+    }
+}
+
+fn table_subtree_position(table: &Table) -> Option<usize> {
+    table
+        .position()
+        .into_iter()
+        .chain(
+            table
+                .iter()
+                .filter_map(|(_, item)| item_table_position(item)),
+        )
+        .min()
+}
+
+fn set_item_table_position(item: &mut Item, position: usize) {
+    match item {
+        Item::Table(table) => set_table_subtree_position(table, position),
+        Item::ArrayOfTables(tables) => {
+            for table in tables.iter_mut() {
+                set_table_subtree_position(table, position);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn set_table_subtree_position(table: &mut Table, position: usize) {
+    table.set_position(position);
+    for (_, item) in table.iter_mut() {
+        set_item_table_position(item, position);
+    }
+}
+
+fn merge_array_of_tables_positionally(
     raw: &mut ArrayOfTables,
     current: &ArrayOfTables,
     desired: &ArrayOfTables,
@@ -1232,6 +1609,36 @@ mod tests {
     }
 
     #[test]
+    fn update_persists_property_order_on_disk_and_after_reload() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n[properties]\n# author property\nauthor = { type = \"text\", plugin_property = \"for-author\" }\n# status property\nstatus = { type = \"select\", options = [\"queued\"], plugin_property = \"for-status\" }\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.properties.swap(0, 1);
+
+        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        assert_eq!(
+            stored
+                .definition
+                .file
+                .properties
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["status", "author"]
+        );
+        let status = "# status property\nstatus = { type = \"select\", options = [\"queued\"], plugin_property = \"for-status\" }";
+        let author =
+            "# author property\nauthor = { type = \"text\", plugin_property = \"for-author\" }";
+        assert!(after.contains(status));
+        assert!(after.contains(author));
+        assert!(after.find(status).unwrap() < after.find(author).unwrap());
+    }
+
+    #[test]
     fn changed_arrays_preserve_element_comments() {
         let fixture = fixture_base(
             "name = \"Reading\"\n\n[properties.status]\ntype = \"select\"\noptions = [\n  \"queued\", # keep queued\n]\n",
@@ -1248,20 +1655,128 @@ mod tests {
     }
 
     #[test]
-    fn changed_view_tables_preserve_comments_and_unsupported_keys() {
+    fn reordering_views_moves_each_raw_table_with_its_metadata() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n# all view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"for-all\"\n\n# queued view\n[[views]]\nname = \"Queued\"\nlayout = \"table\"\nplugin_view = \"for-queued\"\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.views.swap(0, 1);
+
+        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        assert_eq!(
+            stored
+                .definition
+                .file
+                .views
+                .iter()
+                .map(|view| view.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Queued", "All"]
+        );
+        let queued = "# queued view\n[[views]]\nname = \"Queued\"\nlayout = \"table\"\nplugin_view = \"for-queued\"";
+        let all =
+            "# all view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"for-all\"";
+        assert!(after.contains(queued));
+        assert!(after.contains(all));
+        assert!(after.find(queued).unwrap() < after.find(all).unwrap());
+    }
+
+    #[test]
+    fn deleting_a_view_removes_only_that_logical_raw_table() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n# all view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"for-all\"\n\n# queued view\n[[views]]\nname = \"Queued\"\nlayout = \"table\"\nplugin_view = \"for-queued\"\n\n# done view\n[[views]]\nname = \"Done\"\nlayout = \"table\"\nplugin_view = \"for-done\"\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.views.remove(1);
+
+        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        assert_eq!(
+            stored
+                .definition
+                .file
+                .views
+                .iter()
+                .map(|view| view.name.as_str())
+                .collect::<Vec<_>>(),
+            ["All", "Done"]
+        );
+        assert!(after.contains(
+            "# all view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"for-all\""
+        ));
+        assert!(after.contains(
+            "# done view\n[[views]]\nname = \"Done\"\nlayout = \"table\"\nplugin_view = \"for-done\""
+        ));
+        assert!(!after.contains("for-queued"));
+        assert!(!after.contains("# queued view"));
+    }
+
+    #[test]
+    fn duplicating_a_view_adds_a_fresh_table_without_moving_source_metadata() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n# all view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"for-all\"\n",
+        );
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        let mut duplicate = next.views[0].clone();
+        duplicate.name = "All copy".into();
+        next.views.push(duplicate);
+
+        let stored = update(fixture.root(), "reading", &current.revision, &next).unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        assert_eq!(
+            stored
+                .definition
+                .file
+                .views
+                .iter()
+                .map(|view| view.name.as_str())
+                .collect::<Vec<_>>(),
+            ["All", "All copy"]
+        );
+        assert!(after.contains(
+            "# all view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"for-all\""
+        ));
+        assert_eq!(after.matches("plugin_view = \"for-all\"").count(), 1);
+        assert!(after.contains("[[views]]\nname = \"All copy\"\nlayout = \"table\""));
+    }
+
+    #[test]
+    fn case_only_view_rename_preserves_the_raw_table() {
         let fixture = fixture_base(
             "name = \"Reading\"\n\n[[views]]\n# saved view\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"keep\"\n",
         );
         let current = load_for_test(fixture.root(), "reading");
         let mut next = current.definition.file.clone();
-        next.views[0].name = "Library".into();
+        next.views[0].name = "ALL".into();
 
         update(fixture.root(), "reading", &current.revision, &next).unwrap();
         let after = fs::read_to_string(fixture.path()).unwrap();
 
-        assert!(after.contains("# saved view\nname = \"Library\""));
-        assert!(after.contains("layout = \"table\""));
+        assert!(after.contains("# saved view\nname = \"ALL\""));
         assert!(after.contains("plugin_view = \"keep\""));
+    }
+
+    #[test]
+    fn ambiguous_view_rename_is_rejected_without_touching_the_file() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\n\n[[views]]\n# saved view\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"keep\"\n",
+        );
+        let before = fs::read_to_string(fixture.path()).unwrap();
+        let current = load_for_test(fixture.root(), "reading");
+        let mut next = current.definition.file.clone();
+        next.views[0].name = "Library".into();
+
+        let error = update(fixture.root(), "reading", &current.revision, &next).unwrap_err();
+
+        assert!(matches!(error, BaseDocumentError::UnsupportedDocument(_)));
+        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), before);
     }
 
     #[test]

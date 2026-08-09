@@ -102,6 +102,19 @@ describe("ViewsEditor", () => {
     });
   });
 
+  it("generates names with ASCII-case-insensitive uniqueness", async () => {
+    const onChange = renderViews({
+      views: [view({ id: "existing", name: "view" })],
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Add view" }));
+
+    expect(latest<DraftView[]>(onChange).map((item) => item.name)).toEqual([
+      "view",
+      "View 2",
+    ]);
+  });
+
   it("duplicates a view as an independent deep copy with a unique name and ID", async () => {
     const original = view({
       id: "original",
@@ -215,6 +228,28 @@ describe("ViewsEditor", () => {
       { field: "status", dir: "asc" },
       { field: "rating", dir: "desc" },
     ]);
+  });
+
+  it("offers only scalar fields as sort choices", async () => {
+    renderViews({
+      properties: [
+        property("rating", "number"),
+        property("topics", "multi_select"),
+        property("related", "relation"),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Add sort" }));
+    const options = Array.from(
+      screen.getByLabelText("Sort field 1").querySelectorAll("option"),
+    ).map((option) => option.value);
+
+    expect(options).toContain("title");
+    expect(options).toContain("rating");
+    expect(options).not.toContain("tags");
+    expect(options).not.toContain("aliases");
+    expect(options).not.toContain("topics");
+    expect(options).not.toContain("related");
   });
 
   it("offers grouping only for fields accepted by canGroup", () => {

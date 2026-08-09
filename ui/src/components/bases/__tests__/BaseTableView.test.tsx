@@ -86,6 +86,18 @@ describe("BaseTableView", () => {
     expect(props.onViewChange).toHaveBeenCalledWith("Shelf");
   });
 
+  it("matches active view names using ASCII-case-insensitive equivalence", () => {
+    renderView({ activeView: "cONTINUES" });
+
+    expect(screen.getByRole("button", { name: "Continues" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      screen.getByRole("columnheader", { name: "author" }),
+    ).toBeInTheDocument();
+  });
+
   it("links to the definition workspace from a saved base", () => {
     renderView({});
     const configure = screen.getByRole("link", {
@@ -153,6 +165,61 @@ describe("BaseTableView", () => {
     }
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
+  it("sorts scalar headers but keeps multi-valued headers inert", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        properties: {
+          ...definition.properties,
+          topics: { type: "multi_select" },
+          related: { type: "relation" },
+        },
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: [
+              "title",
+              "author",
+              "tags",
+              "aliases",
+              "topics",
+              "related",
+            ],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 1,
+        rows: [
+          {
+            ...row,
+            columns: {
+              ...row.columns,
+              tags: ["fiction"],
+              aliases: ["New Sun"],
+              topics: ["science fantasy"],
+              related: ["02"],
+            },
+          },
+        ],
+      },
+    });
+
+    for (const name of ["tags", "aliases", "topics", "related"]) {
+      await user.click(screen.getByRole("columnheader", { name }));
+    }
+    expect(props.onSortChange).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("columnheader", { name: "author" }));
+    expect(props.onSortChange).toHaveBeenCalledWith({
+      sort: "author",
+      dir: "asc",
+    });
   });
 
   it("treats omitted property definitions as an empty read-only schema", () => {

@@ -6,7 +6,6 @@
 //! the registry — a broken base is listed with its diagnostics and excluded
 //! from evaluation.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +25,20 @@ pub const SYSTEM_FIELDS: &[&str] = &[
     "created_at",
     "updated_at",
     "encryption",
+    "journal_date",
+    "word_count",
+];
+/// System fields with scalar values backed by the query evaluator's sort
+/// semantics. Multi-valued or otherwise unsupported system fields are
+/// intentionally absent.
+pub const SCALAR_SORT_SYSTEM_FIELDS: &[&str] = &[
+    "id",
+    "path",
+    "title",
+    "kind",
+    "project",
+    "created_at",
+    "updated_at",
     "journal_date",
     "word_count",
 ];
@@ -53,6 +66,12 @@ impl PropertyType {
             self,
             PropertyType::Number | PropertyType::Date | PropertyType::Datetime
         )
+    }
+
+    /// Whether saved-view evaluation can order this property as one scalar
+    /// value per page.
+    pub fn is_scalar_sortable(self) -> bool {
+        !matches!(self, PropertyType::MultiSelect | PropertyType::Relation)
     }
 }
 
@@ -279,6 +298,15 @@ impl BaseDefinition {
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, def)| def)
+    }
+
+    /// Resolve a saved view using the API's ASCII case-insensitive naming
+    /// contract.
+    pub fn view(&self, name: &str) -> Option<&ViewDefinition> {
+        self.file
+            .views
+            .iter()
+            .find(|view| view.name.eq_ignore_ascii_case(name))
     }
 }
 
@@ -722,7 +750,6 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         validate_filter(base, filter, "filter", "filter", &mut push);
     }
 
-    let mut seen_views = HashSet::new();
     for (view_index, view) in base.file.views.iter().enumerate() {
         if view.name.trim().is_empty() {
             push(
@@ -731,7 +758,10 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 "view name must not be empty".to_string(),
             );
         }
-        if !seen_views.insert(view.name.as_str()) {
+        if base.file.views[..view_index]
+            .iter()
+            .any(|seen| seen.name.eq_ignore_ascii_case(&view.name))
+        {
             push(
                 BaseDiagnosticSeverity::Error,
                 Some(format!("views[{view_index}].name")),
@@ -754,6 +784,15 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 filter,
                 &format!("views[{view_index}].filter"),
                 &format!("view `{}` filter", view.name),
+                &mut push,
+            );
+        }
+        for (sort_index, sort) in view.sort.iter().enumerate() {
+            validate_sort_field(
+                base,
+                &sort.field,
+                &format!("views[{view_index}].sort[{sort_index}].field"),
+                &format!("view `{}` sort", view.name),
                 &mut push,
             );
         }
@@ -787,6 +826,70 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 );
             }
         }
+    }
+}
+
+fn validate_sort_field(
+    base: &BaseDefinition,
+    field: &str,
+    path: &str,
+    context: &str,
+    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
+) {
+    if let Some(name) = field.strip_prefix("sys.") {
+        if !SYSTEM_FIELDS.contains(&name) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: unknown system field `{name}`"),
+            );
+        } else if !SCALAR_SORT_SYSTEM_FIELDS.contains(&name) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: system field `{name}` is not scalar-sortable"),
+            );
+        }
+        return;
+    }
+
+    if let Some(name) = field.strip_prefix("prop.") {
+        validate_property_sort_field(base, name, path, context, push);
+        return;
+    }
+
+    if SYSTEM_FIELDS.contains(&field) {
+        if !SCALAR_SORT_SYSTEM_FIELDS.contains(&field) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: system field `{field}` is not scalar-sortable"),
+            );
+        }
+        return;
+    }
+
+    validate_property_sort_field(base, field, path, context, push);
+}
+
+fn validate_property_sort_field(
+    base: &BaseDefinition,
+    field: &str,
+    path: &str,
+    context: &str,
+    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
+) {
+    if let Some(definition) = base.property(field)
+        && !definition.property_type.is_scalar_sortable()
+    {
+        push(
+            BaseDiagnosticSeverity::Error,
+            Some(path.to_string()),
+            format!(
+                "{context}: property `{field}` ({:?}) is not scalar-sortable",
+                definition.property_type
+            ),
+        );
     }
 }
 
@@ -973,6 +1076,25 @@ layout = "table"
     }
 
     #[test]
+    fn structured_validation_rejects_case_only_duplicate_view() {
+        let file = base_file_with_views(["All", "aLL"]);
+        let result = validate_definition("reading", file);
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("views[1].name")
+                && diagnostic.message.contains("duplicate view name")
+        }));
+    }
+
+    #[test]
+    fn accepted_view_names_are_ascii_case_insensitively_addressable() {
+        let result = validate_definition("reading", base_file_with_views(["All", "Rated"]));
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.definition.view("aLL").unwrap().name, "All");
+        assert_eq!(result.definition.view("RATED").unwrap().name, "Rated");
+    }
+
+    #[test]
     fn parses_spec_reading_base_verbatim() {
         let (base, diagnostics) = parse_base(&path("bases/reading.base.toml"), READING_BASE);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -1124,6 +1246,59 @@ status = { type = "select", options = ["queued", "reading"] }
             .unwrap();
         assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Error);
         assert_eq!(diagnostic.path.as_deref(), Some("views[1].name"));
+    }
+
+    #[test]
+    fn non_scalar_saved_view_sorts_are_blocking_diagnostics() {
+        let content = r#"
+name = "X"
+
+[properties]
+themes = { type = "multi_select" }
+series = { type = "relation" }
+status = { type = "select" }
+
+[[views]]
+name = "All"
+sort = [
+    { field = "tags" },
+    { field = "sys.aliases" },
+    { field = "encryption" },
+    { field = "themes" },
+    { field = "prop.series" },
+    { field = "status" },
+    { field = "title" },
+]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let error_paths = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            error_paths,
+            vec![
+                "views[0].sort[0].field",
+                "views[0].sort[1].field",
+                "views[0].sort[2].field",
+                "views[0].sort[3].field",
+                "views[0].sort[4].field",
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_explicit_system_saved_view_sort_is_an_error() {
+        let content =
+            "name = \"X\"\n\n[[views]]\nname = \"All\"\nsort = [{ field = \"sys.missing\" }]\n";
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("unknown system field"))
+            .unwrap();
+        assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Error);
+        assert_eq!(diagnostic.path.as_deref(), Some("views[0].sort[0].field"));
     }
 
     #[test]

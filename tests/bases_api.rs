@@ -392,6 +392,51 @@ async fn view_evaluation_honors_view_filter_and_sort() {
 }
 
 #[tokio::test]
+async fn every_accepted_named_view_is_ascii_case_insensitively_addressable() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "addressable",
+            "definition": {
+                "name": "Addressable",
+                "properties": {
+                    "rating": { "type": "number" }
+                },
+                "views": [
+                    { "name": "All", "layout": "table" },
+                    {
+                        "name": "Rated",
+                        "layout": "table",
+                        "sort": [{ "field": "rating", "dir": "desc" }]
+                    }
+                ]
+            }
+        }))
+        .await;
+    response.assert_status_ok();
+    let created: serde_json::Value = response.json();
+    assert_eq!(
+        created["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|view| view["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["All", "Rated"]
+    );
+
+    for address in ["all", "RATED"] {
+        fixture
+            .server
+            .get(&format!("/api/vault/bases/addressable/views/{address}"))
+            .await
+            .assert_status_ok();
+    }
+}
+
+#[tokio::test]
 async fn generic_query_filters_numerically_with_inline_types() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(seed)
@@ -623,6 +668,96 @@ async fn blocking_diagnostics_are_bad_request_detail_without_notification() {
             .vault
             .root()
             .join("bases/invalid.base.toml")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn case_only_duplicate_view_names_are_rejected_before_publication() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "duplicate-views",
+            "definition": {
+                "name": "Duplicate Views",
+                "views": [
+                    { "name": "All", "layout": "table" },
+                    { "name": "aLL", "layout": "table" }
+                ]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["severity"] == "error"
+            && diagnostic["path"] == "views[1].name"
+            && diagnostic["message"] == "duplicate view name `aLL`"
+    }));
+    assert_no_notification(&mut notifications);
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/duplicate-views.base.toml")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn non_scalar_system_view_sorts_are_rejected_before_publication() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "invalid-sorts",
+            "definition": {
+                "name": "Invalid Sorts",
+                "views": [{
+                    "name": "All",
+                    "layout": "table",
+                    "sort": [
+                        { "field": "tags" },
+                        { "field": "sys.aliases" },
+                        { "field": "encryption" }
+                    ]
+                }]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    let error_paths = error["detail"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["severity"] == "error")
+        .map(|diagnostic| diagnostic["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        error_paths,
+        vec![
+            "views[0].sort[0].field",
+            "views[0].sort[1].field",
+            "views[0].sort[2].field",
+        ]
+    );
+    assert_no_notification(&mut notifications);
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/invalid-sorts.base.toml")
             .exists()
     );
 }

@@ -9,6 +9,7 @@ import {
   type AggregateFunction,
   aggregateFunctions,
   canGroup,
+  canSort,
   type DraftProperty,
   type DraftView,
   moveItem,
@@ -75,11 +76,27 @@ export function ViewDefinitionEditor({
     ({ type }) =>
       type !== "system-multi" && type !== "word_count" && canGroup(type),
   );
+  const sortFields = fields.filter(({ type }) => canSort(type));
   const unselectedColumns = fields.filter(
     ({ key }) => !view.columns.includes(key),
   );
-  const viewDiagnostics = diagnostics.filter((diagnostic) =>
-    diagnostic.path?.startsWith(viewPath),
+  const nameDiagnostics = diagnostics.filter(
+    (diagnostic) => diagnostic.path === `${viewPath}.name`,
+  );
+  const layoutDiagnostics = diagnostics.filter(
+    (diagnostic) => diagnostic.path === `${viewPath}.layout`,
+  );
+  const viewDiagnostics = diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.path?.startsWith(viewPath) &&
+      diagnostic.path !== `${viewPath}.name` &&
+      diagnostic.path !== `${viewPath}.layout`,
+  );
+  const nameInvalid = nameDiagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  const layoutInvalid = layoutDiagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
   );
 
   function replaceSort(index: number, sort: SortKey) {
@@ -103,25 +120,57 @@ export function ViewDefinitionEditor({
   return (
     <div className="min-w-0">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
-        <label className={labelClass}>
-          View name
+        <div>
+          <label className={labelClass} htmlFor={`view-name-${viewIndex}`}>
+            View name
+          </label>
           <input
+            id={`view-name-${viewIndex}`}
             ref={(element) => registerFocus(`${viewPath}.name`, element)}
             className={controlClass}
             value={view.name}
             onChange={(event) =>
               onChange({ ...view, name: event.target.value })
             }
+            aria-invalid={nameInvalid || undefined}
+            aria-describedby={
+              nameDiagnostics.length > 0
+                ? `view-name-error-${viewIndex}`
+                : undefined
+            }
           />
-        </label>
-        <label className={labelClass}>
-          Layout
+          {nameDiagnostics.length > 0 ? (
+            <span
+              id={`view-name-error-${viewIndex}`}
+              className={
+                nameInvalid
+                  ? "mt-1 block text-xs normal-case tracking-normal text-destructive"
+                  : "mt-1 block text-xs normal-case tracking-normal text-warn"
+              }
+            >
+              {nameDiagnostics
+                .map((diagnostic) => diagnostic.message)
+                .join(" ")}
+            </span>
+          ) : null}
+        </div>
+        <div>
+          <label className={labelClass} htmlFor={`view-layout-${viewIndex}`}>
+            Layout
+          </label>
           <select
+            id={`view-layout-${viewIndex}`}
             ref={(element) => registerFocus(`${viewPath}.layout`, element)}
             className={controlClass}
             value={view.layout}
             onChange={(event) =>
               onChange({ ...view, layout: event.target.value })
+            }
+            aria-invalid={layoutInvalid || undefined}
+            aria-describedby={
+              layoutDiagnostics.length > 0
+                ? `view-layout-error-${viewIndex}`
+                : undefined
             }
           >
             {unsupportedLayout ? (
@@ -129,9 +178,23 @@ export function ViewDefinitionEditor({
             ) : null}
             <option value="table">Table</option>
           </select>
-        </label>
+          {layoutDiagnostics.length > 0 ? (
+            <span
+              id={`view-layout-error-${viewIndex}`}
+              className={
+                layoutInvalid
+                  ? "mt-1 block text-xs normal-case tracking-normal text-destructive"
+                  : "mt-1 block text-xs normal-case tracking-normal text-warn"
+              }
+            >
+              {layoutDiagnostics
+                .map((diagnostic) => diagnostic.message)
+                .join(" ")}
+            </span>
+          ) : null}
+        </div>
       </div>
-      {unsupportedLayout ? (
+      {unsupportedLayout && layoutDiagnostics.length === 0 ? (
         <p
           role="alert"
           className="mt-3 border border-destructive p-3 text-sm text-destructive"
@@ -266,7 +329,7 @@ export function ViewDefinitionEditor({
                     replaceSort(index, { ...sort, field: event.target.value })
                   }
                 >
-                  {fields.map(({ key }) => (
+                  {sortFields.map(({ key }) => (
                     <option key={key} value={key}>
                       {key}
                     </option>
@@ -343,7 +406,7 @@ export function ViewDefinitionEditor({
               ...view,
               sort: [
                 ...view.sort,
-                { field: fields[0]?.key ?? "title", dir: "asc" },
+                { field: sortFields[0]?.key ?? "title", dir: "asc" },
               ],
             })
           }

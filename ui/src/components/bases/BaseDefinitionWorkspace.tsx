@@ -1,5 +1,5 @@
 import { useBlocker } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BaseDetailResponse } from "#/api/bases";
 import { useBase, useUpdateBase } from "#/api/bases";
 import { formatApiError, isApiConflict, isApiError } from "#/api/error";
@@ -13,6 +13,7 @@ import {
 } from "./DefinitionHeader";
 import { type BaseDraft, fromWire, toWire } from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
+import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
 import { MembershipEditor } from "./MembershipEditor";
 import { PropertiesEditor } from "./PropertiesEditor";
 import { ValidationSummary } from "./ValidationSummary";
@@ -48,8 +49,9 @@ function selectionIndex(views: BaseDraft["views"], selection: ViewSelection) {
   const idIndex = views.findIndex((view) => view.id === selection.id);
   if (idIndex >= 0) return idIndex;
   if (selection.name) {
+    const equivalentName = asciiCaseFold(selection.name);
     const matchingIndexes = views.flatMap((view, index) =>
-      view.name === selection.name ? [index] : [],
+      asciiCaseFold(view.name) === equivalentName ? [index] : [],
     );
     if (matchingIndexes.length === 1) return matchingIndexes[0];
   }
@@ -142,6 +144,14 @@ export function BaseDefinitionWorkspace({
   const obsoleteQueryRevisions = useRef(new Set<string>());
   const focusTargets = useRef(new Map<string, HTMLElement>());
   const isDirty = editGeneration.current > savedGeneration.current;
+  const structuralDiagnostics = useMemo(
+    () => (draft ? validateBaseDraftStructure(slug, draft) : []),
+    [draft, slug],
+  );
+  const mergedLocalDiagnostics = useMemo(
+    () => [...localDiagnostics, ...structuralDiagnostics],
+    [localDiagnostics, structuralDiagnostics],
+  );
 
   useEffect(() => {
     const detail = baseQuery.data;
@@ -171,13 +181,28 @@ export function BaseDefinitionWorkspace({
     [],
   );
 
-  const focusDiagnostic = useCallback((path: string) => {
-    setSelectedSection(sectionForDiagnostic(path));
-    setFocusRequest((current) => ({
-      path,
-      sequence: (current?.sequence ?? 0) + 1,
-    }));
-  }, []);
+  const focusDiagnostic = useCallback(
+    (path: string) => {
+      const viewMatch = path.match(/^views\[(\d+)\]/);
+      const viewIndex = viewMatch ? Number(viewMatch[1]) : -1;
+      const view = draft?.views[viewIndex];
+      if (view) {
+        const nextSelection = {
+          id: view.id,
+          name: view.name,
+          index: viewIndex,
+        };
+        selectedViewRef.current = nextSelection;
+        setSelectedView(nextSelection);
+      }
+      setSelectedSection(sectionForDiagnostic(path));
+      setFocusRequest((current) => ({
+        path,
+        sequence: (current?.sequence ?? 0) + 1,
+      }));
+    },
+    [draft],
+  );
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -216,7 +241,9 @@ export function BaseDefinitionWorkspace({
       !isDirty ||
       saving ||
       conflictMessage ||
-      localDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+      mergedLocalDiagnostics.some(
+        (diagnostic) => diagnostic.severity === "error",
+      )
     )
       return;
     const submittedGeneration = editGeneration.current;
@@ -260,7 +287,9 @@ export function BaseDefinitionWorkspace({
           submittedDraft.views[logicalSelectedIndex] ?? submittedSelectedView;
         if (logicalSelectedView) {
           const matchingIndexes = serverDraft.views.flatMap((view, index) =>
-            view.name === logicalSelectedView.name ? [index] : [],
+            asciiCaseFold(view.name) === asciiCaseFold(logicalSelectedView.name)
+              ? [index]
+              : [],
           );
           const nextIndex =
             matchingIndexes.length === 1
@@ -331,12 +360,13 @@ export function BaseDefinitionWorkspace({
     );
   }
   if (!draft) return <RecoveryState slug={slug} error={baseQuery.error} />;
-  const visibleDiagnostics = [...diagnostics, ...localDiagnostics];
+  const visibleDiagnostics = [...diagnostics, ...mergedLocalDiagnostics];
   const draftViews = draft.views;
   let activeView = draftViews.find((view) => view.id === selectedView.id);
   if (!activeView && selectedView.name) {
+    const equivalentName = asciiCaseFold(selectedView.name);
     const matchingViews = draftViews.filter(
-      (view) => view.name === selectedView.name,
+      (view) => asciiCaseFold(view.name) === equivalentName,
     );
     if (matchingViews.length === 1) activeView = matchingViews[0];
   }
@@ -388,7 +418,7 @@ export function BaseDefinitionWorkspace({
           isDirty &&
           !saving &&
           !conflictMessage &&
-          !localDiagnostics.some(
+          !mergedLocalDiagnostics.some(
             (diagnostic) => diagnostic.severity === "error",
           )
         }

@@ -17,9 +17,16 @@ interface GeneralEditorProps {
 export function GeneralEditor({
   slug,
   draft,
+  diagnostics,
   setDraft,
   registerFocusTarget,
 }: GeneralEditorProps) {
+  const nameDiagnostics = diagnostics.filter(
+    (diagnostic) => diagnostic.path === "name",
+  );
+  const nameInvalid = nameDiagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
   const path = `bases/${slug}.base.toml`;
 
   return (
@@ -35,19 +42,40 @@ export function GeneralEditor({
       </p>
 
       <div className="mt-5 grid gap-5">
-        <label className="flex flex-col">
-          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            Name
-          </span>
+        <div className="flex flex-col">
+          <label htmlFor="base-name">
+            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              Name
+            </span>
+          </label>
           <input
+            id="base-name"
             ref={(element) => registerFocusTarget("name", element)}
             value={draft.name}
             onChange={(event) =>
               setDraft((current) => ({ ...current, name: event.target.value }))
             }
+            aria-invalid={nameInvalid || undefined}
+            aria-describedby={
+              nameDiagnostics.length > 0 ? "base-name-error" : undefined
+            }
             className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
           />
-        </label>
+          {nameDiagnostics.length > 0 ? (
+            <p
+              id="base-name-error"
+              className={
+                nameInvalid
+                  ? "mt-1 text-xs text-destructive"
+                  : "mt-1 text-xs text-warn"
+              }
+            >
+              {nameDiagnostics
+                .map((diagnostic) => diagnostic.message)
+                .join(" ")}
+            </p>
+          ) : null}
+        </div>
 
         <label className="flex flex-col">
           <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">

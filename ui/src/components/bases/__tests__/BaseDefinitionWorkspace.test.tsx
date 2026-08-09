@@ -144,6 +144,29 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("revision-2")).toBeInTheDocument();
   });
 
+  it("blocks Save and focuses the inline error for an empty base name", async () => {
+    renderWorkspace();
+    const user = userEvent.setup();
+    const name = screen.getByLabelText("Name");
+
+    await user.clear(name);
+
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveAttribute("aria-describedby", "base-name-error");
+    expect(
+      name.ownerDocument.getElementById("base-name-error"),
+    ).toHaveTextContent("Base name must not be empty.");
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(updateMock).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: /base name must not be empty/i }),
+    );
+    expect(name).toHaveFocus();
+  });
+
   it("saves the exact membership filter edited in the workspace", async () => {
     const filter = { field: "id", op: "eq", value: "page-1" } as const;
     updateMock.mockResolvedValue(
@@ -451,6 +474,59 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(viewDiagnostic);
     expect(screen.getByRole("button", { name: "Select All" })).toHaveFocus();
   });
+
+  it("blocks duplicate view names and focuses the exact non-selected control", async () => {
+    baseState.data = {
+      ...detail,
+      views: [
+        { name: "All", layout: "table", columns: ["title"] },
+        { name: "Later", layout: "table", columns: ["title"] },
+      ],
+    };
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Select Later" }));
+    const name = screen.getByLabelText("View name");
+    await user.clear(name);
+    await user.type(name, "aLL");
+
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveAttribute("aria-describedby", "view-name-error-1");
+    const secondDiagnostic = screen
+      .getAllByRole("button", { name: /view names must be unique/i })
+      .find(
+        (button) =>
+          button.getAttribute("data-diagnostic-path") === "views[1].name",
+      );
+    expect(secondDiagnostic).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "Select All" }));
+    await user.click(secondDiagnostic!);
+
+    expect(screen.getByLabelText("View name")).toHaveValue("aLL");
+    expect(screen.getByLabelText("View name")).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks and focuses an empty view name", async () => {
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    const name = screen.getByLabelText("View name");
+    await user.clear(name);
+
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveAttribute("aria-describedby", "view-name-error-0");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: /view name must not be empty/i }),
+    );
+    expect(name).toHaveFocus();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
   it("saves the exact authored view while previewing the unsaved definition", async () => {
     updateMock.mockResolvedValue(
       mutationResponse({
@@ -539,7 +615,7 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
-  it("preserves an unsupported layout through an unrelated edit in preview and save", async () => {
+  it("blocks an unsupported layout until the exact control repairs it", async () => {
     const unsupported = {
       ...detail,
       views: [
@@ -555,6 +631,15 @@ describe("BaseDefinitionWorkspace", () => {
     baseState.data = unsupported;
     updateMock.mockResolvedValue({
       ...unsupported,
+      views: [
+        {
+          name: "Board",
+          layout: "table",
+          sort: [],
+          aggregates: [],
+          columns: ["title"],
+        },
+      ],
       revision: "revision-2",
     });
     renderWorkspace();
@@ -562,30 +647,38 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Views" }));
     await waitFor(() => expect(previewMock).toHaveBeenCalled());
 
-    const definition = {
-      name: "Renamed only",
-      description: "Books in progress",
-      filter: undefined,
-      properties: {},
-      views: [
-        {
-          name: "Board",
-          layout: "board",
-          filter: undefined,
-          sort: [],
-          group_by: undefined,
-          aggregates: [],
-          columns: ["title"],
-        },
-      ],
-    };
-    expect(previewMock).toHaveBeenLastCalledWith({
-      body: { definition, view: "Board", limit: 100, offset: 0 },
+    const layout = screen.getByLabelText("Layout");
+    expect(layout).toHaveAttribute("aria-invalid", "true");
+    expect(layout).toHaveAttribute("aria-describedby", "view-layout-error-0");
+    const diagnostic = screen.getByRole("button", {
+      name: /unsupported layout “board”/i,
     });
+    expect(diagnostic).toHaveAttribute(
+      "data-diagnostic-path",
+      "views[0].layout",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateMock).not.toHaveBeenCalled();
+
+    await user.click(diagnostic);
+    expect(layout).toHaveFocus();
+    await user.selectOptions(layout, "table");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(updateMock).toHaveBeenCalledWith({
       params: { path: { slug: "reading-log" } },
-      body: { expected_revision: "revision-1", definition },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({
+          name: "Renamed only",
+          views: [
+            expect.objectContaining({
+              name: "Board",
+              layout: "table",
+            }),
+          ],
+        }),
+      },
     });
   });
 

@@ -363,13 +363,7 @@ pub async fn preview_base(
 
     let base = validation.definition;
     let selected_view = match request.view {
-        Some(view_name) => match base
-            .file
-            .views
-            .iter()
-            .find(|view| view.name.eq_ignore_ascii_case(&view_name))
-            .cloned()
-        {
+        Some(view_name) => match base.view(&view_name).cloned() {
             Some(view) => Some(view),
             None => {
                 return Json(BasePreviewResponse {
@@ -439,15 +433,9 @@ pub async fn evaluate_view(
         .get(&slug)
         .cloned()
         .ok_or_else(|| ApiError::not_found(format!("no base with slug `{slug}`")))?;
-    let view = base
-        .file
-        .views
-        .iter()
-        .find(|v| v.name.eq_ignore_ascii_case(&view_name))
-        .cloned()
-        .ok_or_else(|| {
-            ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
-        })?;
+    let view = base.view(&view_name).cloned().ok_or_else(|| {
+        ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
+    })?;
 
     let spec = query_spec(
         &base,

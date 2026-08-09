@@ -125,7 +125,7 @@ describe("BasesIndexView", () => {
             slug: "broken",
             severity: "error",
             message: "expected a table",
-            path: "bases/broken.base.toml",
+            path: undefined,
           },
         ]}
         onCreate={vi.fn()}
@@ -169,7 +169,7 @@ describe("BasesIndexView", () => {
             slug: "beta",
             severity: "error",
             message: "broken beta",
-            path: "bases/beta.base.toml",
+            path: undefined,
           },
         ]}
         onCreate={vi.fn()}
