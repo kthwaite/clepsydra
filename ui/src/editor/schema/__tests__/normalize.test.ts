@@ -126,3 +126,89 @@ describe("list structure invariant", () => {
     expect(list.children.every((c) => c.type === "list-item")).toBe(true);
   });
 });
+
+function normalizePersistedMath(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const editor = withSchema(createEditor());
+  if (node.type === "math-block") {
+    editor.children = [node] as never;
+  } else {
+    editor.children = [
+      {
+        type: "paragraph",
+        children: [{ text: "before" }, node, { text: "after" }],
+      },
+    ] as never;
+  }
+
+  Editor.normalize(editor, { force: true });
+
+  if (node.type === "math-block") {
+    return editor.children[0] as unknown as Record<string, unknown>;
+  }
+  const paragraph = editor.children[0] as unknown as {
+    children: Record<string, unknown>[];
+  };
+  const math = paragraph.children.find((child) => child.type === "inline-math");
+  if (!math) throw new Error("Expected inline math to survive normalization");
+  return math;
+}
+
+describe("math integrity invariant", () => {
+  it("repairs missing TeX without dropping persisted inline math", () => {
+    const math = normalizePersistedMath({
+      type: "inline-math",
+      delimiter: "$",
+      children: [{ text: "" }],
+    });
+
+    expect(math).toMatchObject({
+      type: "inline-math",
+      tex: "",
+      delimiter: "$",
+      children: [{ text: "" }],
+    });
+  });
+
+  it("preserves unknown persisted TeX as editable source", () => {
+    const math = normalizePersistedMath({
+      type: "inline-math",
+      tex: 42,
+      delimiter: "$",
+      children: [{ text: "" }],
+    });
+
+    expect(math.tex).toBe("42");
+  });
+
+  it.each([
+    ["inline-math", "$$", "$"],
+    ["inline-math", "unknown", "$"],
+    ["math-block", "$", "$$"],
+    ["math-block", "unknown", "$$"],
+  ])("repairs %s delimiter %s to %s", (type, delimiter, expected) => {
+    const math = normalizePersistedMath({
+      type,
+      tex: "x",
+      delimiter,
+      children: [{ text: "" }],
+    });
+
+    expect(math.delimiter).toBe(expected);
+  });
+
+  it.each(["inline-math", "math-block"])(
+    "restores one empty text child for %s",
+    (type) => {
+      const math = normalizePersistedMath({
+        type,
+        tex: "x",
+        delimiter: type === "inline-math" ? "$" : "$$",
+        children: [{ text: "stale", bold: true }, { text: "extra" }],
+      });
+
+      expect(math.children).toEqual([{ text: "" }]);
+    },
+  );
+});

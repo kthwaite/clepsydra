@@ -26,6 +26,10 @@ import { BlockRefCombobox } from "./BlockRefCombobox";
 import { makeDecorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
+import {
+  MathEditingProvider,
+  useMathEditingController,
+} from "./mathEditing";
 import { createSelectionReference } from "./floatingSelectionReference";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
 import { withInlinePunctuationBoundary } from "./plugins/withInlinePunctuationBoundary";
@@ -138,6 +142,7 @@ export function SlateEditor({
     [],
   );
   const wikilinkEditing = useWikilinkEditingController(editor);
+  const mathEditing = useMathEditingController(editor);
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
@@ -405,6 +410,22 @@ export function SlateEditor({
       }
     }
 
+    if (event.key === "Enter" && editor.selection) {
+      const selectedMath = Editor.above(editor, {
+        at: editor.selection,
+        match: (node) =>
+          SlateElement.isElement(node) &&
+          (node.type === "inline-math" || node.type === "math-block"),
+        mode: "lowest",
+        voids: true,
+      });
+      if (selectedMath) {
+        event.preventDefault();
+        mathEditing.begin(selectedMath[1]);
+        return;
+      }
+    }
+
     // --- Vim mode (after popovers, before app chords) ---
     if (matchesChord(event, SHORTCUTS["editor.vimMode"].chord)) {
       event.preventDefault();
@@ -559,22 +580,24 @@ export function SlateEditor({
         initialValue={initialValue}
         onChange={handleChange}
       >
-        <WikilinkEditingProvider value={wikilinkEditing}>
-          <Editable
-            renderElement={renderElement}
-            renderLeaf={renderLeaf}
-            decorate={decorateCode}
-            onKeyDown={handleKeyDown}
-            onDOMBeforeInput={vim.handleDOMBeforeInput}
-            onMouseDown={vim.handleMouseDown}
-            placeholder="Start writing..."
-            className="min-h-[200px] w-full min-w-0 outline-none"
-            spellCheck
-          />
-          {isVimEnabled && (
-            <VimStatusBar mode={vim.mode} pending={vim.pending} />
-          )}
-        </WikilinkEditingProvider>
+        <MathEditingProvider value={mathEditing}>
+          <WikilinkEditingProvider value={wikilinkEditing}>
+            <Editable
+              renderElement={renderElement}
+              renderLeaf={renderLeaf}
+              decorate={decorateCode}
+              onKeyDown={handleKeyDown}
+              onDOMBeforeInput={vim.handleDOMBeforeInput}
+              onMouseDown={vim.handleMouseDown}
+              placeholder="Start writing..."
+              className="min-h-[200px] w-full min-w-0 outline-none"
+              spellCheck
+            />
+            {isVimEnabled && (
+              <VimStatusBar mode={vim.mode} pending={vim.pending} />
+            )}
+          </WikilinkEditingProvider>
+        </MathEditingProvider>
       </Slate>
 
       {wikilinkTrigger && (
