@@ -54,14 +54,23 @@ pub struct AppState {
     /// `/uptime` endpoint reports `started_at.elapsed()`, giving true server
     /// uptime independent of any client's tab lifetime.
     pub started_at: std::time::Instant,
+    /// Time source for date-sensitive API behavior. Defaults to `SystemClock`.
     pub clock: Arc<dyn Clock>,
+    /// Vault instance, shared across all API handlers.
     pub vault: Vault,
+    /// Index handle, shared across all API handlers.
     pub index: IndexHandle,
+    /// Content-addressable storage (CAS) instance, shared across all API handlers.
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
+    /// Broadcast channel for notifying API clients of vault changes.
     pub warnings: parking_lot::Mutex<Vec<String>>,
+    /// Broadcast channel for notifying API clients of vault changes.
     pub change_tx: broadcast::Sender<SyncNotification>,
+    /// Hooks for post-move and post-delete operations, shared across all API handlers.
     pub hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostMoveHook>>>,
+    /// Hooks for post-delete operations, shared across all API handlers.
     pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
+    /// Mutation coordinator for serializing vault mutations, shared across all API handlers.
     pub mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
