@@ -283,6 +283,48 @@ describe("BaseTableView", () => {
     expect(screen.getByRole("textbox", { name: "Edit number" })).toHaveFocus();
   });
 
+  it("does not reopen a Tab target after its row disappears", async () => {
+    const user = userEvent.setup();
+    const tabDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "author", "rating"],
+        },
+      ],
+    };
+    const props = {
+      definition: tabDefinition,
+      activeView: "Continues",
+      output: flat,
+      sortOverride: {},
+      onViewChange: vi.fn(),
+      onSortChange: vi.fn(),
+      onOpenPage: vi.fn(),
+      onCommitCell: vi.fn(),
+    };
+    const { rerender } = render(<BaseTableView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit text" }), {
+      key: "Tab",
+    });
+    expect(screen.getByRole("textbox", { name: "Edit number" })).toHaveFocus();
+
+    rerender(
+      <BaseTableView
+        {...props}
+        output={{ shape: "flat", rows: [], total: 0 }}
+      />,
+    );
+    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+
+    rerender(<BaseTableView {...props} />);
+    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+  });
+
   it("commits the last editable property with Tab without wrapping rows", async () => {
     const user = userEvent.setup();
     const secondRow = {

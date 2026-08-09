@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Cell,
   Column,
@@ -121,6 +121,25 @@ export function BaseTableView({
     const index = editableColumns.indexOf(column);
     return index < 0 ? undefined : editableColumns[index + 1];
   };
+  const activeRowId = activeCell?.rowId;
+  const activeCellIsRendered =
+    activeCell !== null &&
+    !readOnly &&
+    !viewError &&
+    !viewLoading &&
+    editableColumns.includes(activeCell.column) &&
+    (output?.shape === "flat"
+      ? output.rows.some((row) => String(row.id) === activeRowId)
+      : output?.shape === "grouped" &&
+        output.groups.some((group) =>
+          group.rows.some((row) => String(row.id) === activeRowId),
+        ));
+
+  useEffect(() => {
+    if (activeCell && !activeCellIsRendered) {
+      setActiveCell(null);
+    }
+  }, [activeCell, activeCellIsRendered]);
 
   const sortDescriptor = sortOverride.sort
     ? {
