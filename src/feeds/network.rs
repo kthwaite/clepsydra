@@ -3,6 +3,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION};
 use reqwest::redirect::Policy;
@@ -10,6 +11,7 @@ use reqwest::{StatusCode, Url};
 use thiserror::Error;
 
 const MAX_REDIRECTS: usize = 10;
+const DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConditionalRequest {
@@ -57,6 +59,8 @@ pub enum CheckedHttpError {
     InvalidRedirectLocation,
     #[error("redirect limit was exceeded")]
     TooManyRedirects,
+    #[error("checked HTTP request exceeded its absolute deadline")]
+    DeadlineExceeded,
     #[error("response body exceeds the configured {limit}-byte limit")]
     ResponseLimitExceeded { limit: usize },
 }
@@ -87,6 +91,7 @@ pub struct CheckedHttpClient {
     max_response_bytes: usize,
     resolver: Arc<dyn HostResolver>,
     allow_non_global_resolver_results: bool,
+    deadline: Duration,
 }
 
 impl std::fmt::Debug for CheckedHttpClient {
@@ -94,6 +99,7 @@ impl std::fmt::Debug for CheckedHttpClient {
         formatter
             .debug_struct("CheckedHttpClient")
             .field("max_response_bytes", &self.max_response_bytes)
+            .field("deadline", &self.deadline)
             .finish_non_exhaustive()
     }
 }
@@ -104,6 +110,7 @@ impl CheckedHttpClient {
             max_response_bytes,
             resolver: Arc::new(SystemResolver),
             allow_non_global_resolver_results: false,
+            deadline: DEFAULT_DEADLINE,
         })
     }
 
@@ -120,6 +127,7 @@ impl CheckedHttpClient {
                 address,
             }),
             allow_non_global_resolver_results: true,
+            deadline: DEFAULT_DEADLINE,
         })
     }
 
@@ -132,10 +140,39 @@ impl CheckedHttpClient {
             max_response_bytes,
             resolver,
             allow_non_global_resolver_results: true,
+            deadline: DEFAULT_DEADLINE,
         })
     }
 
+    #[cfg(test)]
+    pub fn for_test_with_production_policy(
+        max_response_bytes: usize,
+        resolver: Arc<dyn HostResolver>,
+    ) -> Result<Self, CheckedHttpError> {
+        Ok(Self {
+            max_response_bytes,
+            resolver,
+            allow_non_global_resolver_results: false,
+            deadline: DEFAULT_DEADLINE,
+        })
+    }
+
+    pub fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = deadline;
+        self
+    }
+
     pub async fn get(
+        &self,
+        url: Url,
+        conditional: Option<&ConditionalRequest>,
+    ) -> Result<CheckedResponse, CheckedHttpError> {
+        tokio::time::timeout(self.deadline, self.get_until_deadline(url, conditional))
+            .await
+            .map_err(|_| CheckedHttpError::DeadlineExceeded)?
+    }
+
+    async fn get_until_deadline(
         &self,
         url: Url,
         conditional: Option<&ConditionalRequest>,
@@ -194,6 +231,9 @@ impl CheckedHttpClient {
         let mut builder = reqwest::Client::builder()
             .redirect(Policy::none())
             .no_proxy()
+            .timeout(self.deadline)
+            .connect_timeout(self.deadline)
+            .read_timeout(self.deadline)
             .user_agent(concat!("clepsydra/", env!("CARGO_PKG_VERSION")));
 
         if let Ok(address) = address_host.parse::<IpAddr>() {
@@ -401,11 +441,18 @@ impl HostResolver for FixedResolver {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
     use std::net::{IpAddr, SocketAddr};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
 
+    use axum::Router;
+    use axum::body::{Body, Bytes};
+    use axum::http::header::LOCATION;
+    use axum::routing::get;
     use reqwest::Url;
+    use tokio_stream::wrappers::ReceiverStream;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -428,6 +475,29 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let address = self.address;
             Box::pin(async move { Ok(vec![address]) })
+        }
+    }
+
+    struct RoutingResolver {
+        address: SocketAddr,
+        delay: Duration,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl HostResolver for RoutingResolver {
+        fn resolve<'a>(
+            &'a self,
+            _host: &'a str,
+            _port: u16,
+        ) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'a>>
+        {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let address = self.address;
+            let delay = self.delay;
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Ok(vec![address])
+            })
         }
     }
 
@@ -552,6 +622,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn production_policy_rejects_injected_private_hostname_answers_before_connecting() {
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resolver = Arc::new(RoutingResolver {
+            address: *server.address(),
+            delay: Duration::ZERO,
+            calls: calls.clone(),
+        });
+        let client = CheckedHttpClient::for_test_with_production_policy(1024, resolver)
+            .expect("fixture client should build");
+
+        for host in ["private.test", "redirect-private.test"] {
+            let url = Url::parse(&format!(
+                "http://{host}:{}/must-not-connect",
+                server.address().port()
+            ))
+            .unwrap();
+            let error = client
+                .get(url, None)
+                .await
+                .expect_err("production policy must reject injected loopback answers");
+            assert!(
+                matches!(
+                    &error,
+                    CheckedHttpError::NonGlobalDestination(address)
+                        if *address == server.address().ip()
+                ),
+                "unexpected error for {host}: {error}"
+            );
+        }
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "a rejected resolver answer reached the fixture server"
+        );
+    }
+
+    #[tokio::test]
     async fn follows_a_safe_relative_redirect() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -641,5 +750,83 @@ mod tests {
             "unexpected error: {error}"
         );
         server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn one_deadline_covers_resolution_redirects_and_streaming_the_body() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let route_hits = Arc::new(AtomicUsize::new(0));
+        let redirect_hits = route_hits.clone();
+        let body_hits = route_hits.clone();
+        let redirect_location = format!("http://final.test:{}/slow", address.port());
+        let app = Router::new()
+            .route(
+                "/start",
+                get(move || {
+                    let redirect_location = redirect_location.clone();
+                    let redirect_hits = redirect_hits.clone();
+                    async move {
+                        redirect_hits.fetch_add(1, Ordering::SeqCst);
+                        (StatusCode::FOUND, [(LOCATION, redirect_location)])
+                    }
+                }),
+            )
+            .route(
+                "/slow",
+                get(move || {
+                    let body_hits = body_hits.clone();
+                    async move {
+                        body_hits.fetch_add(1, Ordering::SeqCst);
+                        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(35)).await;
+                            if sender
+                                .send(Ok::<_, Infallible>(Bytes::from_static(b"first")))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            tokio::time::sleep(Duration::from_millis(35)).await;
+                            let _ = sender
+                                .send(Ok::<_, Infallible>(Bytes::from_static(b"second")))
+                                .await;
+                        });
+                        Body::from_stream(ReceiverStream::new(receiver))
+                    }
+                }),
+            );
+        let server_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resolver = Arc::new(RoutingResolver {
+            address,
+            delay: Duration::from_millis(15),
+            calls,
+        });
+        let client = CheckedHttpClient::for_test_with_resolver(1024, resolver)
+            .expect("fixture client should build")
+            .with_deadline(Duration::from_millis(80));
+        let started = Instant::now();
+
+        let error = client
+            .get(
+                Url::parse(&format!("http://redirect.test:{}/start", address.port())).unwrap(),
+                None,
+            )
+            .await
+            .expect_err("the absolute deadline must expire during the streamed body");
+
+        assert!(matches!(error, CheckedHttpError::DeadlineExceeded));
+        assert!(
+            started.elapsed() < Duration::from_millis(180),
+            "per-hop timeouts allowed the fixture to hold the request too long"
+        );
+        assert_eq!(route_hits.load(Ordering::SeqCst), 2);
+        server_task.abort();
     }
 }

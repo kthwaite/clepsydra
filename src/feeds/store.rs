@@ -16,7 +16,7 @@ use super::types::{
     FetchOutcome, FetchedEntry, ManifestFeed, MarkReadScope,
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FeedStoreError {
@@ -357,6 +357,7 @@ fn initialize_schema(
         CREATE TABLE IF NOT EXISTS feed (
             id INTEGER PRIMARY KEY,
             url TEXT NOT NULL UNIQUE,
+            fetch_url TEXT,
             site_url TEXT,
             title TEXT NOT NULL DEFAULT '',
             title_override TEXT,
@@ -375,6 +376,7 @@ fn initialize_schema(
         ",
     )?;
     for (name, declaration) in [
+        ("fetch_url", "TEXT"),
         ("site_url", "TEXT"),
         ("title", "TEXT NOT NULL DEFAULT ''"),
         ("title_override", "TEXT"),
@@ -472,7 +474,7 @@ fn initialize_schema(
             ON entry(COALESCE(published_at, fetched_at) DESC, id DESC);
         CREATE INDEX IF NOT EXISTS idx_entry_feed_unread
             ON entry(feed_id) WHERE read_at IS NULL;
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
         ",
     )?;
     Ok(())
@@ -523,6 +525,7 @@ fn rebuild_feed_table(connection: &mut Connection) -> Result<(), FeedStoreError>
         CREATE TABLE feed__migration_v2 (
             id INTEGER PRIMARY KEY,
             url TEXT NOT NULL UNIQUE,
+            fetch_url TEXT,
             site_url TEXT,
             title TEXT NOT NULL DEFAULT '',
             title_override TEXT,
@@ -539,12 +542,12 @@ fn rebuild_feed_table(connection: &mut Connection) -> Result<(), FeedStoreError>
             last_error TEXT
         );
         INSERT INTO feed__migration_v2 (
-            id, url, site_url, title, title_override, group_name, tags, subscribed,
-            sort_order, added_at, etag, last_modified, last_fetch_at, next_fetch_at,
-            error_count, last_error
+            id, url, fetch_url, site_url, title, title_override, group_name, tags,
+            subscribed, sort_order, added_at, etag, last_modified, last_fetch_at,
+            next_fetch_at, error_count, last_error
         )
         SELECT
-            id, url, site_url, COALESCE(title, ''), title_override,
+            id, url, fetch_url, site_url, COALESCE(title, ''), title_override,
             COALESCE(group_name, ''), COALESCE(tags, '[]'), COALESCE(subscribed, 1),
             COALESCE(sort_order, 0), added_at, etag, last_modified, last_fetch_at,
             next_fetch_at, COALESCE(error_count, 0), last_error
@@ -621,8 +624,9 @@ fn list_feeds(
 ) -> Result<Vec<FeedSummary>, FeedStoreError> {
     let mut sql = String::from(
         "
-        SELECT id, url, site_url, title, title_override, group_name, tags, subscribed,
-               etag, last_modified, last_fetch_at, next_fetch_at, error_count, last_error
+        SELECT id, url, fetch_url, site_url, title, title_override, group_name, tags,
+               subscribed, etag, last_modified, last_fetch_at, next_fetch_at,
+               error_count, last_error
         FROM feed
         ",
     );
@@ -638,33 +642,34 @@ fn list_feeds(
 }
 
 fn feed_from_row(row: &rusqlite::Row<'_>) -> Result<FeedSummary, rusqlite::Error> {
-    let tags: String = row.get(6)?;
-    let last_fetch_at: Option<String> = row.get(10)?;
-    let next_fetch_at: String = row.get(11)?;
+    let tags: String = row.get(7)?;
+    let last_fetch_at: Option<String> = row.get(11)?;
+    let next_fetch_at: String = row.get(12)?;
     Ok(FeedSummary {
         id: row.get(0)?,
         url: row.get(1)?,
-        site_url: row.get(2)?,
-        title: row.get(3)?,
-        title_override: row.get(4)?,
-        group: row.get(5)?,
+        fetch_url: row.get(2)?,
+        site_url: row.get(3)?,
+        title: row.get(4)?,
+        title_override: row.get(5)?,
+        group: row.get(6)?,
         tags: serde_json::from_str(&tags).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                6,
+                7,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
         })?,
-        subscribed: row.get(7)?,
-        etag: row.get(8)?,
-        last_modified: row.get(9)?,
+        subscribed: row.get(8)?,
+        etag: row.get(9)?,
+        last_modified: row.get(10)?,
         last_fetch_at: last_fetch_at
             .map(|value| parse_db_datetime(&value))
             .transpose()
             .map_err(timestamp_from_sql_error)?,
         next_fetch_at: parse_db_datetime(&next_fetch_at).map_err(timestamp_from_sql_error)?,
-        error_count: row.get(12)?,
-        last_error: row.get(13)?,
+        error_count: row.get(13)?,
+        last_error: row.get(14)?,
     })
 }
 
@@ -678,6 +683,7 @@ fn apply_fetch(
         FetchOutcome::Success {
             fetched_at,
             next_fetch_at,
+            fetch_url,
             etag,
             last_modified,
             title,
@@ -687,17 +693,19 @@ fn apply_fetch(
             let changed = transaction.execute(
                 "
                 UPDATE feed SET
-                    title = COALESCE(?1, title),
-                    site_url = COALESCE(?2, site_url),
-                    etag = ?3,
-                    last_modified = ?4,
-                    last_fetch_at = ?5,
-                    next_fetch_at = ?6,
+                    fetch_url = ?1,
+                    title = COALESCE(?2, title),
+                    site_url = COALESCE(?3, site_url),
+                    etag = ?4,
+                    last_modified = ?5,
+                    last_fetch_at = ?6,
+                    next_fetch_at = ?7,
                     error_count = 0,
                     last_error = NULL
-                WHERE id = ?7
+                WHERE id = ?8
                 ",
                 params![
+                    fetch_url,
                     title,
                     site_url,
                     etag,
@@ -1182,6 +1190,7 @@ mod tests {
         FetchOutcome::Success {
             fetched_at,
             next_fetch_at,
+            fetch_url: "https://fetched.example/feed.xml".to_owned(),
             etag: Some("\"feed-v1\"".to_owned()),
             last_modified: Some("Sun, 09 Aug 2026 11:30:00 GMT".to_owned()),
             title: Some("Fetched title".to_owned()),
@@ -1249,6 +1258,42 @@ mod tests {
             .unwrap();
     }
 
+    fn create_version_two_database(path: &Path) {
+        let connection = Connection::open(path).unwrap();
+        connection
+            .execute_batch(
+                "
+                PRAGMA user_version = 2;
+                CREATE TABLE feed (
+                    id INTEGER PRIMARY KEY,
+                    url TEXT NOT NULL UNIQUE,
+                    site_url TEXT,
+                    title TEXT NOT NULL DEFAULT '',
+                    title_override TEXT,
+                    group_name TEXT NOT NULL DEFAULT '',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    subscribed INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    added_at TEXT NOT NULL,
+                    etag TEXT,
+                    last_modified TEXT,
+                    last_fetch_at TEXT,
+                    next_fetch_at TEXT NOT NULL,
+                    error_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT
+                );
+                INSERT INTO feed (
+                    id, url, title, group_name, tags, subscribed, sort_order, added_at,
+                    next_fetch_at
+                ) VALUES (
+                    42, 'https://v2.example/feed', 'Version two', 'Legacy', '[\"legacy\"]',
+                    1, 0, '2026-08-01T00:00:00Z', '2026-08-09T00:00:00Z'
+                );
+                ",
+            )
+            .unwrap();
+    }
+
     #[test]
     fn opening_a_future_schema_version_is_rejected_without_mutation() {
         let temp = tempfile::tempdir().unwrap();
@@ -1279,7 +1324,7 @@ mod tests {
             error,
             FeedStoreError::UnsupportedSchemaVersion {
                 found: 99,
-                current: 2
+                current: 3
             }
         ));
 
@@ -1305,6 +1350,38 @@ mod tests {
         assert_eq!(version, 99);
         assert_eq!(sentinel, "preserve-me");
         assert!(feed_table.is_none());
+    }
+
+    #[tokio::test]
+    async fn version_two_migration_adds_fetch_url_without_changing_manifest_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("feeds.db");
+        create_version_two_database(&path);
+
+        let store = FeedStoreHandle::open(&path).unwrap();
+        let feed = store.list_feeds().await.unwrap().remove(0);
+
+        assert_eq!(feed.id, 42);
+        assert_eq!(feed.url, "https://v2.example/feed");
+        assert_eq!(feed.fetch_url, None);
+        drop(store);
+        let connection = Connection::open(path).unwrap();
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let fetch_url_column: i64 = connection
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM pragma_table_info('feed')
+                WHERE name = 'fetch_url' AND type = 'TEXT'
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 3);
+        assert_eq!(fetch_url_column, 1);
     }
 
     #[tokio::test]
@@ -1364,7 +1441,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         assert_eq!(stored_group, "");
         assert_eq!(group_not_null, 1);
     }
@@ -2008,6 +2085,45 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn canonical_fetch_url_persists_without_replacing_manifest_identity() {
+        let (store, temp) = open_test_store().await;
+        let manifest_url = "https://redirector.example/subscription";
+        let canonical_url = "https://feeds.example/canonical.xml";
+        let feed_id = add_feed(&store, manifest_feed(manifest_url, "News", &[])).await;
+        store
+            .apply_fetch(
+                feed_id,
+                FetchOutcome::Success {
+                    fetched_at: ts("2026-08-09T11:00:00Z"),
+                    next_fetch_at: ts("2026-08-09T11:30:00Z"),
+                    fetch_url: canonical_url.to_owned(),
+                    etag: Some("\"canonical-v1\"".to_owned()),
+                    last_modified: None,
+                    title: Some("Canonical feed".to_owned()),
+                    site_url: Some("https://feeds.example/".to_owned()),
+                    entries: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        store
+            .reconcile(vec![manifest_feed(manifest_url, "Renamed group", &[])])
+            .await
+            .unwrap();
+        let stored = store.list_feeds().await.unwrap().remove(0);
+        assert_eq!(stored.url, manifest_url);
+        assert_eq!(stored.fetch_url.as_deref(), Some(canonical_url));
+        assert_eq!(stored.etag.as_deref(), Some("\"canonical-v1\""));
+
+        drop(store);
+        let reopened = FeedStoreHandle::open(&temp.path().join("feeds.db")).unwrap();
+        let stored = reopened.list_feeds().await.unwrap().remove(0);
+        assert_eq!(stored.url, manifest_url);
+        assert_eq!(stored.fetch_url.as_deref(), Some(canonical_url));
     }
 
     #[tokio::test]

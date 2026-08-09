@@ -25,6 +25,7 @@ use chrono::{DateTime, Utc};
 pub struct FeedSummary {
     pub id: i64,
     pub url: String,
+    pub fetch_url: Option<String>,
     pub site_url: Option<String>,
     pub title: String,
     pub title_override: Option<String>,
@@ -57,6 +58,7 @@ pub enum FetchOutcome {
     Success {
         fetched_at: DateTime<Utc>,
         next_fetch_at: DateTime<Utc>,
+        fetch_url: String,
         etag: Option<String>,
         last_modified: Option<String>,
         title: Option<String>,

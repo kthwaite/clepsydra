@@ -92,7 +92,7 @@ pub async fn fetch_feed(
     fetch_interval: Duration,
     max_entry_content_bytes: usize,
 ) -> Result<FetchOutcome, FetchError> {
-    let url = parse_url(&feed.url)?;
+    let url = parse_url(feed.fetch_url.as_deref().unwrap_or(&feed.url))?;
     let conditional = ConditionalRequest {
         etag: feed.etag.clone(),
         last_modified: feed.last_modified.clone(),
@@ -109,6 +109,7 @@ pub async fn fetch_feed(
         });
     }
     ensure_success(response.status)?;
+    let fetch_url = response.final_url.to_string();
 
     let etag = response_header(&response.headers, &ETAG);
     let last_modified = response_header(&response.headers, &LAST_MODIFIED);
@@ -130,6 +131,7 @@ pub async fn fetch_feed(
     Ok(FetchOutcome::Success {
         fetched_at,
         next_fetch_at: fetched_at + fetch_interval,
+        fetch_url,
         etag,
         last_modified,
         title: parsed.title,
@@ -371,17 +373,34 @@ fn alternate_href(
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
+    use std::sync::Arc;
 
     use chrono::{DateTime, Duration, Utc};
     use wiremock::matchers::{header, header_regex, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::feeds::network::CheckedHttpClient;
+    use crate::feeds::network::{CheckedHttpClient, HostResolver};
     use crate::feeds::types::{FeedSummary, FetchOutcome};
 
     const RSS_CONTENT_TYPE: &str = "application/rss+xml; charset=utf-8";
     const ATOM_CONTENT_TYPE: &str = "application/atom+xml; charset=utf-8";
+
+    struct MappingResolver {
+        address: SocketAddr,
+    }
+
+    impl HostResolver for MappingResolver {
+        fn resolve<'a>(
+            &'a self,
+            _host: &'a str,
+            _port: u16,
+        ) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'a>>
+        {
+            let address = self.address;
+            Box::pin(async move { Ok(vec![address]) })
+        }
+    }
 
     fn fixture_client(server: &MockServer, max_response_bytes: usize) -> CheckedHttpClient {
         CheckedHttpClient::for_test(
@@ -404,6 +423,7 @@ mod tests {
         FeedSummary {
             id,
             url,
+            fetch_url: None,
             site_url: None,
             title: "Pending title".to_owned(),
             title_override: None,
@@ -531,7 +551,10 @@ mod tests {
             first.entries[0].guid,
             "https://publisher.example/link-fallback"
         );
-        assert!(first.entries[1].guid.starts_with("sha256:"));
+        assert_eq!(
+            first.entries[1].guid,
+            "sha256:9e808ca8822208885a4d7c0132089ed8f14d531fc43ff614187898d315d53a66"
+        );
         assert_eq!(first.entries[1].guid, second.entries[1].guid);
 
         let changed = xml.replace("Stable fallback", "Changed fallback");
@@ -636,6 +659,99 @@ mod tests {
                 etag: feed.etag.clone(),
                 last_modified: feed.last_modified.clone(),
             }
+        );
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn redirected_feed_persists_canonical_url_and_scopes_validators_to_that_origin() {
+        let server = MockServer::start().await;
+        let redirect_url = format!(
+            "http://redirect.test:{}/subscription",
+            server.address().port()
+        );
+        let canonical_url = format!("http://feed.test:{}/feed.xml", server.address().port());
+        Mock::given(method("GET"))
+            .and(path("/subscription"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("location", canonical_url.as_str()),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .and(header("if-none-match", "\"canonical-v1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .with_priority(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", RSS_CONTENT_TYPE)
+                    .insert_header("etag", "\"canonical-v1\"")
+                    .set_body_string(one_item_rss("<p>Canonical</p>")),
+            )
+            .with_priority(2)
+            .expect(1)
+            .mount(&server)
+            .await;
+        let resolver = Arc::new(MappingResolver {
+            address: *server.address(),
+        });
+        let client = CheckedHttpClient::for_test_with_resolver(16 * 1024, resolver)
+            .expect("fixture client should build");
+        let mut feed = subscription(1, redirect_url.clone());
+        let now = fetched_at();
+        let interval = Duration::minutes(30);
+
+        let first = fetch_feed(&client, &feed, now, interval, 1024)
+            .await
+            .expect("redirected feed should fetch");
+        let (effective_url, etag) = match first {
+            FetchOutcome::Success {
+                fetch_url, etag, ..
+            } => (fetch_url, etag),
+            other => panic!("redirected feed produced {other:?}"),
+        };
+        assert_eq!(effective_url, canonical_url);
+        assert_eq!(etag.as_deref(), Some("\"canonical-v1\""));
+        assert_eq!(feed.url, redirect_url, "manifest identity must not change");
+
+        feed.fetch_url = Some(effective_url);
+        feed.etag = etag;
+        let second = fetch_feed(&client, &feed, now + interval, interval, 1024)
+            .await
+            .expect("canonical feed should receive the conditional request");
+        assert!(matches!(second, FetchOutcome::NotModified { .. }));
+
+        let requests = server.received_requests().await.unwrap();
+        let redirect_requests: Vec<_> = requests
+            .iter()
+            .filter(|request| request.url.path() == "/subscription")
+            .collect();
+        assert_eq!(redirect_requests.len(), 1);
+        assert!(
+            redirect_requests[0].headers.get("if-none-match").is_none(),
+            "a final-origin validator leaked to the redirector"
+        );
+        let final_requests: Vec<_> = requests
+            .iter()
+            .filter(|request| request.url.path() == "/feed.xml")
+            .collect();
+        assert_eq!(final_requests.len(), 2);
+        assert!(final_requests[0].headers.get("if-none-match").is_none());
+        assert_eq!(
+            final_requests[1]
+                .headers
+                .get("if-none-match")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "\"canonical-v1\""
         );
         server.verify().await;
     }
