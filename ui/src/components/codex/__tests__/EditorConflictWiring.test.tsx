@@ -38,6 +38,7 @@ vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
+  useTags: () => ({ data: [] }),
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),

@@ -75,6 +75,7 @@ vi.mock("#/api/index", () => ({
   useGraph: () => ({ data: graph, isLoading: false }),
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
+  useTags: () => ({ data: [] }),
   useStats: () => ({
     data: { pages: 2, links_total: 1, last_indexed_at: null },
     isError: false,
