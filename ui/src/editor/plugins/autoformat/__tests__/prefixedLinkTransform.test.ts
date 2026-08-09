@@ -5,9 +5,10 @@ import {
   Node,
   Transforms,
 } from "slate";
-import { type HistoryEditor, withHistory } from "slate-history";
+import { withHistory } from "slate-history";
 import { describe, expect, it, vi } from "vitest";
 import { withSchema } from "../../../schema/withSchema";
+import type { CustomEditor } from "../../../types";
 import {
   tryPrefixedLinkBreakTransform,
   tryPrefixedLinkTextTransform,
@@ -192,7 +193,7 @@ describe("prefixed link break transform", () => {
 describe("prefixed link context guards", () => {
   const protectedFixtures: Array<{
     name: string;
-    create: () => HistoryEditor;
+    create: () => CustomEditor;
   }> = [
     {
       name: "an expanded selection",

@@ -59,3 +59,24 @@ Focused tests cover consumed and uninserted quoted Wiki values, bare arXiv Space
 
 - The canonical leading empty text boundary differs from the brief's illustrative child array, as documented above; retaining it is required by the existing Slate normalization invariant.
 - No broader validation was run because the assignment explicitly restricts verification to the focused Task 2 Vitest file.
+
+
+## Verification fix
+
+Controller verification exposed two `TS2345` diagnostics in the protected-context table: its factory contract was explicitly narrowed to `HistoryEditor`, discarding the project's `CustomEditor` contract (which also includes `ReactEditor`). The fixture table now imports and names the owning `CustomEditor` type. Production signatures remain unchanged and no broad cast was added.
+
+Exact verification:
+
+```text
+cd ui && bun run typecheck
+```
+
+Result: exit code 0; `tsc --noEmit --project tsconfig.app.json` reported no diagnostics.
+
+```text
+bun run --cwd ui test -- src/editor/plugins/autoformat/__tests__/prefixedLinkTransform.test.ts
+```
+
+Result: exit code 0; 1 test file passed; 25 tests passed.
+
+Formatter, lint, build, and project-wide suites were not run. The verification fix is committed as `test(ui): type prefixed link fixtures as custom editors`.
