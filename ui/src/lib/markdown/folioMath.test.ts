@@ -170,6 +170,43 @@ x
     });
   });
 
+  it("keeps a dollar preceded by an odd backslash run inside inline math", () => {
+    const source = String.raw`$a\$b$`;
+    const nodes = findMath(parse(source));
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({
+      type: "inlineMath",
+      value: String.raw`a\$b`,
+      data: {
+        folioDelimiter: "$",
+        folioSourceBody: String.raw`a\$b`,
+      },
+      position: {
+        start: { offset: 0 },
+        end: { offset: 6 },
+      },
+    });
+  });
+
+  it("treats a dollar preceded by an even backslash run as a closer", () => {
+    const nodes = findMath(parse(String.raw`$a\\$b$`));
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({
+      type: "inlineMath",
+      value: String.raw`a\\`,
+      data: {
+        folioDelimiter: "$",
+        folioSourceBody: String.raw`a\\`,
+      },
+      position: {
+        start: { offset: 0 },
+        end: { offset: 5 },
+      },
+    });
+  });
+
   it("restores inline double-dollar tokens to text", () => {
     const paragraph = parse("before $$x^2$$ after").children[0];
 
@@ -249,6 +286,44 @@ x
       value: body,
       data: { folioSourceBody: body },
     });
+  });
+
+  it("round-trips odd-parity escaped dollars with dollar delimiters", () => {
+    const source = String.raw`$a\$b$`;
+    const output = serialize(parse(source)).trimEnd();
+
+    expect(output).toBe(source);
+    expect(findMath(parse(output))).toMatchObject([
+      {
+        type: "inlineMath",
+        value: String.raw`a\$b`,
+        data: {
+          folioDelimiter: "$",
+          folioSourceBody: String.raw`a\$b`,
+        },
+      },
+    ]);
+  });
+
+  it("avoids dollar delimiters for even-parity dollar collisions", () => {
+    const body = String.raw`a\\$b`;
+    const root: Root = {
+      type: "root",
+      children: [{ type: "paragraph", children: [inlineNode(body)] }],
+    };
+
+    const output = serialize(root).trimEnd();
+    expect(output).toBe(String.raw`\(a\\$b\)`);
+    expect(findMath(parse(output))).toMatchObject([
+      {
+        type: "inlineMath",
+        value: body,
+        data: {
+          folioDelimiter: String.raw`\(`,
+          folioSourceBody: body,
+        },
+      },
+    ]);
   });
 
   it("falls back to backslash display syntax on dollar collisions", () => {

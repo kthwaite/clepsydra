@@ -7,6 +7,12 @@ import type {
   State,
 } from "mdast-util-to-markdown";
 import { math as mathSyntax } from "micromark-extension-math-extended";
+import type {
+  Code,
+  Extension,
+  State as MicromarkState,
+  Token,
+} from "micromark-util-types";
 import type { Data as ProcessorData, Plugin } from "unified";
 
 export type MathDelimiter = "$" | "$$" | "\\(" | "\\[";
@@ -150,13 +156,125 @@ function annotateMathSource(tree: Root, source: string): void {
   visit(tree as unknown as MutableParent);
 }
 
+function folioMathSyntax(): Extension {
+  const syntax = mathSyntax({
+    backslashDelimiters: true,
+    singleDollarTextMath: true,
+  });
+  const text = syntax.text;
+  const dollar = text?.[36];
+  if (!text || !dollar || Array.isArray(dollar)) return syntax;
+
+  text[36] = {
+    ...dollar,
+    tokenize(effects, ok, nok) {
+      type StateResult = MicromarkState | undefined;
+
+      let sizeOpen = 0;
+      let size = 0;
+      let backslashRun = 0;
+      let token: Token;
+
+      function start(code: Code): StateResult {
+        effects.enter("mathText");
+        effects.enter("mathTextSequence");
+        return sequenceOpen(code);
+      }
+
+      function sequenceOpen(code: Code): StateResult {
+        if (code === 36) {
+          effects.consume(code);
+          sizeOpen++;
+          return sequenceOpen;
+        }
+        effects.exit("mathTextSequence");
+        return between(code);
+      }
+
+      function between(code: Code): StateResult {
+        if (code === null) return nok(code);
+
+        if (code === 36) {
+          if (backslashRun % 2 === 1) {
+            effects.enter("mathTextData");
+            effects.consume(code);
+            backslashRun = 0;
+            return data;
+          }
+
+          token = effects.enter("mathTextSequence");
+          size = 0;
+          return sequenceClose(code);
+        }
+
+        backslashRun = 0;
+        if (code === 32) {
+          effects.enter("space");
+          effects.consume(code);
+          effects.exit("space");
+          return between;
+        }
+        if (code < -2) {
+          effects.enter("lineEnding");
+          effects.consume(code);
+          effects.exit("lineEnding");
+          return between;
+        }
+
+        effects.enter("mathTextData");
+        return data(code);
+      }
+
+      function data(code: Code): StateResult {
+        if (
+          code === null ||
+          code === 32 ||
+          code === 36 ||
+          (code !== null && code < -2)
+        ) {
+          effects.exit("mathTextData");
+          return between(code);
+        }
+
+        backslashRun = code === 92 ? backslashRun + 1 : 0;
+        effects.consume(code);
+        return data;
+      }
+
+      function sequenceClose(code: Code): StateResult {
+        if (code === 36) {
+          effects.consume(code);
+          size++;
+          return sequenceClose;
+        }
+        if (size === sizeOpen) {
+          effects.exit("mathTextSequence");
+          effects.exit("mathText");
+          return ok(code);
+        }
+
+        token.type = "mathTextData";
+        backslashRun = 0;
+        return data(code);
+      }
+
+      return start;
+    },
+  };
+  return syntax;
+}
+
+function hasOddBackslashRunBefore(value: string, index: number): boolean {
+  let count = 0;
+  while (index > 0 && value[--index] === "\\") count++;
+  return count % 2 === 1;
+}
+
 export const remarkFolioMath: Plugin<[], Root> = function () {
   const data = this.data() as ProcessorData & {
     toMarkdownExtensions?: Options[];
   };
-  (data.micromarkExtensions ??= []).push(
-    mathSyntax({ backslashDelimiters: true, singleDollarTextMath: true }),
-  );
+  (data.micromarkExtensions ??= []).push(folioMathSyntax());
   (data.fromMarkdownExtensions ??= []).push(mathFromMarkdown());
   (data.toMarkdownExtensions ??= []).push(folioMathToMarkdown());
 
@@ -184,7 +302,8 @@ function hasInlineDollarCollision(value: string): boolean {
     if (
       value[index] === "$" &&
       value[index - 1] !== "$" &&
-      value[index + 1] !== "$"
+      value[index + 1] !== "$" &&
+      !hasOddBackslashRunBefore(value, index)
     ) {
       return true;
     }
