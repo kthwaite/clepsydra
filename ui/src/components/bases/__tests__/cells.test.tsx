@@ -1,24 +1,63 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { PropertyDefinition } from "#/api/bases";
 import { EditableCell } from "#/components/bases/EditableCell";
 
-function renderCell(
-  value: Parameters<typeof EditableCell>[0]["value"],
-  definition: PropertyDefinition,
-) {
-  const onCommit = vi.fn();
-  render(
-    <EditableCell value={value} definition={definition} onCommit={onCommit} />,
+type EditableProps = Parameters<typeof EditableCell>[0];
+
+interface CellHarnessProps {
+  value: EditableProps["value"];
+  definition: PropertyDefinition;
+  onCommit: EditableProps["onCommit"];
+  onCommitNext: EditableProps["onCommitNext"];
+}
+
+function CellHarness({
+  value,
+  definition,
+  onCommit,
+  onCommitNext,
+}: CellHarnessProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  return (
+    <EditableCell
+      value={value}
+      definition={definition}
+      isEditing={isEditing}
+      onEdit={() => setIsEditing(true)}
+      onCancel={() => setIsEditing(false)}
+      onCommit={(next, hint) => {
+        setIsEditing(false);
+        onCommit(next, hint);
+      }}
+      onCommitNext={(next, hint) => {
+        onCommitNext(next, hint);
+        setIsEditing(false);
+      }}
+    />
   );
-  return onCommit;
+}
+
+function renderCell(value: EditableProps["value"], definition: PropertyDefinition) {
+  const onCommit = vi.fn();
+  const onCommitNext = vi.fn();
+  render(
+    <CellHarness
+      value={value}
+      definition={definition}
+      onCommit={onCommit}
+      onCommitNext={onCommitNext}
+    />,
+  );
+  return { onCommit, onCommitNext };
 }
 
 describe("cell editors", () => {
   it("number cell rejects a non-numeric commit and accepts a numeric one", async () => {
     const user = userEvent.setup();
-    const onCommit = renderCell(9, { type: "number" });
+    const { onCommit } = renderCell(9, { type: "number" });
     await user.click(screen.getByRole("button", { name: "9" }));
     const input = screen.getByRole("textbox", { name: "Edit number" });
 
@@ -33,7 +72,7 @@ describe("cell editors", () => {
 
   it("select cell offers the declared options", async () => {
     const user = userEvent.setup();
-    const onCommit = renderCell("queued", {
+    const { onCommit } = renderCell("queued", {
       type: "select",
       options: ["queued", "reading", "finished"],
     });
@@ -51,7 +90,7 @@ describe("cell editors", () => {
 
   it("date cell commits the ISO value with a types hint", async () => {
     const user = userEvent.setup();
-    const onCommit = renderCell("2026-07-30", { type: "date" });
+    const { onCommit } = renderCell("2026-07-30", { type: "date" });
     await user.click(screen.getByRole("button", { name: "2026-07-30" }));
     const input = screen.getByLabelText("Edit date");
     await user.clear(input);
@@ -62,7 +101,7 @@ describe("cell editors", () => {
 
   it("escape reverts to the display state without committing", async () => {
     const user = userEvent.setup();
-    const onCommit = renderCell("Gene Wolfe", { type: "text" });
+    const { onCommit } = renderCell("Gene Wolfe", { type: "text" });
     await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
     const input = screen.getByRole("textbox", { name: "Edit text" });
     await user.clear(input);
@@ -75,7 +114,7 @@ describe("cell editors", () => {
 
   it("multi-select preserves the existing array when toggling a value", async () => {
     const user = userEvent.setup();
-    const onCommit = renderCell(["memory", "identity"], {
+    const { onCommit } = renderCell(["memory", "identity"], {
       type: "multi_select",
       options: ["memory", "identity", "style", "grief"],
     });
@@ -94,7 +133,9 @@ describe("cell editors", () => {
 
   it("datetime edit preserves the time component and zone suffix", async () => {
     const user = userEvent.setup();
-    const onCommit = renderCell("2026-08-06T14:30:00Z", { type: "datetime" });
+    const { onCommit } = renderCell("2026-08-06T14:30:00Z", {
+      type: "datetime",
+    });
     await user.click(
       screen.getByRole("button", { name: "2026-08-06T14:30:00Z" }),
     );
@@ -111,9 +152,10 @@ describe("cell editors", () => {
       vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
     );
     const user = userEvent.setup();
-    const onCommit = renderCell(["[[Solar Cycle]]", "[[Book of Days]]"], {
-      type: "relation",
-    });
+    const { onCommit } = renderCell(
+      ["[[Solar Cycle]]", "[[Book of Days]]"],
+      { type: "relation" },
+    );
     await user.click(
       screen.getByRole("button", { name: "[[Solar Cycle]], [[Book of Days]]" }),
     );
@@ -137,12 +179,116 @@ describe("cell editors", () => {
       }),
     );
     const user = userEvent.setup();
-    const onCommit = renderCell(["[[Solar Cycle]]"], { type: "relation" });
+    const { onCommit } = renderCell(["[[Solar Cycle]]"], { type: "relation" });
     await user.click(screen.getByRole("button", { name: "[[Solar Cycle]]" }));
     const input = screen.getByRole("combobox", { name: "Edit relation" });
     await user.clear(input);
     await user.type(input, "Lunar Cycle{Enter}");
     expect(onCommit).toHaveBeenCalledWith(["[[Lunar Cycle]]"], undefined);
+    vi.unstubAllGlobals();
+  });
+
+  it("bool cell commits its current value with Tab through onCommitNext", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell(true, { type: "bool" });
+    await user.click(screen.getByRole("button", { name: "true" }));
+    const select = screen.getByRole("combobox", { name: "Edit boolean" });
+
+    fireEvent.keyDown(select, { key: "Tab" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledWith(true, undefined);
+  });
+
+  it("select cell commits its current value with Tab through onCommitNext", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell("queued", {
+      type: "select",
+      options: ["queued", "reading"],
+    });
+    await user.click(screen.getByRole("button", { name: "queued" }));
+    const select = screen.getByRole("combobox", { name: "Edit select" });
+
+    fireEvent.keyDown(select, { key: "Tab" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledWith("queued", undefined);
+  });
+
+  it("date cell commits its draft and type hint with Tab through onCommitNext", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell("2026-07-30", {
+      type: "date",
+    });
+    await user.click(screen.getByRole("button", { name: "2026-07-30" }));
+    const input = screen.getByLabelText("Edit date");
+    fireEvent.change(input, { target: { value: "2026-08-06" } });
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledWith("2026-08-06", "date");
+  });
+
+  it("datetime cell preserves its zone suffix when committing with Tab", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell(
+      "2026-08-06T14:30:00Z",
+      { type: "datetime" },
+    );
+    await user.click(
+      screen.getByRole("button", { name: "2026-08-06T14:30:00Z" }),
+    );
+    const input = screen.getByLabelText("Edit datetime");
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledWith(
+      "2026-08-06T14:30:00Z",
+      "datetime",
+    );
+  });
+
+  it("multi-select cell commits its complete selection with Tab", async () => {
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell(["memory", "identity"], {
+      type: "multi_select",
+      options: ["memory", "identity", "style"],
+    });
+    await user.click(screen.getByRole("button", { name: "memory, identity" }));
+    const select = screen.getByRole("listbox", { name: "Edit multi-select" });
+    await user.selectOptions(select, "style");
+
+    fireEvent.keyDown(select, { key: "Tab" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledWith(
+      ["memory", "identity", "style"],
+      undefined,
+    );
+  });
+
+  it("relation cell serializes every target when committing with Tab", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+    );
+    const user = userEvent.setup();
+    const { onCommit, onCommitNext } = renderCell(["[[Solar Cycle]]"], {
+      type: "relation",
+    });
+    await user.click(screen.getByRole("button", { name: "[[Solar Cycle]]" }));
+    const input = screen.getByRole("combobox", { name: "Edit relation" });
+    fireEvent.change(input, { target: { value: "Lunar Cycle, Book of Days" } });
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCommitNext).toHaveBeenCalledWith(
+      ["[[Lunar Cycle]]", "[[Book of Days]]"],
+      undefined,
+    );
     vi.unstubAllGlobals();
   });
 });
