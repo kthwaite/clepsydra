@@ -27,6 +27,7 @@ const NAV: ReadonlyArray<readonly [CodexView, string]> = [
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
   ["tasking", "TASKING"],
+  ["academic", "ACADEMIC"],
   ["bases", "BASES"],
   ["docs", "DOCS"],
 ];
@@ -53,6 +54,7 @@ export function DesktopCodexFrame({
   const onNav = (target: CodexView) => {
     if (target === "atrium") navigate({ to: "/" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
+    else if (target === "academic") navigate({ to: "/academic" });
     else if (target === "bases") navigate({ to: "/bases" });
     else if (target === "docs") {
       navigate({
@@ -156,7 +158,7 @@ export function DesktopCodexFrame({
                 : "text-ink-mute hover:text-ink",
             )}
           >
-            <span className="text-[9px] text-ink-mute">07</span>
+            <span className="text-[9px] text-ink-mute">08</span>
             <span className="text-[10px]">STATUS</span>
           </button>
           <button
@@ -173,6 +175,7 @@ export function DesktopCodexFrame({
 
       {/* ── SHEAF — hidden on ATRIUM, CONSTELLATION, and DOCS ──────── */}
       {view !== "atrium" &&
+        view !== "academic" &&
         view !== "bases" &&
         view !== "constellation" &&
         view !== "docs" && (
@@ -234,6 +237,7 @@ function useFolioCode(view: CodexView): string {
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
   if (view === "tasking") return "TASKING";
+  if (view === "academic") return "ACADEMIC";
   if (view === "bases") return "BASES";
   if (view === "docs") return "DOC-001";
   const active = tabs.find((t) => t.id === activeTabId);

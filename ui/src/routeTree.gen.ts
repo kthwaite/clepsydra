@@ -16,6 +16,7 @@ import { Route as GraphRouteImport } from './routes/graph'
 import { Route as GazetteerRouteImport } from './routes/gazetteer'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as AcademicRouteImport } from './routes/academic'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BasesIndexRouteImport } from './routes/bases.index'
 import { Route as PagesSplatRouteImport } from './routes/pages/$'
@@ -58,6 +59,11 @@ const AgendaRoute = AgendaRouteImport.update({
   path: '/agenda',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AcademicRoute = AcademicRouteImport.update({
+  id: '/academic',
+  path: '/academic',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -91,6 +97,7 @@ const BasesSlugEditRoute = BasesSlugEditRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
   '/gazetteer': typeof GazetteerRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
   '/gazetteer': typeof GazetteerRoute
@@ -122,6 +130,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
   '/gazetteer': typeof GazetteerRoute
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/academic'
     | '/agenda'
     | '/docs'
     | '/gazetteer'
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/academic'
     | '/agenda'
     | '/docs'
     | '/gazetteer'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/academic'
     | '/agenda'
     | '/docs'
     | '/gazetteer'
@@ -185,6 +197,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AcademicRoute: typeof AcademicRoute
   AgendaRoute: typeof AgendaRoute
   DocsRoute: typeof DocsRouteWithChildren
   GazetteerRoute: typeof GazetteerRoute
@@ -246,6 +259,13 @@ declare module '@tanstack/react-router' {
       path: '/agenda'
       fullPath: '/agenda'
       preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/academic': {
+      id: '/academic'
+      path: '/academic'
+      fullPath: '/academic'
+      preLoaderRoute: typeof AcademicRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -317,6 +337,7 @@ const BasesSlugRouteWithChildren = BasesSlugRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AcademicRoute: AcademicRoute,
   AgendaRoute: AgendaRoute,
   DocsRoute: DocsRouteWithChildren,
   GazetteerRoute: GazetteerRoute,

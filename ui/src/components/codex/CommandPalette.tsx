@@ -75,7 +75,6 @@ function CommandPaletteContent() {
     }
   }, [open]);
 
-
   const verbCommands = useMemo<Command[]>(
     () => [
       {
@@ -115,6 +114,12 @@ function CommandPaletteContent() {
         id: "nav.bases",
         title: "Open Bases",
         action: () => navigate({ to: "/bases" }),
+      },
+      {
+        kind: "cmd",
+        id: "nav.academic",
+        title: "Open Academic Library",
+        action: () => navigate({ to: "/academic" }),
       },
       {
         kind: "cmd",

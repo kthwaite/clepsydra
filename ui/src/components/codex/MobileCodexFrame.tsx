@@ -11,12 +11,13 @@ import { useWorkspaceStore } from "#/store/workspace";
 
 type MobileRoot = Extract<
   CodexView,
-  "atrium" | "gazetteer" | "bases" | "constellation"
+  "atrium" | "gazetteer" | "academic" | "bases" | "constellation"
 >;
 
 const ROOTS: ReadonlyArray<readonly [MobileRoot, string]> = [
   ["atrium", "Atrium"],
   ["gazetteer", "Gazetteer"],
+  ["academic", "Academic"],
   ["bases", "Bases"],
   ["constellation", "Constellation"],
 ];
@@ -37,6 +38,8 @@ export function MobileCodexFrame({
       navigate({ to: "/" });
     } else if (root === "gazetteer") {
       navigate({ to: "/gazetteer" });
+    } else if (root === "academic") {
+      navigate({ to: "/academic" });
     } else if (root === "bases") {
       navigate({ to: "/bases" });
     } else {

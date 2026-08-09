@@ -6,6 +6,7 @@ export type CodexView =
   | "gazetteer"
   | "constellation"
   | "tasking"
+  | "academic"
   | "bases"
   | "docs";
 
@@ -17,6 +18,8 @@ export function resolveCodexView(
   if (pathname === "/" || pathname === "") return "atrium";
   if (pathname === "/docs" || pathname.startsWith("/docs/")) return "docs";
   if (pathname === "/bases" || pathname.startsWith("/bases/")) return "bases";
+  if (pathname === "/academic" || pathname.startsWith("/academic/"))
+    return "academic";
   if (pathname.startsWith("/gazetteer")) return "gazetteer";
   if (pathname.startsWith("/tasking")) return "tasking";
   if (pathname.startsWith("/workspace")) {
