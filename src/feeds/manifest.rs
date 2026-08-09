@@ -1,3 +1,4 @@
+use reqwest::Url;
 use std::collections::HashSet;
 
 pub use super::types::{Manifest, ManifestFeed, ManifestWarning};
@@ -71,6 +72,12 @@ pub fn add_feed(
         return Err(format!(
             "feed was added to the wrong group: {}",
             added.group
+        ));
+    }
+    if added.title_override.as_deref() != title_override {
+        return Err(format!(
+            "feed was added with the wrong title override: {:?}",
+            added.title_override
         ));
     }
 
@@ -174,7 +181,7 @@ fn parse_document(text: &str) -> ParsedDocument<'_> {
         let (content, item_tags) = split_trailing_tags(list_item.content);
         let item_tags = deduplicate_tags(item_tags);
         let Some((url, title_override)) = parse_item(&content) else {
-            if content.contains("://") {
+            if looks_like_feed_item(&content) {
                 manifest.warnings.push(ManifestWarning {
                     line: line.number,
                     message: format!("malformed feed item: {content}"),
@@ -282,17 +289,38 @@ fn list_item(line: &str) -> Option<ListItem<'_>> {
 }
 
 fn split_trailing_tags(text: &str) -> (String, Vec<String>) {
-    let mut tokens: Vec<&str> = text.split_whitespace().collect();
+    let mut prefix_end = text.len();
+    let mut scan_end = text.len();
     let mut tags = Vec::new();
-    while let Some(token) = tokens.last().copied() {
+
+    loop {
+        let candidate = text[..scan_end].trim_end();
+        let Some((token_start, token)) = trailing_token(candidate) else {
+            break;
+        };
         let Some(tag) = tag_token(token) else {
             break;
         };
         tags.push(tag.to_string());
-        tokens.pop();
+        prefix_end = candidate[..token_start].trim_end().len();
+        scan_end = prefix_end;
     }
+
     tags.reverse();
-    (tokens.join(" "), tags)
+    (text[..prefix_end].to_string(), tags)
+}
+
+fn trailing_token(text: &str) -> Option<(usize, &str)> {
+    if text.is_empty() {
+        return None;
+    }
+    let start = text
+        .char_indices()
+        .rev()
+        .find(|(_, character)| character.is_whitespace())
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    Some((start, &text[start..]))
 }
 
 fn tag_token(token: &str) -> Option<&str> {
@@ -337,10 +365,17 @@ fn parse_item(content: &str) -> Option<(String, Option<String>)> {
 }
 
 fn is_http_url(url: &str) -> bool {
-    let remainder = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"));
-    remainder.is_some_and(|value| !value.is_empty() && !url.chars().any(char::is_whitespace))
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
+}
+
+fn looks_like_feed_item(content: &str) -> bool {
+    let content = content.trim();
+    content.contains("://")
+        || (content.starts_with('[') && content.contains("]("))
+        || (content.starts_with('<') && content.ends_with('>'))
 }
 
 fn validate_url(url: &str) -> Result<(), String> {
@@ -643,5 +678,160 @@ mod tests {
                 "missing preserved prose: {prose:?}"
             );
         }
+    }
+
+    #[test]
+    fn feed_shaped_malformed_links_warn_on_their_exact_lines() {
+        let parsed = parse("## Tech\n\n- [Broken]()\n- <not-a-url>\n");
+
+        assert!(parsed.feeds.is_empty());
+        assert_eq!(parsed.warnings.len(), 2);
+        assert_eq!(parsed.warnings[0].line, 3);
+        assert_eq!(parsed.warnings[1].line, 4);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .all(|warning| warning.message.to_ascii_lowercase().contains("malformed"))
+        );
+    }
+
+    #[test]
+    fn warning_bearing_source_is_rejected_by_every_transform_candidate() {
+        let source = "## Tech\n\n- [Broken]()\n- https://one.example/feed #personal\n\n## Other\n";
+
+        assert!(add_feed(source, "Other", "https://two.example/feed", None, &[],).is_err());
+        assert!(update_feed(source, "https://one.example/feed", "Other", Some("One"),).is_err());
+        assert!(remove_feed(source, "https://one.example/feed").is_err());
+    }
+
+    #[test]
+    fn http_urls_without_hosts_are_rejected_by_the_url_contract() {
+        let parsed = parse("## Tech\n\n- https://?query\n- http://#fragment\n");
+
+        assert!(parsed.feeds.is_empty());
+        assert_eq!(
+            parsed
+                .warnings
+                .iter()
+                .map(|warning| warning.line)
+                .collect::<Vec<_>>(),
+            [3, 4]
+        );
+        for url in ["https://?query", "http://#fragment"] {
+            assert!(add_feed("", "Tech", url, None, &[]).is_err());
+        }
+    }
+
+    #[test]
+    fn repeated_title_and_group_whitespace_round_trips_exactly() {
+        let source = "## Research  and\tDevelopment #reading\n\n- [A  title\twith spacing](https://one.example/feed) #personal\n";
+        let parsed = parse(source);
+
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(parsed.feeds[0].group, "Research  and\tDevelopment");
+        assert_eq!(
+            parsed.feeds[0].title_override.as_deref(),
+            Some("A  title\twith spacing")
+        );
+
+        let candidate = add_feed(
+            "",
+            "Tech",
+            "https://two.example/feed",
+            Some("Another  title\twith spacing"),
+            &[],
+        )
+        .unwrap();
+        let added = parse(&candidate);
+        assert_eq!(
+            added.feeds[0].title_override.as_deref(),
+            Some("Another  title\twith spacing")
+        );
+    }
+
+    #[test]
+    fn add_feed_has_exact_outputs_for_empty_existing_and_missing_groups() {
+        assert_eq!(
+            add_feed("", "Tech", "https://one.example/feed", None, &[]).unwrap(),
+            "## Tech\n\n- https://one.example/feed\n"
+        );
+
+        let toml_source = "+++\nid = 'x'\n+++\n\nIntro.\n\n## Tech\n\nParagraph.\n";
+        let toml_expected =
+            "+++\nid = 'x'\n+++\n\nIntro.\n\n## Tech\n\n- https://one.example/feed\nParagraph.\n";
+        assert_eq!(
+            add_feed(toml_source, "Tech", "https://one.example/feed", None, &[],).unwrap(),
+            toml_expected
+        );
+
+        let yaml_without_final_newline = "---\r\nid: x\r\n---\r\n\r\nIntro.";
+        let yaml_missing_group_expected = "---\r\nid: x\r\n---\r\n\r\nIntro.\r\n\r\n## New\r\n\r\n- [One](https://one.example/feed) #personal\r\n";
+        assert_eq!(
+            add_feed(
+                yaml_without_final_newline,
+                "New",
+                "https://one.example/feed",
+                Some("One"),
+                &["#personal"],
+            )
+            .unwrap(),
+            yaml_missing_group_expected
+        );
+
+        let populated_without_final_newline = "## Tech\r\n\r\n- https://old.example/feed";
+        let populated_expected =
+            "## Tech\r\n\r\n- https://old.example/feed\r\n- https://one.example/feed\r\n";
+        assert_eq!(
+            add_feed(
+                populated_without_final_newline,
+                "Tech",
+                "https://one.example/feed",
+                None,
+                &[],
+            )
+            .unwrap(),
+            populated_expected
+        );
+    }
+
+    #[test]
+    fn update_feed_has_exact_lf_and_crlf_outputs() {
+        let same_group_source = "+++\nid = 'x'\n+++\n\n## Tech\n\nPrefix.\n\t* https://one.example/feed #personal\nSuffix.";
+        let same_group_expected = "+++\nid = 'x'\n+++\n\n## Tech\n\nPrefix.\n\t* [One  Feed](https://one.example/feed) #personal\nSuffix.";
+        assert_eq!(
+            update_feed(
+                same_group_source,
+                "https://one.example/feed",
+                "Tech",
+                Some("One  Feed"),
+            )
+            .unwrap(),
+            same_group_expected
+        );
+
+        let move_source = "---\r\nid: x\r\n---\r\n\r\nIntro.\r\n\r\n## Old #legacy\r\n\r\n- https://one.example/feed #personal\r\nOld prose.\r\n\r\n## New #current\r\n\r\n- https://two.example/feed\r\nNew prose.";
+        let move_expected = "---\r\nid: x\r\n---\r\n\r\nIntro.\r\n\r\n## Old #legacy\r\n\r\nOld prose.\r\n\r\n## New #current\r\n\r\n- https://two.example/feed\r\n- [One](https://one.example/feed) #personal\r\nNew prose.";
+        assert_eq!(
+            update_feed(move_source, "https://one.example/feed", "New", Some("One"),).unwrap(),
+            move_expected
+        );
+    }
+
+    #[test]
+    fn remove_feed_has_exact_lf_and_crlf_outputs_without_rebuilding_documents() {
+        let toml_source = "+++\nid = 'x'\n+++\n\n## Tech\n\nBefore.\n- [One](https://one.example/feed) #one\n- [Two](https://two.example/feed) #two\nAfter.\n";
+        let toml_expected = "+++\nid = 'x'\n+++\n\n## Tech\n\nBefore.\n- [Two](https://two.example/feed) #two\nAfter.\n";
+        assert_eq!(
+            remove_feed(toml_source, "https://one.example/feed").unwrap(),
+            toml_expected
+        );
+
+        let yaml_without_final_newline = "---\r\nid: x\r\n---\r\n\r\n## Tech\r\n\r\n- https://one.example/feed\r\n- https://two.example/feed";
+        let yaml_expected = "---\r\nid: x\r\n---\r\n\r\n## Tech\r\n\r\n- https://two.example/feed";
+        assert_eq!(
+            remove_feed(yaml_without_final_newline, "https://one.example/feed",).unwrap(),
+            yaml_expected
+        );
     }
 }
