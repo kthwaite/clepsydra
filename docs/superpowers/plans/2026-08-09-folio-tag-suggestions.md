@@ -63,7 +63,7 @@ Also assert the list is absent for empty input and for a `TagInput` without `sug
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/ui/__tests__/tag-input.test.tsx
+bun run --cwd ui test -- src/components/ui/__tests__/tag-input.test.tsx
 ```
 
 Expected: FAIL because `suggestions` is not a `TagInputProps` field and the textbox has no combobox/listbox semantics.
@@ -224,7 +224,7 @@ Keep blur behavior as: commit any raw draft, then call `onBlur` once.
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/ui/__tests__/tag-input.test.tsx
+bun run --cwd ui test -- src/components/ui/__tests__/tag-input.test.tsx
 ```
 
 Expected: all `TagInput` tests PASS, including pre-existing chip, remove, blur, comma, raw Enter, Backspace, and read-only-tag tests.
@@ -279,7 +279,7 @@ it("offers vault suggestions only for tags", async () => {
 Run:
 
 ```bash
-bun --cwd ui run test -- src/editor/__tests__/PageEditorHeader.test.tsx
+bun run --cwd ui test -- src/editor/__tests__/PageEditorHeader.test.tsx
 ```
 
 Expected: FAIL because `PageEditorHeaderProps` does not accept or forward `tagSuggestions`.
@@ -344,7 +344,7 @@ it("suggests indexed tags while editing folio tags", async () => {
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/codex/__tests__/Folio.test.tsx
+bun run --cwd ui test -- src/components/codex/__tests__/Folio.test.tsx
 ```
 
 Expected: FAIL because `Folio` does not call `useTags` or provide tag suggestions.
@@ -370,7 +370,7 @@ Pass `tagSuggestions={tagSuggestions}` to `PageEditorHeader`. An undefined tag i
 Run:
 
 ```bash
-bun --cwd ui run test -- src/editor/__tests__/PageEditorHeader.test.tsx src/components/codex/__tests__/Folio.test.tsx
+bun run --cwd ui test -- src/editor/__tests__/PageEditorHeader.test.tsx src/components/codex/__tests__/Folio.test.tsx
 ```
 
 Expected: both files PASS; existing title, lock, derived journal tag, invalid-folio, and mobile behavior remain green.
@@ -396,7 +396,7 @@ git commit -m "feat(ui): suggest indexed tags in folios"
 - [ ] **Step 1: Run the complete UI test suite**
 
 ```bash
-bun --cwd ui run test
+bun run --cwd ui test
 ```
 
 Expected: PASS.
@@ -404,8 +404,8 @@ Expected: PASS.
 - [ ] **Step 2: Run required static verification gates**
 
 ```bash
-bun --cwd ui run typecheck
-bun --cwd ui run lint
+bun run --cwd ui typecheck
+bun run --cwd ui lint
 ```
 
 Expected: both commands PASS with no diagnostics.
@@ -413,7 +413,7 @@ Expected: both commands PASS with no diagnostics.
 - [ ] **Step 3: Build the production UI**
 
 ```bash
-bun --cwd ui run build
+bun run --cwd ui build
 ```
 
 Expected: TypeScript build and Vite production build PASS.
@@ -424,7 +424,7 @@ Start the backend and Vite frontend in separate supervised terminals:
 
 ```bash
 cargo run -- serve
-bun --cwd ui run dev
+bun run --cwd ui dev
 ```
 
 Open the Vite URL (normally `http://127.0.0.1:5173`) in a real browser. In a real folio:
