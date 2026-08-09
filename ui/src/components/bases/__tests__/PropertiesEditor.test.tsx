@@ -403,6 +403,31 @@ describe("PropertiesEditor", () => {
       expect.objectContaining({ path: "properties" }),
     ]);
   });
+  it("closes the invalid rename session before opening another row", async () => {
+    const user = userEvent.setup();
+    const onDiagnosticsChange = vi.fn();
+    const alpha = property("alpha", "text");
+    const beta = property("beta", "text");
+    renderProperties({
+      properties: [alpha, beta],
+      persistedPropertyIds: new Set([alpha.id, beta.id]),
+      onDiagnosticsChange,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Rename alpha" }));
+    await user.type(screen.getByLabelText("New key for alpha"), "title");
+    await user.click(
+      screen.getByRole("button", { name: "Review rename alpha" }),
+    );
+    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: "properties.alpha" }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Rename beta" }));
+    expect(screen.queryByLabelText("New key for alpha")).toBeNull();
+    expect(screen.getByLabelText("New key for beta")).toBeInTheDocument();
+    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([]);
+  });
 
   it("lists system fields as read-only reference", () => {
     renderProperties();

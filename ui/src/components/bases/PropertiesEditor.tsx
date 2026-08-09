@@ -106,6 +106,7 @@ export function PropertiesEditor({
     propertyKey: string;
     message: string;
   }>();
+  const [activeRenameId, setActiveRenameId] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<DraftProperty>();
   const [pendingRename, setPendingRename] = useState<PendingRename>();
   const newKeyInput = useRef<HTMLInputElement>(null);
@@ -184,6 +185,7 @@ export function PropertiesEditor({
       setPendingRename({ property, key });
       return;
     }
+    setActiveRenameId(undefined);
     onChange(
       properties.map((current) =>
         current.id === property.id
@@ -306,6 +308,7 @@ export function PropertiesEditor({
               index={index}
               count={properties.length}
               persisted={persistedPropertyIds.has(property.id)}
+              renaming={activeRenameId === property.id}
               renameError={
                 renameDiagnostic?.propertyId === property.id
                   ? renameDiagnostic.message
@@ -315,12 +318,18 @@ export function PropertiesEditor({
               onMove={(from, to) => onChange(moveItem(properties, from, to))}
               onRemove={removeProperty}
               onRename={requestRename}
-              onStartRename={() => setRenameDiagnostic(undefined)}
-              onCancelRename={() =>
+              onStartRename={() => {
+                setActiveRenameId(property.id);
+                setRenameDiagnostic(undefined);
+              }}
+              onCancelRename={() => {
+                setActiveRenameId((current) =>
+                  current === property.id ? undefined : current,
+                );
                 setRenameDiagnostic((current) =>
                   current?.propertyId === property.id ? undefined : current,
-                )
-              }
+                );
+              }}
               registerFocus={registerFocus}
             />
           ))}
@@ -418,6 +427,7 @@ export function PropertiesEditor({
                       : property,
                   ),
                 );
+                setActiveRenameId(undefined);
                 setPendingRename(undefined);
               }}
             >

@@ -47,6 +47,7 @@ export interface PropertyDefinitionEditorProps {
   index: number;
   count: number;
   persisted: boolean;
+  renaming: boolean;
   renameError?: string;
   onChange(property: DraftProperty): void;
   onMove(from: number, to: number): void;
@@ -237,6 +238,7 @@ export function PropertyDefinitionEditor({
   index,
   count,
   persisted,
+  renaming,
   renameError,
   onChange,
   onMove,
@@ -246,7 +248,6 @@ export function PropertyDefinitionEditor({
   onCancelRename,
   registerFocus,
 }: PropertyDefinitionEditorProps) {
-  const [renaming, setRenaming] = useState(false);
   const [renameKey, setRenameKey] = useState("");
 
   function handleKeyboardMove(event: KeyboardEvent<HTMLElement>) {
@@ -313,9 +314,8 @@ export function PropertyDefinitionEditor({
             size="sm"
             variant="ghost"
             onPress={() => {
-              onStartRename(property);
               setRenameKey("");
-              setRenaming(true);
+              onStartRename(property);
             }}
           >
             Rename {property.key}
@@ -363,10 +363,7 @@ export function PropertyDefinitionEditor({
             <Button
               size="sm"
               variant="ghost"
-              onPress={() => {
-                onCancelRename(property);
-                setRenaming(false);
-              }}
+              onPress={() => onCancelRename(property)}
             >
               Cancel rename
             </Button>
