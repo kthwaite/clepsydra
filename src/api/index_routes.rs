@@ -803,7 +803,7 @@ pub async fn create_from_link(
 
     let page_body = body.body.unwrap_or_default();
 
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state.as_ref());
     let result = state
         .mutation_coordinator
         .create_page(

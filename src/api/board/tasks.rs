@@ -133,7 +133,7 @@ pub(crate) async fn create_task(
         String::new()
     };
 
-    let notify = crate::api::mutation_notifier(&state);
+    let notify = crate::api::mutation_notifier(state.as_ref());
     state
         .mutation_coordinator
         .create_page(

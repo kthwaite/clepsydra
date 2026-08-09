@@ -531,7 +531,7 @@ async fn ingest_archive(
     let meta = build_archive_meta(&req, &decoded_blobs);
     let page_id = meta.id.to_string();
     let expected_page_content = write_page_content(&meta, &req.markdown_body);
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state.as_ref());
     if let Err(error) = state
         .mutation_coordinator
         .create_page(

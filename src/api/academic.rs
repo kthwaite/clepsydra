@@ -349,7 +349,7 @@ pub(crate) async fn create_work_internal(
 
     let page_body = body.unwrap_or_default();
 
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state);
     state
         .mutation_coordinator
         .create_page(
@@ -1718,7 +1718,7 @@ pub async fn create_annotation(
 
     let page_body = req.body.unwrap_or_default();
 
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state.as_ref());
     state
         .mutation_coordinator
         .create_page(

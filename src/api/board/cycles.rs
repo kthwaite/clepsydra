@@ -104,7 +104,7 @@ pub(crate) async fn create_cycle(
             .insert("goal".to_string(), toml::Value::String(g.clone()));
     }
 
-    let notify = crate::api::mutation_notifier(&state);
+    let notify = crate::api::mutation_notifier(state.as_ref());
     state
         .mutation_coordinator
         .create_page(

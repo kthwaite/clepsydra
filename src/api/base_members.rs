@@ -280,7 +280,7 @@ async fn create_base_member_with_ids(
         .map_err(internal_creation_error)?
         .map_err(internal_creation_error)?;
 
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state.as_ref());
 
     for _ in 0..MAX_PATH_ATTEMPTS {
         let short_id = short_ids

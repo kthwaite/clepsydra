@@ -472,7 +472,7 @@ pub async fn create_default_page(
     meta.created_at = Some(created);
     meta.updated_at = Some(created);
 
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state.as_ref());
     let result = state
         .mutation_coordinator
         .create_page(
@@ -656,7 +656,7 @@ pub async fn create_page(
     }
     let page_body = body.body.unwrap_or_default();
 
-    let notify = super::mutation_notifier(&state);
+    let notify = super::mutation_notifier(state.as_ref());
     let result = state
         .mutation_coordinator
         .create_page(
