@@ -8,7 +8,7 @@ import type { DraftProperty, DraftView } from "./definition-model";
 import { moveItem } from "./definition-model";
 import { ViewDefinitionEditor } from "./ViewDefinitionEditor";
 
-export interface ViewsEditorProps {
+interface ViewsEditorProps {
   views: DraftView[];
   properties: DraftProperty[];
   diagnostics: BaseDiagnostic[];

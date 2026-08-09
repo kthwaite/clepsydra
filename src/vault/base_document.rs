@@ -1167,7 +1167,7 @@ mod tests {
 
         let update_not_durable =
             map_publication_error(AtomicPublicationError::PublishedButNotDurable(
-                io::Error::new(io::ErrorKind::Other, "directory sync failed"),
+                io::Error::other("directory sync failed"),
             ));
         assert!(matches!(
             update_not_durable,

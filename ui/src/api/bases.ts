@@ -12,9 +12,6 @@ export type BaseSummary = components["schemas"]["BaseSummary"];
 export type BaseMutationResponse =
   components["schemas"]["BaseMutationResponse"];
 export type CreateBaseRequest = components["schemas"]["CreateBaseRequest"];
-export type UpdateBaseRequest = components["schemas"]["UpdateBaseRequest"];
-export type DeleteBaseRequest = components["schemas"]["DeleteBaseRequest"];
-export type BasePreviewRequest = components["schemas"]["BasePreviewRequest"];
 export type BasePreviewResponse = components["schemas"]["BasePreviewResponse"];
 export type BaseFilter = components["schemas"]["Filter"];
 export type FilterOp = components["schemas"]["Op"];
@@ -25,10 +22,6 @@ export type PropertyDefinition = components["schemas"]["PropertyDefinition"];
 export type QueryOutput = components["schemas"]["QueryOutput"];
 export type QueryRow = components["schemas"]["QueryRow"];
 export type GroupResult = components["schemas"]["GroupResult"];
-export type PropertyPatchRequest =
-  components["schemas"]["PropertyPatchRequest"];
-export type PropertyPatchResponse =
-  components["schemas"]["PropertyPatchResponse"];
 
 function useInvalidateBaseQueries() {
   const qc = useQueryClient();
@@ -100,7 +93,7 @@ export function useBaseView(
  * plus type hints from the base schema; the response embeds the refreshed
  * projections (read-after-write) so callers reconcile without waiting on SSE.
  */
-export function usePatchProperties() {
+function usePatchProperties() {
   const qc = useQueryClient();
   return $api.useMutation("patch", "/api/vault/pages/by-id/{uuid}/properties", {
     onSuccess: () => {

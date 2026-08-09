@@ -4,7 +4,7 @@ import { cn } from "#/lib/cn";
 import { CELL_EDITORS } from "./cells/registry";
 import { type CellValue, formatCellValue } from "./cells/types";
 
-export interface EditableCellProps {
+interface EditableCellProps {
   value: CellValue;
   definition: PropertyDefinition;
   onCommit: (value: CellValue, hint?: PropertyType) => void;

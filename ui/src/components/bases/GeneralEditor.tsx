@@ -5,7 +5,7 @@ import type {
 } from "./BaseDefinitionWorkspace";
 import type { BaseDraft } from "./definition-model";
 
-export interface GeneralEditorProps {
+interface GeneralEditorProps {
   slug: string;
   draft: BaseDraft;
   setDraft: (update: (draft: BaseDraft) => BaseDraft) => void;

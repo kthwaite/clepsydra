@@ -52,7 +52,7 @@ function defaultValue(capability: FieldCapability, op: FilterOp): unknown {
   return capability.options?.[0] ?? "";
 }
 
-export interface FilterComparisonEditorProps {
+interface FilterComparisonEditorProps {
   value: BaseFilter;
   path: FilterPath;
   position: number;

@@ -9,7 +9,7 @@ import type {
   SortKey,
 } from "#/api/bases";
 
-export type { BaseFilter, FilterOp } from "#/api/bases";
+export type { BaseFilter } from "#/api/bases";
 
 export interface DraftProperty {
   id: string;

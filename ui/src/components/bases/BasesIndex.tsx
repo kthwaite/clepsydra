@@ -17,13 +17,13 @@ import { CreateBaseDialog } from "./CreateBaseDialog";
 
 type BaseDiagnostic = BaseListResponse["diagnostics"][number];
 
-export interface DeleteCandidate {
+interface DeleteCandidate {
   base: BaseSummary;
   revision: string;
   requestId: number;
 }
 
-export interface BasesIndexViewProps {
+interface BasesIndexViewProps {
   bases: BaseSummary[];
   diagnostics: BaseDiagnostic[];
   onCreate: () => void;

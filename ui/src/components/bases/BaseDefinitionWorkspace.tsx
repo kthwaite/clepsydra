@@ -24,7 +24,7 @@ export type RegisterFocusTarget = (
   element: HTMLElement | null,
 ) => void;
 
-export interface SectionEditorProps {
+interface SectionEditorProps {
   draft: BaseDraft;
   setDraft: (update: (draft: BaseDraft) => BaseDraft) => void;
   diagnostics: BaseDiagnostic[];
@@ -32,7 +32,7 @@ export interface SectionEditorProps {
   registerFocusTarget: RegisterFocusTarget;
 }
 
-export interface BaseDefinitionWorkspaceProps {
+interface BaseDefinitionWorkspaceProps {
   slug: string;
 }
 

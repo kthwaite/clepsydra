@@ -21,7 +21,7 @@ import { cn } from "#/lib/cn";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { EditableCell } from "./EditableCell";
 
-export interface BaseTableViewProps {
+interface BaseTableViewProps {
   definition: BaseDetailResponse;
   activeView: string;
   onViewChange: (name: string) => void;

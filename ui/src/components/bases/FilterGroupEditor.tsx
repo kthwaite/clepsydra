@@ -9,7 +9,7 @@ import {
 } from "./definition-model";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
 
-export interface FilterGroupEditorProps {
+interface FilterGroupEditorProps {
   value: BaseFilter;
   root: BaseFilter;
   path: FilterPath;
@@ -144,6 +144,18 @@ export function FilterGroupEditor({
     onChange(replaceFilterAtPath(root, path, next));
   }
 
+  function moveChild(childIndex: number, destination: number) {
+    const moving = children[childIndex];
+    const displaced = children[destination];
+    if (!moving || !displaced) return;
+    const nextChildren = [...children];
+    nextChildren[childIndex] = displaced;
+    nextChildren[destination] = moving;
+    const next: BaseFilter =
+      kind === "all" ? { all: nextChildren } : { any: nextChildren };
+    onChange(replaceFilterAtPath(root, path, next));
+  }
+
   return (
     <div
       role="group"
@@ -172,6 +184,22 @@ export function FilterGroupEditor({
                 registerFocus={registerFocus}
               />
               <div className="mt-2 flex flex-wrap gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  isDisabled={index === 0}
+                  onPress={() => moveChild(index, index - 1)}
+                >
+                  Move condition {childPosition} up
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  isDisabled={index === children.length - 1}
+                  onPress={() => moveChild(index, index + 1)}
+                >
+                  Move condition {childPosition} down
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"

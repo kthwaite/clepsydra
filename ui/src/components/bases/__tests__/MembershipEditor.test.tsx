@@ -129,6 +129,39 @@ describe("MembershipEditor", () => {
     ).toBeInTheDocument();
   });
 
+  it("reorders sibling rules with keyboard-operable controls", async () => {
+    const user = userEvent.setup();
+    const original: BaseFilter = {
+      all: [
+        { field: "kind", op: "eq", value: "BOOK" },
+        { field: "status", op: "eq", value: "reading" },
+      ],
+    };
+    const { onChange } = renderEditor(original);
+    const all = screen.getByRole("group", {
+      name: "Match all of 2 conditions",
+    });
+    const moveSecondUp = within(all).getByRole("button", {
+      name: "Move condition 2 up",
+    });
+
+    moveSecondUp.focus();
+    await user.keyboard("{Enter}");
+
+    expect(latest(onChange)).toEqual({
+      all: [
+        { field: "status", op: "eq", value: "reading" },
+        { field: "kind", op: "eq", value: "BOOK" },
+      ],
+    });
+    expect(original).toEqual({
+      all: [
+        { field: "kind", op: "eq", value: "BOOK" },
+        { field: "status", op: "eq", value: "reading" },
+      ],
+    });
+  });
+
   it("edits nested nodes immutably and collapses only an empty root to All pages", async () => {
     const user = userEvent.setup();
     const original: BaseFilter = {

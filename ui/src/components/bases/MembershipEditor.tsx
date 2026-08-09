@@ -5,7 +5,7 @@ import type { RegisterFocusTarget } from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
 import { FilterGroupEditor } from "./FilterGroupEditor";
 
-export interface MembershipEditorProps {
+interface MembershipEditorProps {
   value: BaseFilter | undefined;
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;

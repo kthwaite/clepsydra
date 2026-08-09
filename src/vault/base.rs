@@ -687,15 +687,14 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
 }
 
 fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
-    let mut push =
-        |severity: BaseDiagnosticSeverity, path: Option<String>, message: String| {
-            diagnostics.push(BaseDiagnostic {
-                slug: base.slug.clone(),
-                severity,
-                path,
-                message,
-            })
-        };
+    let mut push = |severity: BaseDiagnosticSeverity, path: Option<String>, message: String| {
+        diagnostics.push(BaseDiagnostic {
+            slug: base.slug.clone(),
+            severity,
+            path,
+            message,
+        })
+    };
 
     if base.file.name.trim().is_empty() {
         push(
@@ -801,24 +800,12 @@ fn validate_filter(
     match filter {
         Filter::All(children) => {
             for (index, child) in children.iter().enumerate() {
-                validate_filter(
-                    base,
-                    child,
-                    &format!("{path}.all[{index}]"),
-                    context,
-                    push,
-                );
+                validate_filter(base, child, &format!("{path}.all[{index}]"), context, push);
             }
         }
         Filter::Any(children) => {
             for (index, child) in children.iter().enumerate() {
-                validate_filter(
-                    base,
-                    child,
-                    &format!("{path}.any[{index}]"),
-                    context,
-                    push,
-                );
+                validate_filter(base, child, &format!("{path}.any[{index}]"), context, push);
             }
         }
         Filter::Not(child) => {
@@ -1084,9 +1071,11 @@ value = "BOOK"
         let content = "name = \"X\"\n\n[properties]\ntitle = { type = \"text\" }\nkind = { type = \"text\" }\nencryption = { type = \"text\" }\n";
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
         assert!(base.is_some());
-        assert!(diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Warning));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Warning)
+        );
         assert_eq!(
             diagnostics
                 .iter()

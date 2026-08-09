@@ -12,7 +12,7 @@ import { type BaseDraft, toWire } from "./definition-model";
 
 const MEMBERSHIP_SCOPE = "__membership__";
 
-export interface BasePreviewProps {
+interface BasePreviewProps {
   draft: BaseDraft;
   selectedViewId?: string;
   onDiagnosticFocus?(path: string): void;

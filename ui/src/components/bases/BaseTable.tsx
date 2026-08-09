@@ -8,7 +8,7 @@ import {
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { BaseTableView } from "./BaseTableView";
 
-export interface BaseTableProps {
+interface BaseTableProps {
   slug: string;
 }
 

@@ -480,3 +480,26 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/{slug}/views/{view}", get(evaluate_view))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::document_error;
+    use crate::vault::base_document::BaseDocumentError;
+
+    #[test]
+    fn published_but_not_durable_maps_to_distinct_internal_error() {
+        let error = document_error(BaseDocumentError::PublishedButNotDurable(io::Error::other(
+            "directory sync failed",
+        )));
+
+        assert_eq!(error.status, 500);
+        assert_eq!(
+            error.error,
+            "base definition was published but not durably synchronized: directory sync failed"
+        );
+        assert_eq!(error.detail, None);
+        assert_eq!(error.hint, None);
+    }
+}

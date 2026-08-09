@@ -18,7 +18,7 @@ import {
 } from "./definition-model";
 import { MembershipEditor } from "./MembershipEditor";
 
-export interface CreateBaseDialogProps {
+interface CreateBaseDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (

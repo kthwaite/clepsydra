@@ -2,7 +2,7 @@ import { Button } from "#/components/ui/button";
 
 export type DefinitionSaveStatus = "saved" | "saving" | "unsaved" | "error";
 
-export interface DefinitionHeaderProps {
+interface DefinitionHeaderProps {
   name: string;
   slug: string;
   revision: string;

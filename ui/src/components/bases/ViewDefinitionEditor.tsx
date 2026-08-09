@@ -50,7 +50,7 @@ const labelClass =
 const headingClass =
   "font-mono text-xs font-semibold uppercase tracking-widest text-foreground";
 
-export interface ViewDefinitionEditorProps {
+interface ViewDefinitionEditorProps {
   view: DraftView;
   viewIndex: number;
   properties: DraftProperty[];

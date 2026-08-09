@@ -28,7 +28,7 @@ const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   relation: "Relation",
 };
 
-export function changePropertyType(
+function changePropertyType(
   property: DraftProperty,
   type: PropertyType,
 ): DraftProperty {
@@ -42,7 +42,7 @@ export function changePropertyType(
   };
 }
 
-export interface PropertyDefinitionEditorProps {
+interface PropertyDefinitionEditorProps {
   property: DraftProperty;
   index: number;
   count: number;

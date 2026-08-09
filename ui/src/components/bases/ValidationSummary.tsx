@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
 
-export interface ValidationSummaryProps {
+interface ValidationSummaryProps {
   diagnostics: BaseDiagnostic[];
   focusDiagnostic: (path: string) => void;
 }
