@@ -1,4 +1,4 @@
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::derivation::{Deriver, IndexedPage};
 use crate::vault::index::IndexError;
@@ -15,7 +15,7 @@ impl Deriver for TagDeriver {
         &self,
         page: &IndexedPage,
         page_id: &str,
-        tx: &Transaction,
+        tx: &Connection,
     ) -> Result<(), IndexError> {
         for tag in &page.meta.tags {
             tx.execute(

@@ -1,4 +1,4 @@
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::block::BlockType;
 use crate::vault::derivation::{Deriver, IndexedPage};
@@ -16,7 +16,7 @@ impl Deriver for BlockDeriver {
         &self,
         page: &IndexedPage,
         page_id: &str,
-        tx: &Transaction,
+        tx: &Connection,
     ) -> Result<(), IndexError> {
         for block in &page.blocks {
             let parent_id = block

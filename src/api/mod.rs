@@ -88,6 +88,18 @@ pub struct AppState {
     pub location: parking_lot::RwLock<Option<crate::vault::location::Location>>,
 }
 
+pub(crate) fn mutation_notifier(
+    state: &AppState,
+) -> Arc<dyn Fn(crate::vault::mutation_coordinator::MutationNotification) + Send + Sync> {
+    let change_tx = state.change_tx.clone();
+    Arc::new(move |notification| {
+        let _ = change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    })
+}
+
 pub(crate) fn mutation_error(
     error: crate::vault::mutation_coordinator::MutationError,
 ) -> error::ApiError {

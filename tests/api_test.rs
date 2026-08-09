@@ -2503,10 +2503,13 @@ async fn page_create_rolls_back_file_when_index_publication_fails() {
         .with_index(|_, _| -> () { panic!("terminate index thread for failure test") })
         .await;
 
-    let notified = std::sync::atomic::AtomicBool::new(false);
-    let notify = |_: MutationNotification| {
-        notified.store(true, std::sync::atomic::Ordering::SeqCst);
-    };
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_: MutationNotification| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
     let error = MutationCoordinator::new()
         .create_page(
             &vault,
@@ -2516,7 +2519,7 @@ async fn page_create_rolls_back_file_when_index_publication_fails() {
                 meta: PageMeta::new(),
                 body: "persisted".to_string(),
             },
-            &notify,
+            notify,
         )
         .await
         .unwrap_err();
@@ -2559,10 +2562,13 @@ async fn page_create_rolls_back_published_file_before_indexing_when_directory_sy
         ))
     })));
 
-    let notified = std::sync::atomic::AtomicBool::new(false);
-    let notify = |_: MutationNotification| {
-        notified.store(true, std::sync::atomic::Ordering::SeqCst);
-    };
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_: MutationNotification| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
     let error = coordinator
         .create_page(
             &vault,
@@ -2572,7 +2578,7 @@ async fn page_create_rolls_back_published_file_before_indexing_when_directory_sy
                 meta: PageMeta::new(),
                 body: "not durable".to_owned(),
             },
-            &notify,
+            notify,
         )
         .await
         .unwrap_err();
@@ -2628,10 +2634,13 @@ async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing
         ))
     })));
 
-    let notified = std::sync::atomic::AtomicBool::new(false);
-    let notify = |_: MutationNotification| {
-        notified.store(true, std::sync::atomic::Ordering::SeqCst);
-    };
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_: MutationNotification| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
     let error = coordinator
         .create_page(
             &vault,
@@ -2641,7 +2650,7 @@ async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing
                 meta: PageMeta::new(),
                 body: String::new(),
             },
-            &notify,
+            notify,
         )
         .await
         .unwrap_err();
@@ -2672,6 +2681,96 @@ async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing
     assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
 }
 
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_create_notifies_once_after_caller_cancellation() {
+    use clepsydra::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationNotification,
+    };
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let entered_tx = Arc::new(parking_lot::Mutex::new(Some(entered_tx)));
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+    coordinator.set_create_publication_hook(Some(Arc::new({
+        let entered_tx = Arc::clone(&entered_tx);
+        let release_rx = Arc::clone(&release_rx);
+        move |path, content| {
+            if let Some(entered_tx) = entered_tx.lock().take() {
+                let _ = entered_tx.send(());
+            }
+            release_rx.lock().recv().unwrap();
+            clepsydra::vault::atomic_file::atomic_create(path, content)
+        }
+    })));
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let event_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let event_count = Arc::clone(&event_count);
+        move |notification| {
+            event_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = event_tx.send(notification);
+        }
+    });
+
+    let worker = Arc::clone(&coordinator);
+    let worker_vault = vault.clone();
+    let worker_handle = handle.clone();
+    let creating = tokio::spawn(async move {
+        worker
+            .create_page(
+                &worker_vault,
+                &worker_handle,
+                CreatePageCommand {
+                    path: VaultPath::new("cancelled-create.md").unwrap(),
+                    meta: PageMeta::new(),
+                    body: "durable".to_owned(),
+                },
+                notify,
+            )
+            .await
+    });
+
+    entered_rx.await.unwrap();
+    creating.abort();
+    let _ = creating.await;
+    release_tx.send(()).unwrap();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv())
+        .await
+        .expect("shielded mutation did not notify after caller cancellation")
+        .unwrap();
+    assert_eq!(event.upserted, vec!["cancelled-create.md"]);
+    assert!(event.removed.is_empty());
+    assert_eq!(
+        event_count.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert!(event_rx.try_recv().is_err());
+    assert!(tmp.path().join("cancelled-create.md").exists());
+    let indexed: i64 = handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pages WHERE path = 'cancelled-create.md'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(indexed, 1);
+}
 #[tokio::test]
 async fn page_mutation_projected_move_invokes_hook_before_notification() {
     use clepsydra::vault::hooks::PostMoveHook;

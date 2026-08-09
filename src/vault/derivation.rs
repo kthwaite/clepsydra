@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use rusqlite::Transaction;
+use rusqlite::Connection;
 
 use super::block::Block;
 use super::canonical::CanonicalName;
@@ -57,6 +57,6 @@ pub trait Deriver: Send + Sync {
     /// `page_id` is the stringified UUID of the page (already inserted into
     /// the `pages` table). The deriver should INSERT rows into its target
     /// table(s) within `tx`.
-    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Transaction)
-    -> Result<(), IndexError>;
+    fn derive(&self, page: &IndexedPage, page_id: &str, conn: &Connection)
+        -> Result<(), IndexError>;
 }

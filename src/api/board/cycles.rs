@@ -104,12 +104,7 @@ pub(crate) async fn create_cycle(
             .insert("goal".to_string(), toml::Value::String(g.clone()));
     }
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(&state);
     state
         .mutation_coordinator
         .create_page(
@@ -120,7 +115,7 @@ pub(crate) async fn create_cycle(
                 meta,
                 body: String::new(),
             },
-            &notify,
+            notify,
         )
         .await
         .map_err(crate::api::mutation_error)?;

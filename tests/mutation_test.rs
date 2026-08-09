@@ -951,7 +951,7 @@ async fn cancelled_create_finishes_indexing_after_filesystem_publication() {
                     meta: PageMeta::new(),
                     body: "published".to_string(),
                 },
-                &|_| {},
+                Arc::new(|_| {}),
             )
             .await
     });

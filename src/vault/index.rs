@@ -23,6 +23,7 @@ use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 
+
 // ---------------------------------------------------------------------------
 // IndexError
 // ---------------------------------------------------------------------------
@@ -389,6 +390,28 @@ impl VaultIndex {
         &mut self.conn
     }
 
+
+    pub(crate) fn begin_created_mutation(&mut self) -> Result<(), IndexError> {
+        self.conn
+            .execute_batch("SAVEPOINT created_page_mutation")?;
+        Ok(())
+    }
+
+    pub(crate) fn commit_created_mutation(&mut self) -> Result<(), IndexError> {
+        self.conn
+            .execute_batch("RELEASE SAVEPOINT created_page_mutation")?;
+        Ok(())
+    }
+
+    pub(crate) fn rollback_created_mutation(&mut self) -> Result<(), IndexError> {
+        self.conn.execute_batch(
+            "ROLLBACK TO SAVEPOINT created_page_mutation;
+             RELEASE SAVEPOINT created_page_mutation;",
+        )?;
+        Ok(())
+    }
+
+
     /// Remove deleted content from SQLite pages and truncate the WAL.
     ///
     /// Call this after replacing plaintext projections with encrypted-page
@@ -659,7 +682,7 @@ impl VaultIndex {
             blocks,
         };
 
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let page_id = page.meta.id.to_string();
         let meta_json = serde_json::to_string(&page.meta).unwrap_or_else(|_| "{}".to_string());
         let created_at = page.meta.created_at.map(|dt| dt.to_rfc3339());
@@ -793,7 +816,7 @@ impl VaultIndex {
     ///
     /// Returns the number of links resolved.
     pub fn resolve_links_for_page(&mut self, vault_path: &VaultPath) -> Result<usize, IndexError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let mut resolved_count = 0usize;
 
         let page_id: Option<String> = tx
@@ -1349,7 +1372,7 @@ impl VaultIndex {
 
 /// Pass 1: resolve this page's outgoing wikilinks against canonical_names.
 fn resolve_outgoing_wikilinks(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
@@ -1396,7 +1419,7 @@ fn resolve_outgoing_wikilinks(
 
 /// Pass 2: resolve this page's outgoing block-ref links against block IDs.
 fn resolve_outgoing_block_refs(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
@@ -1440,7 +1463,7 @@ fn resolve_outgoing_block_refs(
 /// Pass 3: resolve other pages' incoming wikilinks that target this page's
 /// canonical names (only when the canonical name is unambiguous).
 fn resolve_incoming_wikilinks(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
@@ -1489,7 +1512,7 @@ fn resolve_incoming_wikilinks(
 /// Pass 4: resolve other pages' incoming block-ref links that target block IDs
 /// on this page. `page_path` is prefetched by the caller.
 fn resolve_incoming_block_refs(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     page_path: &str,
     count: &mut usize,

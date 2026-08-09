@@ -10,14 +10,13 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use crate::api::events::SyncNotification;
 use crate::vault::base::{BaseDefinition, SYSTEM_FIELDS};
 use crate::vault::base_document;
 use crate::vault::base_member::{
     BaseMemberDiagnostic, BaseMemberScope, CandidateDerived, candidate_matches,
 };
 use crate::vault::kind::Kind;
-use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError, MutationNotification};
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError};
 use crate::vault::new_note::build_projected_note_path;
 use crate::vault::page::{PageMeta, page_revision};
 use crate::vault::property_value::coerce_property_value;
@@ -129,6 +128,18 @@ fn validation_error(diagnostics: Vec<BaseMemberDiagnostic>) -> ApiError {
         serde_json::to_value(BaseMemberValidationDetail { diagnostics })
             .expect("Base member diagnostics must serialize"),
     )
+}
+
+fn internal_creation_error(error: impl std::fmt::Debug + std::fmt::Display) -> ApiError {
+    tracing::error!(error = ?error, error_display = %error, "Base member creation failed");
+    ApiError {
+        status: 500,
+        error: "Base member creation failed".to_owned(),
+        detail: Some(serde_json::json!({
+            "code": "base_member_creation_failed"
+        })),
+        hint: None,
+    }
 }
 
 fn is_reserved_field(key: &str) -> bool {
@@ -249,17 +260,12 @@ async fn create_base_member_with_ids(
         meta.kind = Some(Kind::Note);
     }
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(&state);
 
     for _ in 0..MAX_PATH_ATTEMPTS {
-        let short_id = short_ids
-            .next()
-            .ok_or_else(|| ApiError::internal("Base member path ID source was exhausted"))?;
+        let short_id = short_ids.next().ok_or_else(|| {
+            internal_creation_error("Base member path ID source was exhausted")
+        })?;
         let path = build_projected_note_path(
             title,
             created,
@@ -267,9 +273,7 @@ async fn create_base_member_with_ids(
             meta.project.as_deref(),
             &short_id,
         )
-        .map_err(|error| {
-            ApiError::internal(format!("failed to build Base member path: {error}"))
-        })?;
+        .map_err(internal_creation_error)?;
 
         candidate_matches(
             &stored.definition,
@@ -294,7 +298,7 @@ async fn create_base_member_with_ids(
                     meta: meta.clone(),
                     body: String::new(),
                 },
-                &notify,
+                Arc::clone(&notify),
             )
             .await
         {
@@ -308,7 +312,7 @@ async fn create_base_member_with_ids(
             }
             Err(MutationError::Conflict(message))
                 if message == format!("page already exists: {generated_path}") => {}
-            Err(error) => return Err(super::mutation_error(error)),
+            Err(error) => return Err(internal_creation_error(error)),
         }
     }
 

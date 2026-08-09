@@ -1,4 +1,4 @@
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::canonical::CanonicalName;
 use crate::vault::derivation::{Deriver, IndexedPage};
@@ -17,7 +17,7 @@ impl Deriver for LinkDeriver {
         &self,
         page: &IndexedPage,
         page_id: &str,
-        tx: &Transaction,
+        tx: &Connection,
     ) -> Result<(), IndexError> {
         // Body links (non-negative span_start)
         for link in &page.body_links {

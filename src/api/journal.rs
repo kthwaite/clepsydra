@@ -146,12 +146,7 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
     meta.title = Some(date.to_string());
     meta.tags = vec!["journal".to_string()];
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(state);
     match state
         .mutation_coordinator
         .create_page(
@@ -162,7 +157,7 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
                 meta,
                 body: String::new(),
             },
-            &notify,
+            notify,
         )
         .await
     {

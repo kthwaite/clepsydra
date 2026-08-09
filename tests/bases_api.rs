@@ -1360,6 +1360,67 @@ async fn member_index_failure_rolls_back_generated_page_without_notification() {
 }
 
 #[tokio::test]
+async fn member_internal_failure_is_generic_and_leaves_no_artifact_or_event() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let root = fixture.state.vault.root().to_string_lossy().into_owned();
+    let trigger_sql = format!(
+        "CREATE TRIGGER reject_member_status_property
+         BEFORE INSERT ON page_properties
+         WHEN NEW.key = 'status'
+         BEGIN
+           SELECT RAISE(FAIL, 'injected index failure at {root}');
+         END;
+         CREATE TRIGGER reject_member_page_delete
+         BEFORE DELETE ON pages
+         BEGIN
+           SELECT RAISE(FAIL, 'delete compensation must not run');
+         END;"
+    );
+    fixture
+        .state
+        .index
+        .with_index(move |index, _| {
+            index.connection().execute_batch(&trigger_sql).unwrap();
+        })
+        .await
+        .unwrap();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_rollback_sync_hook(Some(Arc::new(|parent| {
+            Err(std::io::Error::other(format!(
+                "injected rollback sync failure at {}",
+                parent.display()
+            )))
+        })));
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Private failure",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let response_text = response.text();
+    let error: serde_json::Value = serde_json::from_str(&response_text).unwrap();
+    assert_eq!(error["error"], "Base member creation failed");
+    assert_eq!(error["detail"]["code"], "base_member_creation_failed");
+    assert!(!response_text.contains(&root), "{response_text}");
+    assert!(!response_text.contains("injected"), "{response_text}");
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_eq!(indexed_page_count(&fixture).await, before_rows);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
 async fn openapi_registers_base_member_contract() {
     let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
     assert!(document["paths"]["/api/vault/bases/{slug}/members"]["post"].is_object());

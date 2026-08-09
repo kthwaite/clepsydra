@@ -1,4 +1,4 @@
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::canonical::CanonicalName;
 use crate::vault::derivation::{Deriver, IndexedPage};
@@ -17,7 +17,7 @@ impl Deriver for CiteKeyDeriver {
         &self,
         page: &IndexedPage,
         page_id: &str,
-        tx: &Transaction,
+        tx: &Connection,
     ) -> Result<(), IndexError> {
         let cite_key = match page.meta.extra.get("cite_key") {
             Some(v) => match v.as_str() {

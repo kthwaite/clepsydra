@@ -472,12 +472,7 @@ pub async fn create_default_page(
     meta.created_at = Some(created);
     meta.updated_at = Some(created);
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(&state);
     let result = state
         .mutation_coordinator
         .create_page(
@@ -488,7 +483,7 @@ pub async fn create_default_page(
                 meta,
                 body: body.body.unwrap_or_default(),
             },
-            &notify,
+            notify,
         )
         .await
         .map_err(super::mutation_error)?;
@@ -661,12 +656,7 @@ pub async fn create_page(
     }
     let page_body = body.body.unwrap_or_default();
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(&state);
     let result = state
         .mutation_coordinator
         .create_page(
@@ -677,7 +667,7 @@ pub async fn create_page(
                 meta,
                 body: page_body,
             },
-            &notify,
+            notify,
         )
         .await
         .map_err(super::mutation_error)?;

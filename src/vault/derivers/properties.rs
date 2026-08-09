@@ -1,4 +1,4 @@
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::derivation::{Deriver, IndexedPage};
 use crate::vault::index::IndexError;
@@ -98,7 +98,7 @@ impl Deriver for PropertyDeriver {
         &self,
         page: &IndexedPage,
         page_id: &str,
-        tx: &Transaction,
+        tx: &Connection,
     ) -> Result<(), IndexError> {
         for (key, value) in &page.meta.extra {
             for p in project(value) {

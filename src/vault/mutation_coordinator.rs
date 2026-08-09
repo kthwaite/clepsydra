@@ -365,13 +365,14 @@ impl MutationCoordinator {
         vault: &Vault,
         index: &IndexHandle,
         command: CreatePageCommand,
-        notify: &(dyn Fn(MutationNotification) + Send + Sync),
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
     ) -> Result<Page, MutationError> {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
         let create_publication_hook = self.create_publication_hook.lock().clone();
         let create_rollback_sync_hook = self.create_rollback_sync_hook.lock().clone();
+        let index_rollback_sync_hook = create_rollback_sync_hook.clone();
         let result =
             run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
                 let blocking_path = absolute.clone();
@@ -431,10 +432,14 @@ impl MutationCoordinator {
                     .apply_mutation(command.path.clone(), IndexMutation::Created)
                     .await;
                 if let Err(source) = index_result {
-                    let index_may_be_partial = matches!(source, IndexPolicyError::Operation { .. });
+                    let index_may_be_partial =
+                        matches!(source, IndexPolicyError::TransactionRollback { .. });
                     let rollback_path = absolute.clone();
                     let rollback = tokio::task::spawn_blocking(move || {
-                        let result = fs::remove_file(&rollback_path);
+                        let result = rollback_created_publication(
+                            &rollback_path,
+                            index_rollback_sync_hook.as_deref(),
+                        );
                         (guard, result)
                     })
                     .await;
@@ -477,19 +482,20 @@ impl MutationCoordinator {
                     }
                 }
                 let _guard = guard;
-                Ok(Page {
+                let page = Page {
                     path: command.path,
                     meta: command.meta,
                     body: command.body,
                     raw_content: content,
-                })
+                };
+                notify(MutationNotification {
+                    upserted: vec![page.path.as_str().to_string()],
+                    removed: Vec::new(),
+                });
+                Ok(page)
             })
             .await?;
 
-        notify(MutationNotification {
-            upserted: vec![result.path.as_str().to_string()],
-            removed: Vec::new(),
-        });
         Ok(result)
     }
 
