@@ -73,9 +73,9 @@ function MathSourceEditor({
   const handleKeyDown = (
     event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
+    event.stopPropagation();
     if (event.key === "Escape") {
       event.preventDefault();
-      event.stopPropagation();
       finish();
       return;
     }
@@ -91,8 +91,8 @@ function MathSourceEditor({
     if (!exitsBefore && !exitsAfter) return;
 
     event.preventDefault();
-    event.stopPropagation();
     onExit(exitsBefore ? "before" : "after", draft);
+    if (valid) onClose();
   };
 
   const label = display ? "Edit display math" : "Edit inline math";
@@ -179,7 +179,6 @@ export function MathElement({
 
   const exit = (side: "before" | "after", tex: string) => {
     controller.commit(tex);
-    controller.close();
     const point =
       side === "before"
         ? Editor.before(editor, path, { voids: true })

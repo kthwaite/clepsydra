@@ -3,14 +3,21 @@ import {
   type PropsWithChildren,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { Editor, Path, Transforms } from "slate";
+import {
+  Editor,
+  Element as SlateElement,
+  Path,
+  type PathRef,
+  Transforms,
+} from "slate";
 import { HistoryEditor } from "slate-history";
 
 export interface MathEditingController {
-  activePath: Path | null;
   begin(path: Path): void;
   commit(tex: string): void;
   close(): void;
@@ -20,34 +27,62 @@ export interface MathEditingController {
 export function useMathEditingController(
   editor: Editor,
 ): MathEditingController {
-  const [activePath, setActivePath] = useState<Path | null>(null);
+  const activePathRef = useRef<PathRef | null>(null);
+  const [sessionVersion, setSessionVersion] = useState(0);
 
-  const begin = useCallback((path: Path) => {
-    setActivePath(path);
-  }, []);
+  const begin = useCallback(
+    (path: Path) => {
+      activePathRef.current?.unref();
+      activePathRef.current = Editor.pathRef(editor, path);
+      setSessionVersion((version) => version + 1);
+    },
+    [editor],
+  );
 
   const commit = useCallback(
     (tex: string) => {
+      const activePath = activePathRef.current?.current;
       if (!activePath || !Editor.hasPath(editor, activePath)) return;
+      const [node] = Editor.node(editor, activePath);
+      if (
+        !SlateElement.isElement(node) ||
+        (node.type !== "inline-math" && node.type !== "math-block")
+      ) {
+        return;
+      }
       HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
         Transforms.setNodes(editor, { tex } as never, { at: activePath });
       });
     },
-    [activePath, editor],
+    [editor],
   );
 
   const close = useCallback(() => {
-    setActivePath(null);
+    activePathRef.current?.unref();
+    activePathRef.current = null;
+    setSessionVersion((version) => version + 1);
   }, []);
 
-  const isActive = useCallback(
-    (path: Path) => activePath !== null && Path.equals(activePath, path),
-    [activePath],
+  const isActive = useCallback((path: Path) => {
+    const activePath = activePathRef.current?.current;
+    return (
+      activePath !== null &&
+      activePath !== undefined &&
+      Path.equals(activePath, path)
+    );
+  }, []);
+
+  useEffect(
+    () => () => {
+      activePathRef.current?.unref();
+      activePathRef.current = null;
+    },
+    [],
   );
 
   return useMemo(
-    () => ({ activePath, begin, commit, close, isActive }),
-    [activePath, begin, close, commit, isActive],
+    () => ({ begin, commit, close, isActive }),
+    [begin, close, commit, isActive, sessionVersion],
   );
 }
 
