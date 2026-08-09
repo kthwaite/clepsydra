@@ -39,6 +39,7 @@ export const queryKeys = {
   },
 
   encryption: { pathPrefix: "/api/vault/encryption" },
+  attachments: { pathPrefix: "/api/vault/attachments" },
 
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },

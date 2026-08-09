@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type BasePoint,
   createEditor,
@@ -12,7 +12,7 @@ import {
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
-import { Editable, Slate, withReact } from "slate-react";
+import { Editable, ReactEditor, Slate, withReact } from "slate-react";
 import type { BlockResponse } from "#/api/blocks";
 import { useAssignBlockId } from "#/api/blocks";
 import { usePages } from "#/api/pages";
@@ -43,6 +43,7 @@ import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBlockRef } from "./schema/elements/blockRef";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
+import { insertMarkdown } from "./transforms/insertMarkdown";
 import {
   handleJournalTimeHeadingDeletion,
   insertJournalTimeHeading,
@@ -110,6 +111,8 @@ interface SlateEditorProps {
   initialValue: Descendant[];
   onChange: (value: Descendant[], editor: Editor) => void;
   onSaveNow: () => void | Promise<void>;
+  insertionRequest?: { id: number; markdown: string } | null;
+  onInsertionHandled?: (id: number) => void;
 }
 
 interface ComboboxTrigger {
@@ -125,6 +128,8 @@ export function SlateEditor({
   initialValue,
   onChange,
   onSaveNow,
+  insertionRequest,
+  onInsertionHandled,
 }: SlateEditorProps) {
   const editor = useMemo(
     () =>
@@ -138,6 +143,20 @@ export function SlateEditor({
     [],
   );
   const wikilinkEditing = useWikilinkEditingController(editor);
+  const handledInsertionRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (
+      !insertionRequest ||
+      handledInsertionRef.current === insertionRequest.id
+    ) {
+      return;
+    }
+    handledInsertionRef.current = insertionRequest.id;
+    insertMarkdown(editor, insertionRequest.markdown);
+    ReactEditor.focus(editor);
+    onInsertionHandled?.(insertionRequest.id);
+  }, [editor, insertionRequest, onInsertionHandled]);
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];

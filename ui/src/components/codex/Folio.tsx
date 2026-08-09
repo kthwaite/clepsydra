@@ -1,5 +1,13 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
@@ -44,6 +52,12 @@ const EMPTY_EDITOR_VALUE: [] = [];
 const NoteProtectionDialog = lazy(() =>
   import("#/components/codex/NoteProtectionDialog").then((module) => ({
     default: module.NoteProtectionDialog,
+  })),
+);
+
+const AttachmentManager = lazy(() =>
+  import("#/components/attachments/AttachmentManager").then((module) => ({
+    default: module.AttachmentManager,
   })),
 );
 
@@ -100,6 +114,19 @@ export function Folio({ tabId, path }: FolioProps) {
   const [protectionDialog, setProtectionDialog] = useState<
     "protect" | "unprotect" | null
   >(null);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const insertionIdRef = useRef(0);
+  const [attachmentInsertion, setAttachmentInsertion] = useState<{
+    id: number;
+    markdown: string;
+  } | null>(null);
+  const requestAttachmentInsertion = useCallback((markdown: string) => {
+    insertionIdRef.current += 1;
+    setAttachmentInsertion({ id: insertionIdRef.current, markdown });
+  }, []);
+  const finishAttachmentInsertion = useCallback((id: number) => {
+    setAttachmentInsertion((current) => (current?.id === id ? null : current));
+  }, []);
 
   // Assigning a kind/project writes frontmatter AND moves the file, so the
   // page path changes. Repoint the open tab to the new path; because FOLIO is
@@ -299,6 +326,8 @@ export function Folio({ tabId, path }: FolioProps) {
             initialValue={currentEditorValue}
             onChange={editor.onSlateChange}
             onSaveNow={editor.saveNow}
+            insertionRequest={attachmentInsertion}
+            onInsertionHandled={finishAttachmentInsertion}
           />
         </WikilinkResolutionProvider>
       </article>
@@ -400,6 +429,32 @@ export function Folio({ tabId, path }: FolioProps) {
           </Block>
         ) : null;
       })()}
+
+      <Block label="Attachments">
+        <button
+          type="button"
+          aria-expanded={attachmentsOpen}
+          className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+          onClick={() => setAttachmentsOpen((open) => !open)}
+        >
+          <span>Manage attachments</span>
+          <span aria-hidden>{attachmentsOpen ? "⌄" : "›"}</span>
+        </button>
+        {attachmentsOpen ? (
+          <Suspense
+            fallback={
+              <p className="cl-marg mt-2 mb-0">Loading attachment tools…</p>
+            }
+          >
+            <div className="mt-2">
+              <AttachmentManager
+                protectedPage={encrypted}
+                onInsertMarkdown={requestAttachmentInsertion}
+              />
+            </div>
+          </Suspense>
+        ) : null}
+      </Block>
 
       <OpenFilesAccordion activeTabId={tabId} />
     </>
