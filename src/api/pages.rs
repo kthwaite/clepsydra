@@ -1305,7 +1305,7 @@ pub async fn move_page(
 /// build a folder path. Defense-in-depth: `VaultPath::new` rejects `..`
 /// downstream, but the value is persisted and Project is defined as a slug, so
 /// we reject anything non-slug at the boundary.
-fn validate_project_slug(p: &str) -> Result<(), String> {
+pub(super) fn validate_project_slug(p: &str) -> Result<(), String> {
     if p.is_empty()
         || p.contains("..")
         || p.starts_with('/')

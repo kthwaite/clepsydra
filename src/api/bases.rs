@@ -23,6 +23,7 @@ use crate::vault::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
     SortDir, SortKey, ViewDefinition, validate_definition,
 };
+use crate::vault::base_member::{BaseMemberCapability, creation_capabilities};
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
 use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
@@ -53,6 +54,7 @@ pub struct BaseDetailResponse {
     pub definition: BaseDefinition,
     pub diagnostics: Vec<BaseDiagnostic>,
     pub revision: String,
+    pub member_creation: Vec<BaseMemberCapability>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -229,10 +231,12 @@ pub async fn get_base(
     Path(slug): Path<String>,
 ) -> Result<Json<BaseDetailResponse>, ApiError> {
     let stored = base_document::load(state.vault.root(), &slug).map_err(document_error)?;
+    let member_creation = creation_capabilities(&stored.definition);
     Ok(Json(BaseDetailResponse {
         definition: stored.definition,
         diagnostics: stored.diagnostics,
         revision: stored.revision,
+        member_creation,
     }))
 }
 
@@ -317,7 +321,7 @@ pub async fn delete_base(
     Ok(StatusCode::OK)
 }
 
-fn document_error(error: BaseDocumentError) -> ApiError {
+pub(super) fn document_error(error: BaseDocumentError) -> ApiError {
     match error {
         BaseDocumentError::InvalidSlug(message) => ApiError::bad_request(message),
         BaseDocumentError::NotFound(message) => ApiError::not_found(message),
@@ -470,6 +474,10 @@ pub fn router() -> Router<Arc<AppState>> {
             get(get_base).put(update_base).delete(delete_base),
         )
         .route("/{slug}/views/{view}", get(evaluate_view))
+        .route(
+            "/{slug}/members",
+            post(super::base_members::create_base_member),
+        )
 }
 
 #[cfg(test)]

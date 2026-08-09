@@ -107,6 +107,24 @@ pub enum MutationError {
         #[source]
         source: IndexPolicyError,
     },
+    #[error(
+        "index mutation failed and filesystem rollback failed for {path}: index error: {source}; rollback error: {rollback}"
+    )]
+    IndexRollback {
+        path: PathBuf,
+        #[source]
+        source: IndexPolicyError,
+        rollback: io::Error,
+    },
+    #[error(
+        "index mutation failed and index rollback failed for {path}: index error: {source}; rollback error: {rollback}"
+    )]
+    IndexCompensation {
+        path: VaultPath,
+        #[source]
+        source: IndexPolicyError,
+        rollback: IndexPolicyError,
+    },
     #[error("move reconciliation failed after filesystem_applied={filesystem_applied}: {source}")]
     Reconcile {
         filesystem_applied: bool,
@@ -135,7 +153,12 @@ impl MutationError {
             | Self::Hook {
                 filesystem_applied, ..
             } => *filesystem_applied,
-            Self::InvalidInput(_) | Self::NotFound(_) | Self::Conflict(_) | Self::Stale(_) => false,
+            Self::IndexRollback { .. } => true,
+            Self::IndexCompensation { .. }
+            | Self::InvalidInput(_)
+            | Self::NotFound(_)
+            | Self::Conflict(_)
+            | Self::Stale(_) => false,
         }
     }
 }
@@ -314,14 +337,61 @@ impl MutationCoordinator {
                     })
                     .await?;
                 filesystem_applied.store(true, Ordering::Release);
-                let _guard = guard;
-                index
+                let index_result = index
                     .apply_mutation(command.path.clone(), IndexMutation::Created)
-                    .await
-                    .map_err(|source| MutationError::Index {
-                        filesystem_applied: true,
-                        source,
-                    })?;
+                    .await;
+                if let Err(source) = index_result {
+                    let index_may_be_partial =
+                        matches!(source, IndexPolicyError::Operation { .. });
+                    let rollback_path = absolute.clone();
+                    let rollback = tokio::task::spawn_blocking(move || {
+                        let result = fs::remove_file(&rollback_path);
+                        (guard, result)
+                    })
+                    .await;
+                    match rollback {
+                        Ok((guard, Ok(()))) => {
+                            filesystem_applied.store(false, Ordering::Release);
+                            if index_may_be_partial {
+                                if let Err(rollback) = index
+                                    .apply_mutation(
+                                        command.path.clone(),
+                                        IndexMutation::Deleted,
+                                    )
+                                    .await
+                                {
+                                    return Err(MutationError::IndexCompensation {
+                                        path: command.path,
+                                        source,
+                                        rollback,
+                                    });
+                                }
+                            }
+                            let _guard = guard;
+                            return Err(MutationError::Index {
+                                filesystem_applied: false,
+                                source,
+                            });
+                        }
+                        Ok((_guard, Err(rollback))) => {
+                            return Err(MutationError::IndexRollback {
+                                path: absolute,
+                                source,
+                                rollback,
+                            });
+                        }
+                        Err(error) => {
+                            return Err(MutationError::IndexRollback {
+                                path: absolute,
+                                source,
+                                rollback: io::Error::other(format!(
+                                    "blocking filesystem rollback task failed: {error}"
+                                )),
+                            });
+                        }
+                    }
+                }
+                let _guard = guard;
                 if let Some(source) = durability_error {
                     return Err(MutationError::Filesystem {
                         filesystem_applied: true,

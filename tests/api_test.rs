@@ -2488,7 +2488,7 @@ Source body.
 }
 
 #[tokio::test]
-async fn page_mutation_reports_index_failure_after_filesystem_success_without_notification() {
+async fn page_create_rolls_back_file_when_index_publication_fails() {
     use clepsydra::vault::mutation_coordinator::{
         CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
     };
@@ -2524,13 +2524,13 @@ async fn page_mutation_reports_index_failure_after_filesystem_success_without_no
     assert!(matches!(
         error,
         MutationError::Index {
-            filesystem_applied: true,
+            filesystem_applied: false,
             ..
         }
     ));
     assert!(
-        tmp.path().join("failure.md").exists(),
-        "filesystem success must be reported rather than rolled back implicitly"
+        !tmp.path().join("failure.md").exists(),
+        "failed index publication must roll back the created file"
     );
     assert!(
         !notified.load(std::sync::atomic::Ordering::SeqCst),

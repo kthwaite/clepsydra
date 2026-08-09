@@ -2,6 +2,7 @@ pub mod academic;
 pub mod agenda;
 pub mod archive;
 pub mod attachments;
+pub mod base_members;
 pub mod bases;
 pub mod bcl;
 pub mod blocks;
@@ -103,6 +104,8 @@ pub(crate) fn mutation_error(
         }
         MutationError::Filesystem { .. }
         | MutationError::Index { .. }
+        | MutationError::IndexRollback { .. }
+        | MutationError::IndexCompensation { .. }
         | MutationError::Reconcile { .. }
         | MutationError::Hook { .. } => error::ApiError::internal(error.to_string()),
     }

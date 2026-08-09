@@ -2,8 +2,12 @@ mod support;
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
 
 use axum::http::StatusCode;
+use clepsydra::api::Clock;
 use clepsydra::api::events::SyncNotification;
 use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::base_document;
@@ -45,6 +49,78 @@ name = "B"
 layout = "table"
 plugin_view = "for-b"
 "#;
+
+#[derive(Debug)]
+struct FixedClock(DateTime<Utc>);
+
+impl Clock for FixedClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.0
+    }
+}
+
+fn fixed_now() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-08-09T12:34:56Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+fn member_fixture(seed_fn: impl FnOnce(&Path) + 'static) -> ApiFixture {
+    ApiFixture::builder()
+        .clock(Arc::new(FixedClock(fixed_now())))
+        .pre_index_seed(seed_fn)
+        .build()
+}
+
+fn collect_page_paths(root: &Path, current: &Path, paths: &mut Vec<String>) {
+    for entry in fs::read_dir(current).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().is_some_and(|name| name == ".clepsydra") {
+                continue;
+            }
+            collect_page_paths(root, &path, paths);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            paths.push(
+                path.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+}
+
+fn page_paths(root: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    collect_page_paths(root, root, &mut paths);
+    paths.sort();
+    paths
+}
+
+async fn current_base_revision(fixture: &ApiFixture, slug: &str) -> String {
+    let detail: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/bases/{slug}"))
+        .await
+        .json();
+    detail["revision"].as_str().unwrap().to_owned()
+}
+
+async fn indexed_page_count(fixture: &ApiFixture) -> i64 {
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+                .unwrap()
+        })
+        .await
+        .unwrap()
+}
 
 fn seed_identity_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
@@ -377,6 +453,17 @@ async fn get_base_returns_definition_and_unknown_is_404() {
         base_document::revision(
             &fs::read_to_string(tmp.path().join("vault/bases/reading.base.toml")).unwrap()
         )
+    );
+    assert_eq!(body["member_creation"][0]["view"], "Continues");
+    assert_eq!(body["member_creation"][0]["enabled"], true);
+    assert!(
+        body["member_creation"][0]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field["field"] == "status"
+                && field["membership"] == false
+                && field["view"] == true)
     );
 
     server
@@ -829,4 +916,323 @@ async fn non_scalar_system_view_sorts_are_rejected_before_publication() {
             .join("bases/invalid-sorts.base.toml")
             .exists()
     );
+}
+
+#[tokio::test]
+async fn create_base_member_writes_one_matching_typed_page() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "The Left Hand of Darkness",
+            "fields": {
+                "kind": "BOOK",
+                "author": "Le Guin",
+                "status": "reading",
+                "rating": 10,
+                "started": "2026-08-09"
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = body["path"].as_str().unwrap();
+    assert!(path.starts_with("books/20260809.the-left-hand-of-darkness."));
+    assert_eq!(body["title"], "The Left Hand of Darkness");
+
+    let vault_path = clepsydra::vault::path::VaultPath::new(path).unwrap();
+    let page = clepsydra::vault::page::Page::from_file(
+        &fixture.state.vault.resolve(&vault_path),
+        vault_path,
+    )
+    .unwrap();
+    assert_eq!(body["id"], page.meta.id.to_string());
+    assert_eq!(
+        body["revision"],
+        clepsydra::vault::page::page_revision(&page.raw_content)
+    );
+    assert_eq!(
+        page.meta.kind,
+        Some(clepsydra::vault::kind::Kind::Book)
+    );
+    assert_eq!(page.meta.extra["rating"], toml::Value::Integer(10));
+    assert!(matches!(
+        page.meta.extra["started"],
+        toml::Value::Datetime(_)
+    ));
+    assert!(page.body.is_empty());
+
+    let view: serde_json::Value = fixture
+        .server
+        .get("/api/vault/bases/reading/views/continues")
+        .await
+        .json();
+    assert!(
+        view["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == body["id"])
+    );
+    match notifications.try_recv().unwrap() {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(upserted, vec![path]);
+            assert!(removed.is_empty());
+        }
+        other => panic!("unexpected notification: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn member_rejections_leave_no_file_or_index_row() {
+    let fixture = member_fixture(seed);
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let revision = current_base_revision(&fixture, "reading").await;
+
+    for request in [
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Queued", "fields": { "kind": "BOOK", "status": "queued" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Wrong kind", "fields": { "kind": "NOTE", "status": "reading" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad rating", "fields": { "kind": "BOOK", "status": "reading", "rating": "five" } }),
+    ] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/reading/members")
+            .json(&request)
+            .await;
+        response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let error: serde_json::Value = response.json();
+        assert!(error["detail"]["diagnostics"].is_array(), "{error}");
+        assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+        assert_eq!(indexed_page_count(&fixture).await, before_rows);
+    }
+}
+
+#[tokio::test]
+async fn member_revision_and_lookup_errors_have_exact_statuses_without_artifacts() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    let stale = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": "stale",
+            "view": "Continues",
+            "title": "Stale",
+            "fields": {}
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "base_revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], revision);
+
+    fixture
+        .server
+        .post("/api/vault/bases/missing/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Missing",
+            "fields": {}
+        }))
+        .await
+        .assert_status_not_found();
+    fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": current_base_revision(&fixture, "reading").await,
+            "view": "Missing",
+            "title": "Missing view",
+            "fields": {}
+        }))
+        .await
+        .assert_status_not_found();
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn member_malformed_and_unsupported_fields_are_bad_requests() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    for request in [
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "  ", "fields": {} }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Unknown", "fields": { "missing": "value" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Reserved", "fields": { "id": "client-id" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad tags", "fields": { "tags": "not-an-array" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad kind", "fields": { "kind": "MISSING" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad project", "fields": { "project": "../escape" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Malformed", "fields": [] }),
+    ] {
+        fixture
+            .server
+            .post("/api/vault/bases/reading/members")
+            .json(&request)
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(page_paths(fixture.state.vault.root()), before);
+    }
+}
+
+fn seed_property_types(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/types.base.toml"),
+        r#"
+name = "Typed"
+filter = { field = "kind", op = "eq", value = "NOTE" }
+
+[properties]
+text = { type = "text" }
+url = { type = "url" }
+relation = { type = "relation", many = false }
+select = { type = "select", options = ["one", "two"] }
+multi = { type = "multi_select", options = ["red", "blue"] }
+number = { type = "number" }
+bool = { type = "bool" }
+date = { type = "date" }
+datetime = { type = "datetime" }
+
+[[views]]
+name = "Compound"
+filter = { all = [
+  { any = [
+    { field = "select", op = "eq", value = "one" },
+    { field = "number", op = "gt", value = 100 }
+  ] },
+  { not = { field = "bool", op = "eq", value = false } }
+] }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn member_creation_coerces_every_custom_property_type_and_compound_filters() {
+    let fixture = member_fixture(seed_property_types);
+    let revision = current_base_revision(&fixture, "types").await;
+    let response = fixture
+        .server
+        .post("/api/vault/bases/types/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "compound",
+            "title": "Typed values",
+            "fields": {
+                "text": "hello",
+                "prop.url": "https://example.com",
+                "relation": ["alpha", "beta"],
+                "select": "one",
+                "multi": ["red", "blue"],
+                "number": 2.5,
+                "bool": true,
+                "date": "2026-08-09",
+                "datetime": "2026-08-09T12:34:56Z",
+                "tags": ["typed"],
+                "aliases": ["Types"]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = clepsydra::vault::path::VaultPath::new(body["path"].as_str().unwrap()).unwrap();
+    let page =
+        clepsydra::vault::page::Page::from_file(&fixture.state.vault.resolve(&path), path).unwrap();
+    assert_eq!(
+        page.meta.kind,
+        Some(clepsydra::vault::kind::Kind::Note),
+        "missing kind must persist the NOTE declaration"
+    );
+    assert_eq!(page.meta.tags, vec!["typed"]);
+    assert_eq!(page.meta.aliases, vec!["Types"]);
+    assert_eq!(page.meta.extra["text"], toml::Value::String("hello".into()));
+    assert_eq!(
+        page.meta.extra["url"],
+        toml::Value::String("https://example.com".into())
+    );
+    assert_eq!(
+        page.meta.extra["relation"],
+        toml::Value::Array(vec![
+            toml::Value::String("alpha".into()),
+            toml::Value::String("beta".into())
+        ])
+    );
+    assert_eq!(
+        page.meta.extra["select"],
+        toml::Value::String("one".into())
+    );
+    assert_eq!(
+        page.meta.extra["multi"],
+        toml::Value::Array(vec![
+            toml::Value::String("red".into()),
+            toml::Value::String("blue".into())
+        ])
+    );
+    assert!(matches!(page.meta.extra["number"], toml::Value::Float(_)));
+    assert!(matches!(page.meta.extra["bool"], toml::Value::Boolean(true)));
+    assert!(matches!(page.meta.extra["date"], toml::Value::Datetime(_)));
+    assert!(matches!(
+        page.meta.extra["datetime"],
+        toml::Value::Datetime(_)
+    ));
+}
+
+#[tokio::test]
+async fn member_index_failure_rolls_back_generated_page_without_notification() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let _ = fixture
+        .state
+        .index
+        .with_index(|_, _| -> () { panic!("terminate index thread for failure test") })
+        .await;
+
+    fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Rollback",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await
+        .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
+async fn openapi_registers_base_member_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    assert!(
+        document["paths"]["/api/vault/bases/{slug}/members"]["post"].is_object()
+    );
+    for schema in [
+        "BaseMemberCreateRequest",
+        "BaseMemberCreateResponse",
+        "BaseMemberValidationDetail",
+        "BaseMemberCapability",
+        "BaseMemberDiagnostic",
+    ] {
+        assert!(
+            document["components"]["schemas"][schema].is_object(),
+            "missing {schema}"
+        );
+    }
 }
