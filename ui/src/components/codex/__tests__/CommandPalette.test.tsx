@@ -158,4 +158,15 @@ describe("CommandPalette keyboard navigation", () => {
     });
     expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
+
+  it("opens book import with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Add book by ISBN{Enter}");
+
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+    expect(useUiStore.getState().isBookImportOpen).toBe(true);
+  });
 });

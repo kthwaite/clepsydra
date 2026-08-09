@@ -48,6 +48,7 @@ function CommandPaletteContent() {
   const close = useUiStore((s) => s.closeSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openCaptureAside = useUiStore((s) => s.openCaptureAside);
+  const openBookImport = useUiStore((s) => s.openBookImport);
   const openSettings = useUiStore((s) => s.openSettings);
   const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const runBoot = useUiStore((s) => s.runBoot);
@@ -74,7 +75,6 @@ function CommandPaletteContent() {
       window.setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open]);
-
 
   const verbCommands = useMemo<Command[]>(
     () => [
@@ -124,6 +124,12 @@ function CommandPaletteContent() {
       },
       {
         kind: "cmd",
+        id: "library.add-book",
+        title: "Add book by ISBN",
+        action: () => openBookImport(),
+      },
+      {
+        kind: "cmd",
         id: formatChord(SHORTCUTS["app.inscribe"].chord),
         title: "Inscribe new folio",
         action: () => openInscribe(),
@@ -166,6 +172,7 @@ function CommandPaletteContent() {
       toggleTheme,
       openInscribe,
       openCaptureAside,
+      openBookImport,
       openSettings,
       openShortcutHelp,
       runBoot,

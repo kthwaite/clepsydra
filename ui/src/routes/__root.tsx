@@ -1,9 +1,9 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { lazy, type ReactNode, Suspense, useEffect, useRef } from "react";
 import { CodexFrame } from "#/components/codex/CodexFrame";
+import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
 import { RouteError } from "#/components/RouteError";
-import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { Toaster } from "#/components/ui/Toaster";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { usePreviewStore } from "#/store/preview";
@@ -29,6 +29,11 @@ const CaptureAsideModal = lazy(() =>
     default: module.CaptureAsideModal,
   })),
 );
+const BookImportModal = lazy(() =>
+  import("#/components/books/BookImportModal").then((module) => ({
+    default: module.BookImportModal,
+  })),
+);
 const LocationModal = lazy(() =>
   import("#/components/codex/LocationModal").then((module) => ({
     default: module.LocationModal,
@@ -50,6 +55,7 @@ export function GlobalOverlays() {
   const settingsOpen = useUiStore((state) => state.isSettingsOpen);
   const inscribeOpen = useUiStore((state) => state.isInscribeOpen);
   const captureOpen = useUiStore((state) => state.isCaptureAsideOpen);
+  const bookImportOpen = useUiStore((state) => state.isBookImportOpen);
   const locationOpen = useUiStore((state) => state.isLocationOpen);
   const shortcutHelpOpen = useUiStore((state) => state.isShortcutHelpOpen);
   const booting = useUiStore((state) => state.isBooting);
@@ -57,6 +63,7 @@ export function GlobalOverlays() {
   const closeSettings = useUiStore((state) => state.closeSettings);
   const closeInscribe = useUiStore((state) => state.closeInscribe);
   const closeCaptureAside = useUiStore((state) => state.closeCaptureAside);
+  const closeBookImport = useUiStore((state) => state.closeBookImport);
   const closeLocation = useUiStore((state) => state.closeLocation);
   const closeShortcutHelp = useUiStore((state) => state.closeShortcutHelp);
   const endBoot = useUiStore((state) => state.endBoot);
@@ -84,16 +91,18 @@ export function GlobalOverlays() {
           <CaptureAsideModal />
         </OverlayBoundary>
       )}
+      {bookImportOpen && (
+        <OverlayBoundary onDismiss={closeBookImport} label="Add book">
+          <BookImportModal />
+        </OverlayBoundary>
+      )}
       {locationOpen && (
         <OverlayBoundary onDismiss={closeLocation} label="Location">
           <LocationModal />
         </OverlayBoundary>
       )}
       {shortcutHelpOpen && (
-        <OverlayBoundary
-          onDismiss={closeShortcutHelp}
-          label="Shortcut help"
-        >
+        <OverlayBoundary onDismiss={closeShortcutHelp} label="Shortcut help">
           <ShortcutHelpModal />
         </OverlayBoundary>
       )}
@@ -159,7 +168,6 @@ function OverlayLoadingFallback({
     </div>
   );
 }
-
 
 export const Route = createRootRoute({
   notFoundComponent: () => (

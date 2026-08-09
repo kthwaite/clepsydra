@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { useUiStore } from "#/store/ui";
 import { usePreviewStore } from "#/store/preview";
+import { useUiStore } from "#/store/ui";
 
 vi.mock("#/components/codex/CommandPalette", () => ({
   CommandPalette: () => (
@@ -27,6 +27,13 @@ vi.mock("#/components/codex/InscribeModal", () => ({
 vi.mock("#/components/codex/CaptureAsideModal", () => ({
   CaptureAsideModal: () => <div>lazy capture</div>,
 }));
+vi.mock("#/components/books/BookImportModal", () => ({
+  BookImportModal: () => (
+    <div role="dialog" aria-label="Add book">
+      lazy book import
+    </div>
+  ),
+}));
 vi.mock("#/components/codex/LocationModal", () => ({
   LocationModal: () => <div>lazy location</div>,
 }));
@@ -48,6 +55,7 @@ beforeEach(() => {
     isSettingsOpen: false,
     isInscribeOpen: false,
     isCaptureAsideOpen: false,
+    isBookImportOpen: false,
     isLocationOpen: false,
     isShortcutHelpOpen: false,
     isBooting: false,
@@ -70,6 +78,7 @@ it("opens Search, Settings, and New note as named dialogs through store actions"
     ["Command console", () => useUiStore.getState().openSearch()],
     ["Settings", () => useUiStore.getState().openSettings()],
     ["Intake", () => useUiStore.getState().openInscribe()],
+    ["Add book", () => useUiStore.getState().openBookImport()],
   ] as const;
 
   for (const [name, open] of cases) {
@@ -80,6 +89,7 @@ it("opens Search, Settings, and New note as named dialogs through store actions"
         isSearchOpen: false,
         isSettingsOpen: false,
         isInscribeOpen: false,
+        isBookImportOpen: false,
       });
     });
   }
@@ -91,6 +101,7 @@ it("mounts each overlay from its corresponding UI state", async () => {
     ["isSettingsOpen", "lazy settings"],
     ["isInscribeOpen", "lazy inscribe"],
     ["isCaptureAsideOpen", "lazy capture"],
+    ["isBookImportOpen", "lazy book import"],
     ["isLocationOpen", "lazy location"],
     ["isShortcutHelpOpen", "lazy shortcut help"],
     ["isBooting", "lazy boot"],

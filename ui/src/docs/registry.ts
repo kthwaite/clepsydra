@@ -1,5 +1,6 @@
 import { lazy } from "react";
 import basesSource from "#/docs/content/bases.mdx?raw";
+import booksAndReadingSource from "#/docs/content/books-and-reading.mdx?raw";
 import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
 import cliSource from "#/docs/content/cli.mdx?raw";
 import configurationSource from "#/docs/content/configuration.mdx?raw";
@@ -23,6 +24,9 @@ const TroubleshootingGuide = lazy(
 );
 const CliGuide = lazy(() => import("#/docs/content/cli.mdx"));
 const BasesGuide = lazy(() => import("#/docs/content/bases.mdx"));
+const BooksAndReadingGuide = lazy(
+  () => import("#/docs/content/books-and-reading.mdx"),
+);
 const LspGuide = lazy(() => import("#/docs/content/lsp.mdx"));
 const McpGuide = lazy(() => import("#/docs/content/mcp.mdx"));
 const BrowserExtensionGuide = lazy(
@@ -54,6 +58,12 @@ const basesMeta = {
   slug: "bases",
   title: "Bases",
   description: "Define typed fields and filtered table views.",
+} satisfies DocMeta;
+const booksAndReadingMeta = {
+  slug: "books-and-reading",
+  title: "Books and Reading",
+  description:
+    "Add books from an ISBN or camera barcode and understand imported metadata.",
 } satisfies DocMeta;
 const lspMeta = {
   slug: "lsp",
@@ -102,6 +112,12 @@ const troubleshooting = page(
 );
 const cli = page("reference", cliMeta, CliGuide, cliSource);
 const bases = page("features", basesMeta, BasesGuide, basesSource);
+const booksAndReading = page(
+  "features",
+  booksAndReadingMeta,
+  BooksAndReadingGuide,
+  booksAndReadingSource,
+);
 const lsp = page("integrations", lspMeta, LspGuide, lspSource);
 const mcp = page("integrations", mcpMeta, McpGuide, mcpSource);
 const browserExtension = page(
@@ -118,7 +134,11 @@ export const DOC_GROUPS = [
     pages: [gettingStarted, configuration, troubleshooting],
   },
   { id: "reference", label: "Reference", pages: [cli] },
-  { id: "features", label: "Features", pages: [bases] },
+  {
+    id: "features",
+    label: "Features",
+    pages: [bases, booksAndReading],
+  },
   {
     id: "integrations",
     label: "Integrations",
