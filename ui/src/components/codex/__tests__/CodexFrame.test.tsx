@@ -223,11 +223,12 @@ describe("CodexFrame Docs integration", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-08T12:00:00Z"));
     renderFrame();
-    expect(locationHookMock).toHaveBeenCalledOnce();
+    const callsAfterRender = locationHookMock.mock.calls.length;
+    expect(callsAfterRender).toBeGreaterThan(0);
 
     act(() => vi.advanceTimersByTime(1000));
 
-    expect(locationHookMock).toHaveBeenCalledOnce();
+    expect(locationHookMock).toHaveBeenCalledTimes(callsAfterRender);
     vi.useRealTimers();
   });
 });
@@ -273,6 +274,30 @@ describe("CodexFrame responsive shell", () => {
     expect(screen.queryByText("TASKING")).not.toBeInTheDocument();
     expect(screen.getByText("Frame content")).toBeInTheDocument();
   });
+
+  it.each([
+    ["mobile", true],
+    ["desktop", false],
+  ] as const)(
+    "keeps %s bottom chrome after the routed content in DOM order",
+    (_label, mobile) => {
+      mobileLayoutState.matches = mobile;
+      renderFrame();
+
+      const main = document.querySelector("main");
+      const bottomChrome = mobile
+        ? screen.getByRole("navigation", { name: "Mobile roots" })
+        : document.querySelector("footer");
+
+      if (!main || !bottomChrome) {
+        throw new Error("Expected main and responsive bottom chrome");
+      }
+      expect(
+        main.compareDocumentPosition(bottomChrome) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    },
+  );
 
   it("wires the mobile global actions and Constellation root", async () => {
     const user = userEvent.setup();

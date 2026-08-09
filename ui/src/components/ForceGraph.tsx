@@ -121,6 +121,13 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .scaleExtent([0.1, 4])
       .on("zoom", (event) => {
         gSel.attr("transform", event.transform);
+        const targetSize = 44 / event.transform.k;
+        gSel
+          .selectAll<SVGRectElement, SimNode>(".node-hit-target")
+          .attr("x", -targetSize / 2)
+          .attr("y", -targetSize / 2)
+          .attr("width", targetSize)
+          .attr("height", targetSize);
       });
     svgSel.call(zoomBehavior).call(zoomBehavior.transform, zoomIdentity);
 

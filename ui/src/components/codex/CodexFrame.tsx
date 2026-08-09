@@ -1,5 +1,5 @@
 import { useLocation } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { DesktopCodexFrame } from "#/components/codex/DesktopCodexFrame";
 import { MobileCodexFrame } from "#/components/codex/MobileCodexFrame";
 import type { CodexView } from "#/components/codex/useCodexView";
@@ -14,11 +14,13 @@ export type CodexFrameProps = {
 
 export type CodexFrameChromeProps = Omit<CodexFrameProps, "children"> & {
   pathname: string;
+  bottomSlot: Element | null;
 };
 
 export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const mobile = useMobileLayout();
   const { pathname } = useLocation();
+  const [bottomSlot, setBottomSlot] = useState<HTMLDivElement | null>(null);
 
   return (
     <div
@@ -28,9 +30,17 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       )}
     >
       {mobile ? (
-        <MobileCodexFrame forceView={forceView} pathname={pathname} />
+        <MobileCodexFrame
+          bottomSlot={bottomSlot}
+          forceView={forceView}
+          pathname={pathname}
+        />
       ) : (
-        <DesktopCodexFrame forceView={forceView} pathname={pathname} />
+        <DesktopCodexFrame
+          bottomSlot={bottomSlot}
+          forceView={forceView}
+          pathname={pathname}
+        />
       )}
       <main
         className={cn(
@@ -45,6 +55,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           {children}
         </div>
       </main>
+      <div className="contents" ref={setBottomSlot} />
     </div>
   );
 }

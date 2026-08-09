@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { createPortal } from "react-dom";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import {
   type CodexView,
@@ -20,6 +21,7 @@ const ROOTS: ReadonlyArray<readonly [MobileRoot, string]> = [
 ];
 
 export function MobileCodexFrame({
+  bottomSlot,
   forceView,
   pathname,
 }: CodexFrameChromeProps) {
@@ -65,30 +67,35 @@ export function MobileCodexFrame({
         </button>
       </header>
 
-      <nav
-        aria-label="Mobile roots"
-        className="cl-mobile-bottom order-3 flex flex-shrink-0 border-t border-rule bg-bar-bg"
-      >
-        {ROOTS.map(([root, label]) => {
-          const active = view === root;
-          return (
-            <button
-              key={root}
-              type="button"
-              onClick={() => navigateToRoot(root)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "cl-mono min-h-12 flex-1 px-2 py-2 text-[10px] uppercase tracking-[0.12em]",
-                active
-                  ? "text-bar-fg shadow-[inset_0_2px_0_0_var(--accent)]"
-                  : "text-bar-fg/65",
-              )}
+      {bottomSlot
+        ? createPortal(
+            <nav
+              aria-label="Mobile roots"
+              className="cl-mobile-bottom order-3 flex flex-shrink-0 border-t border-rule bg-bar-bg"
             >
-              {label}
-            </button>
-          );
-        })}
-      </nav>
+              {ROOTS.map(([root, label]) => {
+                const active = view === root;
+                return (
+                  <button
+                    key={root}
+                    type="button"
+                    onClick={() => navigateToRoot(root)}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "cl-mono min-h-12 flex-1 px-2 py-2 text-[10px] uppercase tracking-[0.12em]",
+                      active
+                        ? "text-bar-fg shadow-[inset_0_2px_0_0_var(--accent)]"
+                        : "text-bar-fg/65",
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </nav>,
+            bottomSlot,
+          )
+        : null}
     </>
   );
 }

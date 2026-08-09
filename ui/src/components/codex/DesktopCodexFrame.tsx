@@ -1,5 +1,6 @@
 import { useIsMutating } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { createPortal } from "react-dom";
 import { useStats } from "#/api/index";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { shortFolio } from "#/components/codex/folio-utils";
@@ -30,6 +31,7 @@ const NAV: ReadonlyArray<readonly [CodexView, string]> = [
 ];
 
 export function DesktopCodexFrame({
+  bottomSlot,
   forceView,
   pathname,
 }: CodexFrameChromeProps) {
@@ -175,42 +177,50 @@ export function DesktopCodexFrame({
         )}
 
       {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
-      <footer className="cl-mono order-3 flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
-        {diegetic && (
-          <span className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]">
-            <span
-              className="inline-block h-[6px] w-[6px]"
-              style={{ background: syncColor }}
-              aria-hidden
-            />
-            <span className="font-medium tracking-[0.16em]">VESSEL</span>
-            <span
-              className={cn(
-                "inline-block h-[6px] w-[6px]",
-                writing ? "animate-pulse bg-accent" : "bg-ink-mute/30",
+      {bottomSlot
+        ? createPortal(
+            <footer className="cl-mono order-3 flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
+              {diegetic && (
+                <span className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]">
+                  <span
+                    className="inline-block h-[6px] w-[6px]"
+                    style={{ background: syncColor }}
+                    aria-hidden
+                  />
+                  <span className="font-medium tracking-[0.16em]">VESSEL</span>
+                  <span
+                    className={cn(
+                      "inline-block h-[6px] w-[6px]",
+                      writing ? "animate-pulse bg-accent" : "bg-ink-mute/30",
+                    )}
+                    aria-label={
+                      writing ? "Sending data to server" : undefined
+                    }
+                    title={writing ? "Sending…" : undefined}
+                  />
+                </span>
               )}
-              aria-label={writing ? "Sending data to server" : undefined}
-              title={writing ? "Sending…" : undefined}
-            />
-          </span>
-        )}
-        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">
-          FILE {folioCode} · VIEW {view.toUpperCase()} · CORPUS {pages}/{links}
-        </span>
-        {view === "folio" && (
-          <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70">
-            {Math.round(Math.max(0, Math.min(1, progress)) * 100)}%
-          </span>
-        )}
-        {diegetic && (
-          <span className="hidden flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70 md:inline">
-            idx {statsError ? "✗" : stats ? "✓" : "…"} · collated{" "}
-            {formatRelativeTime(stats?.last_indexed_at)}
-          </span>
-        )}
-        <UptimeText />
-        <UtcClockText />
-      </footer>
+              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">
+                FILE {folioCode} · VIEW {view.toUpperCase()} · CORPUS {pages}/
+                {links}
+              </span>
+              {view === "folio" && (
+                <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70">
+                  {Math.round(Math.max(0, Math.min(1, progress)) * 100)}%
+                </span>
+              )}
+              {diegetic && (
+                <span className="hidden flex-shrink-0 border-l border-bar-rule px-3 py-[2px] opacity-70 md:inline">
+                  idx {statsError ? "✗" : stats ? "✓" : "…"} · collated{" "}
+                  {formatRelativeTime(stats?.last_indexed_at)}
+                </span>
+              )}
+              <UptimeText />
+              <UtcClockText />
+            </footer>,
+            bottomSlot,
+          )
+        : null}
     </>
   );
 }

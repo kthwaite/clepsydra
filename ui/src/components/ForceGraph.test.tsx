@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphNode } from "#/api/types";
 import { ForceGraph } from "./ForceGraph";
@@ -51,5 +51,26 @@ describe("ForceGraph", () => {
 
     fireEvent.click(graph);
     expect(onNodeClick).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the node target at least 44px in screen space at minimum zoom", async () => {
+    render(<ForceGraph nodes={[alpha]} edges={[]} />);
+
+    const graph = await screen.findByRole("img", {
+      name: "Constellation graph",
+    });
+    const target = graph.querySelector(".node-hit-target");
+    expect(target).not.toBeNull();
+
+    fireEvent.wheel(graph, {
+      deltaY: 100_000,
+      clientX: 0,
+      clientY: 0,
+    });
+
+    await waitFor(() => expect(target).toHaveAttribute("width", "440"));
+    expect(target).toHaveAttribute("height", "440");
+    expect(target).toHaveAttribute("x", "-220");
+    expect(target).toHaveAttribute("y", "-220");
   });
 });
