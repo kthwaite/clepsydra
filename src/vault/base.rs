@@ -418,6 +418,12 @@ pub(crate) fn fixed_candidate_comparison_matches(
             value,
             false,
         )),
+        ResolvedField::Prop { ty, .. }
+            if op == Op::Contains
+                && matches!(ty, PropertyType::Number | PropertyType::Bool) =>
+        {
+            Some(false)
+        }
         ResolvedField::Prop { key, ty } if base.property(&key).is_none() => {
             Some(property_matches(None, ty, op, value))
         }
@@ -692,6 +698,14 @@ fn scalar_matches(
                 })
             })
             .unwrap_or(false),
+        Op::Contains
+            if matches!(
+                property_type,
+                PropertyType::Number | PropertyType::Bool
+            ) =>
+        {
+            false
+        }
         Op::Contains => expected_scalar(property_type, value).is_some_and(|expected| {
             if contains_is_membership {
                 scalar_equal(&current, &expected)

@@ -87,6 +87,7 @@ pub fn candidate_matches(
         && !filter_matches_meta(filter, &context)
     {
         diagnostics.push(candidate_diagnostic(
+            base,
             BaseMemberScope::Membership,
             filter,
             "filter",
@@ -97,6 +98,7 @@ pub fn candidate_matches(
         && !filter_matches_meta(filter, &context)
     {
         diagnostics.push(candidate_diagnostic(
+            base,
             BaseMemberScope::View,
             filter,
             &format!("views.{}.filter", view.name),
@@ -258,13 +260,18 @@ fn bare_field(field: &str) -> &str {
 }
 
 fn candidate_diagnostic(
+    base: &BaseDefinition,
     scope: BaseMemberScope,
     filter: &Filter,
     root: &str,
     message: &str,
 ) -> BaseMemberDiagnostic {
     let field = match filter {
-        Filter::Cmp { field, .. } => Some(bare_field(field).to_owned()),
+        Filter::Cmp { field, .. } => Some(
+            resolved_requirement(base, field)
+                .map(|(_, request_key)| request_key)
+                .unwrap_or_else(|| bare_field(field).to_owned()),
+        ),
         _ => None,
     };
     BaseMemberDiagnostic {
@@ -832,5 +839,169 @@ layout = "table"
                 "unexpected alias result for {op}"
             );
         }
+    }
+
+    #[test]
+    fn candidate_contains_rejects_non_text_scalars_and_supports_dates() {
+        let cases = [
+            (
+                "number",
+                ", value = 7",
+                toml::Value::Integer(7),
+                false,
+            ),
+            (
+                "number",
+                ", value = 1.5",
+                toml::Value::Float(1.5),
+                false,
+            ),
+            (
+                "bool",
+                ", value = true",
+                toml::Value::Boolean(true),
+                false,
+            ),
+            (
+                "date",
+                ", value = \"2026-08\"",
+                toml::Value::Datetime("2026-08-09".parse().unwrap()),
+                true,
+            ),
+            (
+                "datetime",
+                ", value = \"12:34\"",
+                toml::Value::Datetime("2026-08-09T12:34:56Z".parse().unwrap()),
+                true,
+            ),
+        ];
+
+        for (property_type, value, current, expected) in cases {
+            let base = base(&format!(
+                r#"
+name = "Scalar contains"
+filter = {{ field = "value", op = "contains"{value} }}
+[properties]
+value = {{ type = "{property_type}" }}
+[[views]]
+name = "All"
+layout = "table"
+"#
+            ));
+            let mut meta = PageMeta::new();
+            meta.extra.insert("value".into(), current);
+            assert_eq!(
+                creation_capabilities(&base).remove(0).enabled,
+                expected,
+                "unexpected capability for {property_type} contains"
+            );
+
+            assert_eq!(
+                candidate_matches(
+                    &base,
+                    &base.file.views[0],
+                    &meta,
+                    "notes/20260809.scalar.Ab3xYz90.md",
+                    &CandidateDerived {
+                        word_count: 0,
+                        journal_date: None,
+                    },
+                )
+                .is_ok(),
+                expected,
+                "unexpected contains result for {property_type}"
+            );
+        }
+
+        let base = base(
+            r#"
+name = "Derived contains"
+filter = { field = "word_count", op = "contains", value = 0 }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        assert!(!creation_capabilities(&base).remove(0).enabled);
+        assert!(
+            candidate_matches(
+                &base,
+                &base.file.views[0],
+                &PageMeta::new(),
+                "notes/20260809.derived.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn candidate_diagnostics_use_resolved_request_keys() {
+        let kind_base = base(
+            r#"
+name = "Diagnostic keys"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+[properties]
+kind = { type = "text" }
+[[views]]
+name = "Property"
+layout = "table"
+filter = { field = "prop.kind", op = "eq", value = "genre" }
+"#,
+        );
+        let mut meta = PageMeta::new();
+        meta.kind = Some(Kind::Note);
+        meta.extra
+            .insert("kind".into(), toml::Value::String("wrong".into()));
+
+        let errors = candidate_matches(
+            &kind_base,
+            &kind_base.file.views[0],
+            &meta,
+            "notes/20260809.keys.Ab3xYz90.md",
+            &CandidateDerived {
+                word_count: 0,
+                journal_date: None,
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            errors
+                .iter()
+                .map(|diagnostic| diagnostic.field.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("kind"), Some("prop.kind")]
+        );
+
+        let word_count_base = base(
+            r#"
+name = "Derived property diagnostic"
+filter = { field = "prop.word_count", op = "eq", value = 7 }
+[properties]
+word_count = { type = "number" }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        let mut meta = PageMeta::new();
+        meta.extra
+            .insert("word_count".into(), toml::Value::Integer(8));
+        let errors = candidate_matches(
+            &word_count_base,
+            &word_count_base.file.views[0],
+            &meta,
+            "notes/20260809.word-count.Ab3xYz90.md",
+            &CandidateDerived {
+                word_count: 0,
+                journal_date: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(errors[0].field.as_deref(), Some("prop.word_count"));
     }
 }

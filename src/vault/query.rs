@@ -217,6 +217,27 @@ fn bind_value(
     }
 }
 
+fn bind_literal_contains_value(
+    field: &str,
+    ty: PropertyType,
+    value: &serde_json::Value,
+) -> Result<SqlValue, QueryError> {
+    let SqlValue::Text(value) = bind_value(field, ty, value)? else {
+        return Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op: Op::Contains,
+        });
+    };
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    Ok(SqlValue::Text(escaped))
+}
+
 fn sql_op(op: Op) -> Option<&'static str> {
     Some(match op {
         Op::Eq => "=",
@@ -311,9 +332,17 @@ fn compile_cmp(
                     }
                     Ok(format!("{column} IN ({})", holes.join(", ")))
                 }
+                Op::Contains if sys == SysField::WordCount => Err(QueryError::InvalidOp {
+                    field: field.to_string(),
+                    op,
+                }),
                 Op::Contains => {
-                    params.push(bind_sys_value(field, sys, value)?);
-                    Ok(format!("{column} LIKE '%' || ? || '%'"))
+                    params.push(bind_literal_contains_value(
+                        field,
+                        PropertyType::Text,
+                        value,
+                    )?);
+                    Ok(format!("{column} LIKE '%' || ? || '%' ESCAPE '\\'"))
                 }
                 Op::LinksTo => Err(QueryError::InvalidOp {
                     field: field.to_string(),
@@ -452,17 +481,31 @@ fn compile_prop(
             }
             Ok(exists(&format!("pp.{column} IN ({})", holes.join(", "))))
         }
+        Op::Contains
+            if matches!(
+                ty,
+                PropertyType::Number | PropertyType::Bool
+            ) =>
+        {
+            Err(QueryError::InvalidOp {
+                field: field.to_string(),
+                op,
+            })
+        }
         Op::Contains => {
             params.push(SqlValue::Text(key.to_string()));
-            params.push(bind_value(field, ty, value)?);
             if matches!(
                 ty,
                 PropertyType::MultiSelect | PropertyType::Select | PropertyType::Relation
             ) {
+                params.push(bind_value(field, ty, value)?);
                 // Membership on multi-valued: any element matches exactly.
                 Ok(exists(&format!("pp.{column} = ?")))
             } else {
-                Ok(exists(&format!("pp.{column} LIKE '%' || ? || '%'")))
+                params.push(bind_literal_contains_value(field, ty, value)?);
+                Ok(exists(&format!(
+                    "pp.{column} LIKE '%' || ? || '%' ESCAPE '\\'"
+                )))
             }
         }
         Op::Ne => {
@@ -1033,6 +1076,9 @@ rating  = { type = "number" }
 started = { type = "date" }
 series  = { type = "relation" }
 themes  = { type = "multi_select", options = [] }
+pattern = { type = "text" }
+done    = { type = "bool" }
+moment  = { type = "datetime" }
 "#;
 
     fn page(id: &str, kind: &str, title: &str, extras: &str) -> String {
@@ -1052,7 +1098,7 @@ themes  = { type = "multi_select", options = [] }
                 "0190f8a0-0000-7000-8000-00000000000a",
                 "BOOK",
                 "Book A",
-                "tags = [\"sf\"]\naliases = [\"Science Fiction\"]\nauthor = \"Wolfe\"\nstatus = \"reading\"\nrating = 9\nstarted = 2026-07-01\nthemes = [\"memory\"]\nseries = [\"[[Solar Cycle]]\"]\n",
+                "tags = [\"sf\"]\naliases = [\"Science Fiction\"]\nauthor = \"Wolfe\"\nstatus = \"reading\"\nrating = 9\nstarted = 2026-07-01\nthemes = [\"memory\"]\nseries = [\"[[Solar Cycle]]\"]\npattern = \"100%_done\"\ndone = true\nmoment = 2026-08-09T12:34:56Z\n",
             ),
         );
         write(
@@ -1146,9 +1192,45 @@ themes  = { type = "multi_select", options = [] }
             "series".into(),
             toml::Value::Array(vec![toml::Value::String("[[Solar Cycle]]".into())]),
         );
+        meta.extra.insert(
+            "pattern".into(),
+            toml::Value::String("100%_done".into()),
+        );
+        meta.extra.insert(
+            "started".into(),
+            toml::Value::Datetime("2026-07-01".parse().unwrap()),
+        );
+        meta.extra.insert(
+            "moment".into(),
+            toml::Value::Datetime("2026-08-09T12:34:56Z".parse().unwrap()),
+        );
         let cases = [
             (
                 serde_json::json!({ "field": "author", "op": "contains", "value": "OLF" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "%" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "_" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "contains", "value": "%" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "contains", "value": "_" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "started", "op": "contains", "value": "2026-07" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "contains", "value": "12:34" }),
                 true,
             ),
             (
@@ -1195,6 +1277,26 @@ themes  = { type = "multi_select", options = [] }
 
             assert_eq!(sql, expected, "unexpected SQL fixture result");
             assert_eq!(in_memory, sql, "in-memory matcher diverged from SQL");
+        }
+    }
+
+    #[test]
+    fn query_rejects_contains_for_non_text_scalar_types() {
+        let (_tmp, _index, base) = fixture();
+        for filter in [
+            serde_json::json!({ "field": "rating", "op": "contains", "value": 9 }),
+            serde_json::json!({ "field": "rating", "op": "contains", "value": 9.5 }),
+            serde_json::json!({ "field": "done", "op": "contains", "value": true }),
+            serde_json::json!({ "field": "word_count", "op": "contains", "value": 0 }),
+        ] {
+            let filter: Filter = serde_json::from_value(filter).unwrap();
+            assert!(matches!(
+                compile_filter(&filter, &QueryContext::for_base(&base)),
+                Err(QueryError::InvalidOp {
+                    op: Op::Contains,
+                    ..
+                })
+            ));
         }
     }
 

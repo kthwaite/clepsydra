@@ -529,6 +529,86 @@ async fn get_base_emits_resolved_member_creation_request_keys() {
     );
 }
 
+fn seed_diagnostic_key_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/diagnostic-keys.base.toml"),
+        r#"
+name = "Diagnostic keys"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+journal_date = { type = "date" }
+[[views]]
+name = "PropKind"
+layout = "table"
+filter = { field = "prop.kind", op = "eq", value = "genre" }
+[[views]]
+name = "PropWord"
+layout = "table"
+filter = { field = "prop.word_count", op = "eq", value = 7 }
+[[views]]
+name = "PropJournal"
+layout = "table"
+filter = { field = "prop.journal_date", op = "eq", value = "2026-08-09" }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn member_rejection_diagnostics_emit_resolved_request_keys() {
+    let fixture = member_fixture(seed_diagnostic_key_base);
+    let revision = current_base_revision(&fixture, "diagnostic-keys").await;
+    let cases = [
+        (
+            "PropKind",
+            serde_json::json!({ "kind": "NOTE", "prop.kind": "genre" }),
+            "membership",
+            "kind",
+        ),
+        (
+            "PropKind",
+            serde_json::json!({ "kind": "BOOK", "prop.kind": "wrong" }),
+            "view",
+            "prop.kind",
+        ),
+        (
+            "PropWord",
+            serde_json::json!({ "kind": "BOOK", "prop.word_count": 8 }),
+            "view",
+            "prop.word_count",
+        ),
+        (
+            "PropJournal",
+            serde_json::json!({ "kind": "BOOK", "prop.journal_date": "2026-08-08" }),
+            "view",
+            "prop.journal_date",
+        ),
+    ];
+
+    for (view, fields, expected_scope, expected_field) in cases {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/diagnostic-keys/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": view,
+                "title": format!("Wrong {view}"),
+                "fields": fields
+            }))
+            .await;
+        response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let error: serde_json::Value = response.json();
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+
+        assert_eq!(diagnostics.len(), 1, "{error}");
+        assert_eq!(diagnostics[0]["scope"], expected_scope);
+        assert_eq!(diagnostics[0]["field"], expected_field);
+    }
+}
+
 #[tokio::test]
 async fn view_evaluation_honors_view_filter_and_sort() {
     let (server, _tmp) = ApiFixture::builder()
