@@ -54,6 +54,13 @@ function renderViews(
   overrides: {
     views?: DraftView[];
     properties?: DraftProperty[];
+    diagnostics?: Array<{
+      slug: string;
+      severity: "error" | "warning";
+      path?: string | null;
+      message: string;
+    }>;
+    registerFocus?: (path: string, element: HTMLElement | null) => void;
     onChange?: ReturnType<typeof vi.fn<(views: DraftView[]) => void>>;
   } = {},
 ) {
@@ -65,12 +72,12 @@ function renderViews(
       <ViewsEditor
         views={views}
         properties={overrides.properties ?? draft().properties}
-        diagnostics={[]}
+        diagnostics={overrides.diagnostics ?? []}
         onChange={(next) => {
           onChange(next);
           setViews(next);
         }}
-        registerFocus={() => undefined}
+        registerFocus={overrides.registerFocus ?? (() => undefined)}
       />
     );
   }
@@ -227,6 +234,28 @@ describe("ViewsEditor", () => {
     expect(options).not.toContain("tags");
   });
 
+  it("exposes only query-engine system fields in view controls", () => {
+    renderViews();
+    const columnOptions = Array.from(
+      screen.getByLabelText("Column to add").querySelectorAll("option"),
+    ).map((option) => option.value);
+    expect(columnOptions).toEqual(
+      expect.arrayContaining([
+        "id",
+        "path",
+        "kind",
+        "project",
+        "tags",
+        "aliases",
+        "created_at",
+        "updated_at",
+        "journal_date",
+        "word_count",
+      ]),
+    );
+    expect(columnOptions).not.toContain("encryption");
+  });
+
   it("uses aggregateFunctions and omits the field for count", async () => {
     const onChange = renderViews();
     const user = userEvent.setup();
@@ -282,6 +311,55 @@ describe("ViewsEditor", () => {
     );
     expect(screen.getByLabelText("Layout")).toHaveValue("board");
   });
+
+  it("registers unsupported layout and nested diagnostics to exact controls", () => {
+    const targets = new Map<string, HTMLElement>();
+    const unsupported = view({
+      id: "diagnostic-view",
+      layout: "board",
+      filter: {
+        all: [{ field: "status", op: "eq", value: "reading" }],
+      },
+      aggregates: [{ fn: "sum", field: "rating" }],
+    } as unknown as Partial<DraftView>);
+    renderViews({
+      views: [unsupported],
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].layout",
+          message: "unsupported",
+        },
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].filter.all[0].value",
+          message: "bad filter",
+        },
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].aggregates[0].field",
+          message: "bad aggregate field",
+        },
+      ],
+      registerFocus: (path, element) => {
+        if (element) targets.set(path, element);
+        else targets.delete(path);
+      },
+    });
+
+    expect(targets.get("views[0].layout")).toBe(
+      screen.getByLabelText("Layout"),
+    );
+    expect(targets.get("views[0].filter.all[0].value")).toBe(
+      screen.getByLabelText("Value for condition 1"),
+    );
+    expect(targets.get("views[0].aggregates[0].field")).toBe(
+      screen.getByLabelText("Aggregate field 1"),
+    );
+  });
 });
 
 describe("BasePreview", () => {
@@ -313,12 +391,42 @@ describe("BasePreview", () => {
     expect(previewMock).toHaveBeenCalledTimes(1);
     expect(previewMock).toHaveBeenCalledWith({
       body: {
-        definition: expect.objectContaining({ name: "Newest" }),
+        definition: {
+          name: "Newest",
+          description: undefined,
+          filter: undefined,
+          properties: {
+            rating: { type: "number", options: undefined },
+            status: { type: "select", options: undefined },
+          },
+          views: [
+            {
+              name: "All",
+              layout: "table",
+              filter: undefined,
+              sort: [],
+              group_by: undefined,
+              aggregates: [],
+              columns: ["title", "rating"],
+            },
+          ],
+        },
         view: "All",
         limit: 100,
         offset: 0,
       },
     });
+    vi.useRealTimers();
+  });
+
+  it("cancels the pending debounce on unmount", async () => {
+    vi.useFakeTimers();
+    const rendered = render(
+      <BasePreview draft={draft()} selectedViewId="view-all" />,
+    );
+    rendered.unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(previewMock).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

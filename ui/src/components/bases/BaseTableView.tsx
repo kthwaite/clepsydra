@@ -35,6 +35,7 @@ export interface BaseTableViewProps {
     value: CellValue,
     hint?: PropertyType,
   ) => void;
+  readOnly?: boolean;
 }
 
 /**
@@ -86,6 +87,7 @@ export function BaseTableView({
   onSortChange,
   onOpenPage,
   onCommitCell,
+  readOnly = false,
 }: BaseTableViewProps) {
   const view = definition.views?.find((v) => v.name === activeView);
   const columns =
@@ -105,12 +107,15 @@ export function BaseTableView({
   const grid = (rows: QueryRow[], label: string) => (
     <Table
       aria-label={label}
-      sortDescriptor={sortDescriptor}
-      onSortChange={(descriptor) =>
-        onSortChange({
-          sort: String(descriptor.column),
-          dir: descriptor.direction === "descending" ? "desc" : "asc",
-        })
+      sortDescriptor={readOnly ? undefined : sortDescriptor}
+      onSortChange={
+        readOnly
+          ? undefined
+          : (descriptor) =>
+              onSortChange({
+                sort: String(descriptor.column),
+                dir: descriptor.direction === "descending" ? "desc" : "asc",
+              })
       }
       className="w-full border-collapse"
     >
@@ -120,10 +125,10 @@ export function BaseTableView({
             key={column}
             id={column}
             isRowHeader={column === columns[0]}
-            allowsSorting
+            allowsSorting={!readOnly}
             className={cn(
-              "cl-mono cursor-pointer border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
-              "data-[hovered]:text-ink",
+              "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
+              !readOnly && "cursor-pointer data-[hovered]:text-ink",
             )}
           >
             {({ sortDirection }) => (
@@ -148,14 +153,22 @@ export function BaseTableView({
             {columns.map((column) => (
               <Cell key={column} className="px-1 py-0.5 align-top">
                 {column === "title" ? (
-                  <button
-                    type="button"
-                    className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
-                    onClick={() => onOpenPage(row.path)}
-                  >
-                    {row.title ?? row.path}
-                  </button>
-                ) : !SYSTEM_COLUMNS.has(column) && properties[column] ? (
+                  readOnly ? (
+                    <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
+                      {row.title ?? row.path}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
+                      onClick={() => onOpenPage(row.path)}
+                    >
+                      {row.title ?? row.path}
+                    </button>
+                  )
+                ) : !readOnly &&
+                  !SYSTEM_COLUMNS.has(column) &&
+                  properties[column] ? (
                   <EditableCell
                     value={
                       (row.columns as Record<string, CellValue>)[column] ?? null
@@ -192,21 +205,35 @@ export function BaseTableView({
           {definition.name}
         </h1>
         <nav aria-label="Views" className="flex gap-1">
-          {(definition.views ?? []).map((v) => (
-            <button
-              key={v.name}
-              type="button"
-              className={cn(
-                "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em]",
-                v.name === activeView
-                  ? "border-accent text-accent"
-                  : "border-rule text-ink-mute hover:text-ink",
-              )}
-              onClick={() => onViewChange(v.name)}
-            >
-              {v.name}
-            </button>
-          ))}
+          {(definition.views ?? []).map((v) =>
+            readOnly ? (
+              <span
+                key={v.name}
+                className={cn(
+                  "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em]",
+                  v.name === activeView
+                    ? "border-accent text-accent"
+                    : "border-rule text-ink-mute",
+                )}
+              >
+                {v.name}
+              </span>
+            ) : (
+              <button
+                key={v.name}
+                type="button"
+                className={cn(
+                  "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em]",
+                  v.name === activeView
+                    ? "border-accent text-accent"
+                    : "border-rule text-ink-mute hover:text-ink",
+                )}
+                onClick={() => onViewChange(v.name)}
+              >
+                {v.name}
+              </button>
+            ),
+          )}
         </nav>
       </div>
 

@@ -95,6 +95,27 @@ describe("base definition model", () => {
     ]);
   });
 
+  it("preserves an unsupported wire layout until the user explicitly repairs it", () => {
+    const detail = baseDetail({
+      views: [
+        {
+          name: "Board",
+          layout: "board",
+          columns: ["title"],
+        },
+      ],
+    } as unknown as Partial<BaseFile>);
+
+    const draft = fromWire(detail);
+
+    expect(draft.views[0].layout).toBe("board");
+    expect(toWire(draft)).toEqual(
+      expect.objectContaining({
+        views: [expect.objectContaining({ layout: "board" })],
+      }),
+    );
+  });
+
   it("materializes wire defaults without mutating the response", () => {
     const detail = baseDetail({
       description: undefined,

@@ -25,7 +25,7 @@ function fieldCapabilities(
   properties: readonly DraftProperty[],
 ): FieldCapability[] {
   return [
-    ...SYSTEM_PROPERTY_FIELDS.map(
+    ...SYSTEM_PROPERTY_FIELDS.filter((key) => key !== "encryption").map(
       (key): FieldCapability => ({
         key,
         type:
@@ -119,9 +119,9 @@ export function ViewDefinitionEditor({
           <select
             ref={(element) => registerFocus(`${viewPath}.layout`, element)}
             className={controlClass}
-            value={view.layout as string}
+            value={view.layout}
             onChange={(event) =>
-              onChange({ ...view, layout: event.target.value as "table" })
+              onChange({ ...view, layout: event.target.value })
             }
           >
             {unsupportedLayout ? (
@@ -405,9 +405,16 @@ export function ViewDefinitionEditor({
                 <label className={labelClass}>
                   Aggregate function {index + 1}
                   <select
-                    ref={(element) =>
-                      registerFocus(`${viewPath}.aggregates[${index}]`, element)
-                    }
+                    ref={(element) => {
+                      registerFocus(
+                        `${viewPath}.aggregates[${index}]`,
+                        element,
+                      );
+                      registerFocus(
+                        `${viewPath}.aggregates[${index}].fn`,
+                        element,
+                      );
+                    }}
                     className={controlClass}
                     value={fn}
                     onChange={(event) => {
@@ -440,6 +447,12 @@ export function ViewDefinitionEditor({
                   <label className={labelClass}>
                     Aggregate field {index + 1}
                     <select
+                      ref={(element) =>
+                        registerFocus(
+                          `${viewPath}.aggregates[${index}].field`,
+                          element,
+                        )
+                      }
                       className={controlClass}
                       value={aggregate.field ?? ""}
                       onChange={(event) =>
@@ -508,10 +521,7 @@ export function ViewDefinitionEditor({
             properties={properties}
             onChange={(filter) => onChange({ ...view, filter })}
             registerFocus={(path, element) =>
-              registerFocus(
-                `${viewPath}.filter${path === "filter" ? "" : `.${path}`}`,
-                element,
-              )
+              registerFocus(`${viewPath}.${path}`, element)
             }
           />
         </div>

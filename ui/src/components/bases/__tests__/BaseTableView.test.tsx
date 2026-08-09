@@ -157,4 +157,22 @@ describe("BaseTableView", () => {
     expect(key).toBe("author");
     expect(value).toBe("G-Wolfe");
   });
+  it("renders a genuinely read-only preview without fake interactive controls", () => {
+    const props = renderView({ readOnly: true });
+
+    expect(screen.queryByRole("button", { name: "Continues" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Shelf" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "The Book of the New Sun" }),
+    ).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("Gene Wolfe").tagName).toBe("SPAN");
+    expect(
+      screen.getByRole("columnheader", { name: "title" }),
+    ).not.toHaveAttribute("aria-sort");
+    expect(props.onViewChange).not.toHaveBeenCalled();
+    expect(props.onSortChange).not.toHaveBeenCalled();
+    expect(props.onOpenPage).not.toHaveBeenCalled();
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
 });

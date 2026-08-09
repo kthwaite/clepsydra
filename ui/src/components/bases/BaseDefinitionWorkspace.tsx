@@ -111,7 +111,11 @@ export function BaseDefinitionWorkspace({
     path: string;
     sequence: number;
   }>();
-  const [selectedViewId, setSelectedViewId] = useState<string>();
+  const [selectedView, setSelectedView] = useState<{
+    id?: string;
+    name?: string;
+    index: number;
+  }>({ index: 0 });
 
   const editGeneration = useRef(0);
   const savedGeneration = useRef(0);
@@ -270,6 +274,30 @@ export function BaseDefinitionWorkspace({
   }
   if (!draft) return <RecoveryState slug={slug} error={baseQuery.error} />;
   const visibleDiagnostics = [...diagnostics, ...localDiagnostics];
+  const draftViews = draft.views;
+  let activeView = draftViews.find((view) => view.id === selectedView.id);
+  if (!activeView && selectedView.name) {
+    const matchingViews = draftViews.filter(
+      (view) => view.name === selectedView.name,
+    );
+    if (matchingViews.length === 1) activeView = matchingViews[0];
+  }
+  activeView ??= draftViews[selectedView.index] ?? draftViews[0];
+  const activeViewId = activeView?.id;
+
+  function selectView(id: string | undefined) {
+    if (!id) {
+      setSelectedView({ index: 0 });
+      return;
+    }
+    const index = draftViews.findIndex((view) => view.id === id);
+    const view = draftViews[index];
+    setSelectedView({
+      id,
+      name: view?.name,
+      index: index >= 0 ? index : 0,
+    });
+  }
 
   const status: DefinitionSaveStatus = saving
     ? "saving"
@@ -408,12 +436,12 @@ export function BaseDefinitionWorkspace({
                   changeDraft((current) => ({ ...current, views }))
                 }
                 registerFocus={registerFocusTarget}
-                selectedViewId={selectedViewId ?? draft.views[0]?.id}
-                onSelectedViewChange={setSelectedViewId}
+                selectedViewId={activeViewId}
+                onSelectedViewChange={selectView}
               />
               <BasePreview
                 draft={draft}
-                selectedViewId={selectedViewId ?? draft.views[0]?.id}
+                selectedViewId={activeViewId}
                 onDiagnosticFocus={focusDiagnostic}
               />
             </>

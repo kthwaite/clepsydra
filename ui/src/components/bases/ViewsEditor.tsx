@@ -37,6 +37,26 @@ function newView(name: string): DraftView {
   };
 }
 
+function hasSpecificDiagnosticControl(
+  view: DraftView,
+  viewIndex: number,
+  path: string,
+) {
+  const prefix = `views[${viewIndex}]`;
+  if (
+    path === `${prefix}.name` ||
+    path === `${prefix}.layout` ||
+    path === `${prefix}.group_by`
+  ) {
+    return true;
+  }
+  const sort = path.match(/^views\[\d+\]\.sort\[(\d+)\]/);
+  if (sort) return Number(sort[1]) < view.sort.length;
+  const aggregate = path.match(/^views\[\d+\]\.aggregates\[(\d+)\]/);
+  if (aggregate) return Number(aggregate[1]) < view.aggregates.length;
+  return path.startsWith(`${prefix}.filter.`) && view.filter !== undefined;
+}
+
 export function ViewsEditor({
   views,
   properties,
@@ -151,7 +171,15 @@ export function ViewsEditor({
                     ref={(element) => {
                       registerFocus(`views[${index}]`, element);
                       for (const diagnostic of itemDiagnostics) {
-                        if (diagnostic.path) {
+                        if (
+                          diagnostic.path &&
+                          (!selectedItem ||
+                            !hasSpecificDiagnosticControl(
+                              item,
+                              index,
+                              diagnostic.path,
+                            ))
+                        ) {
                           registerFocus(diagnostic.path, element);
                         }
                       }

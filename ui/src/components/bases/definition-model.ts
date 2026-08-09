@@ -20,7 +20,7 @@ export interface DraftProperty {
 export interface DraftView {
   id: string;
   name: string;
-  layout: "table";
+  layout: string;
   filter?: BaseFilter;
   sort: SortKey[];
   group_by?: string;
@@ -158,7 +158,7 @@ export function fromWire(detail: BaseDetailResponse): BaseDraft {
     views: (detail.views ?? []).map((view) => ({
       id: crypto.randomUUID(),
       name: view.name,
-      layout: "table",
+      layout: view.layout ?? "table",
       filter: cloneFilter(view.filter),
       sort: (view.sort ?? []).map((sort) => ({ ...sort })),
       group_by: view.group_by ?? undefined,
@@ -171,7 +171,7 @@ export function fromWire(detail: BaseDetailResponse): BaseDraft {
 }
 
 export function toWire(draft: BaseDraft): BaseFile {
-  return {
+  const wire = {
     name: draft.name,
     description: draft.description,
     filter: cloneFilter(draft.filter),
@@ -191,6 +191,9 @@ export function toWire(draft: BaseDraft): BaseFile {
       columns: [...view.columns],
     })),
   };
+  // The generated schema currently narrows layout to `table`, while persisted
+  // files may contain unsupported strings that the editor must preserve.
+  return wire as unknown as BaseFile;
 }
 
 export function createMinimalDraft(

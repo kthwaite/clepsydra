@@ -538,4 +538,94 @@ describe("BaseDefinitionWorkspace", () => {
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
+
+  it("preserves an unsupported layout through an unrelated edit in preview and save", async () => {
+    const unsupported = {
+      ...detail,
+      views: [
+        {
+          name: "Board",
+          layout: "board",
+          sort: [],
+          aggregates: [],
+          columns: ["title"],
+        },
+      ],
+    } as unknown as BaseDetailResponse;
+    baseState.data = unsupported;
+    updateMock.mockResolvedValue({
+      ...unsupported,
+      revision: "revision-2",
+    });
+    renderWorkspace();
+    const user = await renameBase("Renamed only");
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await waitFor(() => expect(previewMock).toHaveBeenCalled());
+
+    const definition = {
+      name: "Renamed only",
+      description: "Books in progress",
+      filter: undefined,
+      properties: {},
+      views: [
+        {
+          name: "Board",
+          layout: "board",
+          filter: undefined,
+          sort: [],
+          group_by: undefined,
+          aggregates: [],
+          columns: ["title"],
+        },
+      ],
+    };
+    expect(previewMock).toHaveBeenLastCalledWith({
+      body: { definition, view: "Board", limit: 100, offset: 0 },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateMock).toHaveBeenCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: { expected_revision: "revision-1", definition },
+    });
+  });
+
+  it("keeps the same logical second view selected after save rehydrates IDs", async () => {
+    const twoViews: BaseDetailResponse = {
+      ...detail,
+      views: [
+        { name: "All", layout: "table", columns: ["title"] },
+        { name: "Later", layout: "table", columns: ["title"] },
+      ],
+    };
+    baseState.data = twoViews;
+    updateMock.mockResolvedValue({
+      ...twoViews,
+      views: [
+        { name: "All", layout: "table", columns: ["title"] },
+        { name: "Later saved", layout: "table", columns: ["title"] },
+      ],
+      revision: "revision-2",
+    });
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Select Later" }));
+    const viewName = screen.getByLabelText("View name");
+    await user.clear(viewName);
+    await user.type(viewName, "Later saved");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("revision-2")).toBeInTheDocument();
+    expect(screen.getByLabelText("View name")).toHaveValue("Later saved");
+    expect(
+      screen.getByRole("button", { name: "Select Later saved" }),
+    ).toHaveAttribute("aria-current", "true");
+    await waitFor(() =>
+      expect(previewMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({ view: "Later saved" }),
+        }),
+      ),
+    );
+  });
 });

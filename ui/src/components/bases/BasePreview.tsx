@@ -106,7 +106,7 @@ export function BasePreview({
     revision: "preview",
     diagnostics: [],
     ...wire,
-    properties: {},
+    properties: wire.properties,
     views: [displayView],
   };
 
@@ -215,6 +215,7 @@ export function BasePreview({
             onSortChange={() => undefined}
             onOpenPage={() => undefined}
             onCommitCell={() => undefined}
+            readOnly
           />
         </div>
       ) : null}
