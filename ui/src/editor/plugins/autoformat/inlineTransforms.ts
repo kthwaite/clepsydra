@@ -269,6 +269,12 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
   const contentEnd = textBefore.length - (closerConsumed ? 1 : 0);
   const openBracketIdx = textBefore.lastIndexOf("[", contentEnd - 1);
   if (openBracketIdx === -1) return false;
+  // A backslash bracket opener is math syntax, not a Markdown link label.
+  // Invalid, empty, or non-standalone display math must remain literal text
+  // rather than gaining the link destination scaffold.
+  if (openBracketIdx > 0 && textBefore[openBracketIdx - 1] === "\\") {
+    return false;
+  }
   if (openBracketIdx > 0 && !isOpenerBoundary(textBefore[openBracketIdx - 1]))
     return false;
   if (hasInvalidBracketSyntax(textBefore, openBracketIdx, contentEnd))

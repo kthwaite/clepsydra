@@ -33,6 +33,7 @@ import {
 import { createSelectionReference } from "./floatingSelectionReference";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
 import { withInlinePunctuationBoundary } from "./plugins/withInlinePunctuationBoundary";
+import { withMathClipboard } from "./plugins/withMathClipboard";
 import { withMarkdownPaste } from "./plugins/withMarkdownPaste";
 import {
   indentListItem,
@@ -132,10 +133,14 @@ export function SlateEditor({
 }: SlateEditorProps) {
   const editor = useMemo(
     () =>
-      withMarkdownPaste(
-        withReact(
-          withInlinePunctuationBoundary(
-            withHistory(withAutoformat(withOutliner(withSchema(createEditor())))),
+      withMathClipboard(
+        withMarkdownPaste(
+          withReact(
+            withInlinePunctuationBoundary(
+              withHistory(
+                withAutoformat(withOutliner(withSchema(createEditor()))),
+              ),
+            ),
           ),
         ),
       ),

@@ -90,6 +90,228 @@ describe("withAutoformat integration", () => {
     });
   });
 
+  describe("typed math", () => {
+    it("converts typed dollar syntax and selects the text after the inline void", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText("$");
+      editor.insertText("x");
+      editor.insertText("$");
+
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "" },
+        {
+          type: "inline-math",
+          tex: "x",
+          delimiter: "$",
+          children: [{ text: "" }],
+        },
+        { text: "" },
+      ]);
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 2], offset: 0 },
+        focus: { path: [0, 2], offset: 0 },
+      });
+    });
+
+    it("converts typed backslash-parenthesis syntax", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, String.raw`\(x\)`);
+
+      expect(elementChildren(editor.children[0])).toContainEqual(
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "x",
+          delimiter: "\\(",
+        }),
+      );
+    });
+
+    it("converts a backslash-parenthesis closer consumed by overtype", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "paragraph",
+          children: [{ text: String.raw`\(x\)` }],
+        },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: 4 });
+
+      editor.insertText(")");
+
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "" },
+        {
+          type: "inline-math",
+          tex: "x",
+          delimiter: "\\(",
+          children: [{ text: "" }],
+        },
+        { text: "" },
+      ]);
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 2], offset: 0 },
+        focus: { path: [0, 2], offset: 0 },
+      });
+    });
+
+    it.each([
+      ["$$x$$", "$$", "x"],
+      [String.raw`\[x\]`, "\\[", "x"],
+    ])(
+      "converts standalone display syntax %s and selects a following paragraph",
+      (source, delimiter, tex) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(editor.children).toEqual([
+          {
+            type: "math-block",
+            tex,
+            delimiter,
+            children: [{ text: "" }],
+          },
+          { type: "paragraph", children: [{ text: "" }] },
+        ]);
+        expect(editor.selection).toEqual({
+          anchor: { path: [1, 0], offset: 0 },
+          focus: { path: [1, 0], offset: 0 },
+        });
+      },
+    );
+
+    it.each(["before $$x$$", String.raw`before \[x\]`])(
+      "leaves non-standalone display syntax as text: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+        expect(
+          elementChildren(editor.children[0]).some(
+            (child) =>
+              SlateElement.isElement(child) &&
+              (child.type === "inline-math" || child.type === "math-block"),
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it("leaves unsupported longer display-dollar fences as text", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, "$$$x$$");
+
+      expect(Node.string(editor.children[0])).toBe("$$$x$$");
+      expect(
+        elementChildren(editor.children[0]).some((child) =>
+          SlateElement.isElement(child),
+        ),
+      ).toBe(false);
+    });
+
+    it.each(["$x", String.raw`\(x`, "$$x", String.raw`\[x`])(
+      "leaves unmatched math syntax as text: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+      },
+    );
+
+    it.each(["$$", String.raw`\(\)`, "$$$$", String.raw`\[\]`])(
+      "leaves empty math syntax as text: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+      },
+    );
+
+    it("does not convert math syntax in a code leaf", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "paragraph",
+          children: [{ text: "", code: true }],
+        },
+      ]);
+
+      type(editor, String.raw`$x$ \(y\)`);
+
+      expect(Node.string(editor.children[0])).toBe(String.raw`$x$ \(y\)`);
+      expect(
+        elementChildren(editor.children[0]).some((child) =>
+          SlateElement.isElement(child),
+        ),
+      ).toBe(false);
+    });
+
+    it("does not convert math syntax in a code block", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "code-block",
+          language: "",
+          children: [{ text: "" }],
+        },
+      ]);
+
+      type(editor, String.raw`$x$ \(y\) $$z$$ \[w\]`);
+
+      expect(Node.string(editor.children[0])).toBe(
+        String.raw`$x$ \(y\) $$z$$ \[w\]`,
+      );
+      expect(editor.children[0]).toMatchObject({ type: "code-block" });
+    });
+
+    it("resolves multiple math expressions in one composed insertion", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText(String.raw`$x$ and \(y\)`);
+
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "" },
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "x",
+          delimiter: "$",
+        }),
+        { text: " and " },
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "y",
+          delimiter: "\\(",
+        }),
+        { text: "" },
+      ]);
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 4], offset: 0 },
+        focus: { path: [0, 4], offset: 0 },
+      });
+    });
+
+    it.each([
+      ["$$x$$", "$$"],
+      [String.raw`\[x\]`, "\\["],
+    ])("resolves composed standalone display syntax %s", (source, delimiter) => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText(source);
+
+      expect(editor.children[0]).toMatchObject({
+        type: "math-block",
+        tex: "x",
+        delimiter,
+      });
+      expect(editor.selection?.anchor.path).toEqual([1, 0]);
+    });
+  });
+
   describe("inline transforms via insertText", () => {
     it("*text* applies italic", () => {
       const editor = makeEditor();
