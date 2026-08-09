@@ -187,6 +187,23 @@ describe("BaseTableView", () => {
     );
   });
 
+  it("describes an unavailable capability when the server provides no blocker", () => {
+    renderView({
+      memberCapability: {
+        view: "Continues",
+        enabled: false,
+        fields: [],
+        blockers: [],
+      },
+    });
+
+    const add = screen.getByRole("button", { name: "Add member" });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription(
+      "Member creation is unavailable for this view.",
+    );
+  });
+
   it("focuses the created title when it appears in authoritative output", () => {
     const onCreatedRowFocused = vi.fn();
     renderView({ focusCreatedId: row.id, onCreatedRowFocused });

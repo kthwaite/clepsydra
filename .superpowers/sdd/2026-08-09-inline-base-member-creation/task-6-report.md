@@ -39,6 +39,24 @@ Before editing, raised `NEEDS_CONTEXT`: the brief required clearing diagnostics 
 
 Self-review confirmed the workflow uses existing API hooks, React Aria/shared Button and Table patterns, existing tokens/classes, query invalidation plus explicit authoritative refetch, and ref-based focus. No filter interpretation or optimistic grouping/sorting was added to the UI. No Folio code or server/API behavior changed.
 
+## Review Round 1
+
+Resolved all four findings:
+
+- Added an explicit submitting → refreshing → resolving lifecycle so Add remains disabled until authoritative placement focuses or settles to a notice.
+- Settled title-less saved views with an accessible “created but focus unavailable” status rather than leaving a latent focus marker.
+- On native `base_revision_conflict` 409, preserves the draft/error, refetches Base detail, and resubmits against the refreshed revision.
+- Gives every disabled/missing capability an accessible generic description when the server supplies no blocker.
+
+Latest focused evidence (supersedes the earlier 36-test checkpoint):
+
+```text
+bun run --cwd ui test src/components/bases/__tests__/BaseTable.test.tsx src/components/bases/__tests__/BaseTableView.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/member-draft.test.ts
+Test Files  4 passed (4)
+Tests       39 passed (39)
+Duration    3.10s
+```
+
 ## Concerns
 
 None known within focused Task 6 coverage. Controller-owned gates and browser smoke remain intentionally pending.

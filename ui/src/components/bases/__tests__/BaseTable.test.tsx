@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   createMember: vi.fn(),
 
   commit: vi.fn(),
+  refetchBase: vi.fn(),
   refetchView: vi.fn(),
   viewState: {
     data: undefined as QueryOutput | undefined,
@@ -69,7 +70,12 @@ vi.mock("#/api/bases", async (importOriginal) => {
   const actual = await importOriginal<typeof BasesApi>();
   return {
     ...actual,
-    useBase: () => ({ data: definition, error: null, isLoading: false }),
+    useBase: () => ({
+      data: definition,
+      error: null,
+      isLoading: false,
+      refetch: mocks.refetchBase,
+    }),
     useBaseView: () => ({ ...mocks.viewState, refetch: mocks.refetchView }),
     useCreateBaseMember: () => ({
       mutateAsync: mocks.createMember,
@@ -264,5 +270,96 @@ describe("BaseTable member creation", () => {
     expect(
       screen.getByRole("textbox", { name: "New member — Title" }),
     ).toHaveValue("");
+  });
+
+  it("keeps Add disabled through refresh and resolves focus when the saved view omits title", async () => {
+    const user = userEvent.setup();
+    const savedView = definition.views![0];
+    const originalColumns = savedView.columns;
+    savedView.columns = ["kind", "status", "rating"];
+    mocks.viewState.data = groupedOutput();
+    mocks.viewState.error = null;
+    mocks.viewState.isLoading = false;
+    mocks.viewState.isFetching = false;
+    mocks.createMember.mockReset();
+    mocks.refetchView.mockReset();
+    mocks.createMember.mockResolvedValue({
+      id: "created",
+      path: "the-dispossessed.md",
+      title: "The Dispossessed",
+      revision: "page-rev-1",
+    });
+    let resolveRefresh: (() => void) | undefined;
+    mocks.refetchView.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = () => {
+            mocks.viewState.data = groupedOutput([createdRow, existingRow]);
+            resolve({ data: mocks.viewState.data });
+          };
+        }),
+    );
+
+    render(<BaseTable slug="reading" />);
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await fillMemberDraft(user);
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    await waitFor(() => expect(mocks.refetchView).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
+
+    resolveRefresh?.();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "The member was created, but this view does not display its title.",
+    );
+    expect(screen.getByRole("button", { name: "Add member" })).toBeEnabled();
+    savedView.columns = originalColumns;
+  });
+
+  it("refetches a revision conflict and resubmits the preserved draft with the refreshed revision", async () => {
+    const user = userEvent.setup();
+    definition.revision = "base-rev-1";
+    mocks.viewState.data = groupedOutput();
+    mocks.viewState.error = null;
+    mocks.viewState.isLoading = false;
+    mocks.viewState.isFetching = false;
+    mocks.createMember.mockReset();
+    mocks.refetchBase.mockReset();
+    mocks.refetchView.mockReset();
+    mocks.createMember
+      .mockRejectedValueOnce({
+        status: 409,
+        error: "base_revision_conflict",
+      })
+      .mockResolvedValueOnce({
+        id: "created",
+        path: "the-dispossessed.md",
+        title: "The Dispossessed",
+        revision: "page-rev-1",
+      });
+    mocks.refetchBase.mockImplementation(async () => {
+      definition.revision = "base-rev-2";
+      return { data: definition };
+    });
+    mocks.refetchView.mockImplementation(async () => {
+      mocks.viewState.data = groupedOutput([createdRow, existingRow]);
+      return { data: mocks.viewState.data };
+    });
+
+    render(<BaseTable slug="reading" />);
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+    const title = await fillMemberDraft(user);
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+
+    await waitFor(() => expect(mocks.refetchBase).toHaveBeenCalledTimes(1));
+    expect(title).toHaveValue("The Dispossessed");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "base_revision_conflict",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    await waitFor(() => expect(mocks.createMember).toHaveBeenCalledTimes(2));
+    expect(mocks.createMember.mock.calls[1][0].body.base_revision).toBe(
+      "base-rev-2",
+    );
   });
 });

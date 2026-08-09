@@ -161,10 +161,10 @@ export function BaseTableView({
     [focusCreatedId, onCreatedRowFocused],
   );
   const memberBlocker =
-    memberCapability?.blockers?.[0]?.message ??
-    (!memberCapability
-      ? "Member creation is unavailable for this view."
-      : undefined);
+    memberCapability?.enabled === true
+      ? undefined
+      : (memberCapability?.blockers?.[0]?.message ??
+        "Member creation is unavailable for this view.");
 
   useEffect(() => {
     if (!focusCreatedId) {

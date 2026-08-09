@@ -8,7 +8,7 @@ import {
   type BaseMemberDiagnostic,
   type ViewOverrides,
 } from "#/api/bases";
-import { formatApiError } from "#/api/error";
+import { formatApiError, isApiError } from "#/api/error";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useProjects } from "#/lib/useProjects";
 import { BaseTableView } from "./BaseTableView";
@@ -22,6 +22,14 @@ interface BaseTableProps {
   slug: string;
 }
 
+type MemberCreationLifecycle =
+  | { phase: "idle" }
+  | { phase: "submitting" }
+  | { phase: "refreshing"; createdId: string }
+  | { phase: "resolving"; createdId: string };
+
+const IDLE_MEMBER_CREATION: MemberCreationLifecycle = { phase: "idle" };
+
 /** Data wiring for {@link BaseTableView}: queries, cell commits, navigation. */
 export function BaseTable({ slug }: BaseTableProps) {
   const openTab = useOpenTab();
@@ -33,8 +41,9 @@ export function BaseTable({ slug }: BaseTableProps) {
   const [memberDiagnostics, setMemberDiagnostics] = useState<
     BaseMemberDiagnostic[]
   >([]);
-  const [focusCreatedId, setFocusCreatedId] = useState<string>();
-  const [memberRefreshPending, setMemberRefreshPending] = useState(false);
+  const [memberCreation, setMemberCreation] = useState<MemberCreationLifecycle>(
+    IDLE_MEMBER_CREATION,
+  );
   const [memberNotice, setMemberNotice] = useState<string>();
 
   const activeView = viewName ?? detail.data?.views?.[0]?.name;
@@ -42,6 +51,14 @@ export function BaseTable({ slug }: BaseTableProps) {
   const commit = usePropertyCommit();
   const createMemberMutation = useCreateBaseMember();
   const projects = useProjects();
+  const activeViewDefinition = useMemo(
+    () =>
+      detail.data?.views?.find(
+        (candidate) =>
+          asciiCaseFold(candidate.name) === asciiCaseFold(activeView ?? ""),
+      ),
+    [activeView, detail.data?.views],
+  );
   const memberCapability = useMemo(
     () =>
       detail.data?.member_creation?.find(
@@ -60,8 +77,7 @@ export function BaseTable({ slug }: BaseTableProps) {
 
   useEffect(() => {
     if (
-      !focusCreatedId ||
-      memberRefreshPending ||
+      memberCreation.phase !== "resolving" ||
       viewQuery.isFetching ||
       viewQuery.isLoading ||
       viewQuery.error ||
@@ -71,19 +87,29 @@ export function BaseTable({ slug }: BaseTableProps) {
     }
     const createdIsPresent =
       viewQuery.data.shape === "flat"
-        ? viewQuery.data.rows.some((row) => row.id === focusCreatedId)
+        ? viewQuery.data.rows.some(
+            (row) => row.id === memberCreation.createdId,
+          )
         : viewQuery.data.groups.some((group) =>
-            group.rows.some((row) => row.id === focusCreatedId),
+            group.rows.some((row) => row.id === memberCreation.createdId),
           );
     if (!createdIsPresent) {
-      setFocusCreatedId(undefined);
+      setMemberCreation(IDLE_MEMBER_CREATION);
       setMemberNotice(
         "The member was created, but it is not included in the current view.",
       );
+      return;
+    }
+    const columns = activeViewDefinition?.columns;
+    if (columns && columns.length > 0 && !columns.includes("title")) {
+      setMemberCreation(IDLE_MEMBER_CREATION);
+      setMemberNotice(
+        "The member was created, but this view does not display its title.",
+      );
     }
   }, [
-    focusCreatedId,
-    memberRefreshPending,
+    activeViewDefinition?.columns,
+    memberCreation,
     viewQuery.data,
     viewQuery.error,
     viewQuery.isFetching,
@@ -91,11 +117,14 @@ export function BaseTable({ slug }: BaseTableProps) {
   ]);
 
   const handleCreatedRowFocused = useCallback(() => {
-    setFocusCreatedId(undefined);
+    setMemberCreation((current) =>
+      current.phase === "resolving" ? IDLE_MEMBER_CREATION : current,
+    );
     setMemberNotice(undefined);
   }, []);
 
   async function createMember(value: BaseMemberDraftValue) {
+    setMemberCreation({ phase: "submitting" });
     setMemberError(undefined);
     setMemberDiagnostics([]);
     let created;
@@ -112,17 +141,40 @@ export function BaseTable({ slug }: BaseTableProps) {
     } catch (error) {
       setMemberError(formatApiError(error, "Member could not be created."));
       setMemberDiagnostics(decodeBaseMemberDiagnostics(error));
+      if (
+        isApiError(error) &&
+        error.status === 409 &&
+        error.error === "base_revision_conflict"
+      ) {
+        try {
+          await detail.refetch();
+        } finally {
+          setMemberCreation(IDLE_MEMBER_CREATION);
+        }
+      } else {
+        setMemberCreation(IDLE_MEMBER_CREATION);
+      }
       return;
     }
 
     setMemberDraftOpen(false);
-    setFocusCreatedId(created.id);
+    setMemberCreation({ phase: "refreshing", createdId: created.id });
     setMemberNotice(undefined);
-    setMemberRefreshPending(true);
     try {
-      await viewQuery.refetch();
-    } finally {
-      setMemberRefreshPending(false);
+      const refreshed = await viewQuery.refetch();
+      if (refreshed.error) {
+        setMemberCreation(IDLE_MEMBER_CREATION);
+        setMemberNotice(
+          "The member was created, but the current view could not be refreshed.",
+        );
+        return;
+      }
+      setMemberCreation({ phase: "resolving", createdId: created.id });
+    } catch {
+      setMemberCreation(IDLE_MEMBER_CREATION);
+      setMemberNotice(
+        "The member was created, but the current view could not be refreshed.",
+      );
     }
   }
 
@@ -151,7 +203,7 @@ export function BaseTable({ slug }: BaseTableProps) {
         setMemberDraftOpen(false);
         setMemberError(undefined);
         setMemberDiagnostics([]);
-        setFocusCreatedId(undefined);
+        setMemberCreation(IDLE_MEMBER_CREATION);
         setMemberNotice(undefined);
       }}
       output={viewQuery.data}
@@ -164,13 +216,18 @@ export function BaseTable({ slug }: BaseTableProps) {
       memberCapability={memberCapability}
       memberDraftFields={memberDraftFields}
       memberDraftOpen={memberDraftOpen}
-      memberSaving={createMemberMutation.isPending}
+      memberSaving={memberCreation.phase !== "idle"}
       memberDiagnostics={memberDiagnostics}
       memberError={memberError}
       memberNotice={memberNotice}
       projects={projects}
       onAddMember={() => {
-        if (memberCapability?.enabled !== true) return;
+        if (
+          memberCapability?.enabled !== true ||
+          memberCreation.phase !== "idle"
+        ) {
+          return;
+        }
         setMemberError(undefined);
         setMemberDiagnostics([]);
         setMemberNotice(undefined);
@@ -183,12 +240,17 @@ export function BaseTable({ slug }: BaseTableProps) {
         setMemberDraftOpen(false);
         setMemberError(undefined);
         setMemberDiagnostics([]);
+        setMemberCreation(IDLE_MEMBER_CREATION);
       }}
       onMemberEdit={() => {
         setMemberError(undefined);
         setMemberDiagnostics([]);
       }}
-      focusCreatedId={focusCreatedId}
+      focusCreatedId={
+        memberCreation.phase === "resolving"
+          ? memberCreation.createdId
+          : undefined
+      }
       onCreatedRowFocused={handleCreatedRowFocused}
       onCommitCell={(row, key, value, hint) => {
         void commit(row, key, value, hint);
