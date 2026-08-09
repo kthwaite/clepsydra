@@ -100,6 +100,28 @@ describe("BaseMemberDraft", () => {
     });
   });
 
+  it("reports every user-originated draft edit without exposing draft state", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(draftElement({ onChange }));
+
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+      "D",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Rating" }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: "New member — Rating" }),
+      "9{Enter}",
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenNthCalledWith(1);
+    expect(onChange).toHaveBeenNthCalledWith(2);
+  });
+
   it("gives every field a stable name and describes filter requirements", () => {
     render(draftElement());
 

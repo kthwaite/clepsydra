@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useId, useRef } from "react";
 import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import {
@@ -10,18 +11,25 @@ import {
 } from "react-aria-components";
 import type {
   BaseDetailResponse,
+  BaseMemberCapability,
+  BaseMemberDiagnostic,
   GroupResult,
   PropertyType,
   QueryOutput,
   QueryRow,
   ViewOverrides,
 } from "#/api/bases";
-import { buttonStyles } from "#/components/ui/button";
+import { Button, buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
+import { BaseMemberDraft } from "./BaseMemberDraft";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import { asciiCaseFold } from "./local-validation";
+import type {
+  BaseMemberDraftField,
+  BaseMemberDraftValue,
+} from "./member-draft";
 
 interface BaseTableViewProps {
   definition: BaseDetailResponse;
@@ -42,6 +50,20 @@ interface BaseTableViewProps {
     hint?: PropertyType,
   ) => void;
   readOnly?: boolean;
+  memberCapability?: BaseMemberCapability;
+  memberDraftFields?: BaseMemberDraftField[];
+  memberDraftOpen?: boolean;
+  memberSaving?: boolean;
+  memberDiagnostics?: BaseMemberDiagnostic[];
+  memberError?: string;
+  memberNotice?: string;
+  projects?: string[];
+  onAddMember?: () => void;
+  onSaveMember?: (value: BaseMemberDraftValue) => void;
+  onCancelMember?: () => void;
+  onMemberEdit?: () => void;
+  focusCreatedId?: string;
+  onCreatedRowFocused?: () => void;
 }
 
 /**
@@ -98,6 +120,20 @@ export function BaseTableView({
   configureSlug,
   onCommitCell,
   readOnly = false,
+  memberCapability,
+  memberDraftFields = [],
+  memberDraftOpen = false,
+  memberSaving = false,
+  memberDiagnostics = [],
+  memberError,
+  memberNotice,
+  projects = [],
+  onAddMember,
+  onSaveMember,
+  onCancelMember,
+  onMemberEdit,
+  focusCreatedId,
+  onCreatedRowFocused,
 }: BaseTableViewProps) {
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
@@ -106,6 +142,37 @@ export function BaseTableView({
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
   const properties = definition.properties ?? EMPTY_PROPERTIES;
+  const memberBlockerId = useId();
+  const createdTitleRef = useRef<HTMLButtonElement | null>(null);
+  const focusedCreatedId = useRef<string>();
+  const setCreatedTitleRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      createdTitleRef.current = node;
+      if (
+        node &&
+        focusCreatedId &&
+        focusedCreatedId.current !== focusCreatedId
+      ) {
+        focusedCreatedId.current = focusCreatedId;
+        node.focus();
+        onCreatedRowFocused?.();
+      }
+    },
+    [focusCreatedId, onCreatedRowFocused],
+  );
+  const memberBlocker =
+    memberCapability?.blockers?.[0]?.message ??
+    (!memberCapability
+      ? "Member creation is unavailable for this view."
+      : undefined);
+
+  useEffect(() => {
+    if (!focusCreatedId) {
+      focusedCreatedId.current = undefined;
+      return;
+    }
+    setCreatedTitleRef(createdTitleRef.current);
+  }, [focusCreatedId, output, setCreatedTitleRef]);
 
   const sortDescriptor = sortOverride.sort
     ? {
@@ -163,7 +230,7 @@ export function BaseTableView({
           );
         })}
       </TableHeader>
-      <TableBody items={rows.map((row) => ({ ...row, key: row.id }))}>
+      <TableBody key={memberDraftOpen ? "draft" : "active"} items={rows}>
         {(row) => (
           <Row
             id={row.id}
@@ -172,12 +239,17 @@ export function BaseTableView({
             {columns.map((column) => (
               <Cell key={column} className="px-1 py-0.5 align-top">
                 {column === "title" ? (
-                  readOnly ? (
+                  readOnly || memberDraftOpen ? (
                     <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
                       {row.title ?? row.path}
                     </span>
                   ) : (
                     <button
+                      ref={
+                        row.id === focusCreatedId
+                          ? setCreatedTitleRef
+                          : undefined
+                      }
                       type="button"
                       className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
                       onClick={() => onOpenPage(row.path)}
@@ -186,6 +258,7 @@ export function BaseTableView({
                     </button>
                   )
                 ) : !readOnly &&
+                  !memberDraftOpen &&
                   SYSTEM_COLUMNS[column] === undefined &&
                   properties[column] ? (
                   <EditableCell
@@ -270,7 +343,51 @@ export function BaseTableView({
             Configure
           </Link>
         )}
+        {!readOnly ? (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              className={configureSlug ? undefined : "ml-auto"}
+              isDisabled={
+                memberDraftOpen ||
+                memberSaving ||
+                memberCapability?.enabled !== true
+              }
+              aria-describedby={memberBlocker ? memberBlockerId : undefined}
+              onPress={onAddMember}
+            >
+              Add member
+            </Button>
+            {memberBlocker ? (
+              <span id={memberBlockerId} className="sr-only">
+                {memberBlocker}
+              </span>
+            ) : null}
+          </>
+        ) : null}
       </div>
+      {memberDraftOpen && onSaveMember && onCancelMember ? (
+        <BaseMemberDraft
+          fields={memberDraftFields}
+          projects={projects}
+          isSaving={memberSaving}
+          diagnostics={memberDiagnostics}
+          summaryError={memberError}
+          onSave={onSaveMember}
+          onCancel={onCancelMember}
+          onChange={onMemberEdit}
+        />
+      ) : null}
+
+      {memberNotice ? (
+        <p
+          role="status"
+          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+        >
+          {memberNotice}
+        </p>
+      ) : null}
 
       {viewError ? (
         <p

@@ -21,8 +21,13 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-import type { BaseDetailResponse, QueryOutput } from "#/api/bases";
+import type {
+  BaseDetailResponse,
+  BaseMemberCapability,
+  QueryOutput,
+} from "#/api/bases";
 import { BaseTableView } from "#/components/bases/BaseTableView";
+import type { BaseMemberDraftField } from "#/components/bases/member-draft";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
@@ -56,25 +61,58 @@ const row = {
 
 const flat: QueryOutput = { shape: "flat", rows: [row], total: 1 };
 
-function renderView(overrides: Partial<Parameters<typeof BaseTableView>[0]>) {
+const enabledCapability: BaseMemberCapability = {
+  view: "Continues",
+  enabled: true,
+  fields: [],
+  blockers: [],
+};
+
+const memberDraftFields: BaseMemberDraftField[] = [
+  {
+    key: "title",
+    kind: "title",
+    membership: true,
+    viewOnly: false,
+  },
+];
+
+type ViewProps = Parameters<typeof BaseTableView>[0];
+
+function renderView(overrides: Partial<ViewProps>) {
   const spies = {
     onViewChange: vi.fn(),
     onSortChange: vi.fn(),
     onOpenPage: vi.fn(),
     onCommitCell: vi.fn(),
+    onAddMember: vi.fn(),
+    onSaveMember: vi.fn(),
+    onCancelMember: vi.fn(),
+    onMemberEdit: vi.fn(),
     configureSlug: "reading",
   };
-  render(
+  const element = (next: Partial<ViewProps> = {}) => (
     <BaseTableView
       definition={definition}
       activeView="Continues"
       output={flat}
       sortOverride={{}}
+      memberCapability={enabledCapability}
+      memberDraftFields={memberDraftFields}
+      memberDraftOpen={false}
+      memberSaving={false}
+      memberDiagnostics={[]}
+      projects={[]}
       {...spies}
       {...overrides}
-    />,
+      {...next}
+    />
   );
-  return spies;
+  const result = render(element());
+  return {
+    ...spies,
+    rerender: (next: Partial<ViewProps>) => result.rerender(element(next)),
+  };
 }
 
 describe("BaseTableView", () => {
@@ -105,6 +143,58 @@ describe("BaseTableView", () => {
     });
 
     expect(configure).toHaveAttribute("href", "/bases/reading/edit");
+  });
+
+  it("opens exactly one draft and explains disabled capability", async () => {
+    const user = userEvent.setup();
+    const view = renderView({});
+    view.onAddMember.mockImplementation(() =>
+      view.rerender({ memberDraftOpen: true }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+
+    expect(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+    ).toHaveFocus();
+    expect(screen.getAllByRole("button", { name: "Add member" })).toHaveLength(
+      1,
+    );
+    expect(
+      screen.queryByRole("button", { name: "The Book of the New Sun" }),
+    ).not.toBeInTheDocument();
+
+    view.rerender({
+      memberDraftOpen: false,
+      memberCapability: {
+        view: "Continues",
+        enabled: false,
+        fields: [],
+        blockers: [
+          {
+            scope: "membership",
+            field: "word_count",
+            filter_path: "filter",
+            message: "word_count > 0 requires body content",
+          },
+        ],
+      },
+    });
+    const add = screen.getByRole("button", { name: "Add member" });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription(
+      "word_count > 0 requires body content",
+    );
+  });
+
+  it("focuses the created title when it appears in authoritative output", () => {
+    const onCreatedRowFocused = vi.fn();
+    renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+
+    expect(
+      screen.getByRole("button", { name: "The Book of the New Sun" }),
+    ).toHaveFocus();
+    expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
   });
 
   it("renders group header rows with aggregate chips", () => {

@@ -27,6 +27,7 @@ export interface BaseMemberDraftProps {
   summaryError?: string;
   onSave(value: BaseMemberDraftValue): void;
   onCancel(): void;
+  onChange?(): void;
 }
 
 function fieldLabel(key: string): string {
@@ -147,6 +148,7 @@ export function BaseMemberDraft({
   summaryError,
   onSave,
   onCancel,
+  onChange,
 }: BaseMemberDraftProps) {
   const [draft, setDraft] = useState(() => initialMemberDraft(fields));
   const [titleError, setTitleError] = useState<string>();
@@ -157,6 +159,7 @@ export function BaseMemberDraft({
   const updateDraft = (next: BaseMemberDraftValue) => {
     draftRef.current = next;
     setDraft(next);
+    onChange?.();
   };
 
   const updateField = (key: string, value: CellValue) => {
