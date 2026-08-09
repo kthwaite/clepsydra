@@ -13,8 +13,7 @@ use super::error::ApiError;
 use crate::vault::base::{BaseDefinition, SYSTEM_FIELDS, candidate_link_targets};
 use crate::vault::base_document;
 use crate::vault::base_member::{
-    BaseMemberDiagnostic, BaseMemberScope, CandidateDerived,
-    candidate_matches_with_link_targets,
+    BaseMemberDiagnostic, BaseMemberScope, CandidateDerived, candidate_matches_with_link_targets,
 };
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError};
@@ -280,7 +279,6 @@ async fn create_base_member_with_ids(
         .await
         .map_err(internal_creation_error)?
         .map_err(internal_creation_error)?;
-
 
     let notify = super::mutation_notifier(&state);
 

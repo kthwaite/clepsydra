@@ -689,8 +689,6 @@ fn property_scalar_matches(
     )
 }
 
-
-
 fn toml_value_is_empty(value: &toml::Value) -> bool {
     match value {
         toml::Value::String(value) => value.is_empty(),

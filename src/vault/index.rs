@@ -486,8 +486,10 @@ impl VaultIndex {
         &self,
         target_canonical: &str,
     ) -> Result<Option<String>, IndexError> {
-        Ok(unique_link_target(self.connection(), target_canonical)?
-            .map(|(target_id, _)| target_id))
+        Ok(
+            unique_link_target(self.connection(), target_canonical)?
+                .map(|(target_id, _)| target_id),
+        )
     }
 
     /// Resolve unresolved links by matching `target_canonical` against the

@@ -1561,7 +1561,6 @@ async fn bare_system_and_persistable_prop_shadow_fields_coexist() {
     assert_eq!(page.meta.extra["word_count"], toml::Value::Integer(7));
 }
 
-
 #[tokio::test]
 async fn invalid_shadow_property_value_reports_canonical_request_key() {
     let fixture = member_fixture(seed_persistable_shadow_base);
@@ -1586,8 +1585,7 @@ async fn invalid_shadow_property_value_reports_canonical_request_key() {
     response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
     let error: serde_json::Value = response.json();
     assert_eq!(
-        error["detail"]["diagnostics"][0]["field"],
-        "prop.kind",
+        error["detail"]["diagnostics"][0]["field"], "prop.kind",
         "{error}"
     );
     assert_eq!(page_paths(fixture.state.vault.root()), before);
@@ -1856,7 +1854,9 @@ async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and
 
         let queried: serde_json::Value = fixture
             .server
-            .get(&format!("/api/vault/bases/relations/views/{view}?limit=25&offset=0"))
+            .get(&format!(
+                "/api/vault/bases/relations/views/{view}?limit=25&offset=0"
+            ))
             .await
             .json();
         assert!(
