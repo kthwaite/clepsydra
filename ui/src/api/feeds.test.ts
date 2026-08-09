@@ -764,6 +764,62 @@ describe("usePatchFeedEntry", () => {
     );
     expect(client.getQueryData(key)).toBe(baseline);
   });
+
+  it("adopts an independently recreated query and restores the exact captured baseline", async () => {
+    const entry = makeEntry({ read: false });
+    const baseline = makePages([entry], ["captured-page"]);
+    const key = entriesKey({ view: "all" });
+    const client = freshClient();
+    client.setQueryData(key, baseline);
+    const originalQuery = client
+      .getQueryCache()
+      .find({ queryKey: key, exact: true });
+    expect(originalQuery).toBeDefined();
+    const response = deferred<Response>();
+    fetchMock.mockReturnValue(response.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = result.current
+      .mutateAsync({ id: entry.id, read: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    client.removeQueries({ queryKey: key, exact: true });
+
+    const independentClone: EntryPages = {
+      pages: baseline.pages.map((page) => ({
+        ...page,
+        entries: page.entries.map((cachedEntry) => ({ ...cachedEntry })),
+      })),
+      pageParams: [...baseline.pageParams],
+    };
+    client.setQueryData(key, independentClone);
+    const replacementQuery = client
+      .getQueryCache()
+      .find({ queryKey: key, exact: true });
+    expect(replacementQuery).toBeDefined();
+    expect(replacementQuery).not.toBe(originalQuery);
+    expect(replacementQuery?.queryKey).toEqual(key);
+    expect(client.getQueryData(key)).toBe(independentClone);
+    expect(independentClone).toEqual(baseline);
+    expect(independentClone).not.toBe(baseline);
+
+    response.resolve(
+      jsonResponse({ error: "failed after independent recreation" }, 500),
+    );
+    await expect(mutation).resolves.toEqual({
+      error: "failed after independent recreation",
+    });
+
+    expect(client.getQueryCache().find({ queryKey: key, exact: true })).toBe(
+      replacementQuery,
+    );
+    expect(client.getQueryData(key)).toBe(baseline);
+  });
 });
 
 describe("feed membership mutations", () => {

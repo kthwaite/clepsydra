@@ -214,6 +214,11 @@ function rebaseEntryQuery(
     cachedQuery.setState({ data: pages });
     return;
   }
+  if (cachedQuery !== undefined) {
+    state.query = cachedQuery;
+    cachedQuery.setState({ data: pages });
+    return;
+  }
 
   queryClient.setQueryData(state.queryKey, pages);
   const recreatedQuery = queryClient
