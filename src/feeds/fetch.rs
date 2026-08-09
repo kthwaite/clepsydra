@@ -254,14 +254,20 @@ fn parsed_entry(entry: feed_rs::model::Entry, max_entry_content_bytes: usize) ->
 fn preferred_link(links: &[feed_rs::model::Link]) -> Option<&str> {
     links
         .iter()
-        .find(|link| {
+        .filter(|link| {
             link.rel
                 .as_deref()
                 .is_none_or(|relation| relation.eq_ignore_ascii_case("alternate"))
         })
-        .or_else(|| links.first())
-        .map(|link| link.href.as_str())
-        .filter(|href| !href.trim().is_empty())
+        .find_map(|link| safe_web_link(&link.href))
+        .or_else(|| links.iter().find_map(|link| safe_web_link(&link.href)))
+}
+
+fn safe_web_link(href: &str) -> Option<&str> {
+    Url::parse(href)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        .map(|_| href)
 }
 
 fn stable_entry_guid(
@@ -546,6 +552,73 @@ mod tests {
     }
 
     #[test]
+    fn entry_urls_allow_only_absolute_http_and_https_destinations() {
+        let xml = rss_document(
+            r#"<item>
+      <guid>https-link</guid><title>HTTPS</title>
+      <link>https://publisher.example/secure</link><description>safe</description>
+    </item>
+    <item>
+      <guid>http-link</guid><title>HTTP</title>
+      <link>http://publisher.example/plain</link><description>safe</description>
+    </item>
+    <item>
+      <guid>javascript-link</guid><title>JavaScript</title>
+      <link>javascript:alert(1)</link><description>unsafe</description>
+    </item>
+    <item>
+      <guid>data-link</guid><title>Data</title>
+      <link>data:text/html,unsafe</link><description>unsafe</description>
+    </item>
+    <item>
+      <guid>file-link</guid><title>File</title>
+      <link>file:///etc/passwd</link><description>unsafe</description>
+    </item>
+    <item>
+      <guid>custom-link</guid><title>Custom</title>
+      <link>reader:open-me</link><description>unsafe</description>
+    </item>
+    <item>
+      <guid>malformed-link</guid><title>Malformed</title>
+      <link>not a url</link><description>unsafe</description>
+    </item>
+    <item>
+      <guid>hostless-link</guid><title>Hostless</title>
+      <link>https://</link><description>unsafe</description>
+    </item>
+    <item>
+      <title>Unsafe fallback</title>
+      <link>javascript:alert(2)</link>
+      <description>must hash instead of adopting the unsafe link as a GUID</description>
+    </item>"#,
+        );
+
+        let parsed = parse_feed(xml.as_bytes(), 4096).unwrap();
+        let urls: Vec<_> = parsed
+            .entries
+            .iter()
+            .map(|entry| entry.url.as_deref())
+            .collect();
+
+        assert_eq!(
+            urls,
+            vec![
+                Some("https://publisher.example/secure"),
+                Some("http://publisher.example/plain"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ]
+        );
+        assert!(parsed.entries[8].guid.starts_with("sha256:"));
+        assert!(!parsed.entries[8].guid.contains("javascript:"));
+    }
+
+    #[test]
     fn guid_falls_back_to_link_then_to_a_stable_content_hash() {
         let xml = rss_document(
             r#"<item>
@@ -601,6 +674,45 @@ mod tests {
             entry.url.as_deref(),
             Some("https://publisher.example/rss-entry")
         );
+    }
+
+    #[tokio::test]
+    async fn fetched_entries_never_expose_an_unsafe_publisher_link() {
+        let server = MockServer::start().await;
+        let xml = rss_document(
+            r#"<item>
+      <guid>unsafe-ingested-link</guid>
+      <title>Unsafe ingested link</title>
+      <link>javascript:alert(document.cookie)</link>
+      <description>The entry itself is otherwise valid.</description>
+    </item>"#,
+        );
+        Mock::given(method("GET"))
+            .and(path("/unsafe-link.xml"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", RSS_CONTENT_TYPE)
+                    .set_body_string(xml),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = fixture_client(&server, 16 * 1024);
+        let feed = subscription(7, fixture_url(&server, "/unsafe-link.xml"));
+
+        let outcome = fetch_feed(&client, &feed, fetched_at(), Duration::minutes(30), 4096)
+            .await
+            .unwrap();
+
+        match outcome {
+            FetchOutcome::Success { entries, .. } => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].guid, "unsafe-ingested-link");
+                assert_eq!(entries[0].url, None);
+            }
+            other => panic!("unsafe-link feed produced {other:?}"),
+        }
+        server.verify().await;
     }
 
     #[tokio::test]
