@@ -87,6 +87,15 @@ impl ApiError {
         }
     }
 
+    pub fn bad_request_with_detail(msg: impl Into<String>, detail: serde_json::Value) -> Self {
+        Self {
+            status: 400,
+            error: msg.into(),
+            detail: Some(detail),
+            hint: None,
+        }
+    }
+
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self {
             status: 403,

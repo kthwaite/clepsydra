@@ -11,12 +11,13 @@ import { useWorkspaceStore } from "#/store/workspace";
 
 type MobileRoot = Extract<
   CodexView,
-  "atrium" | "gazetteer" | "constellation"
+  "atrium" | "gazetteer" | "bases" | "constellation"
 >;
 
 const ROOTS: ReadonlyArray<readonly [MobileRoot, string]> = [
   ["atrium", "Atrium"],
   ["gazetteer", "Gazetteer"],
+  ["bases", "Bases"],
   ["constellation", "Constellation"],
 ];
 
@@ -29,14 +30,15 @@ export function MobileCodexFrame({
   const openSearch = useUiStore((state) => state.openSearch);
   const openInscribe = useUiStore((state) => state.openInscribe);
   const { tabs, activeTabId, openTab } = useWorkspaceStore();
-  const view =
-    forceView ?? resolveCodexView(pathname, tabs, activeTabId);
+  const view = forceView ?? resolveCodexView(pathname, tabs, activeTabId);
 
   const navigateToRoot = (root: MobileRoot) => {
     if (root === "atrium") {
       navigate({ to: "/" });
     } else if (root === "gazetteer") {
       navigate({ to: "/gazetteer" });
+    } else if (root === "bases") {
+      navigate({ to: "/bases" });
     } else {
       openTab("graph");
       navigate({ to: "/workspace" });

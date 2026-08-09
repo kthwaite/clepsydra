@@ -6,7 +6,6 @@
 //! the registry — a broken base is listed with its diagnostics and excluded
 //! from evaluation.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +25,20 @@ pub const SYSTEM_FIELDS: &[&str] = &[
     "created_at",
     "updated_at",
     "encryption",
+    "journal_date",
+    "word_count",
+];
+/// System fields with scalar values backed by the query evaluator's sort
+/// semantics. Multi-valued or otherwise unsupported system fields are
+/// intentionally absent.
+pub const SCALAR_SORT_SYSTEM_FIELDS: &[&str] = &[
+    "id",
+    "path",
+    "title",
+    "kind",
+    "project",
+    "created_at",
+    "updated_at",
     "journal_date",
     "word_count",
 ];
@@ -53,6 +66,12 @@ impl PropertyType {
             self,
             PropertyType::Number | PropertyType::Date | PropertyType::Datetime
         )
+    }
+
+    /// Whether saved-view evaluation can order this property as one scalar
+    /// value per page.
+    pub fn is_scalar_sortable(self) -> bool {
+        !matches!(self, PropertyType::MultiSelect | PropertyType::Relation)
     }
 }
 
@@ -188,7 +207,7 @@ fn default_layout() -> String {
 }
 
 /// The parsed model of a `.base.toml` file.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BaseFile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -196,7 +215,7 @@ pub struct BaseFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
     /// Declared properties in file order (serialized as a key → definition map).
-    #[serde(with = "property_map")]
+    #[serde(default, with = "property_map")]
     #[schema(value_type = std::collections::HashMap<String, PropertyDefinition>)]
     pub properties: Vec<(String, PropertyDefinition)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -219,9 +238,12 @@ struct RawBaseFile {
     views: Vec<ViewDefinition>,
 }
 
-/// Serialize declared properties as a map, keeping file order.
+/// Serialize and deserialize declared properties as a map, keeping input order.
 mod property_map {
+    use std::fmt;
+
     use super::PropertyDefinition;
+    use serde::de::{Deserializer, MapAccess, Visitor};
     use serde::ser::{SerializeMap, Serializer};
 
     pub fn serialize<S: Serializer>(
@@ -233,6 +255,30 @@ mod property_map {
             map.serialize_entry(k, v)?;
         }
         map.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<(String, PropertyDefinition)>, D::Error> {
+        struct PropertyMapVisitor;
+
+        impl<'de> Visitor<'de> for PropertyMapVisitor {
+            type Value = Vec<(String, PropertyDefinition)>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a map of property names to property definitions")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut properties = Vec::with_capacity(map.size_hint().unwrap_or(0));
+                while let Some(entry) = map.next_entry()? {
+                    properties.push(entry);
+                }
+                Ok(properties)
+            }
+        }
+
+        deserializer.deserialize_map(PropertyMapVisitor)
     }
 }
 
@@ -253,6 +299,23 @@ impl BaseDefinition {
             .find(|(k, _)| k == key)
             .map(|(_, def)| def)
     }
+
+    /// Resolve a saved view using the API's ASCII case-insensitive naming
+    /// contract.
+    pub fn view(&self, name: &str) -> Option<&ViewDefinition> {
+        self.file
+            .views
+            .iter()
+            .find(|view| view.name.eq_ignore_ascii_case(name))
+    }
+}
+
+/// Severity assigned to a base diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BaseDiagnosticSeverity {
+    Error,
+    Warning,
 }
 
 /// A validation diagnostic for a base file. Never fatal to the registry.
@@ -260,7 +323,28 @@ impl BaseDefinition {
 pub struct BaseDiagnostic {
     /// Slug of the base (filename stem), even when parsing failed.
     pub slug: String,
+    pub severity: BaseDiagnosticSeverity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     pub message: String,
+}
+
+pub struct ValidationResult {
+    pub definition: BaseDefinition,
+    pub diagnostics: Vec<BaseDiagnostic>,
+}
+
+pub fn validate_definition(slug: &str, file: BaseFile) -> ValidationResult {
+    let definition = BaseDefinition {
+        slug: slug.to_owned(),
+        file,
+    };
+    let mut diagnostics = Vec::new();
+    validate(&definition, &mut diagnostics);
+    ValidationResult {
+        definition,
+        diagnostics,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +585,8 @@ impl BaseRegistry {
                 Err(e) => {
                     registry.diagnostics.push(BaseDiagnostic {
                         slug: slug_from_path(&path),
+                        severity: BaseDiagnosticSeverity::Error,
+                        path: None,
                         message: format!("cannot read base file: {e}"),
                     });
                     continue;
@@ -512,6 +598,8 @@ impl BaseRegistry {
                 if registry.bases.iter().any(|b| b.slug == base.slug) {
                     registry.diagnostics.push(BaseDiagnostic {
                         slug: base.slug.clone(),
+                        severity: BaseDiagnosticSeverity::Error,
+                        path: None,
                         message: format!("duplicate base slug `{}`", base.slug),
                     });
                 } else {
@@ -591,6 +679,8 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
         Err(e) => {
             diagnostics.push(BaseDiagnostic {
                 slug: slug.clone(),
+                severity: BaseDiagnosticSeverity::Error,
+                path: None,
                 message: format!("invalid base file: {e}"),
             });
             return (None, diagnostics);
@@ -605,6 +695,8 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
             Ok(def) => properties.push((key, def)),
             Err(e) => diagnostics.push(BaseDiagnostic {
                 slug: slug.clone(),
+                severity: BaseDiagnosticSeverity::Error,
+                path: None,
                 message: format!("property `{key}`: invalid declaration ({e})"),
             }),
         }
@@ -617,25 +709,37 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
         properties,
         views: raw.views,
     };
-    let base = BaseDefinition { slug, file };
-    validate(&base, &mut diagnostics);
-    (Some(base), diagnostics)
+    let result = validate_definition(&slug, file);
+    diagnostics.extend(result.diagnostics);
+    (Some(result.definition), diagnostics)
 }
 
 fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
-    let mut push = |message: String| {
+    let mut push = |severity: BaseDiagnosticSeverity, path: Option<String>, message: String| {
         diagnostics.push(BaseDiagnostic {
             slug: base.slug.clone(),
+            severity,
+            path,
             message,
         })
     };
 
+    if base.file.name.trim().is_empty() {
+        push(
+            BaseDiagnosticSeverity::Error,
+            Some("name".to_string()),
+            "base name must not be empty".to_string(),
+        );
+    }
+
     // Properties may not shadow system fields.
     for (key, _) in &base.file.properties {
         if SYSTEM_FIELDS.contains(&key.as_str()) {
-            push(format!(
-                "property `{key}` shadows a system field and cannot be declared"
-            ));
+            push(
+                BaseDiagnosticSeverity::Warning,
+                Some(format!("properties.{key}")),
+                format!("property `{key}` shadows a system field and cannot be declared"),
+            );
         }
     }
 
@@ -643,25 +747,52 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
     // vault may legitimately carry keys the base doesn't declare); op/type
     // mismatches are hard facts.
     if let Some(filter) = &base.file.filter {
-        validate_filter(base, filter, "filter", &mut push);
+        validate_filter(base, filter, "filter", "filter", &mut push);
     }
 
-    let mut seen_views = HashSet::new();
-    for view in &base.file.views {
-        if !seen_views.insert(view.name.as_str()) {
-            push(format!("duplicate view name `{}`", view.name));
+    for (view_index, view) in base.file.views.iter().enumerate() {
+        if view.name.trim().is_empty() {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("views[{view_index}].name")),
+                "view name must not be empty".to_string(),
+            );
+        }
+        if base.file.views[..view_index]
+            .iter()
+            .any(|seen| seen.name.eq_ignore_ascii_case(&view.name))
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("views[{view_index}].name")),
+                format!("duplicate view name `{}`", view.name),
+            );
         }
         if view.layout != "table" {
-            push(format!(
-                "view `{}` uses unsupported layout `{}` (v1 supports `table`)",
-                view.name, view.layout
-            ));
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("views[{view_index}].layout")),
+                format!(
+                    "view `{}` uses unsupported layout `{}` (v1 supports `table`)",
+                    view.name, view.layout
+                ),
+            );
         }
         if let Some(filter) = &view.filter {
             validate_filter(
                 base,
                 filter,
+                &format!("views[{view_index}].filter"),
                 &format!("view `{}` filter", view.name),
+                &mut push,
+            );
+        }
+        for (sort_index, sort) in view.sort.iter().enumerate() {
+            validate_sort_field(
+                base,
+                &sort.field,
+                &format!("views[{view_index}].sort[{sort_index}].field"),
+                &format!("view `{}` sort", view.name),
                 &mut push,
             );
         }
@@ -672,35 +803,117 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 PropertyType::Number | PropertyType::Relation | PropertyType::MultiSelect
             )
         {
-            push(format!(
-                "view `{}` groups by `{group_by}` ({:?}), which is not a groupable type",
-                view.name, def.property_type
-            ));
+            push(
+                BaseDiagnosticSeverity::Warning,
+                Some(format!("views[{view_index}].group_by")),
+                format!(
+                    "view `{}` groups by `{group_by}` ({:?}), which is not a groupable type",
+                    view.name, def.property_type
+                ),
+            );
         }
-        for agg in &view.aggregates {
-            if !matches!(agg.function, AggregateFn::Count) && agg.field.is_none() {
-                push(format!(
-                    "view `{}`: aggregate `{:?}` requires a field",
-                    view.name, agg.function
-                ));
+        for (aggregate_index, aggregate) in view.aggregates.iter().enumerate() {
+            if !matches!(aggregate.function, AggregateFn::Count) && aggregate.field.is_none() {
+                push(
+                    BaseDiagnosticSeverity::Warning,
+                    Some(format!(
+                        "views[{view_index}].aggregates[{aggregate_index}].field"
+                    )),
+                    format!(
+                        "view `{}`: aggregate `{:?}` requires a field",
+                        view.name, aggregate.function
+                    ),
+                );
             }
         }
+    }
+}
+
+fn validate_sort_field(
+    base: &BaseDefinition,
+    field: &str,
+    path: &str,
+    context: &str,
+    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
+) {
+    if let Some(name) = field.strip_prefix("sys.") {
+        if !SYSTEM_FIELDS.contains(&name) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: unknown system field `{name}`"),
+            );
+        } else if !SCALAR_SORT_SYSTEM_FIELDS.contains(&name) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: system field `{name}` is not scalar-sortable"),
+            );
+        }
+        return;
+    }
+
+    if let Some(name) = field.strip_prefix("prop.") {
+        validate_property_sort_field(base, name, path, context, push);
+        return;
+    }
+
+    if SYSTEM_FIELDS.contains(&field) {
+        if !SCALAR_SORT_SYSTEM_FIELDS.contains(&field) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: system field `{field}` is not scalar-sortable"),
+            );
+        }
+        return;
+    }
+
+    validate_property_sort_field(base, field, path, context, push);
+}
+
+fn validate_property_sort_field(
+    base: &BaseDefinition,
+    field: &str,
+    path: &str,
+    context: &str,
+    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
+) {
+    if let Some(definition) = base.property(field)
+        && !definition.property_type.is_scalar_sortable()
+    {
+        push(
+            BaseDiagnosticSeverity::Error,
+            Some(path.to_string()),
+            format!(
+                "{context}: property `{field}` ({:?}) is not scalar-sortable",
+                definition.property_type
+            ),
+        );
     }
 }
 
 fn validate_filter(
     base: &BaseDefinition,
     filter: &Filter,
+    path: &str,
     context: &str,
-    push: &mut impl FnMut(String),
+    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
 ) {
     match filter {
-        Filter::All(children) | Filter::Any(children) => {
-            for child in children {
-                validate_filter(base, child, context, push);
+        Filter::All(children) => {
+            for (index, child) in children.iter().enumerate() {
+                validate_filter(base, child, &format!("{path}.all[{index}]"), context, push);
             }
         }
-        Filter::Not(child) => validate_filter(base, child, context, push),
+        Filter::Any(children) => {
+            for (index, child) in children.iter().enumerate() {
+                validate_filter(base, child, &format!("{path}.any[{index}]"), context, push);
+            }
+        }
+        Filter::Not(child) => {
+            validate_filter(base, child, &format!("{path}.not"), context, push);
+        }
         Filter::Cmp { field, op, .. } => {
             let bare = field
                 .strip_prefix("prop.")
@@ -711,15 +924,23 @@ fn validate_filter(
                 match base.property(bare) {
                     Some(def) => {
                         if op.is_ordering() && !def.property_type.is_ordered() {
-                            push(format!(
-                                "{context}: `{op:?}` cannot order `{bare}` ({:?})",
-                                def.property_type
-                            ));
+                            push(
+                                BaseDiagnosticSeverity::Warning,
+                                Some(format!("{path}.op")),
+                                format!(
+                                    "{context}: `{op:?}` cannot order `{bare}` ({:?})",
+                                    def.property_type
+                                ),
+                            );
                         }
                     }
-                    None => push(format!(
-                        "{context}: field `{bare}` is not declared in [properties] (matching against raw vault values)"
-                    )),
+                    None => push(
+                        BaseDiagnosticSeverity::Warning,
+                        Some(format!("{path}.field")),
+                        format!(
+                            "{context}: field `{bare}` is not declared in [properties] (matching against raw vault values)"
+                        ),
+                    ),
                 }
             }
         }
@@ -768,6 +989,109 @@ columns = ["title", "author", "rating", "finished"]
 
     fn path(s: &str) -> PathBuf {
         PathBuf::from(s)
+    }
+
+    fn base_file_with_views<const N: usize>(names: [&str; N]) -> BaseFile {
+        BaseFile {
+            name: "Reading".to_string(),
+            description: None,
+            filter: None,
+            properties: Vec::new(),
+            views: names
+                .into_iter()
+                .map(|name| ViewDefinition {
+                    name: name.to_string(),
+                    layout: default_layout(),
+                    filter: None,
+                    sort: Vec::new(),
+                    group_by: None,
+                    aggregates: Vec::new(),
+                    columns: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn structured_base_preserves_property_order() {
+        let file: BaseFile = serde_json::from_str(
+            r#"{
+                "name": "Reading",
+                "properties": {
+                    "status": { "type": "select", "options": ["queued", "reading"] },
+                    "rating": { "type": "number" }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            file.properties
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["status", "rating"]
+        );
+    }
+
+    #[test]
+    fn structured_toml_base_preserves_property_order() {
+        let file: BaseFile = toml::from_str(
+            r#"
+name = "Reading"
+
+[properties]
+status = { type = "select", options = ["queued", "reading"] }
+rating = { type = "number" }
+
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            file.properties
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["status", "rating"]
+        );
+    }
+
+    #[test]
+    fn structured_base_defaults_omitted_properties() {
+        let file: BaseFile = toml::from_str("name = \"Reading\"\n").unwrap();
+        assert!(file.properties.is_empty());
+    }
+
+    #[test]
+    fn structured_validation_addresses_duplicate_view() {
+        let file = base_file_with_views(["All", "All"]);
+        let result = validate_definition("reading", file);
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("views[1].name")
+        }));
+    }
+
+    #[test]
+    fn structured_validation_rejects_case_only_duplicate_view() {
+        let file = base_file_with_views(["All", "aLL"]);
+        let result = validate_definition("reading", file);
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("views[1].name")
+                && diagnostic.message.contains("duplicate view name")
+        }));
+    }
+
+    #[test]
+    fn accepted_view_names_are_ascii_case_insensitively_addressable() {
+        let result = validate_definition("reading", base_file_with_views(["All", "Rated"]));
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.definition.view("aLL").unwrap().name, "All");
+        assert_eq!(result.definition.view("RATED").unwrap().name, "Rated");
     }
 
     #[test]
@@ -857,6 +1181,8 @@ value = "BOOK"
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].slug, "x");
         assert!(diagnostics[0].message.contains("property `rating`"));
+        assert_eq!(diagnostics[0].severity, BaseDiagnosticSeverity::Error);
+        assert_eq!(diagnostics[0].path, None);
         // The bad declaration is dropped; the good one survives.
         assert!(base.property("rating").is_none());
         assert!(base.property("author").is_some());
@@ -867,7 +1193,22 @@ value = "BOOK"
         let content = "name = \"X\"\n\n[properties]\ntitle = { type = \"text\" }\nkind = { type = \"text\" }\nencryption = { type = \"text\" }\n";
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
         assert!(base.is_some());
-        assert_eq!(diagnostics.len(), 3);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Warning)
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter_map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                "properties.title",
+                "properties.kind",
+                "properties.encryption"
+            ]
+        );
         assert!(diagnostics[0].message.contains("shadows a system field"));
     }
 
@@ -886,12 +1227,12 @@ status = { type = "select", options = ["queued", "reading"] }
 "#;
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
         assert!(base.is_some());
-        assert!(
-            diagnostics
-                .iter()
-                .any(|d| d.message.contains("cannot order")),
-            "{diagnostics:?}"
-        );
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("cannot order"))
+            .unwrap();
+        assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Warning);
+        assert_eq!(diagnostic.path.as_deref(), Some("filter.op"));
     }
 
     #[test]
@@ -899,12 +1240,65 @@ status = { type = "select", options = ["queued", "reading"] }
         let content = "name = \"X\"\n\n[[views]]\nname = \"V\"\n\n[[views]]\nname = \"V\"\n";
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
         assert!(base.is_some());
-        assert!(
-            diagnostics
-                .iter()
-                .any(|d| d.message.contains("duplicate view name")),
-            "{diagnostics:?}"
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("duplicate view name"))
+            .unwrap();
+        assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Error);
+        assert_eq!(diagnostic.path.as_deref(), Some("views[1].name"));
+    }
+
+    #[test]
+    fn non_scalar_saved_view_sorts_are_blocking_diagnostics() {
+        let content = r#"
+name = "X"
+
+[properties]
+themes = { type = "multi_select" }
+series = { type = "relation" }
+status = { type = "select" }
+
+[[views]]
+name = "All"
+sort = [
+    { field = "tags" },
+    { field = "sys.aliases" },
+    { field = "encryption" },
+    { field = "themes" },
+    { field = "prop.series" },
+    { field = "status" },
+    { field = "title" },
+]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let error_paths = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            error_paths,
+            vec![
+                "views[0].sort[0].field",
+                "views[0].sort[1].field",
+                "views[0].sort[2].field",
+                "views[0].sort[3].field",
+                "views[0].sort[4].field",
+            ]
         );
+    }
+
+    #[test]
+    fn unknown_explicit_system_saved_view_sort_is_an_error() {
+        let content =
+            "name = \"X\"\n\n[[views]]\nname = \"All\"\nsort = [{ field = \"sys.missing\" }]\n";
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("unknown system field"))
+            .unwrap();
+        assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Error);
+        assert_eq!(diagnostic.path.as_deref(), Some("views[0].sort[0].field"));
     }
 
     #[test]
@@ -913,6 +1307,8 @@ status = { type = "select", options = ["queued", "reading"] }
         assert!(base.is_none());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("invalid base file"));
+        assert_eq!(diagnostics[0].severity, BaseDiagnosticSeverity::Error);
+        assert_eq!(diagnostics[0].path, None);
     }
 
     #[test]
@@ -927,12 +1323,12 @@ value = "y"
 "#;
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
         assert!(base.is_some());
-        assert!(
-            diagnostics
-                .iter()
-                .any(|d| d.message.contains("not declared")),
-            "{diagnostics:?}"
-        );
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("not declared"))
+            .unwrap();
+        assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Warning);
+        assert_eq!(diagnostic.path.as_deref(), Some("filter.field"));
     }
 
     #[test]
@@ -948,12 +1344,12 @@ op = "eq"
 value = "work"
 "#;
         let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
-        assert!(
-            diagnostics
-                .iter()
-                .any(|d| d.message.contains("`kind` is not declared")),
-            "{diagnostics:?}"
-        );
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("`kind` is not declared"))
+            .unwrap();
+        assert_eq!(diagnostic.severity, BaseDiagnosticSeverity::Warning);
+        assert_eq!(diagnostic.path.as_deref(), Some("filter.field"));
 
         // Bare `kind` binds to the system field: no warning.
         let bare = r#"

@@ -268,7 +268,11 @@ mod tests {
 
         assert!(entry.header().entry_type().is_symlink());
         assert_eq!(entry.link_name().unwrap().unwrap(), outside.as_path());
-        assert!(entries.all(|entry| entry.unwrap().path().unwrap() != Path::new("linked-outside/secret.txt")));
+        assert!(
+            entries
+                .all(|entry| entry.unwrap().path().unwrap()
+                    != Path::new("linked-outside/secret.txt"))
+        );
     }
 
     #[test]
@@ -303,12 +307,16 @@ mod tests {
                     std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
                 )
         ));
-        assert!(!destination
-            .join("clepsydra-backup-20260808T123456Z.tar")
-            .exists());
-        assert!(!destination
-            .join("clepsydra-backup-20260808T123456Z.tar.partial")
-            .exists());
+        assert!(
+            !destination
+                .join("clepsydra-backup-20260808T123456Z.tar")
+                .exists()
+        );
+        assert!(
+            !destination
+                .join("clepsydra-backup-20260808T123456Z.tar.partial")
+                .exists()
+        );
     }
 
     #[test]
@@ -328,9 +336,11 @@ mod tests {
                     && source.kind() == std::io::ErrorKind::AlreadyExists
         ));
         assert_eq!(fs::read(&existing).unwrap(), b"existing archive");
-        assert!(!destination
-            .join("clepsydra-backup-20260808T123456Z.tar.partial")
-            .exists());
+        assert!(
+            !destination
+                .join("clepsydra-backup-20260808T123456Z.tar.partial")
+                .exists()
+        );
     }
 
     #[test]

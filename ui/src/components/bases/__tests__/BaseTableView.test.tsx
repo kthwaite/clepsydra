@@ -1,11 +1,32 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    children,
+    to,
+    params,
+    ...props
+  }: {
+    children: ReactNode;
+    to: string;
+    params: { slug: string };
+    [key: string]: unknown;
+  }) => (
+    <a {...props} href={to.replace("$slug", params.slug)}>
+      {children}
+    </a>
+  ),
+}));
+
 import type { BaseDetailResponse, QueryOutput } from "#/api/bases";
 import { BaseTableView } from "#/components/bases/BaseTableView";
 
 const definition: BaseDetailResponse = {
   slug: "reading",
+  revision: "revision-1",
   name: "Reading Log",
   properties: {
     author: { type: "text" },
@@ -41,6 +62,7 @@ function renderView(overrides: Partial<Parameters<typeof BaseTableView>[0]>) {
     onSortChange: vi.fn(),
     onOpenPage: vi.fn(),
     onCommitCell: vi.fn(),
+    configureSlug: "reading",
   };
   render(
     <BaseTableView
@@ -62,6 +84,27 @@ describe("BaseTableView", () => {
     expect(screen.getByRole("button", { name: "Continues" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Shelf" }));
     expect(props.onViewChange).toHaveBeenCalledWith("Shelf");
+  });
+
+  it("matches active view names using ASCII-case-insensitive equivalence", () => {
+    renderView({ activeView: "cONTINUES" });
+
+    expect(screen.getByRole("button", { name: "Continues" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      screen.getByRole("columnheader", { name: "author" }),
+    ).toBeInTheDocument();
+  });
+
+  it("links to the definition workspace from a saved base", () => {
+    renderView({});
+    const configure = screen.getByRole("link", {
+      name: "Configure Reading Log",
+    });
+
+    expect(configure).toHaveAttribute("href", "/bases/reading/edit");
   });
 
   it("renders group header rows with aggregate chips", () => {
@@ -124,6 +167,73 @@ describe("BaseTableView", () => {
     expect(props.onCommitCell).not.toHaveBeenCalled();
   });
 
+  it("sorts scalar headers but keeps multi-valued headers inert", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        properties: {
+          ...definition.properties,
+          topics: { type: "multi_select" },
+          related: { type: "relation" },
+        },
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: [
+              "title",
+              "author",
+              "tags",
+              "aliases",
+              "topics",
+              "related",
+            ],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 1,
+        rows: [
+          {
+            ...row,
+            columns: {
+              ...row.columns,
+              tags: ["fiction"],
+              aliases: ["New Sun"],
+              topics: ["science fantasy"],
+              related: ["02"],
+            },
+          },
+        ],
+      },
+    });
+
+    for (const name of ["tags", "aliases", "topics", "related"]) {
+      await user.click(screen.getByRole("columnheader", { name }));
+    }
+    expect(props.onSortChange).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("columnheader", { name: "author" }));
+    expect(props.onSortChange).toHaveBeenCalledWith({
+      sort: "author",
+      dir: "asc",
+    });
+  });
+
+  it("treats omitted property definitions as an empty read-only schema", () => {
+    renderView({
+      definition: {
+        ...definition,
+        properties: undefined,
+      },
+    });
+
+    expect(screen.getByText("Gene Wolfe").tagName).toBe("SPAN");
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
   it("renders an error banner instead of an empty table on view failure", () => {
     renderView({ output: undefined, viewError: "query error: bad filter" });
     const alert = screen.getByRole("alert");
@@ -143,5 +253,25 @@ describe("BaseTableView", () => {
     expect(commitRow.id).toBe("01");
     expect(key).toBe("author");
     expect(value).toBe("G-Wolfe");
+  });
+  it("renders a genuinely read-only preview without fake interactive controls", () => {
+    const props = renderView({ readOnly: true });
+
+    expect(screen.queryByRole("button", { name: "Continues" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Shelf" })).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: "Configure Reading Log" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "The Book of the New Sun" }),
+    ).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("Gene Wolfe").tagName).toBe("SPAN");
+    expect(
+      screen.getByRole("columnheader", { name: "title" }),
+    ).not.toHaveAttribute("aria-sort");
+    expect(props.onViewChange).not.toHaveBeenCalled();
+    expect(props.onSortChange).not.toHaveBeenCalled();
+    expect(props.onOpenPage).not.toHaveBeenCalled();
   });
 });

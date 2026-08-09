@@ -8,7 +8,7 @@ import {
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { BaseTableView } from "./BaseTableView";
 
-export interface BaseTableProps {
+interface BaseTableProps {
   slug: string;
 }
 
@@ -52,6 +52,7 @@ export function BaseTable({ slug }: BaseTableProps) {
       sortOverride={sortOverride}
       onSortChange={setSortOverride}
       onOpenPage={(path) => openTab("page", path)}
+      configureSlug={slug}
       onCommitCell={(row, key, value, hint) => {
         void commit(row, key, value, hint);
       }}

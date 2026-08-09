@@ -1,15 +1,17 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Profiler } from "react";
 import { flushSync } from "react-dom";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { navigateMock, openTabMock, useSearchMock, useTagsMock } = vi.hoisted(() => ({
-  navigateMock: vi.fn(),
-  openTabMock: vi.fn(),
-  useSearchMock: vi.fn(() => ({ data: [] })),
-  useTagsMock: vi.fn(() => ({ data: [] })),
-}));
+const { navigateMock, openTabMock, useSearchMock, useTagsMock } = vi.hoisted(
+  () => ({
+    navigateMock: vi.fn(),
+    openTabMock: vi.fn(),
+    useSearchMock: vi.fn(() => ({ data: [] })),
+    useTagsMock: vi.fn(() => ({ data: [] })),
+  }),
+);
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
@@ -130,5 +132,30 @@ describe("CommandPalette keyboard navigation", () => {
     expect(screen.getByRole("button", { name: /Open Atrium/ })).toHaveClass(
       "bg-ink",
     );
+  });
+
+  it("opens the Bases index with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Open Bases{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("opens guided Base creation with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Create Base{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/bases",
+      search: { create: true },
+    });
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
 });

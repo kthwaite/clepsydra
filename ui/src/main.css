@@ -31,7 +31,7 @@
     --color-paper-edge: #161616;
     --color-ink: #e8e6df;
     --color-ink-2: #b8b5a8;
-    --color-ink-mute: #6a675c;
+    --color-ink-mute: #918d80;
     --color-ink-faint: #3a3833;
     --color-accent: #ee7733;
     /* barbican (primary / "hot" in the prototype sense) */
@@ -60,7 +60,7 @@
     --color-secondary: #161616;
     --color-secondary-foreground: #e8e6df;
     --color-muted: #161616;
-    --color-muted-foreground: #6a675c;
+    --color-muted-foreground: #918d80;
     --color-accent-foreground: #0a0a0a;
     --color-destructive: #ff3b1f;
     --color-destructive-foreground: #0a0a0a;
@@ -96,7 +96,7 @@
     --paper-edge: #161616;
     --ink: #e8e6df;
     --ink-2: #b8b5a8;
-    --ink-mute: #6a675c;
+    --ink-mute: #918d80;
     --ink-faint: #3a3833;
     --accent: #ee7733;
     --accent-deep: #c75f24;

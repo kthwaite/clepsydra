@@ -27,6 +27,7 @@ const NAV: ReadonlyArray<readonly [CodexView, string]> = [
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
   ["tasking", "TASKING"],
+  ["bases", "BASES"],
   ["docs", "DOCS"],
 ];
 
@@ -47,12 +48,12 @@ export function DesktopCodexFrame({
   const syncStatus = useVaultEvents();
 
   const view =
-    forceView ??
-    resolveCodexView(pathname, workspaceTabs, activeTabId);
+    forceView ?? resolveCodexView(pathname, workspaceTabs, activeTabId);
 
   const onNav = (target: CodexView) => {
     if (target === "atrium") navigate({ to: "/" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
+    else if (target === "bases") navigate({ to: "/bases" });
     else if (target === "docs") {
       navigate({
         to: "/docs/$slug",
@@ -98,13 +99,14 @@ export function DesktopCodexFrame({
           <span className="text-accent">C</span>LEPSYDRA
         </button>
 
-        <nav className="flex items-stretch">
+        <nav aria-label="Primary navigation" className="flex items-stretch">
           {NAV.map(([key, label], i) => {
             const active = view === key;
             return (
               <button
                 key={key}
                 type="button"
+                aria-current={active ? "page" : undefined}
                 onClick={() => onNav(key)}
                 className={cn(
                   "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
@@ -154,7 +156,7 @@ export function DesktopCodexFrame({
                 : "text-ink-mute hover:text-ink",
             )}
           >
-            <span className="text-[9px] text-ink-mute">06</span>
+            <span className="text-[9px] text-ink-mute">07</span>
             <span className="text-[10px]">STATUS</span>
           </button>
           <button
@@ -171,6 +173,7 @@ export function DesktopCodexFrame({
 
       {/* ── SHEAF — hidden on ATRIUM, CONSTELLATION, and DOCS ──────── */}
       {view !== "atrium" &&
+        view !== "bases" &&
         view !== "constellation" &&
         view !== "docs" && (
           <Sheaf activeTabId={activeTabId} className="order-1" />
@@ -193,9 +196,7 @@ export function DesktopCodexFrame({
                       "inline-block h-[6px] w-[6px]",
                       writing ? "animate-pulse bg-accent" : "bg-ink-mute/30",
                     )}
-                    aria-label={
-                      writing ? "Sending data to server" : undefined
-                    }
+                    aria-label={writing ? "Sending data to server" : undefined}
                     title={writing ? "Sending…" : undefined}
                   />
                 </span>
@@ -233,6 +234,7 @@ function useFolioCode(view: CodexView): string {
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
   if (view === "tasking") return "TASKING";
+  if (view === "bases") return "BASES";
   if (view === "docs") return "DOC-001";
   const active = tabs.find((t) => t.id === activeTabId);
   if (!active?.path) return "—";

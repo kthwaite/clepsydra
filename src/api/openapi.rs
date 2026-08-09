@@ -1,10 +1,57 @@
 use axum::Router;
-use utoipa::OpenApi;
+use utoipa::openapi::Ref;
+use utoipa::openapi::schema::{
+    AdditionalProperties, Array, Object, ObjectBuilder, OneOfBuilder, Schema, SchemaType, Type,
+};
+use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
+struct FilterSchema;
+
+impl Modify for FilterSchema {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let Some(components) = openapi.components.as_mut() else {
+            return;
+        };
+
+        let recursive = Ref::from_schema_name("Filter");
+        let closed_object = || {
+            ObjectBuilder::new().additional_properties(Some(AdditionalProperties::FreeForm(false)))
+        };
+        let all = closed_object()
+            .property("all", Array::new(recursive.clone()))
+            .required("all");
+        let any = closed_object()
+            .property("any", Array::new(recursive.clone()))
+            .required("any");
+        let not = closed_object().property("not", recursive).required("not");
+        let comparison = closed_object()
+            .property("field", Object::with_type(Type::String))
+            .property("op", Ref::from_schema_name("Op"))
+            .property(
+                "value",
+                ObjectBuilder::new().schema_type(SchemaType::AnyValue),
+            )
+            .required("field")
+            .required("op");
+        let filter = OneOfBuilder::new()
+            .item(all)
+            .item(any)
+            .item(not)
+            .item(comparison)
+            .description(Some(
+                "Recursive filter AST: all, any, not, or a field comparison",
+            ))
+            .build();
+        components
+            .schemas
+            .insert("Filter".to_owned(), Schema::OneOf(filter).into());
+    }
+}
 /// OpenAPI document for the clepsydra vault API used by the UI.
 #[derive(OpenApi)]
 #[openapi(
+    modifiers(&FilterSchema),
     info(
         title = "Clepsydra API",
         version = "0.0.0",
@@ -100,8 +147,12 @@ use utoipa_swagger_ui::SwaggerUi;
         crate::api::deeplink::resolve_url,
         // Bases
         crate::api::bases::list_bases,
+        crate::api::bases::preview_base,
         crate::api::bases::get_base,
         crate::api::bases::evaluate_view,
+        crate::api::bases::create_base,
+        crate::api::bases::update_base,
+        crate::api::bases::delete_base,
         crate::api::query::run_query,
         crate::api::properties::patch_properties
     ),
@@ -123,12 +174,19 @@ use utoipa_swagger_ui::SwaggerUi;
             crate::vault::base::BaseFile,
             crate::vault::base::BaseDefinition,
             crate::vault::base::BaseDiagnostic,
+            crate::vault::base_document::ViewOrigin,
             crate::vault::query::QueryRow,
             crate::vault::query::GroupResult,
             crate::vault::query::QueryOutput,
             crate::api::bases::BaseSummary,
             crate::api::bases::BaseListResponse,
             crate::api::bases::BaseDetailResponse,
+            crate::api::bases::CreateBaseRequest,
+            crate::api::bases::UpdateBaseRequest,
+            crate::api::bases::DeleteBaseRequest,
+            crate::api::bases::BaseMutationResponse,
+            crate::api::bases::BasePreviewRequest,
+            crate::api::bases::BasePreviewResponse,
             crate::api::query::QueryRequest,
             crate::api::properties::PropertyPatchRequest,
             crate::api::properties::PropertyPatchResponse,
@@ -421,6 +479,96 @@ mod tests {
         assert!(
             schemas.schemas.contains_key("PatchCycleRequest"),
             "expected PatchCycleRequest in components"
+        );
+    }
+    #[test]
+    fn openapi_documents_base_authoring_contract() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+
+        let collection = &json["paths"]["/api/vault/bases"];
+        assert!(collection.get("post").is_some());
+        let item = &json["paths"]["/api/vault/bases/{slug}"];
+        assert!(item.get("put").is_some());
+        assert!(item.get("delete").is_some());
+
+        for schema_name in ["UpdateBaseRequest", "DeleteBaseRequest"] {
+            let schema = &json["components"]["schemas"][schema_name];
+            let required = schema["required"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{schema_name}.required should be an array"));
+            assert!(
+                required.iter().any(|field| field == "expected_revision"),
+                "{schema_name} should require expected_revision"
+            );
+            assert_eq!(
+                schema["properties"]["expected_revision"]["type"], "string",
+                "{schema_name}.expected_revision should be a string"
+            );
+        }
+        let update_schema = &json["components"]["schemas"]["UpdateBaseRequest"];
+        let update_required = update_schema["required"]
+            .as_array()
+            .expect("UpdateBaseRequest.required should be an array");
+        assert!(
+            update_required.iter().any(|field| field == "view_origins"),
+            "UpdateBaseRequest should require view_origins"
+        );
+        assert_eq!(
+            update_schema["properties"]["view_origins"]["type"], "array",
+            "UpdateBaseRequest.view_origins should be an array"
+        );
+        assert!(
+            json["components"]["schemas"].get("ViewOrigin").is_some(),
+            "ViewOrigin should be a named schema"
+        );
+
+        let detail_schema = &json["components"]["schemas"]["BaseDetailResponse"];
+        let detail_fields = detail_schema["allOf"]
+            .as_array()
+            .expect("flattened BaseDetailResponse should use allOf")
+            .iter()
+            .find(|part| part["properties"].get("revision").is_some())
+            .expect("BaseDetailResponse should expose revision");
+        let detail_required = detail_fields["required"]
+            .as_array()
+            .expect("BaseDetailResponse fields should declare required properties");
+        assert!(
+            detail_required.iter().any(|field| field == "revision"),
+            "BaseDetailResponse should require revision"
+        );
+        assert_eq!(
+            detail_fields["properties"]["revision"]["type"], "string",
+            "BaseDetailResponse.revision should be a string"
+        );
+
+        let variants = json["components"]["schemas"]["Filter"]["oneOf"]
+            .as_array()
+            .expect("Filter should be a recursive oneOf");
+        assert_eq!(variants.len(), 4);
+        assert_eq!(
+            variants[0]["properties"]["all"]["items"]["$ref"],
+            "#/components/schemas/Filter"
+        );
+        assert_eq!(
+            variants[1]["properties"]["any"]["items"]["$ref"],
+            "#/components/schemas/Filter"
+        );
+        assert_eq!(
+            variants[2]["properties"]["not"]["$ref"],
+            "#/components/schemas/Filter"
+        );
+        assert_eq!(
+            variants[3]["properties"]["op"]["$ref"],
+            "#/components/schemas/Op"
+        );
+        assert!(
+            variants[3]["properties"].get("field").is_some(),
+            "comparison filters should expose field"
+        );
+        assert!(
+            variants[3]["properties"].get("value").is_some(),
+            "comparison filters should expose authorable values"
         );
     }
 }

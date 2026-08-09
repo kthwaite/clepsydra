@@ -1,0 +1,326 @@
+import { describe, expect, it } from "vitest";
+import type { BaseDetailResponse, BaseFile } from "#/api/bases";
+import {
+  aggregateFunctions,
+  canGroup,
+  createMinimalDraft,
+  fromWire,
+  isValidBaseSlug,
+  moveItem,
+  operatorsFor,
+  removeFilterAtPath,
+  replaceFilterAtPath,
+  slugifyBaseName,
+  toWire,
+} from "#/components/bases/definition-model";
+
+type BaseDetailFixture = BaseDetailResponse & { revision: string };
+
+function baseDetail(overrides: Partial<BaseFile> = {}): BaseDetailFixture {
+  return {
+    slug: "books",
+    revision: "revision-1",
+    diagnostics: [],
+    name: "Books",
+    description: "Reading tracker",
+    properties: {},
+    views: [],
+    ...overrides,
+  };
+}
+
+function stripResponseFields(detail: BaseDetailFixture): BaseFile {
+  const {
+    slug: _slug,
+    revision: _revision,
+    diagnostics: _diagnostics,
+    ...file
+  } = detail;
+  return file;
+}
+
+describe("base definition model", () => {
+  it("round-trips the complete model while preserving property and view order", () => {
+    const detail = baseDetail({
+      filter: {
+        all: [
+          { field: "kind", op: "eq", value: "BOOK" },
+          {
+            any: [
+              { field: "status", op: "eq", value: "reading" },
+              { field: "status", op: "eq", value: "queued" },
+            ],
+          },
+        ],
+      },
+      properties: {
+        status: { type: "select", options: ["queued", "reading"] },
+        rating: { type: "number" },
+      },
+      views: [
+        {
+          name: "Reading",
+          layout: "table",
+          filter: { field: "status", op: "eq", value: "reading" },
+          sort: [{ field: "rating", dir: "desc" }],
+          group_by: "status",
+          aggregates: [{ fn: "count" }, { fn: "avg", field: "rating" }],
+          columns: ["title", "status", "rating"],
+        },
+        {
+          name: "All",
+          layout: "table",
+          sort: [],
+          aggregates: [],
+          columns: ["title"],
+        },
+      ],
+    });
+
+    const draft = fromWire(detail);
+
+    expect(draft.properties.map((property) => property.key)).toEqual([
+      "status",
+      "rating",
+    ]);
+    expect(draft.views.map((view) => view.name)).toEqual(["Reading", "All"]);
+    expect(new Set(draft.properties.map((property) => property.id)).size).toBe(
+      2,
+    );
+    expect(new Set(draft.views.map((view) => view.id)).size).toBe(2);
+    expect(toWire(draft)).toEqual(stripResponseFields(detail));
+    expect(Object.keys(toWire(draft).properties ?? {})).toEqual([
+      "status",
+      "rating",
+    ]);
+  });
+
+  it("preserves an unsupported wire layout until the user explicitly repairs it", () => {
+    const detail = baseDetail({
+      views: [
+        {
+          name: "Board",
+          layout: "board",
+          columns: ["title"],
+        },
+      ],
+    } as unknown as Partial<BaseFile>);
+
+    const draft = fromWire(detail);
+
+    expect(draft.views[0].layout).toBe("board");
+    expect(toWire(draft)).toEqual(
+      expect.objectContaining({
+        views: [expect.objectContaining({ layout: "board" })],
+      }),
+    );
+  });
+
+  it("materializes wire defaults without mutating the response", () => {
+    const detail = baseDetail({
+      description: undefined,
+      filter: undefined,
+      properties: undefined,
+      views: [{ name: "Compact" }],
+    });
+
+    const draft = fromWire(detail);
+
+    expect(draft).toMatchObject({
+      name: "Books",
+      properties: [],
+      views: [
+        {
+          name: "Compact",
+          layout: "table",
+          sort: [],
+          aggregates: [],
+          columns: [],
+        },
+      ],
+    });
+    expect(detail.views).toEqual([{ name: "Compact" }]);
+  });
+
+  it("creates a valid minimal All view with the supplied membership", () => {
+    const filter = { field: "kind", op: "eq", value: "BOOK" } as const;
+
+    expect(createMinimalDraft("Books", "Reading tracker", filter)).toEqual({
+      name: "Books",
+      description: "Reading tracker",
+      filter,
+      properties: [],
+      views: [
+        expect.objectContaining({
+          name: "All",
+          layout: "table",
+          sort: [],
+          aggregates: [],
+          columns: ["title"],
+        }),
+      ],
+    });
+  });
+
+  it("offers operators that match field type and cardinality", () => {
+    expect(operatorsFor("system-multi")).toEqual([
+      "contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("system-scalar")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("number")).toEqual([
+      "eq",
+      "ne",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+    ]);
+    expect(operatorsFor("relation")).toEqual([
+      "eq",
+      "ne",
+      "links_to",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("multi_select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("bool")).toEqual([
+      "eq",
+      "ne",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+  });
+
+  it("matches grouping and aggregate capabilities", () => {
+    for (const type of [
+      "text",
+      "bool",
+      "date",
+      "datetime",
+      "select",
+      "url",
+    ] as const) {
+      expect(canGroup(type)).toBe(true);
+    }
+    for (const type of ["number", "multi_select", "relation"] as const) {
+      expect(canGroup(type)).toBe(false);
+    }
+    expect(canGroup(undefined)).toBe(true);
+
+    const numericFunctions = ["count", "sum", "avg", "min", "max"];
+    expect(aggregateFunctions("number")).toEqual(numericFunctions);
+    expect(aggregateFunctions("date")).toEqual(numericFunctions);
+    expect(aggregateFunctions("datetime")).toEqual(numericFunctions);
+    expect(aggregateFunctions("word_count")).toEqual(numericFunctions);
+    expect(aggregateFunctions("select")).toEqual(["count"]);
+    expect(aggregateFunctions(undefined)).toEqual(["count"]);
+  });
+
+  it("moves an item immutably while preserving tuple order", () => {
+    const items = ["first", "second", "third"] as const;
+
+    expect(moveItem(items, 0, 2)).toEqual(["second", "third", "first"]);
+    expect(items).toEqual(["first", "second", "third"]);
+    expect(moveItem(items, 1, 1)).toEqual(items);
+    expect(moveItem(items, -1, 2)).toEqual(items);
+    expect(moveItem(items, 0, 3)).toEqual(items);
+  });
+
+  it("replaces recursive filter nodes without mutating the source", () => {
+    const source = {
+      all: [
+        { field: "kind", op: "eq", value: "BOOK" },
+        {
+          any: [
+            { field: "status", op: "eq", value: "queued" },
+            { not: { field: "archived", op: "eq", value: true } },
+          ],
+        },
+      ],
+    } satisfies import("#/api/bases").BaseFilter;
+
+    const next = replaceFilterAtPath(source, ["all", 1, "any", 1, "not"], {
+      field: "archived",
+      op: "eq",
+      value: false,
+    });
+
+    expect(next).toEqual({
+      all: [
+        { field: "kind", op: "eq", value: "BOOK" },
+        {
+          any: [
+            { field: "status", op: "eq", value: "queued" },
+            { not: { field: "archived", op: "eq", value: false } },
+          ],
+        },
+      ],
+    });
+    expect(source.all[1]).toEqual({
+      any: [
+        { field: "status", op: "eq", value: "queued" },
+        { not: { field: "archived", op: "eq", value: true } },
+      ],
+    });
+  });
+
+  it("removes nested filters immutably and collapses empty ancestors", () => {
+    const source = {
+      all: [
+        { field: "kind", op: "eq", value: "BOOK" },
+        { any: [{ field: "status", op: "eq", value: "reading" }] },
+      ],
+    } satisfies import("#/api/bases").BaseFilter;
+
+    expect(removeFilterAtPath(source, ["all", 1, "any", 0])).toEqual({
+      all: [{ field: "kind", op: "eq", value: "BOOK" }],
+    });
+    expect(removeFilterAtPath(source, ["all", 0])).toEqual({
+      all: [{ any: [{ field: "status", op: "eq", value: "reading" }] }],
+    });
+    expect(
+      removeFilterAtPath({ all: [source.all[0]] }, ["all", 0]),
+    ).toBeUndefined();
+    expect(removeFilterAtPath(source, [])).toBeUndefined();
+    expect(source.all).toHaveLength(2);
+  });
+
+  it("generates and validates deterministic safe base slugs", () => {
+    expect(slugifyBaseName("  Reading & Research Log  ")).toBe(
+      "reading-research-log",
+    );
+    expect(slugifyBaseName("Café BOOKS")).toBe("caf-books");
+    expect(slugifyBaseName("!!!")).toBe("");
+    expect(isValidBaseSlug("reading-log")).toBe(true);
+    expect(isValidBaseSlug("reading_log-2")).toBe(true);
+    expect(isValidBaseSlug("../reading")).toBe(false);
+    expect(isValidBaseSlug(".hidden")).toBe(false);
+    expect(isValidBaseSlug("")).toBe(false);
+  });
+});

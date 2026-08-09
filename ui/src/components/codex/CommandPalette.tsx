@@ -112,6 +112,18 @@ function CommandPaletteContent() {
       },
       {
         kind: "cmd",
+        id: "nav.bases",
+        title: "Open Bases",
+        action: () => navigate({ to: "/bases" }),
+      },
+      {
+        kind: "cmd",
+        id: "bases.create",
+        title: "Create Base",
+        action: () => navigate({ to: "/bases", search: { create: true } }),
+      },
+      {
+        kind: "cmd",
         id: formatChord(SHORTCUTS["app.inscribe"].chord),
         title: "Inscribe new folio",
         action: () => openInscribe(),
@@ -276,6 +288,7 @@ function CommandPaletteContent() {
             setSel(0);
           }}
           placeholder="grep | go | id | tag — ⏎ to dispatch · esc to close"
+          aria-label="Command query"
           className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
         />
         <span className="cl-mono border border-ink/40 px-[6px] py-[1px] text-[10px] tracking-[0.08em] text-ink-mute">

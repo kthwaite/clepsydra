@@ -174,7 +174,24 @@ export interface paths {
     /** List every base with its views and diagnostic count. */
     get: operations["list_bases"];
     put?: never;
-    post?: never;
+    post: operations["create_base"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/vault/bases/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Evaluate an unsaved definition without mutating vault files or the index. */
+    post: operations["preview_base"];
     delete?: never;
     options?: never;
     head?: never;
@@ -190,9 +207,9 @@ export interface paths {
     };
     /** Full parsed definition plus diagnostics for one base. */
     get: operations["get_base"];
-    put?: never;
+    put: operations["update_base"];
     post?: never;
-    delete?: never;
+    delete: operations["delete_base"];
     options?: never;
     head?: never;
     patch?: never;
@@ -975,20 +992,28 @@ export interface components {
     };
     BaseDetailResponse: components["schemas"]["BaseDefinition"] & {
       diagnostics: components["schemas"]["BaseDiagnostic"][];
+      revision: string;
     };
     /** @description A validation diagnostic for a base file. Never fatal to the registry. */
     BaseDiagnostic: {
       message: string;
+      path?: string | null;
+      severity: components["schemas"]["BaseDiagnosticSeverity"];
       /** @description Slug of the base (filename stem), even when parsing failed. */
       slug: string;
     };
+    /**
+     * @description Severity assigned to a base diagnostic.
+     * @enum {string}
+     */
+    BaseDiagnosticSeverity: "error" | "warning";
     /** @description The parsed model of a `.base.toml` file. */
     BaseFile: {
       description?: string | null;
       filter?: null | components["schemas"]["Filter"];
       name: string;
       /** @description Declared properties in file order (serialized as a key → definition map). */
-      properties: {
+      properties?: {
         [key: string]: components["schemas"]["PropertyDefinition"];
       };
       views?: components["schemas"]["ViewDefinition"][];
@@ -1001,10 +1026,29 @@ export interface components {
        */
       diagnostics: components["schemas"]["BaseDiagnostic"][];
     };
+    BaseMutationResponse: components["schemas"]["BaseDefinition"] & {
+      diagnostics: components["schemas"]["BaseDiagnostic"][];
+      revision: string;
+    };
+    BasePreviewRequest: {
+      definition: components["schemas"]["BaseFile"];
+      /** Format: int32 */
+      limit?: number | null;
+      /** Format: int32 */
+      offset?: number | null;
+      view?: string | null;
+    };
+    BasePreviewResponse: {
+      diagnostics: components["schemas"]["BaseDiagnostic"][];
+      evaluation_error?: string | null;
+      output?: null | components["schemas"]["QueryOutput"];
+    };
     /** @description One entry in the registry listing. */
     BaseSummary: {
       description?: string | null;
       diagnostic_count: number;
+      /** Format: int32 */
+      match_count?: number | null;
       name: string;
       slug: string;
       views: string[];
@@ -1141,6 +1185,10 @@ export interface components {
       tags?: string[];
       work_id: string;
     };
+    CreateBaseRequest: {
+      definition: components["schemas"]["BaseFile"];
+      slug: string;
+    };
     /** @description POST /board/cycles request body. */
     CreateCycleRequest: {
       /**
@@ -1215,6 +1263,9 @@ export interface components {
       /** Format: int32 */
       year?: number | null;
     };
+    DeleteBaseRequest: {
+      expected_revision: string;
+    };
     EncryptionConfigResponse: {
       initialized: boolean;
       key_id?: string | null;
@@ -1240,8 +1291,22 @@ export interface components {
       local_value?: string | null;
       source_value?: string | null;
     };
-    /** @description Recursive filter AST: {"all": [Filter]}, {"any": [Filter]}, {"not": Filter}, or {"field", "op", "value"} */
-    Filter: Record<string, never>;
+    /** @description Recursive filter AST: all, any, not, or a field comparison */
+    Filter:
+      | {
+          all: components["schemas"]["Filter"][];
+        }
+      | {
+          any: components["schemas"]["Filter"][];
+        }
+      | {
+          not: components["schemas"]["Filter"];
+        }
+      | {
+          field: string;
+          op: components["schemas"]["Op"];
+          value?: unknown;
+        };
     FolderInfo: {
       name: string;
       path: string;
@@ -1686,6 +1751,11 @@ export interface components {
       target_canonical?: string | null;
       target_raw: string;
     };
+    UpdateBaseRequest: {
+      definition: components["schemas"]["BaseFile"];
+      expected_revision: string;
+      view_origins: components["schemas"]["ViewOrigin"][];
+    };
     /** @description Request body for `PUT /location`: the new geographic location. */
     UpdateLocationRequest: {
       /** @description Optional human-readable label (e.g. `"London"`). */
@@ -1768,6 +1838,22 @@ export interface components {
       name: string;
       sort?: components["schemas"]["SortKey"][];
     };
+    /**
+     * @description Revision-guarded identity for one desired view in an update.
+     *
+     *     Existing views name the persisted view they originated from; fresh views
+     *     intentionally receive a newly serialized raw table with no source metadata.
+     */
+    ViewOrigin:
+      | {
+          /** @enum {string} */
+          kind: "existing";
+          name: string;
+        }
+      | {
+          /** @enum {string} */
+          kind: "fresh";
+        };
     WorkDetail: {
       assets?: string[];
       authors?: string[];
@@ -2516,12 +2602,81 @@ export interface operations {
       };
     };
   };
+  create_base: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateBaseRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BaseMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  preview_base: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BasePreviewRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BasePreviewResponse"];
+        };
+      };
+    };
+  };
   get_base: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        /** @description Base slug (filename stem) */
         slug: string;
       };
       cookie?: never;
@@ -2536,12 +2691,152 @@ export interface operations {
           "application/json": components["schemas"]["BaseDetailResponse"];
         };
       };
-      /** @description Unknown base */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
       404: {
         headers: {
           [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  update_base: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Base slug (filename stem) */
+        slug: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateBaseRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BaseMutationResponse"];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  delete_base: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Base slug (filename stem) */
+        slug: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeleteBaseRequest"];
+      };
+    };
+    responses: {
+      /** @description Base definition deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
         content?: never;
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
       };
     };
   };

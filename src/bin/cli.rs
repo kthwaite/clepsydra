@@ -562,8 +562,7 @@ mod cli_tests {
 
     #[test]
     fn backup_accepts_a_required_destination() {
-        let cli =
-            Cli::try_parse_from(["clep", "backup", "--destination", "out"]).unwrap();
+        let cli = Cli::try_parse_from(["clep", "backup", "--destination", "out"]).unwrap();
         assert!(matches!(
             cli.command,
             Commands::Backup { destination } if destination == std::path::Path::new("out")

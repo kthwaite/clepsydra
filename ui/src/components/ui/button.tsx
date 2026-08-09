@@ -18,13 +18,13 @@ const base =
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    "border-border bg-primary text-primary-foreground data-[hovered]:bg-primary/90",
+    "border-border bg-primary text-primary-foreground hover:bg-primary/90 data-[hovered]:bg-primary/90",
   secondary:
-    "border-border bg-background text-muted-foreground data-[hovered]:bg-accent data-[hovered]:text-foreground",
+    "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground data-[hovered]:bg-accent data-[hovered]:text-foreground",
   ghost:
-    "border-transparent text-muted-foreground data-[hovered]:bg-accent data-[hovered]:text-foreground",
+    "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground data-[hovered]:bg-accent data-[hovered]:text-foreground",
   danger:
-    "border-destructive bg-destructive text-destructive-foreground data-[hovered]:bg-destructive/90",
+    "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 data-[hovered]:bg-destructive/90",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -32,6 +32,15 @@ const sizeClasses: Record<ButtonSize, string> = {
   md: "px-3 py-1.5",
   icon: "h-7 w-7 p-0",
 };
+
+/** Shared visual contract for buttons and router links presented as buttons. */
+export function buttonStyles(
+  variant: ButtonVariant = "secondary",
+  size: ButtonSize = "md",
+  className?: string,
+) {
+  return cn(base, variantClasses[variant], sizeClasses[size], className);
+}
 
 export function Button({
   variant = "secondary",
@@ -43,7 +52,7 @@ export function Button({
     <RACButton
       {...props}
       className={composeRenderProps(className, (prev) =>
-        cn(base, variantClasses[variant], sizeClasses[size], prev),
+        buttonStyles(variant, size, prev),
       )}
     />
   );

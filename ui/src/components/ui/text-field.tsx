@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import {
   FieldError,
   Input,
@@ -14,6 +15,7 @@ export interface TextFieldProps extends RACTextFieldProps {
   description?: string;
   errorMessage?: string | ((validation: ValidationResult) => string);
   placeholder?: string;
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 export function TextField({
@@ -21,6 +23,7 @@ export function TextField({
   description,
   errorMessage,
   placeholder,
+  inputRef,
   className,
   ...props
 }: TextFieldProps) {
@@ -30,6 +33,7 @@ export function TextField({
         {label}
       </Label>
       <Input
+        ref={inputRef}
         placeholder={placeholder}
         className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm outline-none data-[focused]:border-ring data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50"
       />
