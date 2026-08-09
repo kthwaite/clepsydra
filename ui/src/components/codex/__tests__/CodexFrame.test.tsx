@@ -276,6 +276,13 @@ describe("CodexFrame Docs integration", () => {
     expect(
       screen.getByText("Navigation — Atrium", { selector: "summary" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("Navigation — Atrium", { selector: "summary" })
+        .parentElement,
+    ).toHaveClass("xl:hidden");
+    expect(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    ).toHaveClass("hidden", "xl:flex");
     const mobileNav = screen.getByRole("navigation", {
       name: "Mobile primary navigation",
     });

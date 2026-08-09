@@ -223,14 +223,14 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 
         <nav
           aria-label="Primary navigation"
-          className="hidden min-w-0 flex-1 items-stretch md:flex"
+          className="hidden min-w-0 flex-1 items-stretch xl:flex"
         >
           {NAV.map(([key, label], index) => navItem(key, label, index))}
         </nav>
 
         <details
           ref={mobileNavRef}
-          className="relative min-w-0 flex-1 md:hidden"
+          className="relative min-w-0 flex-1 xl:hidden"
         >
           <summary className="cl-mono flex h-full cursor-pointer list-none items-center border-r border-rule-soft px-3 text-[10px] uppercase tracking-[0.12em] text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring">
             Navigation — {view[0].toUpperCase()}
