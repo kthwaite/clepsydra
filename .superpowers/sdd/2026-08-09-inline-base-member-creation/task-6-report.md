@@ -91,6 +91,30 @@ Duration    3.55s
 
 Task 7 then reran the fresh-vault browser flow on the committed source. After Meta+Enter and authoritative grouped placement, the `The Dispossessed` title button remained `document.activeElement` after 100 ms; its row appeared in the `READING` group with status `reading` and rating `9`. Folio and reload smoke also passed.
 
+## UI Verification Fixes (Round 4)
+
+Resolved all 17 final UI TypeScript errors without changing feature behavior:
+
+- Initialized React 19 refs with explicit `undefined` unions.
+- Added the now-required generated `member_creation` field to Base detail preview, story, and test fixtures.
+- Narrowed `fromWire` to the shared `BaseFile` input it actually consumes, allowing both detail and mutation responses without weakening generated response types.
+- Typed native validity controls and mutable cell/property fixtures precisely.
+
+Fresh verification:
+
+```text
+bun run --cwd ui typecheck
+PASS (tsc --noEmit --project tsconfig.app.json)
+
+bun run --cwd ui test src/components/bases/__tests__/BaseTable.test.tsx src/components/bases/__tests__/BaseTableView.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/member-draft.test.ts src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx src/components/bases/__tests__/PropertiesEditor.test.tsx src/components/bases/__tests__/definition-model.test.ts src/components/bases/__tests__/cells.test.tsx
+Test Files  8 passed (8)
+Tests       128 passed (128)
+Duration    6.44s
+
+bun run --cwd ui build
+PASS (tsc -b && vite build; 4033 modules transformed)
+```
+
 ## Concerns
 
-None known within focused Task 6 coverage or Task 7 browser smoke. Controller-owned format, lint, typecheck, build, and broad-suite gates remain intentionally pending.
+None known within focused coverage, UI typecheck/build, or Task 7 browser smoke. Formatter, lint, and the broad UI suite were intentionally skipped per controller instruction.

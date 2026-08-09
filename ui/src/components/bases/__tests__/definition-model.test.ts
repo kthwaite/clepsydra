@@ -21,6 +21,7 @@ function baseDetail(overrides: Partial<BaseFile> = {}): BaseDetailFixture {
     slug: "books",
     revision: "revision-1",
     diagnostics: [],
+    member_creation: [],
     name: "Books",
     description: "Reading tracker",
     properties: {},
@@ -34,6 +35,7 @@ function stripResponseFields(detail: BaseDetailFixture): BaseFile {
     slug: _slug,
     revision: _revision,
     diagnostics: _diagnostics,
+    member_creation: _memberCreation,
     ...file
   } = detail;
   return file;

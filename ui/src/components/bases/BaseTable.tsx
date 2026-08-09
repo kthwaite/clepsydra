@@ -45,7 +45,7 @@ export function BaseTable({ slug }: BaseTableProps) {
     IDLE_MEMBER_CREATION,
   );
   const [memberNotice, setMemberNotice] = useState<string>();
-  const currentMemberOperation = useRef<number>();
+  const currentMemberOperation = useRef<number | undefined>(undefined);
   const nextMemberOperation = useRef(0);
 
   const activeView = viewName ?? detail.data?.views?.[0]?.name;

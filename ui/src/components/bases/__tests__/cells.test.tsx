@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { PropertyDefinition } from "#/api/bases";
+import type { CellValue } from "#/components/bases/cells/types";
 import { EditableCell } from "#/components/bases/EditableCell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
@@ -51,7 +52,9 @@ describe("cell editors", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "9" }));
-    const input = screen.getByRole("spinbutton", { name: "Edit number" });
+    const input = screen.getByRole<HTMLInputElement>("spinbutton", {
+      name: "Edit number",
+    });
     input.setCustomValidity("Enter a valid number");
     await user.tab();
 
@@ -174,7 +177,9 @@ describe("cell editors", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([
+  const accessibleEditorCases: Array<
+    [name: string, value: CellValue, definition: PropertyDefinition]
+  > = [
     ["text", "", { type: "text" }],
     ["url", "", { type: "url" }],
     ["number", null, { type: "number" }],
@@ -184,7 +189,9 @@ describe("cell editors", () => {
     ["select", null, { type: "select", options: ["one"] }],
     ["multi-select", [], { type: "multi_select", options: ["one"] }],
     ["relation", [], { type: "relation" }],
-  ] as const)(
+  ];
+
+  it.each(accessibleEditorCases)(
     "propagates an accessible override to the %s editor",
     async (_name, value, definition) => {
       vi.stubGlobal(

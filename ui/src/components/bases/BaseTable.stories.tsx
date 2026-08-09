@@ -31,6 +31,7 @@ const definition: BaseDetailResponse = {
     },
   ],
   diagnostics: [],
+  member_creation: [],
 };
 
 const rows = [

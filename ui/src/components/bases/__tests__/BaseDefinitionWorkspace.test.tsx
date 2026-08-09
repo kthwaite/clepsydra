@@ -51,6 +51,7 @@ const detail: BaseDetailResponse = {
     },
   ],
   diagnostics: [],
+  member_creation: [],
   revision: "revision-1",
 };
 

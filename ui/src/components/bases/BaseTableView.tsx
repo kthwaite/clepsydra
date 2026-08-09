@@ -144,8 +144,8 @@ export function BaseTableView({
   const properties = definition.properties ?? EMPTY_PROPERTIES;
   const memberBlockerId = useId();
   const createdTitleRef = useRef<HTMLButtonElement | null>(null);
-  const focusedCreatedId = useRef<string>();
-  const createdFocusTimer = useRef<number>();
+  const focusedCreatedId = useRef<string | undefined>(undefined);
+  const createdFocusTimer = useRef<number | undefined>(undefined);
   const setCreatedTitleRef = useCallback(
     (node: HTMLButtonElement | null) => {
       createdTitleRef.current = node;

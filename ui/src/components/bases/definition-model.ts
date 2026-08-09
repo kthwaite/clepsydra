@@ -1,6 +1,5 @@
 import type {
   Aggregate,
-  BaseDetailResponse,
   BaseFile,
   BaseFilter,
   FilterOp,
@@ -144,7 +143,7 @@ function clonePropertyDefinition(definition: PropertyDefinition) {
   };
 }
 
-export function fromWire(detail: BaseDetailResponse): BaseDraft {
+export function fromWire(detail: BaseFile): BaseDraft {
   return {
     name: detail.name,
     description: detail.description ?? undefined,
