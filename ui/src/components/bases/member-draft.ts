@@ -6,20 +6,20 @@ import type {
 import type { CellValue } from "./cells/types";
 import { asciiCaseFold } from "./local-validation";
 
-const CREATABLE_SYSTEM: Record<string, true> = {
-  kind: true,
-  project: true,
-  tags: true,
-  aliases: true,
-};
-const READ_ONLY_SYSTEM: Record<string, true> = {
-  id: true,
-  path: true,
-  created_at: true,
-  updated_at: true,
-  journal_date: true,
-  word_count: true,
-};
+const CREATABLE_SYSTEM: ReadonlySet<string> = new Set([
+  "kind",
+  "project",
+  "tags",
+  "aliases",
+]);
+const READ_ONLY_SYSTEM: ReadonlySet<string> = new Set([
+  "id",
+  "path",
+  "created_at",
+  "updated_at",
+  "journal_date",
+  "word_count",
+]);
 
 export type DraftFieldKind =
   | "title"
@@ -51,7 +51,7 @@ function normalizedField(field: string): string {
 function isCreatableSystemField(
   field: string,
 ): field is Exclude<DraftFieldKind, "title" | "property"> {
-  return CREATABLE_SYSTEM[field] === true;
+  return CREATABLE_SYSTEM.has(field);
 }
 
 export function composeMemberDraftFields(
@@ -84,7 +84,7 @@ export function composeMemberDraftFields(
     if (seen.has(key)) continue;
     seen.add(key);
 
-    if (READ_ONLY_SYSTEM[key]) continue;
+    if (READ_ONLY_SYSTEM.has(key)) continue;
     const requirement = requirements.get(key);
     const labels = {
       membership: requirement?.membership ?? false,
@@ -95,7 +95,9 @@ export function composeMemberDraftFields(
       continue;
     }
 
-    const propertyDefinition = properties[key];
+    const propertyDefinition = Object.hasOwn(properties, key)
+      ? properties[key]
+      : undefined;
     if (propertyDefinition) {
       fields.push({
         key,

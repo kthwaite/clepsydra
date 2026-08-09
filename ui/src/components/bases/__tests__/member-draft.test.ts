@@ -135,6 +135,36 @@ describe("composeMemberDraftFields", () => {
     expect(fields.map((field) => field.key)).toEqual(["title", "kind", "status"]);
   });
 
+  it("uses own-property checks for names that collide with Object.prototype", () => {
+    const inheritedOnly = composeMemberDraftFields(
+      makeDefinition({
+        properties: undefined,
+        views: [{ name: "Continues" }],
+      }),
+      "Continues",
+      makeCapability({
+        fields: [
+          { field: "prop.constructor", membership: true, view: false },
+        ],
+      }),
+    );
+    expect(inheritedOnly.map((field) => field.key)).toEqual(["title"]);
+
+    const constructorDefinition: PropertyDefinition = { type: "text" };
+    const declared = composeMemberDraftFields(
+      makeDefinition({
+        properties: { constructor: constructorDefinition },
+        views: [{ name: "Continues", columns: ["prop.constructor"] }],
+      }),
+      "Continues",
+      makeCapability(),
+    );
+    expect(declared.find((field) => field.key === "constructor")).toMatchObject({
+      kind: "property",
+      definition: constructorDefinition,
+    });
+  });
+
   it("does not turn undeclared filter keys into controls or consume their diagnostics", () => {
     const capability = makeCapability({
       enabled: false,

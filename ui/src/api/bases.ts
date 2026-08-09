@@ -32,6 +32,41 @@ export type QueryOutput = components["schemas"]["QueryOutput"];
 export type QueryRow = components["schemas"]["QueryRow"];
 export type GroupResult = components["schemas"]["GroupResult"];
 
+const BASE_MEMBER_SCOPES: ReadonlySet<string> = new Set([
+  "membership",
+  "view",
+  "field",
+]);
+
+function isBaseMemberDiagnostic(
+  value: unknown,
+): value is BaseMemberDiagnostic {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  if (
+    !("scope" in value) ||
+    typeof value.scope !== "string" ||
+    !BASE_MEMBER_SCOPES.has(value.scope) ||
+    !("message" in value) ||
+    typeof value.message !== "string"
+  ) {
+    return false;
+  }
+  if (
+    "field" in value &&
+    value.field !== null &&
+    typeof value.field !== "string"
+  ) {
+    return false;
+  }
+  return (
+    !("filter_path" in value) ||
+    value.filter_path === null ||
+    typeof value.filter_path === "string"
+  );
+}
+
 export function decodeBaseMemberDiagnostics(
   error: unknown,
 ): BaseMemberDiagnostic[] {
@@ -44,9 +79,13 @@ export function decodeBaseMemberDiagnostics(
     return [];
   }
   const diagnostics = error.detail.diagnostics;
-  return Array.isArray(diagnostics)
-    ? (diagnostics as BaseMemberDiagnostic[])
-    : [];
+  if (
+    !Array.isArray(diagnostics) ||
+    !diagnostics.every(isBaseMemberDiagnostic)
+  ) {
+    return [];
+  }
+  return diagnostics;
 }
 
 function useInvalidateBaseQueries() {

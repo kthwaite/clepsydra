@@ -25,28 +25,53 @@ describe("Base member API", () => {
     expect(typeof useCreateBaseMember).toBe("function");
   });
 
-  it("decodes diagnostics only from the structured API error detail", () => {
+  it("decodes only diagnostics whose complete runtime shape is valid", () => {
+    const validDiagnostics = [
+      {
+        scope: "membership" as const,
+        message: "must match the Base filter",
+      },
+      {
+        scope: "view" as const,
+        field: null,
+        filter_path: "views[0].filter",
+        message: "must equal reading",
+      },
+      {
+        scope: "field" as const,
+        field: "status",
+        filter_path: null,
+        message: "status cannot be persisted",
+      },
+    ];
     expect(
       decodeBaseMemberDiagnostics({
         status: 422,
         error: "candidate rejected",
-        detail: {
-          diagnostics: [
-            {
-              scope: "view",
-              field: "status",
-              message: "must equal reading",
-            },
-          ],
-        },
+        detail: { diagnostics: validDiagnostics },
       }),
-    ).toEqual([
-      {
-        scope: "view",
-        field: "status",
-        message: "must equal reading",
-      },
-    ]);
+    ).toEqual(validDiagnostics);
+
+    for (const diagnostics of [
+      [null],
+      [{ scope: "other", message: "invalid scope" }],
+      [{ scope: "view", message: 42 }],
+      [{ scope: "view", message: "invalid field", field: false }],
+      [{ scope: "view", message: "invalid path", filter_path: 1 }],
+      [
+        { scope: "view", message: "valid" },
+        { scope: "field", message: "one invalid entry poisons the array", field: {} },
+      ],
+    ]) {
+      expect(
+        decodeBaseMemberDiagnostics({
+          status: 422,
+          error: "candidate rejected",
+          detail: { diagnostics },
+        }),
+      ).toEqual([]);
+    }
+
     expect(
       decodeBaseMemberDiagnostics({ status: 500, error: "failed" }),
     ).toEqual([]);
@@ -58,7 +83,7 @@ describe("Base member API", () => {
     ).toEqual([]);
     expect(
       decodeBaseMemberDiagnostics({
-        detail: { diagnostics: [{ scope: "view", message: "ignored" }] },
+        detail: { diagnostics: validDiagnostics },
       }),
     ).toEqual([]);
   });
