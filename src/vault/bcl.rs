@@ -1,7 +1,7 @@
 //! Brimley-Cocoon Line: a date-of-birth based countdown to the day the user
 //! reaches the age (≈18 530 days) Wilford Brimley was when *Cocoon* (1985)
 //! premiered. The reference C implementation lives at
-//! <https://github.com/cthwaite/bcl>.
+//! <https://github.com/kthwaite/bcl>.
 //!
 //! The vault stores the source-of-truth at `<vault>/.clepsydra/bcl` so the
 //! value travels with the vault. On first run the loader uses a lookaside
