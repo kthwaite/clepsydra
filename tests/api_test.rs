@@ -2603,6 +2603,76 @@ async fn page_create_rolls_back_published_file_before_indexing_when_directory_sy
 }
 
 #[tokio::test]
+async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing() {
+    use clepsydra::vault::atomic_file::AtomicPublicationError;
+    use clepsydra::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_create_publication_hook(Some(Arc::new(|path, content| {
+        fs::write(path, content).unwrap();
+        Err(AtomicPublicationError::PublishedButNotDurable(
+            std::io::Error::other("injected publication durability failure"),
+        ))
+    })));
+    coordinator.set_create_rollback_sync_hook(Some(Arc::new(|_| {
+        Err(std::io::Error::other(
+            "injected rollback directory sync failure",
+        ))
+    })));
+
+    let notified = std::sync::atomic::AtomicBool::new(false);
+    let notify = |_: MutationNotification| {
+        notified.store(true, std::sync::atomic::Ordering::SeqCst);
+    };
+    let error = coordinator
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("rollback-sync-failure.md").unwrap(),
+                meta: PageMeta::new(),
+                body: String::new(),
+            },
+            &notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        MutationError::FilesystemRollback {
+            source,
+            rollback,
+            ..
+        } if source.to_string().contains("injected publication durability failure")
+            && rollback.to_string().contains("injected rollback directory sync failure")
+    ));
+    assert!(
+        !tmp.path().join("rollback-sync-failure.md").exists(),
+        "unlink succeeded even though rollback directory sync failed"
+    );
+    let page_count: i64 = handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page_count, 0);
+    assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
 async fn page_mutation_projected_move_invokes_hook_before_notification() {
     use clepsydra::vault::hooks::PostMoveHook;
     use clepsydra::vault::mutation_coordinator::{

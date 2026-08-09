@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
-use crate::vault::base::BaseDefinition;
+use crate::vault::base::{BaseDefinition, SYSTEM_FIELDS};
 use crate::vault::base_document;
 use crate::vault::base_member::{
     BaseMemberDiagnostic, BaseMemberScope, CandidateDerived, candidate_matches,
@@ -137,6 +137,21 @@ fn is_reserved_field(key: &str) -> bool {
     )
 }
 
+fn is_unpersistable_custom_shadow(key: &str) -> bool {
+    matches!(
+        key,
+        "id"
+            | "path"
+            | "title"
+            | "project"
+            | "tags"
+            | "aliases"
+            | "created_at"
+            | "updated_at"
+            | "encryption"
+    )
+}
+
 async fn create_base_member_with_ids(
     state: Arc<AppState>,
     slug: String,
@@ -177,41 +192,50 @@ async fn create_base_member_with_ids(
     meta.updated_at = Some(created);
 
     let mut normalized_fields = Vec::with_capacity(request.fields.len());
-    let mut logical_keys = HashSet::with_capacity(request.fields.len());
+    let mut targets = HashSet::with_capacity(request.fields.len());
     for (key, value) in &request.fields {
+        let explicit_custom = key.starts_with("prop.");
         let logical = key.strip_prefix("prop.").unwrap_or(key);
-        if !logical_keys.insert(logical) {
+        let targets_custom_property =
+            explicit_custom || !SYSTEM_FIELDS.contains(&logical);
+        if !targets.insert((logical, targets_custom_property)) {
             return Err(ApiError::bad_request(format!(
                 "field `{logical}` was provided more than once"
             )));
         }
-        normalized_fields.push((logical, value));
-    }
-
-    let mut diagnostics = Vec::new();
-    for (key, value) in normalized_fields {
-        if is_reserved_field(key) {
+        if explicit_custom && is_unpersistable_custom_shadow(logical) {
+            return Err(ApiError::bad_request(format!(
+                "custom property `{key}` cannot be persisted without changing its meaning"
+            )));
+        }
+        if !explicit_custom && is_reserved_field(logical) {
             return Err(ApiError::bad_request(format!(
                 "field `{key}` cannot be set when creating a Base member"
             )));
         }
-        match apply_system_field(&mut meta, key, value) {
-            Ok(true) => {}
-            Ok(false) => {
-                if stored.definition.property(key).is_none() {
-                    return Err(ApiError::bad_request(format!(
-                        "base `{slug}` has no declared property `{key}`"
-                    )));
-                }
-                if let Err(diagnostic) =
-                    apply_custom_field(&mut meta, &stored.definition, key, value)
-                {
-                    diagnostics.push(diagnostic);
+        normalized_fields.push((key.as_str(), logical, explicit_custom, value));
+    }
+
+    let mut diagnostics = Vec::new();
+    for (original, logical, explicit_custom, value) in normalized_fields {
+        if !explicit_custom {
+            match apply_system_field(&mut meta, original, value) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(diagnostic) => {
+                    return Err(ApiError::bad_request(diagnostic.message));
                 }
             }
-            Err(diagnostic) => {
-                return Err(ApiError::bad_request(diagnostic.message));
-            }
+        }
+        if stored.definition.property(logical).is_none() {
+            return Err(ApiError::bad_request(format!(
+                "base `{slug}` has no declared property `{logical}`"
+            )));
+        }
+        if let Err(diagnostic) =
+            apply_custom_field(&mut meta, &stored.definition, original, value)
+        {
+            diagnostics.push(diagnostic);
         }
     }
     if !diagnostics.is_empty() {

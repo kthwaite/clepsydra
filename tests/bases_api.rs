@@ -1253,6 +1253,96 @@ async fn duplicate_bare_and_prop_field_aliases_are_bad_request_without_artifacts
     assert_eq!(page_paths(fixture.state.vault.root()), before);
 }
 
+fn seed_persistable_shadow_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/persistable-shadow.base.toml"),
+        r#"
+name = "Persistable shadow"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+project = { type = "text" }
+tags = { type = "text" }
+aliases = { type = "text" }
+
+[[views]]
+name = "Escaped"
+filter = { all = [
+  { field = "prop.kind", op = "eq", value = "genre" },
+  { field = "prop.word_count", op = "eq", value = 7 }
+] }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn bare_system_and_persistable_prop_shadow_fields_coexist() {
+    let fixture = member_fixture(seed_persistable_shadow_base);
+    let revision = current_base_revision(&fixture, "persistable-shadow").await;
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/persistable-shadow/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Escaped",
+            "title": "Shadow fields",
+            "fields": {
+                "kind": "BOOK",
+                "prop.kind": "genre",
+                "prop.word_count": 7
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = clepsydra::vault::path::VaultPath::new(body["path"].as_str().unwrap()).unwrap();
+    let page =
+        clepsydra::vault::page::Page::from_file(&fixture.state.vault.resolve(&path), path).unwrap();
+    assert_eq!(
+        page.meta.kind,
+        Some(clepsydra::vault::kind::Kind::Book)
+    );
+    assert_eq!(
+        page.meta.extra["kind"],
+        toml::Value::String("genre".into())
+    );
+    assert_eq!(
+        page.meta.extra["word_count"],
+        toml::Value::Integer(7)
+    );
+}
+
+#[tokio::test]
+async fn unpersistable_prop_system_shadows_are_bad_request_without_artifacts() {
+    for field in ["project", "tags", "aliases"] {
+        let fixture = member_fixture(seed_persistable_shadow_base);
+        let revision = current_base_revision(&fixture, "persistable-shadow").await;
+        let before = page_paths(fixture.state.vault.root());
+        let prop_field = format!("prop.{field}");
+
+        fixture
+            .server
+            .post("/api/vault/bases/persistable-shadow/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": "Escaped",
+                "title": "Unpersistable shadow",
+                "fields": {
+                    "kind": "BOOK",
+                    (prop_field): "custom"
+                }
+            }))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(page_paths(fixture.state.vault.root()), before);
+    }
+}
+
 #[tokio::test]
 async fn member_index_failure_rolls_back_generated_page_without_notification() {
     let fixture = member_fixture(seed);

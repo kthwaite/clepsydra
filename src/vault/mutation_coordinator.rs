@@ -22,6 +22,7 @@ type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
 type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
 type CreatePublicationHook =
     dyn Fn(&Path, &[u8]) -> Result<(), AtomicPublicationError> + Send + Sync;
+type CreateRollbackSyncHook = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
@@ -29,6 +30,7 @@ pub struct MutationCoordinator {
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
     create_publication_hook: parking_lot::Mutex<Option<Arc<CreatePublicationHook>>>,
+    create_rollback_sync_hook: parking_lot::Mutex<Option<Arc<CreateRollbackSyncHook>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -212,6 +214,48 @@ where
         })?
 }
 
+fn rollback_created_publication(
+    path: &Path,
+    sync_hook: Option<&CreateRollbackSyncHook>,
+) -> io::Result<()> {
+    fs::remove_file(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to remove published file {}: {error}", path.display()),
+        )
+    })?;
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::other(format!(
+            "published path has no parent directory: {}",
+            path.display()
+        ))
+    })?;
+    let sync_result = match sync_hook {
+        Some(hook) => hook(parent),
+        None => sync_rollback_parent(parent),
+    };
+    sync_result.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "removed published file {} but failed to sync parent directory {}: {error}",
+                path.display(),
+                parent.display()
+            ),
+        )
+    })
+}
+
+#[cfg(not(windows))]
+fn sync_rollback_parent(parent: &Path) -> io::Result<()> {
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_rollback_parent(_parent: &Path) -> io::Result<()> {
+    Ok(())
+}
+
 impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
@@ -219,6 +263,7 @@ impl MutationCoordinator {
             before_update_publish_hook: parking_lot::Mutex::new(None),
             after_page_id_lookup_hook: parking_lot::Mutex::new(None),
             create_publication_hook: parking_lot::Mutex::new(None),
+            create_rollback_sync_hook: parking_lot::Mutex::new(None),
         }
     }
 
@@ -240,6 +285,12 @@ impl MutationCoordinator {
     #[doc(hidden)]
     pub fn set_create_publication_hook(&self, hook: Option<Arc<CreatePublicationHook>>) {
         *self.create_publication_hook.lock() = hook;
+    }
+
+    /// Replace create rollback directory synchronization for deterministic failure testing.
+    #[doc(hidden)]
+    pub fn set_create_rollback_sync_hook(&self, hook: Option<Arc<CreateRollbackSyncHook>>) {
+        *self.create_rollback_sync_hook.lock() = hook;
     }
 
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
@@ -317,6 +368,7 @@ impl MutationCoordinator {
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
         let create_publication_hook = self.create_publication_hook.lock().clone();
+        let create_rollback_sync_hook = self.create_rollback_sync_hook.lock().clone();
         let result =
             run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
                 let blocking_path = absolute.clone();
@@ -355,7 +407,10 @@ impl MutationCoordinator {
                                 })
                             }
                             Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                match fs::remove_file(&blocking_path) {
+                                match rollback_created_publication(
+                                    &blocking_path,
+                                    create_rollback_sync_hook.as_deref(),
+                                ) {
                                     Ok(()) => Err(MutationError::Filesystem {
                                         filesystem_applied: false,
                                         path: blocking_path,
