@@ -150,9 +150,8 @@ force cleartext, so `serve` cannot silently downgrade a TLS config.
 
 ### Running an HTTPS server for client testing
 
-Clients that require HTTPS (the iOS app, which has no ATS exception) need a TLS
-server. Rather than flipping `[server.tls].enabled` in the config your everyday
-plain server shares, start a second one on a spare port:
+The responsive web application and desktop browser client use the same tailnet
+HTTPS origin. Start a TLS server when testing from a browser over the tailnet:
 
 ```bash
 clepsydra serve --tls --port 3443
@@ -161,13 +160,8 @@ clepsydra serve --tls --port 3443
 Certificates come from `[server.tls]` when `cert_path` and `key_path` are both
 set; otherwise Clepsydra generates localhost certs with `mkcert` and caches them
 in the app data dir. See [configuration.md](/docs/configuration) for details.
-
-For the iOS Simulator, install the mkcert CA into its keychain once per
-simulator — without this the app reports an untrusted certificate:
-
-```bash
-scripts/trust-simulator-ca.sh
-```
+For tailnet access, use a certificate covering the browser's tailnet hostname
+and ensure the browser trusts its issuing CA.
 
 Run `clepsydra doctor` to check cert state and `mkcert` availability.
 
