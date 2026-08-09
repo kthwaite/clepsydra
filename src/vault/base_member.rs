@@ -1,5 +1,6 @@
 use crate::vault::base::{
-    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition, filter_matches_meta,
+    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition, derived_comparison_matches,
+    filter_matches_meta,
 };
 use crate::vault::page::PageMeta;
 use serde::{Deserialize, Serialize};
@@ -237,75 +238,13 @@ fn filter_possibility(filter: &Filter) -> Possibility {
 }
 
 fn comparison_possibility(field: &str, op: Op, value: &serde_json::Value) -> Possibility {
-    let bare = bare_field(field);
-    let matches = match bare {
-        "word_count" => Some(evaluate_fixed_scalar(Some("0"), op, value)),
-        "journal_date" => Some(evaluate_fixed_scalar(None, op, value)),
-        _ => None,
-    };
-    match matches {
+    match derived_comparison_matches(field, op, value, Some(0), None) {
         Some(true) => Possibility::AlwaysTrue,
         Some(false) => Possibility::AlwaysFalse,
         None => Possibility::Maybe,
     }
 }
 
-fn evaluate_fixed_scalar(
-    current: Option<&str>,
-    op: Op,
-    value: &serde_json::Value,
-) -> bool {
-    match op {
-        Op::IsEmpty => current.is_none(),
-        Op::NotEmpty => current.is_some(),
-        Op::In => value.as_array().is_some_and(|values| {
-            values
-                .iter()
-                .any(|value| evaluate_fixed_scalar(current, Op::Eq, value))
-        }),
-        Op::Contains => match (current, value.as_str()) {
-            (Some(current), Some(expected)) => current.contains(expected),
-            _ => false,
-        },
-        Op::Ne => match (current, scalar_value(value)) {
-            (Some(current), Some(expected)) => current != expected,
-            (None, _) => true,
-            _ => false,
-        },
-        Op::Eq => match (current, scalar_value(value)) {
-            (Some(current), Some(expected)) => current == expected,
-            _ => false,
-        },
-        Op::Lt | Op::Lte | Op::Gt | Op::Gte => match (current, scalar_value(value)) {
-            (Some(current), Some(expected)) => ordered_scalar_matches(current, op, &expected),
-            _ => false,
-        },
-        Op::LinksTo => false,
-    }
-}
-
-fn scalar_value(value: &serde_json::Value) -> Option<std::borrow::Cow<'_, str>> {
-    match value {
-        serde_json::Value::String(value) => Some(std::borrow::Cow::Borrowed(value)),
-        serde_json::Value::Number(value) => Some(std::borrow::Cow::Owned(value.to_string())),
-        serde_json::Value::Bool(value) => Some(std::borrow::Cow::Owned(value.to_string())),
-        _ => None,
-    }
-}
-
-fn ordered_scalar_matches(current: &str, op: Op, expected: &str) -> bool {
-    let ordering = match (current.parse::<f64>(), expected.parse::<f64>()) {
-        (Ok(current), Ok(expected)) => current.partial_cmp(&expected),
-        _ => Some(current.cmp(expected)),
-    };
-    match (op, ordering) {
-        (Op::Lt, Some(std::cmp::Ordering::Less)) => true,
-        (Op::Lte, Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)) => true,
-        (Op::Gt, Some(std::cmp::Ordering::Greater)) => true,
-        (Op::Gte, Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)) => true,
-        _ => false,
-    }
-}
 
 fn collect_contributors(
     filter: &Filter,
@@ -504,6 +443,150 @@ layout = "table"
                 view,
                 &PageMeta::new(),
                 "notes/20260809.blank.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn capability_and_candidate_match_for_every_fixed_derived_operator() {
+        let cases = [
+            ("word_count", "eq", ", value = 0", true),
+            ("word_count", "ne", ", value = 1", true),
+            ("word_count", "lt", ", value = 1", true),
+            ("word_count", "lte", ", value = 0", true),
+            ("word_count", "gt", ", value = -1", true),
+            ("word_count", "gte", ", value = 0", true),
+            ("word_count", "contains", ", value = \"0\"", false),
+            ("word_count", "in", ", value = [0, 1]", true),
+            ("word_count", "links_to", ", value = \"0\"", false),
+            ("word_count", "is_empty", "", false),
+            ("word_count", "not_empty", "", true),
+            (
+                "journal_date",
+                "eq",
+                ", value = \"2026-08-09\"",
+                false,
+            ),
+            (
+                "journal_date",
+                "ne",
+                ", value = \"2026-08-09\"",
+                true,
+            ),
+            (
+                "journal_date",
+                "lt",
+                ", value = \"2026-08-09\"",
+                false,
+            ),
+            (
+                "journal_date",
+                "lte",
+                ", value = \"2026-08-09\"",
+                false,
+            ),
+            (
+                "journal_date",
+                "gt",
+                ", value = \"2026-08-09\"",
+                false,
+            ),
+            (
+                "journal_date",
+                "gte",
+                ", value = \"2026-08-09\"",
+                false,
+            ),
+            (
+                "journal_date",
+                "contains",
+                ", value = \"2026\"",
+                false,
+            ),
+            ("journal_date", "in", ", value = [\"2026-08-09\"]", false),
+            (
+                "journal_date",
+                "links_to",
+                ", value = \"2026-08-09\"",
+                false,
+            ),
+            ("journal_date", "is_empty", "", true),
+            ("journal_date", "not_empty", "", false),
+        ];
+
+        for (field, op, value, expected) in cases {
+            let source = format!(
+                r#"
+name = "Fixed"
+filter = {{ field = "{field}", op = "{op}"{value} }}
+[[views]]
+name = "All"
+layout = "table"
+"#
+            );
+            let base = base(&source);
+            let view = &base.file.views[0];
+            let capability = creation_capabilities(&base).remove(0);
+            let candidate = candidate_matches(
+                &base,
+                view,
+                &PageMeta::new(),
+                "notes/20260809.fixed.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+            );
+
+            assert_eq!(
+                capability.enabled, expected,
+                "unexpected capability for {field} {op}"
+            );
+            assert_eq!(
+                candidate.is_ok(),
+                expected,
+                "unexpected candidate result for {field} {op}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_derived_property_names_remain_user_properties() {
+        let base = base(
+            r#"
+name = "Properties"
+[filter]
+all = [
+  { field = "prop.word_count", op = "eq", value = 7 },
+  { field = "prop.journal_date", op = "eq", value = "manual" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        let view = &base.file.views[0];
+        let capability = creation_capabilities(&base).remove(0);
+        let mut meta = PageMeta::new();
+        meta.extra
+            .insert("word_count".into(), toml::Value::Integer(7));
+        meta.extra.insert(
+            "journal_date".into(),
+            toml::Value::String("manual".into()),
+        );
+
+        assert!(capability.enabled);
+        assert!(
+            candidate_matches(
+                &base,
+                view,
+                &meta,
+                "notes/20260809.properties.Ab3xYz90.md",
                 &CandidateDerived {
                     word_count: 0,
                     journal_date: None,

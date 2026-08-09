@@ -395,6 +395,38 @@ pub(crate) fn filter_matches_meta(
     }
 }
 
+pub(crate) fn derived_comparison_matches(
+    field: &str,
+    op: Op,
+    value: &serde_json::Value,
+    word_count: Option<u32>,
+    journal_date: Option<chrono::NaiveDate>,
+) -> Option<bool> {
+    if field.starts_with("prop.") {
+        return None;
+    }
+    let bare = field.strip_prefix("sys.").unwrap_or(field);
+    match bare {
+        "word_count" => Some(match word_count {
+            Some(word_count) => match op {
+                Op::IsEmpty => false,
+                Op::NotEmpty => true,
+                _ => toml_value_matches(
+                    &toml::Value::Integer(i64::from(word_count)),
+                    op,
+                    value,
+                ),
+            },
+            None => scalar_matches(None, op, value),
+        }),
+        "journal_date" => {
+            let current = journal_date.map(|date| date.to_string());
+            Some(scalar_matches(current.as_deref(), op, value))
+        }
+        _ => None,
+    }
+}
+
 fn cmp_matches_meta(
     field: &str,
     op: Op,
@@ -408,6 +440,16 @@ fn cmp_matches_meta(
     let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
 
     if is_system {
+        if let Some(matches) = derived_comparison_matches(
+            field,
+            op,
+            value,
+            context.word_count,
+            context.journal_date,
+        ) {
+            return matches;
+        }
+
         // Multi-valued system fields: membership semantics.
         let list: Option<Vec<String>> = match bare {
             "tags" => Some(context.meta.tags.clone()),
@@ -431,19 +473,6 @@ fn cmp_matches_meta(
             };
         }
 
-        if bare == "word_count" {
-            if let Some(word_count) = context.word_count {
-                return match op {
-                    Op::IsEmpty => false,
-                    Op::NotEmpty => true,
-                    _ => toml_value_matches(
-                        &toml::Value::Integer(i64::from(word_count)),
-                        op,
-                        value,
-                    ),
-                };
-            }
-        }
 
         let scalar: Option<String> = match bare {
             "id" => Some(context.meta.id.to_string()),
@@ -458,8 +487,6 @@ fn cmp_matches_meta(
             "project" => context.meta.project.clone(),
             "created_at" => context.meta.created_at.map(|dt| dt.to_rfc3339()),
             "updated_at" => context.meta.updated_at.map(|dt| dt.to_rfc3339()),
-            "word_count" => context.word_count.map(|value| value.to_string()),
-            "journal_date" => context.journal_date.map(|value| value.to_string()),
             _ => None,
         };
         return scalar_matches(scalar.as_deref(), op, value);
