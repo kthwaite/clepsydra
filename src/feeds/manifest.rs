@@ -346,7 +346,7 @@ fn parse_item(content: &str) -> Option<(String, Option<String>)> {
     let content = content.trim();
     if let Some(link) = content.strip_prefix('[') {
         let (title, destination) = link.split_once("](")?;
-        let url = destination.strip_suffix(')')?.trim();
+        let url = destination.strip_suffix(')')?;
         if !is_http_url(url) {
             return None;
         }
@@ -365,6 +365,9 @@ fn parse_item(content: &str) -> Option<(String, Option<String>)> {
 }
 
 fn is_http_url(url: &str) -> bool {
+    if url.chars().any(char::is_whitespace) {
+        return false;
+    }
     let Ok(parsed) = Url::parse(url) else {
         return false;
     };
@@ -833,5 +836,53 @@ mod tests {
             remove_feed(yaml_without_final_newline, "https://one.example/feed",).unwrap(),
             yaml_expected
         );
+    }
+
+    #[test]
+    fn parser_rejects_urls_containing_unicode_whitespace() {
+        let parsed = parse(
+            "## Tech\n\n- https://example.com/\tfeed\n- [Leading]( https://example.com/feed)\n- [Trailing](https://example.com/feed )\n- https://example.com/\u{00a0}feed\n",
+        );
+
+        assert!(parsed.feeds.is_empty());
+        assert_eq!(
+            parsed
+                .warnings
+                .iter()
+                .map(|warning| warning.line)
+                .collect::<Vec<_>>(),
+            [3, 4, 5, 6]
+        );
+    }
+
+    #[test]
+    fn every_transform_rejects_whitespace_bearing_url_inputs_as_invalid() {
+        let source = "## Tech\n\n- https://one.example/feed\n";
+        for url in [
+            " https://one.example/feed",
+            "https://one.example/feed ",
+            "https://one.example/\tfeed",
+            "https://one.example/\nfeed",
+            "https://one.example/\rfeed",
+            "https://one.example/\u{00a0}feed",
+        ] {
+            let add_error = add_feed("", "Tech", url, None, &[]).unwrap_err();
+            assert!(
+                add_error.contains("invalid feed URL"),
+                "add accepted or misclassified {url:?}: {add_error}"
+            );
+
+            let update_error = update_feed(source, url, "Other", Some("One")).unwrap_err();
+            assert!(
+                update_error.contains("invalid feed URL"),
+                "update accepted or misclassified {url:?}: {update_error}"
+            );
+
+            let remove_error = remove_feed(source, url).unwrap_err();
+            assert!(
+                remove_error.contains("invalid feed URL"),
+                "remove accepted or misclassified {url:?}: {remove_error}"
+            );
+        }
     }
 }
