@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TagCount } from "#/api/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
@@ -28,7 +29,9 @@ const {
     toggle: vi.fn(),
     onResizeStart: vi.fn(),
   })),
-  useTagsMock: vi.fn(() => ({
+  useTagsMock: vi.fn<
+    () => { data: TagCount[] | undefined; error?: Error }
+  >(() => ({
     data: [
       { tag: "research", count: 4 },
       { tag: "ritual", count: 1 },

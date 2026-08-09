@@ -88,3 +88,32 @@ Per assignment, no formatter, lint, build, Rust checks, or project-wide UI suite
 - `.superpowers/sdd/2026-08-09-folio-tag-suggestions/final-fix-report.md`
 
 No production files remain changed; the new tests confirmed the existing implementation already satisfies the contracts.
+
+## Follow-up type-safety correction
+
+The unavailable-index fixture initially exposed that `useTagsMock` had inferred
+`data` as a populated array only. The mock now declares its real test contract
+as `TagCount[] | undefined`, preserving both populated and unavailable/error
+fixtures.
+
+Initial RED:
+
+```text
+bun run --cwd ui typecheck
+src/components/codex/__tests__/Folio.test.tsx(228,7): error TS2322:
+Type 'undefined' is not assignable to type '{ tag: string; count: number; }[]'.
+Command exited with code 2
+```
+
+Final GREEN:
+
+```text
+bun run --cwd ui typecheck
+$ tsc --noEmit --project tsconfig.app.json
+Exit code 0
+
+bun run --cwd ui test -- src/components/codex/__tests__/Folio.test.tsx
+Test Files  1 passed (1)
+Tests       8 passed (8)
+Duration    1.21s
+```
