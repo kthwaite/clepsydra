@@ -31,26 +31,56 @@ pub enum SchedulerError {
     Store(#[from] crate::feeds::store::FeedStoreError),
 }
 
-/// Reconcile the raw root manifest into feed storage.
+/// Reconcile one serialized raw-manifest snapshot into feed storage.
 ///
-/// Diagnostics always describe the bytes currently on disk. A manifest with
-/// warnings never replaces the last-good subscription set.
-pub async fn reconcile_feed_manifest(state: &AppState) -> Result<(), SchedulerError> {
+/// Callers must hold `state.feed_manifest_lock`. The returned bytes are the
+/// exact snapshot that supplied diagnostics and the optional store commit.
+pub(crate) async fn reconcile_feed_manifest_bytes_locked(
+    state: &AppState,
+    bytes: &[u8],
+) -> Result<(), SchedulerError> {
     let path = state.vault.root().join(MANIFEST_PATH);
-    let bytes = match tokio::fs::read(&path).await {
-        Ok(bytes) => bytes,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(source) => return Err(SchedulerError::ManifestIo { path, source }),
-    };
-    let source = String::from_utf8(bytes)
+    let source = String::from_utf8(bytes.to_vec())
         .map_err(|source| SchedulerError::ManifestEncoding { path, source })?;
     let manifest = crate::feeds::manifest::parse(&source);
+    #[cfg(test)]
+    if let Some(hook) = state.feed_before_reconcile_commit_hook.lock().clone() {
+        hook();
+    }
     let is_valid = manifest.warnings.is_empty();
     *state.feed_manifest_diagnostics.write() = manifest.warnings;
     if is_valid {
         state.feeds.reconcile(manifest.feeds).await?;
     }
     Ok(())
+}
+
+pub(crate) async fn reconcile_feed_manifest_locked(
+    state: &AppState,
+) -> Result<Vec<u8>, SchedulerError> {
+    let path = state.vault.root().join(MANIFEST_PATH);
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(source) => return Err(SchedulerError::ManifestIo { path, source }),
+    };
+    reconcile_feed_manifest_bytes_locked(state, &bytes).await?;
+    Ok(bytes)
+}
+
+/// Reconcile the raw root manifest while serializing the complete snapshot,
+/// parse, diagnostics, and store-commit operation with API mutations/lists.
+pub async fn reconcile_feed_manifest(state: &AppState) -> Result<(), SchedulerError> {
+    let _manifest_guard = state.feed_manifest_lock.lock().await;
+    reconcile_feed_manifest_locked(state).await.map(|_| ())
+}
+
+#[cfg(test)]
+pub(crate) fn set_before_reconcile_commit_hook(
+    state: &AppState,
+    hook: Option<Arc<dyn Fn() + Send + Sync>>,
+) {
+    *state.feed_before_reconcile_commit_hook.lock() = hook;
 }
 
 async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {

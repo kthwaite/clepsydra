@@ -9,7 +9,10 @@ use thiserror::Error;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use super::Vault;
-use super::atomic_file::{AtomicPublicationError, atomic_create, atomic_replace};
+use super::atomic_file::{
+    AtomicPublicationError, ConditionalPublicationError, atomic_create, atomic_replace,
+    atomic_replace_if_unchanged,
+};
 use super::hooks::PostMoveHook;
 use super::index::IndexError;
 use super::index_handle::IndexHandle;
@@ -434,6 +437,7 @@ impl MutationCoordinator {
     ) -> Result<VaultPath, MutationError> {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
+        let before_update_publish_hook = self.before_update_publish_hook.lock().clone();
         let path = run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
             let blocking_path = absolute.clone();
             let page_path = command.path;
@@ -470,35 +474,29 @@ impl MutationCoordinator {
                         }
                     }),
                     Some(expected) => {
-                        let current = fs::read(&blocking_path).map_err(|source| {
-                            if source.kind() == io::ErrorKind::NotFound {
+                        atomic_replace_if_unchanged(&blocking_path, &expected, &content, || {
+                            if let Some(hook) = before_update_publish_hook.as_ref() {
+                                hook(&compare_path);
+                            }
+                        })
+                        .map_err(|error| match error {
+                            ConditionalPublicationError::Stale => {
                                 MutationError::Stale(compare_path.clone())
-                            } else {
-                                MutationError::Filesystem {
-                                    filesystem_applied: false,
-                                    path: blocking_path.clone(),
-                                    source,
-                                }
                             }
-                        })?;
-                        if current != expected {
-                            return Err(MutationError::Stale(compare_path));
-                        }
-                        atomic_replace(&blocking_path, &content).map_err(|error| match error {
-                            AtomicPublicationError::NotPublished(source) => {
-                                MutationError::Filesystem {
-                                    filesystem_applied: false,
-                                    path: blocking_path.clone(),
-                                    source,
-                                }
-                            }
-                            AtomicPublicationError::PublishedButNotDurable(source) => {
-                                MutationError::Filesystem {
-                                    filesystem_applied: true,
-                                    path: blocking_path.clone(),
-                                    source,
-                                }
-                            }
+                            ConditionalPublicationError::Publication(
+                                AtomicPublicationError::NotPublished(source),
+                            ) => MutationError::Filesystem {
+                                filesystem_applied: false,
+                                path: blocking_path.clone(),
+                                source,
+                            },
+                            ConditionalPublicationError::Publication(
+                                AtomicPublicationError::PublishedButNotDurable(source),
+                            ) => MutationError::Filesystem {
+                                filesystem_applied: true,
+                                path: blocking_path.clone(),
+                                source,
+                            },
                         })
                     }
                 };
@@ -1072,5 +1070,66 @@ mod tests {
 
         assert!(matches!(error, MutationError::Stale(stale) if stale == path));
         assert_eq!(std::fs::read(root.join("feeds.md")).unwrap(), external);
+    }
+
+    #[tokio::test]
+    async fn reserved_manifest_rejects_path_replacement_at_the_publication_seam() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut raw_index =
+            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        raw_index.build(&vault).unwrap();
+        let index = IndexHandle::spawn(raw_index, vault.clone());
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("feeds.md").unwrap();
+        let original = b"## Original\n- https://one.example/rss\n".to_vec();
+        // Same bytes, different directory entry: a second pre-publication read
+        // cannot detect this ABA replacement, but conditional publication must.
+        let external = original.clone();
+        let candidate = b"## Candidate\n- https://candidate.example/rss\n".to_vec();
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: None,
+                    content: original.clone(),
+                },
+                &|_: MutationNotification| {},
+            )
+            .await
+            .unwrap();
+        let external_path = root.join("external-feeds.md");
+        std::fs::write(&external_path, &external).unwrap();
+        let destination = root.join("feeds.md");
+        coordinator.set_before_update_publish_hook(Some(Arc::new(move |observed| {
+            assert_eq!(observed.as_str(), "feeds.md");
+            std::fs::rename(&external_path, &destination).unwrap();
+        })));
+        let notifications = parking_lot::Mutex::new(Vec::new());
+
+        let error = coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: Some(original),
+                    content: candidate,
+                },
+                &|notification: MutationNotification| notifications.lock().push(notification),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::Stale(stale) if stale == path));
+        assert_eq!(std::fs::read(root.join("feeds.md")).unwrap(), external);
+        assert!(notifications.lock().is_empty());
+        assert_eq!(
+            indexed_page_count(&index).await,
+            0,
+            "failed reserved publication must leave the page index untouched"
+        );
     }
 }

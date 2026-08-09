@@ -1,5 +1,12 @@
 use reqwest::Url;
-use std::collections::HashSet;
+#[cfg(test)]
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+
+#[cfg(test)]
+thread_local! {
+    static PARSE_OBSERVATIONS: Cell<usize> = const { Cell::new(0) };
+}
 
 pub use super::types::{Manifest, ManifestFeed, ManifestWarning};
 
@@ -45,7 +52,19 @@ struct ListItem<'a> {
 }
 
 pub fn parse(text: &str) -> Manifest {
+    #[cfg(test)]
+    PARSE_OBSERVATIONS.with(|count| count.set(count.get() + 1));
     parse_document(text).manifest
+}
+
+#[cfg(test)]
+pub(crate) fn reset_observed_parse_count() {
+    PARSE_OBSERVATIONS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn observed_parse_count() -> usize {
+    PARSE_OBSERVATIONS.with(Cell::get)
 }
 
 pub fn add_feed(
@@ -81,6 +100,75 @@ pub fn add_feed(
         ));
     }
 
+    Ok(candidate)
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedAddition {
+    pub group: String,
+    pub url: String,
+    pub title_override: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Append a batch of validated subscriptions with one final parse/validation.
+///
+/// Grouping additions before rendering keeps OPML import linear in the size
+/// of the existing manifest plus the imported outlines.
+pub fn add_feeds(source: &str, additions: Vec<FeedAddition>) -> Result<String, String> {
+    if additions.is_empty() {
+        return Ok(source.to_owned());
+    }
+
+    let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
+    let mut group_indices: HashMap<String, usize> = HashMap::new();
+    for addition in additions {
+        let group = validate_group(&addition.group)?.to_owned();
+        validate_url(&addition.url)?;
+        let title = validate_title(addition.title_override.as_deref())?;
+        let tag_refs = addition.tags.iter().map(String::as_str).collect::<Vec<_>>();
+        let tags = normalize_input_tags(&tag_refs)?;
+        let item = render_item(&addition.url, title, &tags);
+        let group_key = group.to_ascii_lowercase();
+        if let Some(index) = group_indices.get(&group_key).copied() {
+            grouped[index].1.push(item);
+        } else {
+            group_indices.insert(group_key, grouped.len());
+            grouped.push((group, vec![item]));
+        }
+    }
+
+    let newline = newline_sequence(source);
+    let mut candidate = String::with_capacity(
+        source.len()
+            + grouped
+                .iter()
+                .map(|(group, items)| {
+                    group.len()
+                        + items.iter().map(String::len).sum::<usize>()
+                        + (items.len() + 3) * (newline.len() + 3)
+                })
+                .sum::<usize>(),
+    );
+    candidate.push_str(source);
+    for (group, items) in grouped {
+        if !candidate.is_empty() {
+            if !candidate.ends_with(newline) {
+                candidate.push_str(newline);
+            }
+            candidate.push_str(newline);
+        }
+        candidate.push_str("## ");
+        candidate.push_str(&group);
+        candidate.push_str(newline);
+        for item in items {
+            candidate.push_str("- ");
+            candidate.push_str(&item);
+            candidate.push_str(newline);
+        }
+    }
+
+    validate_candidate(&candidate)?;
     Ok(candidate)
 }
 

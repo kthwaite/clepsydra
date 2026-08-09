@@ -15,7 +15,9 @@ use utoipa::{IntoParams, ToSchema};
 use super::AppState;
 use super::error::ApiError;
 use crate::feeds::manifest;
-use crate::feeds::scheduler::reconcile_feed_manifest;
+use crate::feeds::scheduler::{
+    reconcile_feed_manifest_bytes_locked, reconcile_feed_manifest_locked,
+};
 use crate::feeds::store::{FeedStoreError, FeedStoreHandle};
 use crate::feeds::types::{
     Entry, EntryCursor, EntryFilters, EntryPatch, EntryView, FeedSummary, ManifestWarning,
@@ -29,6 +31,11 @@ use crate::vault::path::VaultPath;
 const DEFAULT_GROUP: &str = "Subscriptions";
 const DEFAULT_ENTRY_LIMIT: usize = 50;
 const MAX_ENTRY_LIMIT: usize = 100;
+const MAX_OPML_BYTES: usize = 1_048_576;
+const MAX_OPML_OUTLINES: usize = 10_000;
+const MAX_OPML_DEPTH: usize = 32;
+const MAX_OPML_ATTRIBUTES_PER_OUTLINE: usize = 32;
+const MIN_DISCOVERY_NETWORK_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
 
 fn deserialize_tri_state<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
@@ -255,7 +262,7 @@ struct ManifestSnapshot {
     revision: String,
 }
 
-async fn read_manifest(state: &AppState) -> Result<ManifestSnapshot, ApiError> {
+async fn read_manifest_raw(state: &AppState) -> Result<(bool, Vec<u8>, String), ApiError> {
     let path = state.vault.root().join("feeds.md");
     let (existed, bytes) = match tokio::fs::read(&path).await {
         Ok(bytes) => (true, bytes),
@@ -268,6 +275,19 @@ async fn read_manifest(state: &AppState) -> Result<ManifestSnapshot, ApiError> {
         }
     };
     let revision = blake3::hash(&bytes).to_hex().to_string();
+    Ok((existed, bytes, revision))
+}
+
+async fn read_manifest(state: &AppState) -> Result<ManifestSnapshot, ApiError> {
+    let (existed, bytes, revision) = read_manifest_raw(state).await?;
+    decode_manifest(existed, bytes, revision)
+}
+
+fn decode_manifest(
+    existed: bool,
+    bytes: Vec<u8>,
+    revision: String,
+) -> Result<ManifestSnapshot, ApiError> {
     let text = String::from_utf8(bytes.clone())
         .map_err(|_| ApiError::bad_request("feeds.md must contain valid UTF-8"))?;
     Ok(ManifestSnapshot {
@@ -278,12 +298,15 @@ async fn read_manifest(state: &AppState) -> Result<ManifestSnapshot, ApiError> {
     })
 }
 
-fn require_revision(snapshot: &ManifestSnapshot, expected: &str) -> Result<(), ApiError> {
-    if snapshot.revision == expected {
-        Ok(())
-    } else {
-        Err(ApiError::revision_conflict(snapshot.revision.clone()))
+async fn read_manifest_for_mutation(
+    state: &AppState,
+    expected: &str,
+) -> Result<ManifestSnapshot, ApiError> {
+    let (existed, bytes, revision) = read_manifest_raw(state).await?;
+    if revision != expected {
+        return Err(ApiError::revision_conflict(revision));
     }
+    decode_manifest(existed, bytes, revision)
 }
 
 async fn publish_manifest(
@@ -307,14 +330,14 @@ async fn publish_manifest(
     match result {
         Ok(_) => {
             state.feed_refresh.notify_one();
-            reconcile_feed_manifest(state)
+            reconcile_feed_manifest_locked(state)
                 .await
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             Ok(revision)
         }
         Err(MutationError::Stale(_)) => {
-            let current = read_manifest(state).await?;
-            Err(ApiError::revision_conflict(current.revision))
+            let (_, _, current_revision) = read_manifest_raw(state).await?;
+            Err(ApiError::revision_conflict(current_revision))
         }
         Err(error) => Err(super::mutation_error(error)),
     }
@@ -374,10 +397,11 @@ async fn feed_by_id(store: &FeedStoreHandle, id: i64) -> Result<FeedSummary, Api
 pub async fn list_feeds(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<FeedListResponse>, ApiError> {
-    reconcile_feed_manifest(&state)
+    let _manifest_guard = state.feed_manifest_lock.lock().await;
+    let snapshot = read_manifest(&state).await?;
+    reconcile_feed_manifest_bytes_locked(&state, &snapshot.bytes)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let snapshot = read_manifest(&state).await?;
     let feeds = state.feeds.list_feeds().await.map_err(feed_store_error)?;
     let diagnostics = state
         .feed_manifest_diagnostics
@@ -386,11 +410,24 @@ pub async fn list_feeds(
         .into_iter()
         .map(Into::into)
         .collect();
-    Ok(Json(FeedListResponse {
+    let response = FeedListResponse {
         groups: grouped_feeds(feeds),
         diagnostics,
         manifest_revision: snapshot.revision,
-    }))
+    };
+    #[cfg(test)]
+    if let Some(hook) = state.feed_after_list_snapshot_hook.lock().clone() {
+        hook();
+    }
+    Ok(Json(response))
+}
+
+#[cfg(test)]
+pub(crate) fn set_after_list_snapshot_hook(
+    state: &AppState,
+    hook: Option<Arc<dyn Fn() + Send + Sync>>,
+) {
+    *state.feed_after_list_snapshot_hook.lock() = hook;
 }
 
 #[utoipa::path(
@@ -410,13 +447,39 @@ pub async fn subscribe_feed(
     State(state): State<Arc<AppState>>,
     Json(request): Json<SubscribeFeedRequest>,
 ) -> Result<(StatusCode, Json<FeedMutationResponse>), ApiError> {
-    let _manifest_guard = state.feed_manifest_lock.lock().await;
-    let snapshot = read_manifest(&state).await?;
-    require_revision(&snapshot, &request.expected_revision)?;
+    {
+        let _preflight_guard = state.feed_manifest_lock.lock().await;
+        let (_, _, current_revision) = read_manifest_raw(&state).await?;
+        if current_revision != request.expected_revision {
+            return Err(ApiError::revision_conflict(current_revision));
+        }
+    }
 
-    let discovered = crate::feeds::fetch::discover_feed_url(&state.feed_client, &request.url)
+    let deadline = tokio::time::Instant::now() + state.feed_client.deadline();
+    let permit_deadline = deadline - MIN_DISCOVERY_NETWORK_BUDGET;
+    let permit = tokio::time::timeout_at(permit_deadline, state.feed_discovery_semaphore.acquire())
         .await
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        .map_err(|_| ApiError::bad_request("feed discovery deadline exceeded while queued"))?
+        .map_err(|_| ApiError::internal("feed discovery is unavailable"))?;
+    if deadline.saturating_duration_since(tokio::time::Instant::now())
+        < MIN_DISCOVERY_NETWORK_BUDGET
+    {
+        drop(permit);
+        return Err(ApiError::bad_request(
+            "feed discovery deadline exceeded while queued",
+        ));
+    }
+    let discovered = tokio::time::timeout_at(
+        deadline,
+        crate::feeds::fetch::discover_feed_url_before(&state.feed_client, &request.url, deadline),
+    )
+    .await
+    .map_err(|_| ApiError::bad_request("feed discovery deadline exceeded"))?
+    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    drop(permit);
+
+    let _manifest_guard = state.feed_manifest_lock.lock().await;
+    let snapshot = read_manifest_for_mutation(&state, &request.expected_revision).await?;
     let url = discovered.as_str();
     if manifest::parse(&snapshot.text)
         .feeds
@@ -476,8 +539,7 @@ pub async fn update_feed(
     Json(request): Json<UpdateFeedRequest>,
 ) -> Result<Json<FeedMutationResponse>, ApiError> {
     let _manifest_guard = state.feed_manifest_lock.lock().await;
-    let snapshot = read_manifest(&state).await?;
-    require_revision(&snapshot, &request.expected_revision)?;
+    let snapshot = read_manifest_for_mutation(&state, &request.expected_revision).await?;
     let feed = feed_by_id(&state.feeds, id).await?;
     let group = request.group.as_deref().unwrap_or(&feed.group);
     let title = match request.title.as_ref() {
@@ -516,8 +578,7 @@ pub async fn delete_feed(
     Json(request): Json<DeleteFeedRequest>,
 ) -> Result<Json<ManifestMutationResponse>, ApiError> {
     let _manifest_guard = state.feed_manifest_lock.lock().await;
-    let snapshot = read_manifest(&state).await?;
-    require_revision(&snapshot, &request.expected_revision)?;
+    let snapshot = read_manifest_for_mutation(&state, &request.expected_revision).await?;
     let feed = feed_by_id(&state.feeds, id).await?;
     let candidate =
         manifest::remove_feed(&snapshot.text, &feed.url).map_err(ApiError::bad_request)?;
@@ -715,7 +776,12 @@ fn outline_attributes(
 ) -> Result<(Option<String>, Option<String>), ApiError> {
     let mut url = None;
     let mut title = None;
-    for attribute in element.attributes().with_checks(false) {
+    for (index, attribute) in element.attributes().with_checks(false).enumerate() {
+        if index >= MAX_OPML_ATTRIBUTES_PER_OUTLINE {
+            return Err(ApiError::bad_request(format!(
+                "OPML outline exceeds {MAX_OPML_ATTRIBUTES_PER_OUTLINE} attributes"
+            )));
+        }
         let attribute = attribute.map_err(|error| ApiError::bad_request(error.to_string()))?;
         let value = attribute
             .decode_and_unescape_value(reader.decoder())
@@ -733,15 +799,32 @@ fn outline_attributes(
 }
 
 fn parse_opml(source: &str) -> Result<Vec<ImportedFeed>, ApiError> {
+    if source.len() > MAX_OPML_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "OPML document exceeds {MAX_OPML_BYTES} bytes"
+        )));
+    }
     let mut reader = Reader::from_str(source);
     let mut buffer = Vec::new();
     let mut outline_stack: Vec<Option<String>> = Vec::new();
+    let mut outline_count = 0usize;
     let mut feeds = Vec::new();
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(element))
                 if element.name().as_ref().eq_ignore_ascii_case(b"outline") =>
             {
+                outline_count += 1;
+                if outline_count > MAX_OPML_OUTLINES {
+                    return Err(ApiError::bad_request(format!(
+                        "OPML document exceeds {MAX_OPML_OUTLINES} outlines"
+                    )));
+                }
+                if outline_stack.len() >= MAX_OPML_DEPTH {
+                    return Err(ApiError::bad_request(format!(
+                        "OPML outline nesting exceeds depth {MAX_OPML_DEPTH}"
+                    )));
+                }
                 let (url, title) = outline_attributes(&reader, &element)?;
                 if let Some(url) = url {
                     let group = outline_stack
@@ -759,6 +842,17 @@ fn parse_opml(source: &str) -> Result<Vec<ImportedFeed>, ApiError> {
             Ok(Event::Empty(element))
                 if element.name().as_ref().eq_ignore_ascii_case(b"outline") =>
             {
+                outline_count += 1;
+                if outline_count > MAX_OPML_OUTLINES {
+                    return Err(ApiError::bad_request(format!(
+                        "OPML document exceeds {MAX_OPML_OUTLINES} outlines"
+                    )));
+                }
+                if outline_stack.len() >= MAX_OPML_DEPTH {
+                    return Err(ApiError::bad_request(format!(
+                        "OPML outline nesting exceeds depth {MAX_OPML_DEPTH}"
+                    )));
+                }
                 let (url, title) = outline_attributes(&reader, &element)?;
                 if let Some(url) = url {
                     let group = outline_stack
@@ -772,6 +866,9 @@ fn parse_opml(source: &str) -> Result<Vec<ImportedFeed>, ApiError> {
             }
             Ok(Event::End(element)) if element.name().as_ref().eq_ignore_ascii_case(b"outline") => {
                 outline_stack.pop();
+            }
+            Ok(Event::DocType(_)) => {
+                return Err(ApiError::bad_request("OPML document types are not allowed"));
             }
             Ok(Event::Eof) => break,
             Ok(_) => {}
@@ -799,34 +896,36 @@ pub async fn import_opml(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ImportOpmlRequest>,
 ) -> Result<Json<ImportOpmlResponse>, ApiError> {
+    let opml = request.opml;
+    let imported = tokio::task::spawn_blocking(move || parse_opml(&opml))
+        .await
+        .map_err(|error| ApiError::internal(format!("OPML parser task failed: {error}")))??;
+
     let _manifest_guard = state.feed_manifest_lock.lock().await;
-    let snapshot = read_manifest(&state).await?;
-    require_revision(&snapshot, &request.expected_revision)?;
-    let imported = parse_opml(&request.opml)?;
+    let snapshot = read_manifest_for_mutation(&state, &request.expected_revision).await?;
     let mut seen: HashSet<String> = manifest::parse(&snapshot.text)
         .feeds
         .into_iter()
         .map(|feed| feed.url)
         .collect();
-    let mut candidate = snapshot.text.clone();
-    let mut added = 0;
+    let mut additions = Vec::new();
     for feed in imported {
         if !seen.insert(feed.url.clone()) {
             continue;
         }
-        candidate = manifest::add_feed(
-            &candidate,
-            &feed.group,
-            &feed.url,
-            feed.title.as_deref(),
-            &[],
-        )
-        .map_err(ApiError::bad_request)?;
-        added += 1;
+        additions.push(manifest::FeedAddition {
+            group: feed.group,
+            url: feed.url,
+            title_override: feed.title,
+            tags: Vec::new(),
+        });
     }
-    let revision = if added == 0 {
+    let added = additions.len();
+    let revision = if additions.is_empty() {
         snapshot.revision
     } else {
+        let candidate =
+            manifest::add_feeds(&snapshot.text, additions).map_err(ApiError::bad_request)?;
         publish_manifest(&state, snapshot, candidate).await?
     };
     Ok(Json(ImportOpmlResponse {
@@ -915,15 +1014,22 @@ pub fn router() -> Router<Arc<AppState>> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request, StatusCode, header};
+    use axum::response::{IntoResponse, Response};
     use chrono::{DateTime, TimeZone, Utc};
     use serde_json::{Value, json};
     use tempfile::TempDir;
     use tower::ServiceExt;
+
+    use super::{
+        MAX_OPML_ATTRIBUTES_PER_OUTLINE, MAX_OPML_BYTES, MAX_OPML_DEPTH, MAX_OPML_OUTLINES,
+        parse_opml, set_after_list_snapshot_hook,
+    };
 
     use crate::api::AppState;
     use crate::feeds::manifest;
@@ -957,6 +1063,125 @@ mod tests {
             state,
             _temp: temp,
         }
+    }
+
+    async fn feed_test_app_with_client(
+        manifest: &str,
+        settings: FeedsSettings,
+        client: crate::feeds::network::CheckedHttpClient,
+    ) -> FeedTestApp {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(root.join("feeds.md"), manifest.as_bytes()).unwrap();
+        let mut state = build_app_state_with_feeds(&root, &settings).await.unwrap();
+        Arc::get_mut(&mut state)
+            .expect("fresh fixture state should be uniquely owned")
+            .feed_client = client;
+        reconcile_feed_manifest(&state).await.unwrap();
+        let app = Router::new()
+            .nest("/api/vault", crate::api::api_router())
+            .with_state(Arc::clone(&state));
+        FeedTestApp {
+            app,
+            state,
+            _temp: temp,
+        }
+    }
+
+    fn rss_document(guid: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel>\
+             <title>Fixture</title><link>https://fixture.example</link>\
+             <description>Fixture feed</description><item><guid>{guid}</guid>\
+             <title>Entry</title><link>https://fixture.example/entry</link></item>\
+             </channel></rss>"
+        )
+    }
+
+    #[derive(Clone)]
+    struct GatedFeedServer {
+        started: tokio::sync::mpsc::UnboundedSender<String>,
+        release: tokio::sync::watch::Receiver<bool>,
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    async fn gated_feed_response(
+        axum::extract::State(mut state): axum::extract::State<GatedFeedServer>,
+        uri: axum::http::Uri,
+    ) -> Response {
+        let active = state.active.fetch_add(1, Ordering::AcqRel) + 1;
+        state.max_active.fetch_max(active, Ordering::AcqRel);
+        state.started.send(uri.path().to_owned()).unwrap();
+        loop {
+            let released = *state.release.borrow();
+            if released {
+                break;
+            }
+            state.release.changed().await.unwrap();
+        }
+        state.active.fetch_sub(1, Ordering::AcqRel);
+        (
+            [(header::CONTENT_TYPE, "application/rss+xml")],
+            rss_document(uri.path()),
+        )
+            .into_response()
+    }
+
+    async fn spawn_gated_feed_server() -> (
+        std::net::SocketAddr,
+        tokio::sync::mpsc::UnboundedReceiver<String>,
+        tokio::sync::watch::Sender<bool>,
+        Arc<AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (started_tx, started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (release_tx, release_rx) = tokio::sync::watch::channel(false);
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .fallback(gated_feed_response)
+            .with_state(GatedFeedServer {
+                started: started_tx,
+                release: release_rx,
+                active,
+                max_active: Arc::clone(&max_active),
+            });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (address, started_rx, release_tx, max_active, server)
+    }
+
+    async fn delayed_discovery_response(uri: axum::http::Uri) -> Response {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if uri.path() == "/start" {
+            (
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                "<html><head><link rel=\"alternate\" type=\"application/rss+xml\" href=\"/feed.xml\"></head></html>"
+            )
+                .into_response()
+        } else {
+            (
+                [(header::CONTENT_TYPE, "application/rss+xml")],
+                rss_document("deadline"),
+            )
+                .into_response()
+        }
+    }
+
+    async fn spawn_delayed_discovery_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>)
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().fallback(delayed_discovery_response);
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (address, server)
     }
 
     async fn request_json(
@@ -1256,6 +1481,557 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stale_revision_precedes_invalid_utf8_for_every_membership_mutation() {
+        let fixture = feed_test_app("## Stable\n- [Stable](https://stable.example/rss)\n").await;
+        let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
+        let invalid = b"## Invalid\n- \xff\n".to_vec();
+        std::fs::write(fixture.state.vault.root().join("feeds.md"), &invalid).unwrap();
+        let raw_revision = blake3::hash(&invalid).to_hex().to_string();
+        let requests = [
+            (
+                Method::POST,
+                "/api/vault/feeds".to_owned(),
+                json!({
+                    "url": "http://127.0.0.1:9/new-feed",
+                    "expected_revision": "stale"
+                }),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/vault/feeds/{feed_id}"),
+                json!({ "group": "Changed", "expected_revision": "stale" }),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/vault/feeds/{feed_id}"),
+                json!({ "expected_revision": "stale" }),
+            ),
+            (
+                Method::POST,
+                "/api/vault/feeds/import".to_owned(),
+                json!({
+                    "expected_revision": "stale",
+                    "opml": "<opml><body><outline xmlUrl=\"https://import.example/rss\"/></body></opml>"
+                }),
+            ),
+        ];
+
+        for (method, uri, body) in requests {
+            let (status, response) = request_json(&fixture.app, method, &uri, Some(body)).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{uri}");
+            assert_eq!(response["status"], 409, "{uri}");
+            assert_eq!(response["detail"]["code"], "revision_conflict", "{uri}");
+            assert_eq!(
+                response["detail"]["current_revision"], raw_revision,
+                "{uri}"
+            );
+            assert_eq!(
+                std::fs::read(fixture.state.vault.root().join("feeds.md")).unwrap(),
+                invalid,
+                "{uri} must not normalize or replace invalid raw bytes"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn current_revision_with_invalid_utf8_is_a_bad_request() {
+        let fixture = feed_test_app("## Stable\n- [Stable](https://stable.example/rss)\n").await;
+        let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
+        let invalid = b"## Invalid\n- \xff\n".to_vec();
+        std::fs::write(fixture.state.vault.root().join("feeds.md"), &invalid).unwrap();
+        let raw_revision = blake3::hash(&invalid).to_hex().to_string();
+        let requests = [
+            (
+                Method::POST,
+                "/api/vault/feeds".to_owned(),
+                json!({
+                    "url": "http://127.0.0.1:9/new-feed",
+                    "expected_revision": raw_revision
+                }),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/vault/feeds/{feed_id}"),
+                json!({ "group": "Changed", "expected_revision": raw_revision }),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/vault/feeds/{feed_id}"),
+                json!({ "expected_revision": raw_revision }),
+            ),
+            (
+                Method::POST,
+                "/api/vault/feeds/import".to_owned(),
+                json!({
+                    "expected_revision": raw_revision,
+                    "opml": "<opml><body><outline xmlUrl=\"https://import.example/rss\"/></body></opml>"
+                }),
+            ),
+        ];
+
+        for (method, uri, body) in requests {
+            let (status, _) = request_json(&fixture.app, method, &uri, Some(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+            assert_eq!(
+                std::fs::read(fixture.state.vault.root().join("feeds.md")).unwrap(),
+                invalid,
+                "{uri} must leave invalid raw bytes untouched"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn publication_race_to_invalid_utf8_returns_the_raw_revision_conflict() {
+        let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
+        let fixture = feed_test_app(manifest).await;
+        let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
+        let invalid = b"## Invalid\n- \xff\n".to_vec();
+        let external_path = fixture.state.vault.root().join("invalid-feeds.md");
+        std::fs::write(&external_path, &invalid).unwrap();
+        let destination = fixture.state.vault.root().join("feeds.md");
+        fixture
+            .state
+            .mutation_coordinator
+            .set_before_update_publish_hook(Some(Arc::new(move |path| {
+                assert_eq!(path.as_str(), "feeds.md");
+                std::fs::rename(&external_path, &destination).unwrap();
+            })));
+
+        let (status, body) = request_json(
+            &fixture.app,
+            Method::PATCH,
+            &format!("/api/vault/feeds/{feed_id}"),
+            Some(json!({
+                "group": "Changed",
+                "expected_revision": page_revision(manifest)
+            })),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["status"], 409);
+        assert_eq!(body["detail"]["code"], "revision_conflict");
+        assert_eq!(
+            body["detail"]["current_revision"],
+            blake3::hash(&invalid).to_hex().to_string()
+        );
+        assert_eq!(
+            std::fs::read(fixture.state.vault.root().join("feeds.md")).unwrap(),
+            invalid
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn older_reconcile_cannot_overwrite_a_newer_manifest_patch() {
+        let manifest = "## Old\n- [Fixture](https://fixture.example/rss)\n";
+        let fixture = feed_test_app(manifest).await;
+        let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
+        let first_hook = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+        crate::feeds::scheduler::set_before_reconcile_commit_hook(
+            &fixture.state,
+            Some(Arc::new({
+                let first_hook = Arc::clone(&first_hook);
+                let release_rx = Arc::clone(&release_rx);
+                move || {
+                    if first_hook.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                        entered_tx.send(()).unwrap();
+                        release_rx.lock().recv().unwrap();
+                    }
+                }
+            })),
+        );
+        let old_reconcile = tokio::spawn({
+            let state = Arc::clone(&fixture.state);
+            async move { reconcile_feed_manifest(&state).await }
+        });
+        tokio::task::spawn_blocking(move || {
+            entered_rx.recv_timeout(Duration::from_secs(1)).unwrap()
+        })
+        .await
+        .unwrap();
+
+        let mut patch = tokio::spawn({
+            let app = fixture.app.clone();
+            async move {
+                request_json(
+                    &app,
+                    Method::PATCH,
+                    &format!("/api/vault/feeds/{feed_id}"),
+                    Some(json!({
+                        "group": "New",
+                        "expected_revision": page_revision(manifest)
+                    })),
+                )
+                .await
+            }
+        });
+        let early_patch = tokio::time::timeout(Duration::from_millis(50), &mut patch).await;
+        let patch_was_serialized = early_patch.is_err();
+        release_tx.send(()).unwrap();
+        old_reconcile.await.unwrap().unwrap();
+        let (status, _) = match early_patch {
+            Ok(result) => result.unwrap(),
+            Err(_) => patch.await.unwrap(),
+        };
+        crate::feeds::scheduler::set_before_reconcile_commit_hook(&fixture.state, None);
+
+        assert!(
+            patch_was_serialized,
+            "manifest mutation must wait for the older reconcile snapshot to commit"
+        );
+        assert_eq!(status, StatusCode::OK);
+        let feeds = fixture.state.feeds.list_feeds().await.unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].group, "New");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn list_groups_diagnostics_and_revision_come_from_one_serialized_snapshot() {
+        let valid_manifest = "## Old\n- [Fixture](https://fixture.example/rss)\n";
+        let old_manifest = "## Old\n- [Fixture](https://fixture.example/rss)\n- [Broken]()\n";
+        let new_manifest = "## New\n- [Fixture](https://fixture.example/rss)\n";
+        let fixture = feed_test_app(valid_manifest).await;
+        std::fs::write(fixture.state.vault.root().join("feeds.md"), old_manifest).unwrap();
+        reconcile_feed_manifest(&fixture.state).await.unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+        set_after_list_snapshot_hook(
+            &fixture.state,
+            Some(Arc::new({
+                let release_rx = Arc::clone(&release_rx);
+                move || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.lock().recv().unwrap();
+                }
+            })),
+        );
+        let listing = tokio::spawn({
+            let app = fixture.app.clone();
+            async move { request_json(&app, Method::GET, "/api/vault/feeds", None).await }
+        });
+        tokio::task::spawn_blocking(move || {
+            entered_rx.recv_timeout(Duration::from_secs(1)).unwrap()
+        })
+        .await
+        .unwrap();
+
+        std::fs::write(fixture.state.vault.root().join("feeds.md"), new_manifest).unwrap();
+        let mut newer_reconcile = tokio::spawn({
+            let state = Arc::clone(&fixture.state);
+            async move { reconcile_feed_manifest(&state).await }
+        });
+        let early_reconcile =
+            tokio::time::timeout(Duration::from_millis(50), &mut newer_reconcile).await;
+        let reconcile_was_serialized = early_reconcile.is_err();
+        release_tx.send(()).unwrap();
+        let (status, body) = listing.await.unwrap();
+        match early_reconcile {
+            Ok(result) => result.unwrap().unwrap(),
+            Err(_) => newer_reconcile.await.unwrap().unwrap(),
+        }
+        set_after_list_snapshot_hook(&fixture.state, None);
+
+        assert!(
+            reconcile_was_serialized,
+            "external reconciliation must wait until list response snapshotting completes"
+        );
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["manifest_revision"], page_revision(old_manifest));
+        assert_eq!(body["groups"][0]["name"], "Old");
+        assert_eq!(body["diagnostics"].as_array().unwrap().len(), 1);
+        assert_eq!(body["diagnostics"][0]["line"], 3);
+        assert_eq!(
+            fixture.state.feeds.list_feeds().await.unwrap()[0].group,
+            "New"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn slow_discovery_does_not_block_current_patch_delete_or_import() {
+        for operation in ["patch", "delete", "import"] {
+            let (address, mut started, release, _max_active, server) =
+                spawn_gated_feed_server().await;
+            let client =
+                crate::feeds::network::CheckedHttpClient::for_test(1_048_576, "feed.test", address)
+                    .unwrap()
+                    .with_deadline(Duration::from_secs(2));
+            let manifest = "## Existing\n- [Existing](https://existing.example/rss)\n";
+            let fixture =
+                feed_test_app_with_client(manifest, FeedsSettings::default(), client).await;
+            let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
+            let subscribe = tokio::spawn({
+                let app = fixture.app.clone();
+                let url = format!("http://feed.test:{}/slow", address.port());
+                async move {
+                    request_json(
+                        &app,
+                        Method::POST,
+                        "/api/vault/feeds",
+                        Some(json!({
+                            "url": url,
+                            "expected_revision": page_revision(manifest)
+                        })),
+                    )
+                    .await
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(1), started.recv())
+                .await
+                .expect("slow discovery did not reach the local fixture")
+                .expect("slow discovery fixture closed");
+
+            let (method, uri, body) = match operation {
+                "patch" => (
+                    Method::PATCH,
+                    format!("/api/vault/feeds/{feed_id}"),
+                    json!({
+                        "group": "Changed",
+                        "expected_revision": page_revision(manifest)
+                    }),
+                ),
+                "delete" => (
+                    Method::DELETE,
+                    format!("/api/vault/feeds/{feed_id}"),
+                    json!({ "expected_revision": page_revision(manifest) }),
+                ),
+                "import" => (
+                    Method::POST,
+                    "/api/vault/feeds/import".to_owned(),
+                    json!({
+                        "expected_revision": page_revision(manifest),
+                        "opml": "<opml><body><outline xmlUrl=\"https://import.example/rss\"/></body></opml>"
+                    }),
+                ),
+                _ => unreachable!(),
+            };
+            let mut mutation = tokio::spawn({
+                let app = fixture.app.clone();
+                async move { request_json(&app, method, &uri, Some(body)).await }
+            });
+            let early_mutation =
+                tokio::time::timeout(Duration::from_millis(200), &mut mutation).await;
+            let completed_while_discovery_pending = early_mutation.is_ok();
+            release.send(true).unwrap();
+            let (mutation_status, _) = match early_mutation {
+                Ok(result) => result.unwrap(),
+                Err(_) => mutation.await.unwrap(),
+            };
+            let (subscribe_status, _) = tokio::time::timeout(Duration::from_secs(2), subscribe)
+                .await
+                .unwrap()
+                .unwrap();
+            server.abort();
+
+            assert!(
+                completed_while_discovery_pending,
+                "{operation} was blocked behind unrelated feed discovery"
+            );
+            assert_eq!(mutation_status, StatusCode::OK, "{operation}");
+            assert_eq!(
+                subscribe_status,
+                StatusCode::CONFLICT,
+                "the slow subscribe must recheck revision after discovery"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn subscribe_discovery_uses_the_configured_concurrency_cap() {
+        let (address, mut started, release, max_active, server) = spawn_gated_feed_server().await;
+        let client =
+            crate::feeds::network::CheckedHttpClient::for_test(1_048_576, "feed.test", address)
+                .unwrap()
+                .with_deadline(Duration::from_secs(2));
+        let settings = FeedsSettings {
+            fetch_concurrency: 2,
+            ..FeedsSettings::default()
+        };
+        let fixture = feed_test_app_with_client("", settings, client).await;
+        let mut subscriptions = Vec::new();
+        for index in 0..3 {
+            let app = fixture.app.clone();
+            let url = format!("http://feed.test:{}/feed-{index}", address.port());
+            subscriptions.push(tokio::spawn(async move {
+                request_json(
+                    &app,
+                    Method::POST,
+                    "/api/vault/feeds",
+                    Some(json!({
+                        "url": url,
+                        "expected_revision": page_revision("")
+                    })),
+                )
+                .await
+            }));
+        }
+
+        let first_started = tokio::time::timeout(Duration::from_secs(1), started.recv())
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        let second_started = tokio::time::timeout(Duration::from_secs(1), started.recv())
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        let third_started_early = if first_started && second_started {
+            tokio::time::timeout(Duration::from_millis(100), started.recv())
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+        } else {
+            false
+        };
+        release.send(true).unwrap();
+        for subscription in subscriptions {
+            let (status, _) = tokio::time::timeout(Duration::from_secs(2), subscription)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(status, StatusCode::CREATED | StatusCode::CONFLICT),
+                "unexpected subscribe status {status}"
+            );
+        }
+        server.abort();
+
+        assert!(
+            first_started && second_started,
+            "two discoveries should run together"
+        );
+        assert!(
+            !third_started_early,
+            "a third discovery exceeded fetch_concurrency"
+        );
+        assert_eq!(max_active.load(Ordering::Acquire), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn subscribe_deadline_includes_waiting_for_the_discovery_permit() {
+        let (address, mut started, release, _max_active, server) = spawn_gated_feed_server().await;
+        let client =
+            crate::feeds::network::CheckedHttpClient::for_test(1_048_576, "feed.test", address)
+                .unwrap()
+                .with_deadline(Duration::from_millis(300));
+        let settings = FeedsSettings {
+            fetch_concurrency: 1,
+            ..FeedsSettings::default()
+        };
+        let fixture = feed_test_app_with_client("", settings, client).await;
+        let first = tokio::spawn({
+            let app = fixture.app.clone();
+            let url = format!("http://feed.test:{}/first", address.port());
+            async move {
+                request_json(
+                    &app,
+                    Method::POST,
+                    "/api/vault/feeds",
+                    Some(json!({
+                        "url": url,
+                        "expected_revision": page_revision("")
+                    })),
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(1), started.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut second = tokio::spawn({
+            let app = fixture.app.clone();
+            let url = format!("http://feed.test:{}/second", address.port());
+            async move {
+                request_json(
+                    &app,
+                    Method::POST,
+                    "/api/vault/feeds",
+                    Some(json!({
+                        "url": url,
+                        "expected_revision": page_revision("")
+                    })),
+                )
+                .await
+            }
+        });
+
+        let second_before_release =
+            tokio::time::timeout(Duration::from_millis(600), &mut second).await;
+        let permit_wait_was_bounded = second_before_release.is_ok();
+        let second_reached_server = tokio::time::timeout(Duration::from_millis(50), started.recv())
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        release.send(true).unwrap();
+        let (second_status, second_body) = match second_before_release {
+            Ok(result) => result.unwrap(),
+            Err(_) => second.await.unwrap(),
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(1), first).await;
+        server.abort();
+
+        assert!(
+            permit_wait_was_bounded,
+            "subscribe deadline did not include semaphore queue time"
+        );
+        assert!(
+            !second_reached_server,
+            "expired queued discovery must not start an HTTP request"
+        );
+        assert_eq!(second_status, StatusCode::BAD_REQUEST);
+        assert!(
+            second_body["error"]
+                .as_str()
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("deadline")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn subscribe_discovery_uses_one_deadline_across_html_and_feed_requests() {
+        let (address, server) = spawn_delayed_discovery_server().await;
+        let client =
+            crate::feeds::network::CheckedHttpClient::for_test(1_048_576, "feed.test", address)
+                .unwrap()
+                .with_deadline(Duration::from_millis(300));
+        let fixture = feed_test_app_with_client("", FeedsSettings::default(), client).await;
+
+        let (status, body) = tokio::time::timeout(
+            Duration::from_secs(1),
+            request_json(
+                &fixture.app,
+                Method::POST,
+                "/api/vault/feeds",
+                Some(json!({
+                    "url": format!("http://feed.test:{}/start", address.port()),
+                    "expected_revision": page_revision("")
+                })),
+            ),
+        )
+        .await
+        .expect("subscribe exceeded the local end-to-end test bound");
+        server.abort();
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("deadline"),
+            "deadline failure should remain typed and actionable: {body}"
+        );
+    }
+
+    #[tokio::test]
     async fn targeted_refresh_schedules_the_feed_and_notifies_the_scheduler() {
         let fixture = feed_test_app("## Fixture\n- [Fixture](https://fixture.example/rss)\n").await;
         let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
@@ -1290,6 +2066,127 @@ mod tests {
         let due = fixture.state.feeds.due_feeds(Utc::now()).await.unwrap();
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, feed_id);
+    }
+
+    fn assert_opml_bad_request(source: &str, contract: &str) {
+        let error = parse_opml(source).unwrap_err();
+        assert_eq!(error.status, 400, "{contract}");
+    }
+
+    #[test]
+    fn opml_rejects_documents_exceeding_each_structural_limit() {
+        let oversized = format!(
+            "<opml><body>{}</body></opml>",
+            " ".repeat(MAX_OPML_BYTES + 1)
+        );
+        assert_opml_bad_request(&oversized, "byte limit");
+
+        let too_many_outlines = format!(
+            "<opml><body>{}</body></opml>",
+            "<outline/>".repeat(MAX_OPML_OUTLINES + 1)
+        );
+        assert!(
+            too_many_outlines.len() <= MAX_OPML_BYTES,
+            "outline-count fixture must stay below the byte limit"
+        );
+        assert_opml_bad_request(&too_many_outlines, "outline count");
+
+        let depth = MAX_OPML_DEPTH + 1;
+        let too_deep = format!(
+            "<opml><body>{}{}</body></opml>",
+            "<outline text=\"group\">".repeat(depth),
+            "</outline>".repeat(depth)
+        );
+        assert!(depth <= MAX_OPML_OUTLINES);
+        assert!(
+            too_deep.len() <= MAX_OPML_BYTES,
+            "depth fixture must stay below the byte limit"
+        );
+        assert_opml_bad_request(&too_deep, "outline depth");
+
+        let attributes = (0..MAX_OPML_ATTRIBUTES_PER_OUTLINE)
+            .map(|index| format!(" a{index}=\"x\""))
+            .collect::<String>();
+        let too_many_attributes = format!(
+            "<opml><body><outline xmlUrl=\"https://one.example/rss\"{attributes}/></body></opml>"
+        );
+        assert!(
+            too_many_attributes.len() <= MAX_OPML_BYTES,
+            "attribute fixture must stay below the byte limit"
+        );
+        assert_opml_bad_request(&too_many_attributes, "attributes per outline");
+    }
+
+    #[test]
+    fn opml_accepts_each_exact_structural_boundary() {
+        let prefix = "<opml><body>";
+        let suffix = "</body></opml>";
+        assert!(MAX_OPML_BYTES >= prefix.len() + suffix.len());
+        let exact_bytes = format!(
+            "{prefix}{}{suffix}",
+            " ".repeat(MAX_OPML_BYTES - prefix.len() - suffix.len())
+        );
+        assert_eq!(exact_bytes.len(), MAX_OPML_BYTES);
+        parse_opml(&exact_bytes).unwrap();
+
+        let exact_outlines = format!(
+            "<opml><body>{}</body></opml>",
+            "<outline/>".repeat(MAX_OPML_OUTLINES)
+        );
+        assert!(exact_outlines.len() <= MAX_OPML_BYTES);
+        parse_opml(&exact_outlines).unwrap();
+
+        let exact_depth = format!(
+            "<opml><body>{}{}</body></opml>",
+            "<outline text=\"group\">".repeat(MAX_OPML_DEPTH),
+            "</outline>".repeat(MAX_OPML_DEPTH)
+        );
+        parse_opml(&exact_depth).unwrap();
+
+        let attributes = (0..MAX_OPML_ATTRIBUTES_PER_OUTLINE.saturating_sub(1))
+            .map(|index| format!(" a{index}=\"x\""))
+            .collect::<String>();
+        let exact_attributes = format!(
+            "<opml><body><outline xmlUrl=\"https://one.example/rss\"{attributes}/></body></opml>"
+        );
+        assert_eq!(parse_opml(&exact_attributes).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn opml_rejects_doctype_declarations() {
+        assert_opml_bad_request("<!DOCTYPE opml><opml><body></body></opml>", "DOCTYPE");
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn opml_import_performs_one_final_manifest_validation_for_the_batch() {
+        let fixture = feed_test_app("").await;
+        let mut opml = String::from("<opml><body><outline text=\"Batch\">");
+        for index in 0..256 {
+            opml.push_str(&format!(
+                "<outline text=\"Feed {index}\" xmlUrl=\"https://batch-{index}.example/rss\"/>"
+            ));
+        }
+        opml.push_str("</outline></body></opml>");
+        manifest::reset_observed_parse_count();
+
+        let (status, body) = request_json(
+            &fixture.app,
+            Method::POST,
+            "/api/vault/feeds/import",
+            Some(json!({
+                "expected_revision": page_revision(""),
+                "opml": opml
+            })),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["added"], 256);
+        assert!(
+            manifest::observed_parse_count() <= 3,
+            "batch import must parse the source once, validate one final candidate, and reconcile once"
+        );
     }
 
     #[tokio::test]

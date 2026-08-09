@@ -567,9 +567,16 @@ pub async fn build_app_state_with_feeds(
         mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
         feeds,
         feed_client,
+        feed_discovery_semaphore: tokio::sync::Semaphore::new(
+            feed_settings.fetch_concurrency.max(1),
+        ),
         feed_refresh: tokio::sync::Notify::new(),
         feed_manifest_diagnostics: parking_lot::RwLock::new(Vec::new()),
         feed_manifest_lock: tokio::sync::Mutex::new(()),
+        #[cfg(test)]
+        feed_before_reconcile_commit_hook: parking_lot::Mutex::new(None),
+        #[cfg(test)]
+        feed_after_list_snapshot_hook: parking_lot::Mutex::new(None),
         feed_settings: feed_settings.clone(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,

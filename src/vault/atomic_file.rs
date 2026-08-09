@@ -1,7 +1,7 @@
 //! Durable atomic file publication helpers.
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, ErrorKind, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -36,6 +36,170 @@ impl AtomicPublicationError {
             Self::NotPublished(error) | Self::PublishedButNotDurable(error) => error,
         }
     }
+}
+
+/// Result of an exact-content replacement whose destination identity changed.
+#[derive(Debug, thiserror::Error)]
+pub enum ConditionalPublicationError {
+    #[error("destination changed before conditional publication")]
+    Stale,
+    #[error(transparent)]
+    Publication(#[from] AtomicPublicationError),
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(unix)]
+fn file_identity(metadata: &fs::Metadata) -> io::Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+#[cfg(not(unix))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity;
+
+#[cfg(not(unix))]
+fn file_identity(_metadata: &fs::Metadata) -> io::Result<FileIdentity> {
+    Err(io::Error::new(
+        ErrorKind::Unsupported,
+        "conditional exact-content replacement requires stable filesystem file identities",
+    ))
+}
+
+/// Replace `path` only while the exact directory entry that supplied
+/// `expected` remains current.
+///
+/// The destination is atomically moved to a private claim path with
+/// no-replace semantics before the candidate is created. This closes the
+/// compare/rename ABA window for cooperating writers: an intervening rename is
+/// detected by file identity even when it supplies byte-identical content, and
+/// the claimed external entry is restored without being overwritten.
+pub fn atomic_replace_if_unchanged(
+    path: &Path,
+    expected: &[u8],
+    content: &[u8],
+    before_publish: impl FnOnce(),
+) -> Result<(), ConditionalPublicationError> {
+    let mut observed = fs::File::open(path).map_err(|source| {
+        if source.kind() == ErrorKind::NotFound {
+            ConditionalPublicationError::Stale
+        } else {
+            ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+        }
+    })?;
+    let observed_metadata = observed.metadata().map_err(|source| {
+        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+    })?;
+    let observed_identity = file_identity(&observed_metadata).map_err(|source| {
+        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+    })?;
+    let mut observed_bytes = Vec::new();
+    observed
+        .read_to_end(&mut observed_bytes)
+        .map_err(|source| {
+            ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+        })?;
+    if observed_bytes != expected {
+        return Err(ConditionalPublicationError::Stale);
+    }
+
+    before_publish();
+    let claim = claim_destination(path).map_err(|source| {
+        if source.kind() == ErrorKind::NotFound {
+            ConditionalPublicationError::Stale
+        } else {
+            ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+        }
+    })?;
+    let claimed_identity = file_identity(&fs::metadata(&claim).map_err(|source| {
+        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+    })?)
+    .map_err(|source| {
+        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+    })?;
+    if claimed_identity != observed_identity {
+        restore_claim(path, &claim)?;
+        return Err(ConditionalPublicationError::Stale);
+    }
+
+    match atomic_create(path, content) {
+        Ok(()) => {
+            fs::remove_file(&claim).map_err(|source| {
+                ConditionalPublicationError::Publication(
+                    AtomicPublicationError::PublishedButNotDurable(source),
+                )
+            })?;
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            sync_parent(parent).map_err(|source| {
+                ConditionalPublicationError::Publication(
+                    AtomicPublicationError::PublishedButNotDurable(source),
+                )
+            })
+        }
+        Err(AtomicPublicationError::NotPublished(source))
+            if source.kind() == ErrorKind::AlreadyExists =>
+        {
+            let _ = fs::remove_file(&claim);
+            Err(ConditionalPublicationError::Stale)
+        }
+        Err(error) => {
+            let _ = restore_claim(path, &claim);
+            Err(ConditionalPublicationError::Publication(error))
+        }
+    }
+}
+
+fn claim_destination(path: &Path) -> io::Result<PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "destination has no file name"))?;
+    loop {
+        let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let mut claim_name = std::ffi::OsString::from(".");
+        claim_name.push(file_name);
+        claim_name.push(format!(
+            ".clepsydra-claim-{}-{sequence}",
+            std::process::id()
+        ));
+        let claim = parent.join(claim_name);
+        match install_noreplace(path, &claim) {
+            Ok(()) => return Ok(claim),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn restore_claim(path: &Path, claim: &Path) -> Result<(), ConditionalPublicationError> {
+    install_noreplace(claim, path).map_err(|source| {
+        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
+    })?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    sync_parent(parent).map_err(|source| {
+        ConditionalPublicationError::Publication(AtomicPublicationError::PublishedButNotDurable(
+            source,
+        ))
+    })
 }
 
 /// Publish a fully written file without replacing an existing destination.

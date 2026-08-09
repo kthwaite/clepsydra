@@ -65,6 +65,14 @@ pub enum CheckedHttpError {
     ResponseLimitExceeded { limit: usize },
 }
 
+fn checked_request_error(error: reqwest::Error) -> CheckedHttpError {
+    if error.is_timeout() {
+        CheckedHttpError::DeadlineExceeded
+    } else {
+        CheckedHttpError::Request(error)
+    }
+}
+
 pub trait HostResolver: Send + Sync {
     fn resolve<'a>(
         &'a self,
@@ -162,20 +170,49 @@ impl CheckedHttpClient {
         self
     }
 
+    /// Absolute operation budget used by higher-level workflows that span
+    /// permit queueing and more than one checked request.
+    pub fn deadline(&self) -> Duration {
+        self.deadline
+    }
+
     pub async fn get(
         &self,
         url: Url,
         conditional: Option<&ConditionalRequest>,
     ) -> Result<CheckedResponse, CheckedHttpError> {
-        tokio::time::timeout(self.deadline, self.get_until_deadline(url, conditional))
-            .await
-            .map_err(|_| CheckedHttpError::DeadlineExceeded)?
+        self.get_before(
+            url,
+            conditional,
+            tokio::time::Instant::now() + self.deadline,
+        )
+        .await
+    }
+
+    /// Perform a checked request without extending an enclosing workflow's
+    /// absolute deadline.
+    pub async fn get_before(
+        &self,
+        url: Url,
+        conditional: Option<&ConditionalRequest>,
+        deadline: tokio::time::Instant,
+    ) -> Result<CheckedResponse, CheckedHttpError> {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(CheckedHttpError::DeadlineExceeded);
+        }
+        tokio::time::timeout_at(
+            deadline,
+            self.get_until_deadline(url, conditional, deadline),
+        )
+        .await
+        .map_err(|_| CheckedHttpError::DeadlineExceeded)?
     }
 
     async fn get_until_deadline(
         &self,
         url: Url,
         conditional: Option<&ConditionalRequest>,
+        deadline: tokio::time::Instant,
     ) -> Result<CheckedResponse, CheckedHttpError> {
         let mut current_url = url;
 
@@ -188,6 +225,7 @@ impl CheckedHttpClient {
                     } else {
                         None
                     },
+                    deadline,
                 )
                 .await?;
 
@@ -215,6 +253,7 @@ impl CheckedHttpClient {
         &self,
         url: &Url,
         conditional: Option<&ConditionalRequest>,
+        deadline: tokio::time::Instant,
     ) -> Result<reqwest::Response, CheckedHttpError> {
         if !matches!(url.scheme(), "http" | "https") {
             return Err(CheckedHttpError::UnsupportedScheme(url.scheme().to_owned()));
@@ -228,12 +267,16 @@ impl CheckedHttpClient {
         let port = url
             .port_or_known_default()
             .ok_or(CheckedHttpError::MissingPort)?;
+        let mut remaining = deadline
+            .checked_duration_since(tokio::time::Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(CheckedHttpError::DeadlineExceeded)?;
         let mut builder = reqwest::Client::builder()
             .redirect(Policy::none())
             .no_proxy()
-            .timeout(self.deadline)
-            .connect_timeout(self.deadline)
-            .read_timeout(self.deadline)
+            .timeout(remaining)
+            .connect_timeout(remaining)
+            .read_timeout(remaining)
             .user_agent(concat!("clepsydra/", env!("CARGO_PKG_VERSION")));
 
         if let Ok(address) = address_host.parse::<IpAddr>() {
@@ -260,6 +303,14 @@ impl CheckedHttpClient {
             }
             builder = builder.resolve_to_addrs(host, &validated);
         }
+        remaining = deadline
+            .checked_duration_since(tokio::time::Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(CheckedHttpError::DeadlineExceeded)?;
+        builder = builder
+            .timeout(remaining)
+            .connect_timeout(remaining)
+            .read_timeout(remaining);
 
         let client = builder.build().map_err(CheckedHttpError::ClientBuild)?;
         let mut request = client.get(url.clone());
@@ -284,7 +335,10 @@ impl CheckedHttpClient {
             }
         }
 
-        request.send().await.map_err(CheckedHttpError::Request)
+        if tokio::time::Instant::now() >= deadline {
+            return Err(CheckedHttpError::DeadlineExceeded);
+        }
+        request.send().await.map_err(checked_request_error)
     }
 
     async fn collect_response(
@@ -304,7 +358,7 @@ impl CheckedHttpClient {
         let status = response.status();
         let headers = response.headers().clone();
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(CheckedHttpError::Request)? {
+        while let Some(chunk) = response.chunk().await.map_err(checked_request_error)? {
             let remaining = self.max_response_bytes.saturating_sub(body.len());
             if chunk.len() > remaining {
                 return Err(CheckedHttpError::ResponseLimitExceeded {

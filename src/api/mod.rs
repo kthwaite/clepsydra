@@ -77,6 +77,8 @@ pub struct AppState {
     pub feeds: crate::feeds::store::FeedStoreHandle,
     /// Checked HTTP client enforcing the RSS network boundary.
     pub feed_client: crate::feeds::network::CheckedHttpClient,
+    /// Bounds subscribe discovery independently of manifest serialization.
+    pub feed_discovery_semaphore: tokio::sync::Semaphore,
     /// Shared wake-up for manifest edits and explicit refresh requests.
     pub feed_refresh: tokio::sync::Notify,
     /// Diagnostics from the current raw manifest. Warning-bearing manifests do
@@ -84,6 +86,12 @@ pub struct AppState {
     pub feed_manifest_diagnostics: parking_lot::RwLock<Vec<crate::feeds::types::ManifestWarning>>,
     /// Serializes API read/transform/CAS membership mutations.
     pub feed_manifest_lock: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    pub(crate) feed_before_reconcile_commit_hook:
+        parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    #[cfg(test)]
+    pub(crate) feed_after_list_snapshot_hook:
+        parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Feed scheduler limits resolved from the application configuration.
     pub feed_settings: crate::FeedsSettings,
     /// Serializes archive ingest to prevent concurrent race conditions

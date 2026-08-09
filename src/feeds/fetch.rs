@@ -66,8 +66,23 @@ pub async fn discover_feed_url(
     client: &CheckedHttpClient,
     candidate: &str,
 ) -> Result<Url, FetchError> {
+    discover_feed_url_before(
+        client,
+        candidate,
+        tokio::time::Instant::now() + client.deadline(),
+    )
+    .await
+}
+
+/// Discover a feed without resetting the enclosing operation's deadline
+/// between an HTML candidate and its RSS/Atom alternate.
+pub async fn discover_feed_url_before(
+    client: &CheckedHttpClient,
+    candidate: &str,
+    deadline: tokio::time::Instant,
+) -> Result<Url, FetchError> {
     let candidate_url = parse_url(candidate)?;
-    let response = client.get(candidate_url, None).await?;
+    let response = client.get_before(candidate_url, None, deadline).await?;
     ensure_success(response.status)?;
 
     match parse_feed(&response.body, 0) {
@@ -78,7 +93,7 @@ pub async fn discover_feed_url(
 
     let alternate = html_feed_alternate(&response.body, &response.final_url)?
         .ok_or_else(|| FetchError::Discovery("no RSS or Atom alternate link was found".into()))?;
-    let alternate_response = client.get(alternate, None).await?;
+    let alternate_response = client.get_before(alternate, None, deadline).await?;
     ensure_success(alternate_response.status)?;
     parse_feed(&alternate_response.body, 0)?;
 
