@@ -16,3 +16,26 @@ a bespoke personal knowledge management system.
 - Configuration reference: [ui/src/docs/content/configuration.mdx](ui/src/docs/content/configuration.mdx) (in app: `/docs/configuration`)
 - Encrypted notes and security model: [docs/encrypted-notes.md](docs/encrypted-notes.md)
 - Browser extension install/dev guide: [extension/README.md](extension/README.md)
+
+
+## RSS/Atom reader
+
+Subscriptions live in the reserved, human-editable `<vault>/feeds.md` manifest.
+Use `##` headings for groups, Markdown feed links for optional title overrides,
+and trailing hashtags for feed-level tags:
+
+```markdown
+## Engineering
+- [Rust Blog](https://blog.rust-lang.org/feed.xml) #rust
+```
+
+The API is served below `/api/vault/feeds`. Configure scheduling, read/unread
+retention, response/content limits, and bounded fetch concurrency in the
+application config’s `[feeds]` section; see the
+[configuration reference](ui/src/docs/content/configuration.mdx).
+
+Feed requests and redirects reject non-global destinations, response bodies are
+bounded, and stored entry HTML is sanitized. Bookmarks are durable and excluded
+from retention pruning. `feeds.md` is never indexed, and manifest writes use
+revision-checked atomic publication so UI mutations cannot overwrite external
+edits.

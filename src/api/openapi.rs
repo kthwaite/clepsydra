@@ -68,6 +68,7 @@ impl Modify for FilterSchema {
         (name = "Location", description = "Vault geographic location"),
         (name = "Uptime", description = "Server uptime"),
         (name = "Board", description = "TASKING board: read model and task/cycle mutations"),
+        (name = "Feeds", description = "RSS/Atom subscriptions, entries, and refresh"),
         (name = "Deeplink", description = "clepsydra:// / obsidian:// deep-link resolution")
     ),
     paths(
@@ -154,7 +155,19 @@ impl Modify for FilterSchema {
         crate::api::bases::update_base,
         crate::api::bases::delete_base,
         crate::api::query::run_query,
-        crate::api::properties::patch_properties
+        crate::api::properties::patch_properties,
+        // Feeds
+        crate::api::feeds::list_feeds,
+        crate::api::feeds::subscribe_feed,
+        crate::api::feeds::update_feed,
+        crate::api::feeds::delete_feed,
+        crate::api::feeds::refresh_feeds,
+        crate::api::feeds::refresh_feed,
+        crate::api::feeds::list_entries,
+        crate::api::feeds::patch_entry,
+        crate::api::feeds::mark_entries_read,
+        crate::api::feeds::import_opml,
+        crate::api::feeds::export_opml
     ),
     components(
         schemas(
@@ -275,7 +288,26 @@ impl Modify for FilterSchema {
             crate::api::board::CreateCycleRequest,
             crate::api::board::PatchCycleRequest,
             // Deeplink
-            crate::api::deeplink::ResolveResponse
+            crate::api::deeplink::ResolveResponse,
+            // Feeds
+            crate::api::feeds::FeedDto,
+            crate::api::feeds::FeedGroupDto,
+            crate::api::feeds::FeedDiagnosticDto,
+            crate::api::feeds::FeedListResponse,
+            crate::api::feeds::SubscribeFeedRequest,
+            crate::api::feeds::UpdateFeedRequest,
+            crate::api::feeds::DeleteFeedRequest,
+            crate::api::feeds::FeedMutationResponse,
+            crate::api::feeds::ManifestMutationResponse,
+            crate::api::feeds::RefreshFeedsResponse,
+            crate::api::feeds::EntryViewDto,
+            crate::api::feeds::FeedEntryDto,
+            crate::api::feeds::FeedEntryPageResponse,
+            crate::api::feeds::PatchFeedEntryRequest,
+            crate::api::feeds::MarkFeedEntriesReadRequest,
+            crate::api::feeds::MarkFeedEntriesReadResponse,
+            crate::api::feeds::ImportOpmlRequest,
+            crate::api::feeds::ImportOpmlResponse
         )
     )
 )]
@@ -569,6 +601,95 @@ mod tests {
         assert!(
             variants[3]["properties"].get("value").is_some(),
             "comparison filters should expose authorable values"
+        );
+    }
+
+    #[test]
+    fn openapi_documents_every_feed_path_and_revision_contract() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let paths = json["paths"].as_object().unwrap();
+
+        for (path, methods) in [
+            ("/api/vault/feeds", &["get", "post"][..]),
+            ("/api/vault/feeds/{id}", &["patch", "delete"][..]),
+            ("/api/vault/feeds/refresh", &["post"][..]),
+            ("/api/vault/feeds/refresh/{id}", &["post"][..]),
+            ("/api/vault/feeds/entries", &["get"][..]),
+            ("/api/vault/feeds/entries/{id}", &["patch"][..]),
+            ("/api/vault/feeds/entries/mark-read", &["post"][..]),
+            ("/api/vault/feeds/import", &["post"][..]),
+            ("/api/vault/feeds/export", &["get"][..]),
+        ] {
+            let item = paths
+                .get(path)
+                .unwrap_or_else(|| panic!("missing documented feed path {path}"));
+            for method in methods {
+                assert!(
+                    item.get(*method).is_some(),
+                    "missing {method} operation for {path}"
+                );
+            }
+        }
+
+        for (path, method) in [
+            ("/api/vault/feeds", "post"),
+            ("/api/vault/feeds/{id}", "patch"),
+            ("/api/vault/feeds/{id}", "delete"),
+            ("/api/vault/feeds/import", "post"),
+        ] {
+            let operation = &json["paths"][path][method];
+            let reference =
+                operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+                    .as_str()
+                    .unwrap_or_else(|| {
+                        panic!("{method} {path} should use a named JSON request schema")
+                    });
+            let schema_name = reference
+                .strip_prefix("#/components/schemas/")
+                .unwrap_or_else(|| panic!("unexpected request schema reference {reference}"));
+            let schema = &json["components"]["schemas"][schema_name];
+            let required = schema["required"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{schema_name}.required should be an array"));
+            assert!(
+                required.iter().any(|field| field == "expected_revision"),
+                "{method} {path} must require expected_revision"
+            );
+            assert_eq!(
+                schema["properties"]["expected_revision"]["type"], "string",
+                "{schema_name}.expected_revision should be a string"
+            );
+            assert!(
+                operation["responses"].get("409").is_some(),
+                "{method} {path} must document stale-revision conflicts"
+            );
+        }
+
+        let list_reference = json["paths"]["/api/vault/feeds"]["get"]["responses"]["200"]
+            ["content"]["application/json"]["schema"]["$ref"]
+            .as_str()
+            .expect("GET feeds should use a named response schema");
+        let list_schema_name = list_reference
+            .strip_prefix("#/components/schemas/")
+            .expect("unexpected GET feeds schema reference");
+        let list_schema = &json["components"]["schemas"][list_schema_name];
+        let required = list_schema["required"]
+            .as_array()
+            .expect("GET feeds response should declare required fields");
+        for field in ["groups", "diagnostics", "manifest_revision"] {
+            assert!(
+                required.iter().any(|required| required == field),
+                "GET feeds response should require {field}"
+            );
+            assert!(
+                list_schema["properties"].get(field).is_some(),
+                "GET feeds response should expose {field}"
+            );
+        }
+        assert_eq!(
+            list_schema["properties"]["manifest_revision"]["type"],
+            "string"
         );
     }
 }

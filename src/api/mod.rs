@@ -10,6 +10,7 @@ pub mod deeplink;
 pub mod encryption;
 pub mod error;
 pub mod events;
+pub mod feeds;
 pub mod folders;
 pub mod frontend;
 pub mod index_routes;
@@ -72,6 +73,19 @@ pub struct AppState {
     pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
     /// Mutation coordinator for serializing vault mutations, shared across all API handlers.
     pub mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator,
+    /// Serialized feed/entry storage backed by `.clepsydra/feeds.db`.
+    pub feeds: crate::feeds::store::FeedStoreHandle,
+    /// Checked HTTP client enforcing the RSS network boundary.
+    pub feed_client: crate::feeds::network::CheckedHttpClient,
+    /// Shared wake-up for manifest edits and explicit refresh requests.
+    pub feed_refresh: tokio::sync::Notify,
+    /// Diagnostics from the current raw manifest. Warning-bearing manifests do
+    /// not replace the last-good subscription set.
+    pub feed_manifest_diagnostics: parking_lot::RwLock<Vec<crate::feeds::types::ManifestWarning>>,
+    /// Serializes API read/transform/CAS membership mutations.
+    pub feed_manifest_lock: tokio::sync::Mutex<()>,
+    /// Feed scheduler limits resolved from the application configuration.
+    pub feed_settings: crate::FeedsSettings,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,
@@ -140,6 +154,7 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/board", board::router())
         .nest("/agenda", agenda::router())
         .nest("/bases", bases::router())
+        .nest("/feeds", feeds::router())
         .nest("/query", query::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))

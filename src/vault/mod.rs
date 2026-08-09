@@ -93,11 +93,16 @@ impl Vault {
         self.root.join(vp.as_str())
     }
 
-    /// Test whether a [`VaultPath`] matches any of the configured exclusion
-    /// patterns.
+    /// Test whether a [`VaultPath`] is reserved or matches any configured
+    /// exclusion pattern. The root `feeds.md` manifest is always reserved;
+    /// users cannot accidentally make it indexable by replacing the defaults.
     pub fn is_excluded(&self, vp: &VaultPath) -> bool {
         let path = vp.as_str();
-        self.exclusion_patterns.iter().any(|pat| pat.matches(path))
+        path == "feeds.md"
+            || self
+                .exclusion_patterns
+                .iter()
+                .any(|pattern| pattern.matches(path))
     }
 
     /// The canonicalized vault root directory.

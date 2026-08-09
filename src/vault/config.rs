@@ -282,4 +282,24 @@ database_path = "/custom/path/zotero.sqlite"
             Some("/custom/path/zotero.sqlite")
         );
     }
+
+    #[test]
+    fn root_feeds_manifest_is_excluded_independently_of_configured_patterns() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        fs::write(
+            tmp.path().join(".clepsydra/config.toml"),
+            "[vault]\nexcluded_patterns = [\"private\", \"private/**\"]\n",
+        )
+        .unwrap();
+
+        let vault = crate::vault::Vault::open(tmp.path()).unwrap();
+
+        assert!(vault.is_excluded(&crate::vault::path::VaultPath::new("feeds.md").unwrap()));
+        assert!(
+            !vault.is_excluded(&crate::vault::path::VaultPath::new("notes/feeds.md").unwrap()),
+            "only the reserved root manifest is unconditional"
+        );
+        assert!(vault.is_excluded(&crate::vault::path::VaultPath::new("private/page.md").unwrap()));
+    }
 }

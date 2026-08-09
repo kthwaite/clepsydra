@@ -46,6 +46,61 @@ pub struct Settings {
     pub server: ServerSettings,
     #[serde(default)]
     pub vault: VaultSettings,
+    #[serde(default)]
+    pub feeds: FeedsSettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeedsSettings {
+    #[serde(default = "default_fetch_interval_minutes")]
+    pub fetch_interval_minutes: u64,
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u64,
+    #[serde(default = "default_unread_retention_days")]
+    pub unread_retention_days: u64,
+    #[serde(default = "default_max_response_bytes")]
+    pub max_response_bytes: usize,
+    #[serde(default = "default_max_entry_content_bytes")]
+    pub max_entry_content_bytes: usize,
+    #[serde(default = "default_fetch_concurrency")]
+    pub fetch_concurrency: usize,
+}
+
+const fn default_fetch_interval_minutes() -> u64 {
+    30
+}
+
+const fn default_retention_days() -> u64 {
+    30
+}
+
+const fn default_unread_retention_days() -> u64 {
+    90
+}
+
+const fn default_max_response_bytes() -> usize {
+    10_485_760
+}
+
+const fn default_max_entry_content_bytes() -> usize {
+    1_048_576
+}
+
+const fn default_fetch_concurrency() -> usize {
+    4
+}
+
+impl Default for FeedsSettings {
+    fn default() -> Self {
+        Self {
+            fetch_interval_minutes: default_fetch_interval_minutes(),
+            retention_days: default_retention_days(),
+            unread_retention_days: default_unread_retention_days(),
+            max_response_bytes: default_max_response_bytes(),
+            max_entry_content_bytes: default_max_entry_content_bytes(),
+            fetch_concurrency: default_fetch_concurrency(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -447,17 +502,27 @@ pub(crate) fn build_router(
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
 }
 
-/// Build the shared application state over a vault root: open vault + CAS, open
-/// and build the index, spawn the index handle, wire hooks/bcl/location, assemble
-/// AppState. (Exact extraction of run_server lines ~289–349.)
-pub(crate) async fn build_app_state(
+/// Build the shared application state over a vault root with default feed settings.
+pub async fn build_app_state(
     vault_root: &Path,
+) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
+    build_app_state_with_feeds(vault_root, &FeedsSettings::default()).await
+}
+
+/// Build the shared application state with the configured RSS runtime.
+pub async fn build_app_state_with_feeds(
+    vault_root: &Path,
+    feed_settings: &FeedsSettings,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let vault = Vault::open(vault_root)?;
 
     let cas_path_raw = &vault.config().archive.cas_path;
     let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
     let cas = vault::cas::ContentStore::open(&cas_path)?;
+    let feeds =
+        crate::feeds::store::FeedStoreHandle::open(&vault.root().join(".clepsydra/feeds.db"))?;
+    let feed_client =
+        crate::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)?;
 
     let db_path = vault.root().join(INDEX_DB_RELATIVE);
     let mut index = VaultIndex::open(&db_path)?;
@@ -500,6 +565,12 @@ pub(crate) async fn build_app_state(
         hooks,
         delete_hooks,
         mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
+        feeds,
+        feed_client,
+        feed_refresh: tokio::sync::Notify::new(),
+        feed_manifest_diagnostics: parking_lot::RwLock::new(Vec::new()),
+        feed_manifest_lock: tokio::sync::Mutex::new(()),
+        feed_settings: feed_settings.clone(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,
         location: parking_lot::RwLock::new(location),
@@ -581,6 +652,17 @@ async fn reconcile_upserts(state: &AppState, upserts: Vec<VaultPath>) {
     }
 }
 
+/// Wake the feed scheduler when a raw watcher batch touches the reserved root
+/// manifest. This runs before the ordinary exclusion pipeline discards it.
+fn notify_feed_scheduler_from_batch(state: &AppState, batch: &[ChangeEvent]) {
+    if batch.iter().any(|event| match event {
+        ChangeEvent::Upsert(path) | ChangeEvent::Remove(path) => path.as_str() == "feeds.md",
+        ChangeEvent::BaseChanged => false,
+    }) {
+        state.feed_refresh.notify_one();
+    }
+}
+
 /// Start the file watcher and spawn the sync loop. Returns the watcher, which the
 /// caller MUST keep alive for the server's lifetime.
 fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std::error::Error>> {
@@ -600,6 +682,7 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
                 Some(event) => drain_change_batch(event, &mut change_rx),
                 None => break,
             };
+            notify_feed_scheduler_from_batch(&reconcile_state, &batch);
             let upserts: Vec<VaultPath> = batch
                 .iter()
                 .filter_map(|e| match e {
@@ -652,7 +735,7 @@ async fn build_server_state(
         vault_root_config = %settings.vault.root,
         "resolved configuration; opening vault"
     );
-    let state = build_app_state(&vault_root)
+    let state = build_app_state_with_feeds(&vault_root, &settings.feeds)
         .await
         .map_err(|e| explain_startup_error(e, &vault_root))?;
     Ok((state, settings))
@@ -756,6 +839,23 @@ pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
     }
 }
 
+/// Retain the owned feed scheduler for exactly the lifetime of the serving
+/// future, then cancel and join it before returning.
+async fn serve_with_feed_scheduler(
+    state: Arc<AppState>,
+    serving: impl Future<Output = Result<(), Box<dyn std::error::Error>>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    crate::feeds::scheduler::reconcile_feed_manifest(&state).await?;
+    let scheduler = crate::feeds::scheduler::spawn_scheduler(state);
+    let serving_result = serving.await;
+    let shutdown_result = scheduler.shutdown().await;
+    match (serving_result, shutdown_result) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(Box::new(error)),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
 pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (state, settings) = build_server_state(overrides).await?;
@@ -764,7 +864,7 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let archive_body_limit =
         (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;
     let app = build_router(state.clone(), archive_body_limit, settings.server.dev_mode);
-    serve(app, &settings).await
+    serve_with_feed_scheduler(Arc::clone(&state), serve(app, &settings)).await
 }
 
 #[cfg(test)]
@@ -1009,6 +1109,37 @@ mod startup_reconcile_tests {
 }
 
 #[cfg(test)]
+mod feed_serving_lifecycle_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn serving_completion_cancels_and_joins_the_feed_scheduler() {
+        let (state, _tmp) = state_test_support::make_state().await;
+        let serving_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = Arc::clone(&serving_ran);
+
+        serve_with_feed_scheduler(Arc::clone(&state), async move {
+            observed.store(true, std::sync::atomic::Ordering::Release);
+            Ok::<(), Box<dyn std::error::Error>>(())
+        })
+        .await
+        .unwrap();
+        assert!(serving_ran.load(std::sync::atomic::Ordering::Acquire));
+
+        // Once the serving future has ended, the joined scheduler cannot
+        // consume a later wake-up and reconcile this new manifest.
+        std::fs::write(
+            state.vault.root().join("feeds.md"),
+            "## After serving\n- http://127.0.0.1:9/rss\n",
+        )
+        .unwrap();
+        state.feed_refresh.notify_one();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.feeds.list_feeds().await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
 mod watcher_reconcile_tests {
     use super::*;
 
@@ -1169,11 +1300,78 @@ mod watcher_reconcile_tests {
             "reconcile must proceed once the guard is released"
         );
     }
+
+    async fn assert_manifest_edit_notifies_scheduler(content: Option<&str>) {
+        let (state, tmp) = state_test_support::make_state().await;
+        let manifest = tmp.path().join("vault/feeds.md");
+        let path = VaultPath::new("feeds.md").unwrap();
+        let event = match content {
+            Some(content) => {
+                std::fs::write(&manifest, content).unwrap();
+                ChangeEvent::Upsert(path)
+            }
+            None => {
+                std::fs::write(&manifest, "## Before removal\n").unwrap();
+                std::fs::remove_file(&manifest).unwrap();
+                ChangeEvent::Remove(path)
+            }
+        };
+        let notified = state.feed_refresh.notified();
+        tokio::pin!(notified);
+
+        notify_feed_scheduler_from_batch(&state, &[event]);
+
+        tokio::time::timeout(Duration::from_millis(100), &mut notified)
+            .await
+            .expect("raw feeds.md watcher batch did not notify the scheduler");
+    }
+
+    #[tokio::test]
+    async fn watcher_notifies_scheduler_for_valid_manifest_upsert() {
+        assert_manifest_edit_notifies_scheduler(Some("## Valid\n- https://valid.example/rss\n"))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn watcher_notifies_scheduler_for_warning_manifest_upsert() {
+        assert_manifest_edit_notifies_scheduler(Some("## Warning\n- [Broken]()\n")).await;
+    }
+
+    #[tokio::test]
+    async fn watcher_notifies_scheduler_for_manifest_removal() {
+        assert_manifest_edit_notifies_scheduler(None).await;
+    }
 }
 
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    fn assert_feed_defaults(feeds: &FeedsSettings) {
+        assert_eq!(feeds.fetch_interval_minutes, 30);
+        assert_eq!(feeds.retention_days, 30);
+        assert_eq!(feeds.unread_retention_days, 90);
+        assert_eq!(feeds.max_response_bytes, 10_485_760);
+        assert_eq!(feeds.max_entry_content_bytes, 1_048_576);
+        assert_eq!(feeds.fetch_concurrency, 4);
+    }
+
+    #[test]
+    fn feed_settings_default_and_clone_are_stable() {
+        let defaults = FeedsSettings::default();
+        assert_feed_defaults(&defaults);
+        assert_feed_defaults(&defaults.clone());
+    }
+
+    #[test]
+    fn settings_without_a_feeds_section_use_feed_defaults() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "").unwrap();
+
+        let settings = Settings::load_from(&cfg).unwrap();
+        assert_feed_defaults(&settings.feeds);
+    }
 
     #[serial_test::serial]
     #[test]
@@ -1311,6 +1509,7 @@ mod settings_tests {
                 ..ServerSettings::default()
             },
             vault: VaultSettings::default(),
+            feeds: FeedsSettings::default(),
         }
     }
 

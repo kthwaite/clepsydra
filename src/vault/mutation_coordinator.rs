@@ -76,6 +76,17 @@ pub struct ReplacePageContentCommand {
     pub content: String,
 }
 
+/// Exact bytes for a reserved, non-indexed vault file.
+///
+/// `None` means create only when absent. `Some(bytes)` means replace only when
+/// the complete current byte vector is identical.
+#[derive(Debug)]
+pub struct ReservedManifestCommand {
+    pub path: VaultPath,
+    pub expected_content: Option<Vec<u8>>,
+    pub content: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub struct DeleteFolderResult {
     pub removed: Vec<String>,
@@ -409,6 +420,115 @@ impl MutationCoordinator {
         .await?;
         notify(MutationNotification {
             upserted: vec![path.as_str().to_string()],
+            removed: Vec::new(),
+        });
+        Ok(path)
+    }
+
+    /// Atomically publish a reserved manifest without involving the page index.
+    pub async fn write_reserved_manifest(
+        &self,
+        vault: &Vault,
+        command: ReservedManifestCommand,
+        notify: &(dyn Fn(MutationNotification) + Send + Sync),
+    ) -> Result<VaultPath, MutationError> {
+        let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
+        let absolute = vault.resolve(&command.path);
+        let path = run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
+            let blocking_path = absolute.clone();
+            let page_path = command.path;
+            let compare_path = page_path.clone();
+            let expected_content = command.expected_content;
+            let content = command.content;
+            let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
+                if let Some(parent) = blocking_path.parent() {
+                    fs::create_dir_all(parent).map_err(|source| MutationError::Filesystem {
+                        filesystem_applied: false,
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
+                }
+
+                let publication = match expected_content {
+                    None => atomic_create(&blocking_path, &content).map_err(|error| match error {
+                        AtomicPublicationError::NotPublished(source)
+                            if source.kind() == io::ErrorKind::AlreadyExists =>
+                        {
+                            MutationError::Stale(compare_path.clone())
+                        }
+                        AtomicPublicationError::NotPublished(source) => MutationError::Filesystem {
+                            filesystem_applied: false,
+                            path: blocking_path.clone(),
+                            source,
+                        },
+                        AtomicPublicationError::PublishedButNotDurable(source) => {
+                            MutationError::Filesystem {
+                                filesystem_applied: true,
+                                path: blocking_path.clone(),
+                                source,
+                            }
+                        }
+                    }),
+                    Some(expected) => {
+                        let current = fs::read(&blocking_path).map_err(|source| {
+                            if source.kind() == io::ErrorKind::NotFound {
+                                MutationError::Stale(compare_path.clone())
+                            } else {
+                                MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path.clone(),
+                                    source,
+                                }
+                            }
+                        })?;
+                        if current != expected {
+                            return Err(MutationError::Stale(compare_path));
+                        }
+                        atomic_replace(&blocking_path, &content).map_err(|error| match error {
+                            AtomicPublicationError::NotPublished(source) => {
+                                MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path.clone(),
+                                    source,
+                                }
+                            }
+                            AtomicPublicationError::PublishedButNotDurable(source) => {
+                                MutationError::Filesystem {
+                                    filesystem_applied: true,
+                                    path: blocking_path.clone(),
+                                    source,
+                                }
+                            }
+                        })
+                    }
+                };
+
+                match publication {
+                    Ok(()) => Ok(None),
+                    Err(MutationError::Filesystem {
+                        filesystem_applied: true,
+                        source,
+                        ..
+                    }) => Ok(Some(source)),
+                    Err(error) => Err(error),
+                }
+            })
+            .await?;
+            filesystem_applied.store(true, Ordering::Release);
+            let _guard = guard;
+            if let Some(source) = durability_error {
+                return Err(MutationError::Filesystem {
+                    filesystem_applied: true,
+                    path: absolute,
+                    source,
+                });
+            }
+            Ok(page_path)
+        })
+        .await?;
+
+        notify(MutationNotification {
+            upserted: vec![path.as_str().to_owned()],
             removed: Vec::new(),
         });
         Ok(path)
@@ -841,5 +961,116 @@ mod tests {
             .await
             .expect("path lock did not release after index work finished")
             .unwrap();
+    }
+
+    async fn indexed_page_count(index: &IndexHandle) -> i64 {
+        index
+            .with_index(|index, _| {
+                index
+                    .connection()
+                    .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+            })
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn reserved_manifest_create_and_replace_publish_exact_bytes_without_indexing() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut raw_index =
+            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        raw_index.build(&vault).unwrap();
+        let index = IndexHandle::spawn(raw_index, vault.clone());
+        assert_eq!(indexed_page_count(&index).await, 0);
+
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("feeds.md").unwrap();
+        let first = b"\xef\xbb\xbf## Tech\r\n- https://one.example/rss\r\n".to_vec();
+        let second =
+            b"+++\r\nid = '01900000-0000-7000-8000-000000000001'\r\n+++\r\n## News\r\n- https://two.example/rss"
+                .to_vec();
+        let notifications = parking_lot::Mutex::new(Vec::new());
+        let notify = |notification: MutationNotification| notifications.lock().push(notification);
+
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: None,
+                    content: first.clone(),
+                },
+                &notify,
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(root.join("feeds.md")).unwrap(), first);
+        assert_eq!(indexed_page_count(&index).await, 0);
+
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path,
+                    expected_content: Some(first),
+                    content: second.clone(),
+                },
+                &notify,
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(root.join("feeds.md")).unwrap(), second);
+        assert_eq!(
+            indexed_page_count(&index).await,
+            0,
+            "reserved manifest publication must not call IndexHandle::apply_mutation"
+        );
+        assert_eq!(notifications.lock().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn reserved_manifest_compare_and_swap_preserves_external_bytes_when_stale() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("feeds.md").unwrap();
+        let original = b"## Original\n- https://one.example/rss\n".to_vec();
+        let external = b"## External\r\n- https://external.example/rss\r\n".to_vec();
+
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: None,
+                    content: original.clone(),
+                },
+                &|_: MutationNotification| {},
+            )
+            .await
+            .unwrap();
+        std::fs::write(root.join("feeds.md"), &external).unwrap();
+
+        let error = coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: Some(original),
+                    content: b"## Candidate\n- https://candidate.example/rss\n".to_vec(),
+                },
+                &|_: MutationNotification| panic!("stale publication must not notify"),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::Stale(stale) if stale == path));
+        assert_eq!(std::fs::read(root.join("feeds.md")).unwrap(), external);
     }
 }

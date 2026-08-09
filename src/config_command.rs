@@ -38,6 +38,20 @@ const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
 # Vault root. Relative paths resolve relative to this config file.
 # Default: ./vault.
 # root = "./vault"
+
+# [feeds]
+# Periodic RSS/Atom fetch interval in minutes. Default: 30.
+# fetch_interval_minutes = 30
+# Retain read, unbookmarked entries for this many days. Default: 30.
+# retention_days = 30
+# Retain unread, unbookmarked entries for this many days. Default: 90.
+# unread_retention_days = 90
+# Maximum bytes accepted from one HTTP response. Default: 10485760.
+# max_response_bytes = 10485760
+# Maximum stored HTML bytes per entry; larger content is omitted. Default: 1048576.
+# max_entry_content_bytes = 1048576
+# Maximum simultaneous feed fetches. Default: 4.
+# fetch_concurrency = 4
 "##;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -449,6 +463,13 @@ mod tests {
             "# key_path = \"certs/localhost-key.pem\"",
             "# [vault]",
             "# root = \"./vault\"",
+            "# [feeds]",
+            "# fetch_interval_minutes = 30",
+            "# retention_days = 30",
+            "# unread_retention_days = 90",
+            "# max_response_bytes = 10485760",
+            "# max_entry_content_bytes = 1048576",
+            "# fetch_concurrency = 4",
         ] {
             assert!(
                 contents.contains(expected),
