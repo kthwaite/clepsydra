@@ -17,6 +17,24 @@ vi.mock("#/api/academic", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
+vi.mock("#/components/books/BookBarcodeScanner", () => ({
+  BookBarcodeScanner: ({
+    onCapture,
+    onCancel,
+  }: {
+    onCapture: (isbn: string) => void;
+    onCancel: () => void;
+  }) => (
+    <div data-testid="mock-book-scanner">
+      <button onClick={() => onCapture("9780262011532")} type="button">
+        Simulate barcode
+      </button>
+      <button onClick={onCancel} type="button">
+        Cancel mock scanner
+      </button>
+    </div>
+  ),
+}));
 
 import { BookImportModal } from "#/components/books/BookImportModal";
 import { useUiStore } from "#/store/ui";
@@ -115,6 +133,37 @@ describe("BookImportModal", () => {
     mutationState.isPending = true;
     render(<BookImportModal />);
     expect(screen.getByRole("button", { name: "Adding book…" })).toBeDisabled();
+  });
+
+  it("fills the ISBN after scanning and waits for explicit submission", async () => {
+    const user = userEvent.setup();
+    render(<BookImportModal />);
+
+    await user.click(screen.getByRole("button", { name: "Scan barcode" }));
+    expect(screen.getByTestId("mock-book-scanner")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Simulate barcode" }));
+
+    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveValue(
+      "9780262011532",
+    );
+    expect(screen.queryByTestId("mock-book-scanner")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Barcode captured. Choose Add book to import it.",
+    );
+    expect(importMutate).not.toHaveBeenCalled();
+  });
+
+  it("returns to manual entry when scanning is cancelled", async () => {
+    const user = userEvent.setup();
+    render(<BookImportModal />);
+
+    await user.click(screen.getByRole("button", { name: "Scan barcode" }));
+    await user.click(
+      screen.getByRole("button", { name: "Cancel mock scanner" }),
+    );
+
+    expect(screen.queryByTestId("mock-book-scanner")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveFocus();
   });
 
   it("dismisses on Escape and resets before reopening", async () => {
