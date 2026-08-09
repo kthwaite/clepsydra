@@ -51,7 +51,7 @@ export const queryKeys = {
 
 /** Invalidate all openapi-react-query queries whose path (queryKey[1]) starts with `prefix`. */
 export function invalidateByPath(qc: QueryClient, prefix: string) {
-  qc.invalidateQueries({
+  return qc.invalidateQueries({
     predicate: (query) => {
       const path = query.queryKey[1];
       return typeof path === "string" && path.startsWith(prefix);

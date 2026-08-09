@@ -18,6 +18,7 @@ import {
   vi,
 } from "vitest";
 import {
+  type EntryFilters,
   feedEntriesInfiniteOptions,
   updateCachedEntryPages,
   useDeleteFeed,
@@ -48,14 +49,6 @@ type FeedEntry = components["schemas"]["FeedEntryDto"];
 type FeedEntryPage = components["schemas"]["FeedEntryPageResponse"];
 type FeedList = components["schemas"]["FeedListResponse"];
 type EntryPages = InfiniteData<FeedEntryPage, string | undefined>;
-
-type EntryFilters = {
-  view?: components["schemas"]["EntryViewDto"];
-  feed?: number;
-  group?: string;
-  tag?: string;
-  limit?: number;
-};
 
 const feedsPath = "/api/vault/feeds";
 const entriesPath = "/api/vault/feeds/entries";
@@ -307,6 +300,41 @@ describe("feedEntriesInfiniteOptions", () => {
     expect(requested.searchParams.has("cursor")).toBe(false);
   });
 
+  it("excludes caller-supplied cursors from the public filter contract", () => {
+    const filters: EntryFilters = {
+      view: "all",
+      // @ts-expect-error Pagination cursors are owned by the infinite query.
+      cursor: "caller-controlled",
+    };
+
+    expect(filters).toHaveProperty("cursor", "caller-controlled");
+  });
+
+  it("strips an untrusted runtime cursor from the first key and request", async () => {
+    const filters = {
+      view: "unread",
+      limit: 10,
+      cursor: "caller-controlled",
+    } as unknown as EntryFilters;
+    const options = feedEntriesInfiniteOptions(filters);
+
+    expect(options.queryKey).toEqual([
+      "get",
+      entriesPath,
+      { params: { query: { view: "unread", limit: 10 } } },
+    ]);
+    fetchMock.mockResolvedValue(
+      jsonResponse({ entries: [], next_cursor: null }),
+    );
+
+    await freshClient().fetchInfiniteQuery(options);
+
+    const requested = requestedUrl(fetchMock);
+    expect(requested.searchParams.get("view")).toBe("unread");
+    expect(requested.searchParams.get("limit")).toBe("10");
+    expect(requested.searchParams.has("cursor")).toBe(false);
+  });
+
   it("uses next_cursor as the next OpenAPI cursor", async () => {
     fetchMock
       .mockResolvedValueOnce(
@@ -449,6 +477,134 @@ describe("usePatchFeedEntry", () => {
     unsubscribeFeed();
     unsubscribeTag();
   });
+
+  it.each([
+    {
+      name: "older mutation fails first",
+      firstFailure: "older" as const,
+      surviving: { read: false, bookmarked: false },
+    },
+    {
+      name: "newer mutation fails first",
+      firstFailure: "newer" as const,
+      surviving: { read: true, bookmarked: true },
+    },
+  ])("rebases the surviving optimistic layer when the $name", async ({
+    firstFailure,
+    surviving,
+  }) => {
+    const entry = makeEntry({ read: false, bookmarked: true });
+    const baseline = makePages([entry], ["baseline"]);
+    const key = entriesKey({ view: "all" });
+    const client = freshClient();
+    client.setQueryData(key, baseline);
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = result.current
+      .mutateAsync({ id: entry.id, read: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = result.current
+      .mutateAsync({ id: entry.id, bookmarked: false })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, bookmarked: false });
+
+    const firstResponse =
+      firstFailure === "older" ? olderResponse : newerResponse;
+    const firstMutation =
+      firstFailure === "older" ? olderMutation : newerMutation;
+    firstResponse.resolve(
+      jsonResponse({ error: `${firstFailure} failed` }, 500),
+    );
+    await expect(firstMutation).resolves.toEqual({
+      error: `${firstFailure} failed`,
+    });
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+    ).toMatchObject(surviving);
+
+    const lastResponse =
+      firstFailure === "older" ? newerResponse : olderResponse;
+    const lastMutation =
+      firstFailure === "older" ? newerMutation : olderMutation;
+    const lastFailure =
+      firstFailure === "older" ? "newer failed" : "older failed";
+    lastResponse.resolve(jsonResponse({ error: lastFailure }, 500));
+    await expect(lastMutation).resolves.toEqual({ error: lastFailure });
+    expect(client.getQueryData(key)).toBe(baseline);
+  });
+
+  it.each([
+    "failure first",
+    "success first",
+  ] as const)("retains a successful newer patch when the older patch settles %s", async (settlementOrder) => {
+    const entry = makeEntry({ read: false, bookmarked: true });
+    const baseline = makePages([entry], ["baseline"]);
+    const key = entriesKey({ view: "all" });
+    const client = freshClient();
+    client.setQueryData(key, baseline);
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = result.current
+      .mutateAsync({ id: entry.id, read: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = result.current.mutateAsync({
+      id: entry.id,
+      bookmarked: false,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    if (settlementOrder === "failure first") {
+      olderResponse.resolve(jsonResponse({ error: "older failed" }, 500));
+      await expect(olderMutation).resolves.toEqual({
+        error: "older failed",
+      });
+      expect(
+        client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+      ).toMatchObject({ read: false, bookmarked: false });
+      newerResponse.resolve(jsonResponse({ ...entry, bookmarked: false }));
+      await newerMutation;
+    } else {
+      newerResponse.resolve(jsonResponse({ ...entry, bookmarked: false }));
+      await newerMutation;
+      olderResponse.resolve(jsonResponse({ error: "older failed" }, 500));
+      await expect(olderMutation).resolves.toEqual({
+        error: "older failed",
+      });
+    }
+
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+    ).toMatchObject({ read: false, bookmarked: false });
+    expect(client.getQueryData(key)).not.toBe(baseline);
+  });
 });
 
 describe("feed membership mutations", () => {
@@ -545,6 +701,148 @@ describe("feed membership mutations", () => {
         ? requestInput.method
         : (requestInit?.method ?? "GET");
     expect(actualMethod).toBe(method);
+  });
+
+  it("does not let a late membership response downgrade a newer manifest revision", async () => {
+    const client = freshClient();
+    client.setQueryData(feedsKey, makeFeedList("revision-0"));
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const { result } = renderHook(() => useSubscribeFeed(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = result.current.mutateAsync({
+      url: "https://older.example/feed.xml",
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = result.current.mutateAsync({
+      url: "https://newer.example/feed.xml",
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(await requestBody(fetchMock)).toMatchObject({
+      expected_revision: "revision-0",
+    });
+    expect(await requestBody(fetchMock, 1)).toMatchObject({
+      expected_revision: "revision-0",
+    });
+
+    newerResponse.resolve(
+      jsonResponse({
+        feed: makeFeedList("revision-0").groups[0].feeds[0],
+        manifest_revision: "revision-2",
+      }),
+    );
+    await newerMutation;
+    expect(client.getQueryData<FeedList>(feedsKey)?.manifest_revision).toBe(
+      "revision-2",
+    );
+
+    olderResponse.resolve(
+      jsonResponse({
+        feed: makeFeedList("revision-0").groups[0].feeds[0],
+        manifest_revision: "revision-1",
+      }),
+    );
+    await olderMutation;
+    expect(client.getQueryData<FeedList>(feedsKey)?.manifest_revision).toBe(
+      "revision-2",
+    );
+  });
+
+  it("awaits feed and entry refetches after 409 before a retry reads the revision", async () => {
+    const conflict = {
+      error: "manifest revision conflict",
+      hint: "refresh feed subscriptions and retry",
+      detail: {
+        expected_revision: "revision-0",
+        current_revision: "revision-1",
+      },
+    };
+    const client = freshClient();
+    const entryKey = entriesKey({ view: "unread" });
+    client.setQueryData(feedsKey, makeFeedList("revision-0"));
+    client.setQueryData(entryKey, makePages([]));
+    const feedRefetch = deferred<FeedList>();
+    const entryRefetch = deferred<EntryPages>();
+    let feedRefetches = 0;
+    let entryRefetches = 0;
+    const feedObserver = new QueryObserver(client, {
+      queryKey: feedsKey,
+      queryFn: () => {
+        feedRefetches += 1;
+        return feedRefetch.promise;
+      },
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    const entryObserver = new QueryObserver(client, {
+      queryKey: entryKey,
+      queryFn: () => {
+        entryRefetches += 1;
+        return entryRefetch.promise;
+      },
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    const unsubscribeFeed = feedObserver.subscribe(() => undefined);
+    const unsubscribeEntry = entryObserver.subscribe(() => undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(conflict, 409))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          feed: makeFeedList("revision-1").groups[0].feeds[0],
+          manifest_revision: "revision-2",
+        }),
+      );
+    const { result } = renderHook(() => useSubscribeFeed(), {
+      wrapper: wrapper(client),
+    });
+
+    let settled = false;
+    let firstError: unknown;
+    const firstMutation = result.current
+      .mutateAsync({ url: "https://retry.example/feed.xml" })
+      .then(
+        () => {
+          settled = true;
+        },
+        (error: unknown) => {
+          firstError = error;
+          settled = true;
+        },
+      );
+    await waitFor(() => {
+      expect(feedRefetches).toBe(1);
+      expect(entryRefetches).toBe(1);
+    });
+    expect(settled).toBe(false);
+
+    feedRefetch.resolve(makeFeedList("revision-1"));
+    await waitFor(() =>
+      expect(client.getQueryData<FeedList>(feedsKey)?.manifest_revision).toBe(
+        "revision-1",
+      ),
+    );
+    expect(settled).toBe(false);
+
+    entryRefetch.resolve(makePages([]));
+    await firstMutation;
+    expect(firstError).toEqual(conflict);
+    unsubscribeFeed();
+    unsubscribeEntry();
+
+    await result.current.mutateAsync({
+      url: "https://retry.example/feed.xml",
+    });
+
+    expect(await requestBody(fetchMock)).toMatchObject({
+      expected_revision: "revision-0",
+    });
+    expect(await requestBody(fetchMock, 1)).toMatchObject({
+      expected_revision: "revision-1",
+    });
   });
 
   it("surfaces a structured 409 and refetches the manifest revision", async () => {

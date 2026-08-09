@@ -2,7 +2,9 @@ import {
   type InfiniteData,
   infiniteQueryOptions,
   type MutateOptions,
+  type Query,
   type QueryClient,
+  type QueryKey,
   type UseMutationResult,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -41,9 +43,10 @@ const FEEDS_PATH = "/api/vault/feeds" as const;
 const ENTRIES_PATH = "/api/vault/feeds/entries" as const;
 const FEEDS_QUERY_KEY = ["get", FEEDS_PATH] as const;
 
-type FeedEntryFilters = NonNullable<
+type GeneratedEntryFilters = NonNullable<
   operations["list_entries"]["parameters"]["query"]
 >;
+export type EntryFilters = Omit<GeneratedEntryFilters, "cursor">;
 type FeedEntryPages = InfiniteData<FeedEntryPage, string | undefined>;
 type FeedEntryMutation = PatchFeedEntryRequest & Pick<FeedEntry, "id">;
 type SubscribeFeedVariables = Omit<SubscribeFeedRequest, "expected_revision">;
@@ -51,15 +54,30 @@ type UpdateFeedVariables = Omit<UpdateFeedRequest, "expected_revision"> &
   Pick<Feed, "id">;
 type DeleteFeedVariables = Pick<Feed, "id">;
 type ImportOpmlVariables = Omit<ImportOpmlRequest, "expected_revision">;
+type EntryQuery = Query<unknown, unknown, FeedEntryPages, QueryKey>;
+type EntryOptimisticLayer = {
+  id: symbol;
+  mutation: FeedEntryMutation;
+  status: "pending" | "succeeded" | "failed";
+  result?: FeedEntryMutation;
+};
+type EntryOptimisticState = {
+  baseline: FeedEntryPages;
+  filters: EntryFilters;
+  layers: EntryOptimisticLayer[];
+};
+
+const optimisticEntryStates = new WeakMap<
+  QueryClient,
+  Map<EntryQuery, EntryOptimisticState>
+>();
 
 function isEntryQueryKey(queryKey: readonly unknown[]) {
   return queryKey[0] === "get" && queryKey[1] === ENTRIES_PATH;
 }
 
 function filtersFromEntryQueryKey(queryKey: readonly unknown[]) {
-  const init = queryKey[2] as
-    | { params?: { query?: FeedEntryFilters } }
-    | undefined;
+  const init = queryKey[2] as { params?: { query?: EntryFilters } } | undefined;
   return init?.params?.query ?? {};
 }
 
@@ -92,7 +110,7 @@ function patchedEntry(entry: FeedEntry, mutation: FeedEntryMutation) {
   return changed ? { ...entry, read, bookmarked, tags } : entry;
 }
 
-function belongsInEntryCache(entry: FeedEntry, filters: FeedEntryFilters) {
+function belongsInEntryCache(entry: FeedEntry, filters: EntryFilters) {
   if (filters.view === "unread" && entry.read) return false;
   if (filters.view === "saved" && !entry.bookmarked) return false;
   if (filters.feed !== undefined && entry.feed_id !== filters.feed)
@@ -109,7 +127,7 @@ function belongsInEntryCache(entry: FeedEntry, filters: FeedEntryFilters) {
 export function updateCachedEntryPages(
   pages: FeedEntryPages,
   mutation: FeedEntryMutation,
-  filters: FeedEntryFilters,
+  filters: EntryFilters,
 ): FeedEntryPages {
   let nextPages: FeedEntryPage[] | undefined;
 
@@ -135,7 +153,7 @@ export function updateCachedEntryPages(
 }
 
 function invalidateFeedQueries(queryClient: QueryClient) {
-  invalidateByPath(queryClient, queryKeys.feeds.pathPrefix);
+  return invalidateByPath(queryClient, queryKeys.feeds.pathPrefix);
 }
 
 function latestManifestRevision(queryClient: QueryClient) {
@@ -148,13 +166,70 @@ function latestManifestRevision(queryClient: QueryClient) {
 
 function updateCachedManifestRevision(
   queryClient: QueryClient,
+  expectedRevision: string,
   manifestRevision: string,
 ) {
   queryClient.setQueryData<FeedListResponse>(FEEDS_QUERY_KEY, (feeds) =>
-    feeds === undefined || feeds.manifest_revision === manifestRevision
+    feeds === undefined ||
+    feeds.manifest_revision !== expectedRevision ||
+    feeds.manifest_revision === manifestRevision
       ? feeds
       : { ...feeds, manifest_revision: manifestRevision },
   );
+}
+
+function rebaseEntryQuery(query: EntryQuery, state: EntryOptimisticState) {
+  let pages = state.baseline;
+  for (const layer of state.layers) {
+    if (layer.status !== "failed") {
+      pages = updateCachedEntryPages(pages, layer.mutation, state.filters);
+    }
+  }
+  query.setState({ data: pages });
+}
+
+function settleEntryMutation(
+  queryClient: QueryClient,
+  layerId: symbol,
+  queries: EntryQuery[],
+  result?: FeedEntry,
+) {
+  const states = optimisticEntryStates.get(queryClient);
+  if (states === undefined) return;
+
+  for (const query of queries) {
+    const state = states.get(query);
+    const layer = state?.layers.find((candidate) => candidate.id === layerId);
+    if (state === undefined || layer === undefined) continue;
+
+    if (result === undefined) {
+      layer.status = "failed";
+    } else {
+      layer.status = "succeeded";
+      layer.result = {
+        id: result.id,
+        read: result.read,
+        bookmarked: result.bookmarked,
+        tags: result.tags,
+      };
+    }
+
+    while (state.layers.length > 0 && state.layers[0].status !== "pending") {
+      const settled = state.layers.shift();
+      if (settled?.status === "succeeded" && settled.result !== undefined) {
+        state.baseline = updateCachedEntryPages(
+          state.baseline,
+          settled.result,
+          state.filters,
+        );
+      }
+    }
+
+    rebaseEntryQuery(query, state);
+    if (state.layers.length === 0) states.delete(query);
+  }
+
+  if (states.size === 0) optimisticEntryStates.delete(queryClient);
 }
 
 function remapMutateOptions<TData, TError, TRawVariables, TVariables, TContext>(
@@ -224,15 +299,18 @@ export function useFeeds() {
   return $api.useQuery("get", FEEDS_PATH);
 }
 
-export function feedEntriesInfiniteOptions(filters: FeedEntryFilters = {}) {
-  const queryInit = { params: { query: filters } } as const;
-
+export function feedEntriesInfiniteOptions(filters: EntryFilters = {}) {
+  const ownedFilters: GeneratedEntryFilters = { ...filters };
+  delete ownedFilters.cursor;
+  const queryInit = { params: { query: ownedFilters } } as const;
   return infiniteQueryOptions({
     queryKey: ["get", ENTRIES_PATH, queryInit] as const,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
       const query =
-        pageParam === undefined ? filters : { ...filters, cursor: pageParam };
+        pageParam === undefined
+          ? ownedFilters
+          : { ...ownedFilters, cursor: pageParam };
       const { data, error } = await fetchClient.GET(ENTRIES_PATH, {
         params: { query },
         signal,
@@ -258,23 +336,55 @@ export function usePatchFeedEntry() {
         id: variables.params.path.id,
         ...variables.body,
       };
+      const layerId = Symbol();
+      const queries: EntryQuery[] = [];
+      let states = optimisticEntryStates.get(queryClient);
+      if (states === undefined) {
+        states = new Map();
+        optimisticEntryStates.set(queryClient, states);
+      }
 
       for (const [queryKey, pages] of snapshots) {
         if (pages === undefined) continue;
-        const filters = filtersFromEntryQueryKey(queryKey);
-        const nextPages = updateCachedEntryPages(pages, mutationInput, filters);
-        if (nextPages !== pages) queryClient.setQueryData(queryKey, nextPages);
-      }
-
-      return { snapshots };
-    },
-    onError: (_error, _variables, context) => {
-      for (const [queryKey, pages] of context?.snapshots ?? []) {
         const query = queryClient
           .getQueryCache()
-          .find({ queryKey, exact: true });
-        if (query === undefined) queryClient.setQueryData(queryKey, pages);
-        else query.setState({ data: pages });
+          .find({ queryKey, exact: true }) as EntryQuery | undefined;
+        if (query === undefined) continue;
+
+        let state = states.get(query);
+        if (state === undefined) {
+          state = {
+            baseline: pages,
+            filters: filtersFromEntryQueryKey(queryKey),
+            layers: [],
+          };
+          states.set(query, state);
+        }
+        state.layers.push({
+          id: layerId,
+          mutation: mutationInput,
+          status: "pending",
+        });
+        queries.push(query);
+        rebaseEntryQuery(query, state);
+      }
+
+      if (states.size === 0) optimisticEntryStates.delete(queryClient);
+      return { snapshots, layerId, queries };
+    },
+    onSuccess: (data, _variables, context) => {
+      if (context !== undefined) {
+        settleEntryMutation(
+          queryClient,
+          context.layerId,
+          context.queries,
+          data,
+        );
+      }
+    },
+    onError: (_error, _variables, context) => {
+      if (context !== undefined) {
+        settleEntryMutation(queryClient, context.layerId, context.queries);
       }
     },
     onSettled: () => invalidateFeedQueries(queryClient),
@@ -307,8 +417,12 @@ export function useMarkFeedEntriesRead() {
 export function useSubscribeFeed() {
   const queryClient = useQueryClient();
   const mutation = $api.useMutation("post", FEEDS_PATH, {
-    onSuccess: (data) =>
-      updateCachedManifestRevision(queryClient, data.manifest_revision),
+    onSuccess: (data, variables) =>
+      updateCachedManifestRevision(
+        queryClient,
+        variables.body.expected_revision,
+        data.manifest_revision,
+      ),
     onSettled: () => invalidateFeedQueries(queryClient),
   });
   const mapVariables = useCallback(
@@ -326,8 +440,12 @@ export function useSubscribeFeed() {
 export function useUpdateFeed() {
   const queryClient = useQueryClient();
   const mutation = $api.useMutation("patch", "/api/vault/feeds/{id}", {
-    onSuccess: (data) =>
-      updateCachedManifestRevision(queryClient, data.manifest_revision),
+    onSuccess: (data, variables) =>
+      updateCachedManifestRevision(
+        queryClient,
+        variables.body.expected_revision,
+        data.manifest_revision,
+      ),
     onSettled: () => invalidateFeedQueries(queryClient),
   });
   const mapVariables = useCallback(
@@ -346,8 +464,12 @@ export function useUpdateFeed() {
 export function useDeleteFeed() {
   const queryClient = useQueryClient();
   const mutation = $api.useMutation("delete", "/api/vault/feeds/{id}", {
-    onSuccess: (data) =>
-      updateCachedManifestRevision(queryClient, data.manifest_revision),
+    onSuccess: (data, variables) =>
+      updateCachedManifestRevision(
+        queryClient,
+        variables.body.expected_revision,
+        data.manifest_revision,
+      ),
     onSettled: () => invalidateFeedQueries(queryClient),
   });
   const mapVariables = useCallback(
@@ -370,8 +492,12 @@ export function useRefreshFeeds() {
 export function useImportOpml() {
   const queryClient = useQueryClient();
   const mutation = $api.useMutation("post", "/api/vault/feeds/import", {
-    onSuccess: (data) =>
-      updateCachedManifestRevision(queryClient, data.manifest_revision),
+    onSuccess: (data, variables) =>
+      updateCachedManifestRevision(
+        queryClient,
+        variables.body.expected_revision,
+        data.manifest_revision,
+      ),
     onSettled: () => invalidateFeedQueries(queryClient),
   });
   const mapVariables = useCallback(
