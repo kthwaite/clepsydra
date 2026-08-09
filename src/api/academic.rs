@@ -645,9 +645,12 @@ pub async fn import_isbn_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImportIsbnRequest>,
 ) -> Result<Response, ApiError> {
+    let isbn =
+        crate::vault::import_isbn::normalize_isbn(&req.isbn).map_err(ApiError::bad_request)?;
+
     // 1. Check dedup by ISBN
     {
-        let isbn = req.isbn.clone();
+        let isbn = isbn.clone();
         let existing = state
             .index
             .with_index(move |index, _vault| {
@@ -677,18 +680,17 @@ pub async fn import_isbn_handler(
 
     // 2. Fetch from Open Library
     let (edition_json, author_names) = crate::vault::import_isbn::fetch_isbn(
-        &req.isbn,
+        &isbn,
         crate::vault::import_isbn::DEFAULT_OPENLIBRARY_BASE,
     )
     .await
     .map_err(|e| ApiError::bad_request(format!("ISBN lookup failed: {e}")))?;
 
-    let entry = crate::vault::import_isbn::parse_openlibrary_response(
-        &edition_json,
-        &author_names,
-        &req.isbn,
-    )
-    .map_err(|e| ApiError::bad_request(format!("Failed to parse Open Library data: {e}")))?;
+    let entry =
+        crate::vault::import_isbn::parse_openlibrary_response(&edition_json, &author_names, &isbn)
+            .map_err(|e| {
+                ApiError::bad_request(format!("Failed to parse Open Library data: {e}"))
+            })?;
 
     // 3. Create work
     let detail = create_work_internal(
