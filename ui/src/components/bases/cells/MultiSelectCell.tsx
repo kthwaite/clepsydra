@@ -18,10 +18,14 @@ export function MultiSelectCell({
   value,
   definition,
   onCommit,
+  onCommitNext,
   onCancel,
 }: CellEditorProps) {
   const initial = currentValues(value);
   const [selected, setSelected] = useState<string[]>(initial);
+  const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
+    submit(selected.length === 0 ? null : selected);
+  };
 
   // Open vocabulary (or novel values on disk): keep them selectable.
   const options = [
@@ -44,9 +48,15 @@ export function MultiSelectCell({
       }
       onBlur={onCancel}
       onKeyDown={(e) => {
+        if (e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          commit(onCommitNext);
+          return;
+        }
         if (e.key === "Enter") {
           e.preventDefault();
-          onCommit(selected.length === 0 ? null : selected);
+          commit();
         }
         if (e.key === "Escape") onCancel();
       }}

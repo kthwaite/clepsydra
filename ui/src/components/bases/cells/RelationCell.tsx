@@ -23,11 +23,23 @@ function targetsOf(value: CellValue): string[] {
  * committing each target back in wikilink syntax. Canonical-name
  * suggestions from the search index apply while a single target is typed.
  */
-export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
+export function RelationCell({
+  value,
+  onCommit,
+  onCommitNext,
+  onCancel,
+}: CellEditorProps) {
   const [draft, setDraft] = useState(targetsOf(value).join(", "));
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const listId = useId();
   const singleTarget = !draft.includes(",");
+  const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
+    const targets = draft
+      .split(",")
+      .map((target) => target.trim())
+      .filter((target) => target !== "");
+    submit(targets.length === 0 ? null : targets.map((target) => `[[${target}]]`));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -64,15 +76,13 @@ export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={onCancel}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            const targets = draft
-              .split(",")
-              .map((t) => t.trim())
-              .filter((t) => t !== "");
-            onCommit(
-              targets.length === 0 ? null : targets.map((t) => `[[${t}]]`),
-            );
+          if (e.key === "Tab" && !e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            commit(onCommitNext);
+            return;
           }
+          if (e.key === "Enter") commit();
           if (e.key === "Escape") onCancel();
         }}
       />

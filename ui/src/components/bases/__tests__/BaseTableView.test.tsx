@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -253,6 +253,113 @@ describe("BaseTableView", () => {
     expect(commitRow.id).toBe("01");
     expect(key).toBe("author");
     expect(value).toBe("G-Wolfe");
+  });
+
+  it("commits with Tab and opens the next editable property in the row", async () => {
+    const user = userEvent.setup();
+    const tabDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "kind", "author", "missing", "rating"],
+        },
+      ],
+    };
+    const props = renderView({ definition: tabDefinition });
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    const author = screen.getByRole("textbox", { name: "Edit text" });
+    fireEvent.change(author, { target: { value: "Ursula Le Guin" } });
+    fireEvent.keyDown(author, { key: "Tab" });
+
+    expect(props.onCommitCell).toHaveBeenCalledWith(
+      expect.objectContaining(row),
+      "author",
+      "Ursula Le Guin",
+      undefined,
+    );
+    expect(screen.getByRole("textbox", { name: "Edit number" })).toHaveFocus();
+  });
+
+  it("commits the last editable property with Tab without wrapping rows", async () => {
+    const user = userEvent.setup();
+    const secondRow = {
+      ...row,
+      id: "02",
+      path: "second.md",
+      title: "A Wizard of Earthsea",
+      columns: { ...row.columns, author: "Ursula Le Guin", rating: 5 },
+    };
+    const tabDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "author", "rating"],
+        },
+      ],
+    };
+    const props = renderView({
+      definition: tabDefinition,
+      output: { shape: "flat", rows: [row, secondRow], total: 2 },
+    });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    const rating = screen.getByRole("textbox", { name: "Edit number" });
+    await user.clear(rating);
+    await user.type(rating, "4.75");
+    await user.tab();
+
+    expect(props.onCommitCell).toHaveBeenCalledWith(
+      expect.objectContaining(row),
+      "rating",
+      4.75,
+      undefined,
+    );
+    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+  });
+
+  it("keeps an invalid number open when Tab cannot accept it", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "rating", "author"],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    const rating = screen.getByRole("textbox", { name: "Edit number" });
+    fireEvent.change(rating, { target: { value: "not-a-number" } });
+    rating.focus();
+    expect(fireEvent.keyDown(rating, { key: "Tab" })).toBe(false);
+
+    expect(rating).toHaveFocus();
+    expect(rating).toHaveValue("not-a-number");
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
+  });
+
+  it("does not use forward commit navigation for Shift+Tab", async () => {
+    const user = userEvent.setup();
+    const props = renderView({});
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    const author = screen.getByRole("textbox", { name: "Edit text" });
+    fireEvent.keyDown(author, { key: "Tab", shiftKey: true });
+    fireEvent.blur(author);
+
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
   });
   it("renders a genuinely read-only preview without fake interactive controls", () => {
     const props = renderView({ readOnly: true });
