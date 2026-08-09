@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -204,13 +204,31 @@ describe("BaseTableView", () => {
     );
   });
 
-  it("focuses the created title when it appears in authoritative output", () => {
+  it("focuses the created title when it appears in authoritative output", async () => {
     const onCreatedRowFocused = vi.fn();
     renderView({ focusCreatedId: row.id, onCreatedRowFocused });
 
-    expect(
-      screen.getByRole("button", { name: "The Book of the New Sun" }),
-    ).toHaveFocus();
+    const createdTitle = screen.getByRole("button", {
+      name: "The Book of the New Sun",
+    });
+    await waitFor(() => expect(createdTitle).toHaveFocus());
+    expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores created-title focus after the React Aria row reclaims it", async () => {
+    const onCreatedRowFocused = vi.fn();
+    renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+    const createdTitle = screen.getByRole("button", {
+      name: "The Book of the New Sun",
+    });
+    const tableRow = createdTitle.closest("tr");
+    expect(tableRow).not.toBeNull();
+
+    tableRow!.focus();
+    expect(tableRow).toHaveFocus();
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(createdTitle).toHaveFocus());
     expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
   });
 

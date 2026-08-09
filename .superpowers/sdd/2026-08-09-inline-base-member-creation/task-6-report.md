@@ -74,6 +74,23 @@ Tests       40 passed (40)
 Duration    3.61s
 ```
 
+## Browser Focus Fix (Round 3)
+
+Root cause traced in React Aria’s `useSelectableItem`: entering the refreshed Table through the descendant title button initializes `selectionManager.isFocused`/`focusedKey`, then its pending effect focuses the associated row. Browser tracing showed the title receive focus immediately, the `<tr role="row">` reclaim it in the first microtask, and no further reclaim after the manager had settled.
+
+The focused regression simulates that row reclaim and proves the placement callback is not completed early. The source fix primes React Aria’s table focus state, defers one title refocus until after the row effect, verifies focus in the following microtask, and only then settles the member lifecycle. Timer cleanup prevents stale focus work after ref changes/unmount.
+
+Latest focused evidence:
+
+```text
+bun run --cwd ui test src/components/bases/__tests__/BaseTable.test.tsx src/components/bases/__tests__/BaseTableView.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/member-draft.test.ts
+Test Files  4 passed (4)
+Tests       41 passed (41)
+Duration    3.55s
+```
+
+Task 7 then reran the fresh-vault browser flow on the committed source. After Meta+Enter and authoritative grouped placement, the `The Dispossessed` title button remained `document.activeElement` after 100 ms; its row appeared in the `READING` group with status `reading` and rating `9`. Folio and reload smoke also passed.
+
 ## Concerns
 
-None known within focused Task 6 coverage. Controller-owned gates and browser smoke remain intentionally pending.
+None known within focused Task 6 coverage or Task 7 browser smoke. Controller-owned format, lint, typecheck, build, and broad-suite gates remain intentionally pending.

@@ -145,18 +145,44 @@ export function BaseTableView({
   const memberBlockerId = useId();
   const createdTitleRef = useRef<HTMLButtonElement | null>(null);
   const focusedCreatedId = useRef<string>();
+  const createdFocusTimer = useRef<number>();
   const setCreatedTitleRef = useCallback(
     (node: HTMLButtonElement | null) => {
       createdTitleRef.current = node;
-      if (
-        node &&
-        focusCreatedId &&
-        focusedCreatedId.current !== focusCreatedId
-      ) {
-        focusedCreatedId.current = focusCreatedId;
-        node.focus();
-        onCreatedRowFocused?.(focusCreatedId);
+      if (!node) {
+        if (createdFocusTimer.current !== undefined) {
+          window.clearTimeout(createdFocusTimer.current);
+          createdFocusTimer.current = undefined;
+        }
+        return;
       }
+      if (
+        !focusCreatedId ||
+        focusedCreatedId.current === focusCreatedId ||
+        createdFocusTimer.current !== undefined
+      ) {
+        return;
+      }
+
+      // Entering a React Aria Table initializes its selection manager, whose
+      // pending effect focuses the row. Prime that state, then restore the
+      // requested descendant focus after the row effect has settled.
+      node.focus();
+      const createdId = focusCreatedId;
+      createdFocusTimer.current = window.setTimeout(() => {
+        createdFocusTimer.current = undefined;
+        if (createdTitleRef.current !== node) return;
+        node.focus();
+        queueMicrotask(() => {
+          if (
+            createdTitleRef.current === node &&
+            document.activeElement === node
+          ) {
+            focusedCreatedId.current = createdId;
+            onCreatedRowFocused?.(createdId);
+          }
+        });
+      }, 0);
     },
     [focusCreatedId, onCreatedRowFocused],
   );
@@ -173,6 +199,15 @@ export function BaseTableView({
     }
     setCreatedTitleRef(createdTitleRef.current);
   }, [focusCreatedId, output, setCreatedTitleRef]);
+
+  useEffect(
+    () => () => {
+      if (createdFocusTimer.current !== undefined) {
+        window.clearTimeout(createdFocusTimer.current);
+      }
+    },
+    [],
+  );
 
   const sortDescriptor = sortOverride.sort
     ? {
