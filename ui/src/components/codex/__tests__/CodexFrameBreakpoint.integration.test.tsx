@@ -320,6 +320,7 @@ describe("CodexFrame real breakpoint transitions", () => {
     for (const name of actionNames) {
       const button = within(actions).getByRole("button", { name });
       expect(button).toHaveAttribute("aria-label", name);
+      expect(button).toHaveClass("min-w-8");
       expect(button.textContent?.trim().length).toBeLessThanOrEqual(3);
     }
   });

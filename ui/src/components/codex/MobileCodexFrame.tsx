@@ -66,7 +66,7 @@ export function MobileCodexFrame({
           <button
             type="button"
             onClick={openSearch}
-            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            className="cl-mono min-h-11 min-w-8 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
             aria-label="Search"
           >
             ⌕
@@ -74,7 +74,7 @@ export function MobileCodexFrame({
           <button
             type="button"
             onClick={openInscribe}
-            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            className="cl-mono min-h-11 min-w-8 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
             aria-label="New note"
           >
             +
@@ -82,7 +82,7 @@ export function MobileCodexFrame({
           <button
             type="button"
             onClick={() => openSettings("appearance")}
-            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            className="cl-mono min-h-11 min-w-8 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
             aria-label="Status"
           >
             ST
@@ -90,7 +90,7 @@ export function MobileCodexFrame({
           <button
             type="button"
             onClick={toggle}
-            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            className="cl-mono min-h-11 min-w-8 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
             aria-label={dark ? "Switch to paper mode" : "Switch to dark mode"}
             title={dark ? "Switch to paper mode" : "Switch to dark mode"}
           >
