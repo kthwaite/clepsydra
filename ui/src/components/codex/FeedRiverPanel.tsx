@@ -61,6 +61,7 @@ export function FeedRiverPanel() {
     <section aria-label="Feed river panel" className="col-span-12">
       <Card
         label="Feed river"
+        wrapHeader
         caption={`${feedsQuery.data.counts.unread} UNREAD · ${feedsQuery.data.counts.saved} SAVED · ${subscriptionCount} ${subscriptionCount === 1 ? "SOURCE" : "SOURCES"}`}
         pip={
           feedsQuery.isError || feedsQuery.data.diagnostics.length
@@ -70,7 +71,7 @@ export function FeedRiverPanel() {
         action={
           subscriptionCount > 0 ? (
             <Button
-              className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="cl-btn shrink-0 px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
               onPress={() =>
                 navigate({
                   to: "/feeds",

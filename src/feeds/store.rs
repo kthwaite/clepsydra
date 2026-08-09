@@ -22,6 +22,20 @@ pub const MAX_RETAINED_ENTRIES_PER_FEED: usize = 5_000;
 pub const MAX_RETAINED_CONTENT_BYTES_PER_FEED: usize = 128 * 1_048_576;
 pub const MAX_RETAINED_ENTRIES_GLOBAL: usize = 50_000;
 pub const MAX_RETAINED_CONTENT_BYTES_GLOBAL: usize = 1_024 * 1_048_576;
+#[derive(Debug, Clone, Copy)]
+struct RetentionQuotaLimits {
+    per_feed_entries: usize,
+    per_feed_content_bytes: usize,
+    global_entries: usize,
+    global_content_bytes: usize,
+}
+
+const RETENTION_QUOTA_LIMITS: RetentionQuotaLimits = RetentionQuotaLimits {
+    per_feed_entries: MAX_RETAINED_ENTRIES_PER_FEED,
+    per_feed_content_bytes: MAX_RETAINED_CONTENT_BYTES_PER_FEED,
+    global_entries: MAX_RETAINED_ENTRIES_GLOBAL,
+    global_content_bytes: MAX_RETAINED_CONTENT_BYTES_GLOBAL,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum FeedStoreError {
@@ -140,9 +154,9 @@ impl FeedStoreHandle {
         thread::Builder::new()
             .name("clepsydra-feed-store".to_owned())
             .spawn(move || match open_connection(&worker_path) {
-                Ok(mut connection) => {
+                Ok(mut opened) => {
                     if ready_tx.send(Ok(())).is_ok() {
-                        worker_loop(&mut connection, rx);
+                        worker_loop(&mut opened.connection, rx);
                     }
                 }
                 Err(error) => {
@@ -345,8 +359,173 @@ fn worker_loop(connection: &mut Connection, rx: mpsc::Receiver<Command>) {
     }
 }
 
+#[cfg(test)]
+type TestPathBarrier = (PathBuf, std::sync::Arc<std::sync::Barrier>);
+
+#[cfg(test)]
+static AFTER_DATABASE_PATH_PREPARED: std::sync::LazyLock<
+    parking_lot::Mutex<Option<TestPathBarrier>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
+static AFTER_SNAPSHOT_DESTINATION_PREPARED: std::sync::LazyLock<
+    parking_lot::Mutex<Option<TestPathBarrier>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
+fn normalize_test_barrier_path(path: &Path) -> PathBuf {
+    if let Ok(path) = std::fs::canonicalize(path) {
+        return path;
+    }
+    let Some(filename) = path.file_name() else {
+        return path.to_path_buf();
+    };
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::canonicalize(parent)
+        .map(|parent| parent.join(filename))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+fn install_test_path_barrier(
+    slot: &std::sync::LazyLock<parking_lot::Mutex<Option<TestPathBarrier>>>,
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    let path = normalize_test_barrier_path(&path);
+    let prior = slot.lock().replace((path, barrier));
+    assert!(prior.is_none(), "test path barrier was already installed");
+}
+
+#[cfg(test)]
+fn pause_at_test_path_barrier(
+    slot: &std::sync::LazyLock<parking_lot::Mutex<Option<TestPathBarrier>>>,
+    path: &Path,
+) {
+    let path = normalize_test_barrier_path(path);
+    let barrier = {
+        let mut slot = slot.lock();
+        match slot.as_ref() {
+            Some((expected, _)) if expected == &path => slot.take().map(|(_, barrier)| barrier),
+            _ => None,
+        }
+    };
+    if let Some(barrier) = barrier {
+        barrier.wait();
+        barrier.wait();
+    }
+}
+
+#[cfg(test)]
+fn install_after_database_path_prepared_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier(&AFTER_DATABASE_PATH_PREPARED, path, barrier);
+}
+
+#[cfg(test)]
+fn install_after_snapshot_destination_prepared_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier(&AFTER_SNAPSHOT_DESTINATION_PREPARED, path, barrier);
+}
+
+struct PreparedDatabase {
+    #[cfg(not(unix))]
+    path: PathBuf,
+    #[cfg(unix)]
+    directory: std::os::fd::OwnedFd,
+    #[cfg(unix)]
+    filename: std::ffi::OsString,
+    #[cfg(unix)]
+    file: std::fs::File,
+}
+
+struct OpenedConnection {
+    connection: Connection,
+    #[cfg(unix)]
+    _database_directory: std::os::fd::OwnedFd,
+    #[cfg(unix)]
+    _database_file: std::fs::File,
+}
+
+#[cfg(all(unix, target_vendor = "apple"))]
+fn descriptor_directory_path(
+    directory: &impl std::os::fd::AsFd,
+    display_path: &Path,
+) -> Result<PathBuf, FeedStoreError> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let path = rustix::fs::getpath(directory).map_err(|source| FeedStoreError::Io {
+        operation: "resolve retained directory descriptor",
+        path: display_path.to_path_buf(),
+        source: source.into(),
+    })?;
+    Ok(PathBuf::from(std::ffi::OsString::from_vec(
+        path.into_bytes(),
+    )))
+}
+
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn descriptor_directory_path(
+    directory: &impl std::os::fd::AsRawFd,
+    display_path: &Path,
+) -> Result<PathBuf, FeedStoreError> {
+    let alias_root = if cfg!(target_os = "linux") {
+        Path::new("/proc/self/fd")
+    } else {
+        Path::new("/dev/fd")
+    };
+    let alias = alias_root.join(directory.as_raw_fd().to_string());
+    std::fs::canonicalize(&alias).map_err(|source| FeedStoreError::Io {
+        operation: "resolve retained directory descriptor",
+        path: display_path.to_path_buf(),
+        source,
+    })
+}
+
 #[cfg(unix)]
-fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
+fn verify_retained_file_identity(
+    directory: &std::os::fd::OwnedFd,
+    filename: &std::ffi::OsStr,
+    file: &std::fs::File,
+    display_path: &Path,
+) -> Result<(), FeedStoreError> {
+    use rustix::fs::{AtFlags, FileType, fstat, statat};
+
+    let file_metadata = fstat(file).map_err(|source| FeedStoreError::Io {
+        operation: "inspect retained database descriptor",
+        path: display_path.to_path_buf(),
+        source: source.into(),
+    })?;
+    let path_metadata =
+        statat(directory, filename, AtFlags::SYMLINK_NOFOLLOW).map_err(|source| {
+            FeedStoreError::Io {
+                operation: "verify retained database identity",
+                path: display_path.to_path_buf(),
+                source: source.into(),
+            }
+        })?;
+    if FileType::from_raw_mode(file_metadata.st_mode) != FileType::RegularFile
+        || FileType::from_raw_mode(path_metadata.st_mode) != FileType::RegularFile
+        || file_metadata.st_dev != path_metadata.st_dev
+        || file_metadata.st_ino != path_metadata.st_ino
+    {
+        return Err(FeedStoreError::UnsafePath {
+            path: display_path.to_path_buf(),
+            expected: "unchanged regular database file",
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn prepare_database_path(path: &Path) -> Result<PreparedDatabase, FeedStoreError> {
     use rustix::fs::{FileType, Mode, OFlags, fchmod, fstat, mkdirat, open, openat};
     use rustix::io::Errno;
 
@@ -461,11 +640,15 @@ fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
             expected: "regular file",
         });
     }
-    Ok(database_path)
+    Ok(PreparedDatabase {
+        directory,
+        filename: filename.to_os_string(),
+        file: file.into(),
+    })
 }
 
 #[cfg(not(unix))]
-fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
+fn prepare_database_path(path: &Path) -> Result<PreparedDatabase, FeedStoreError> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -483,7 +666,11 @@ fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
                 expected: "regular file",
             });
         }
-        Ok(_) => return Ok(path.to_path_buf()),
+        Ok(_) => {
+            return Ok(PreparedDatabase {
+                path: path.to_path_buf(),
+            });
+        }
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
         Err(source) => {
             return Err(FeedStoreError::Io {
@@ -498,7 +685,9 @@ fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
         .write(true)
         .create_new(true)
         .open(path)
-        .map(|_| path.to_path_buf())
+        .map(|_| PreparedDatabase {
+            path: path.to_path_buf(),
+        })
         .map_err(|source| FeedStoreError::Io {
             operation: "create feed database",
             path: path.to_path_buf(),
@@ -506,12 +695,41 @@ fn prepare_database_path(path: &Path) -> Result<PathBuf, FeedStoreError> {
         })
 }
 
-fn open_connection(path: &Path) -> Result<Connection, FeedStoreError> {
-    let path = prepare_database_path(path)?;
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
-        | OpenFlags::SQLITE_OPEN_NO_MUTEX
-        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let mut connection = Connection::open_with_flags(path, flags)?;
+fn open_connection(path: &Path) -> Result<OpenedConnection, FeedStoreError> {
+    let prepared = prepare_database_path(path)?;
+    #[cfg(test)]
+    pause_at_test_path_barrier(&AFTER_DATABASE_PATH_PREPARED, path);
+    #[cfg(unix)]
+    let (open_path, flags) = {
+        verify_retained_file_identity(
+            &prepared.directory,
+            &prepared.filename,
+            &prepared.file,
+            path,
+        )?;
+        let directory_path = descriptor_directory_path(&prepared.directory, path)?;
+        (
+            directory_path.join(&prepared.filename),
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+    };
+    #[cfg(not(unix))]
+    let (open_path, flags) = (
+        prepared.path.clone(),
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    );
+    let mut connection = Connection::open_with_flags(open_path, flags)?;
+    #[cfg(unix)]
+    verify_retained_file_identity(
+        &prepared.directory,
+        &prepared.filename,
+        &prepared.file,
+        path,
+    )?;
     let schema_version: i64 =
         connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version > CURRENT_SCHEMA_VERSION {
@@ -529,7 +747,13 @@ fn open_connection(path: &Path) -> Result<Connection, FeedStoreError> {
     )?;
     initialize_schema(&mut connection, schema_version)?;
     connection.execute_batch("PRAGMA foreign_keys = ON;")?;
-    Ok(connection)
+    Ok(OpenedConnection {
+        connection,
+        #[cfg(unix)]
+        _database_directory: prepared.directory,
+        #[cfg(unix)]
+        _database_file: prepared.file,
+    })
 }
 
 fn initialize_schema(
@@ -901,7 +1125,7 @@ fn apply_fetch(
             )?;
             if changed != 0 {
                 upsert_entries(&transaction, feed_id, entries)?;
-                enforce_retention_quotas(&transaction, feed_id)?;
+                enforce_retention_quotas(&transaction, feed_id, RETENTION_QUOTA_LIMITS)?;
             }
             changed
         }
@@ -992,6 +1216,7 @@ fn upsert_entries(
 fn enforce_retention_quotas(
     transaction: &Transaction<'_>,
     feed_id: i64,
+    limits: RetentionQuotaLimits,
 ) -> Result<(), FeedStoreError> {
     transaction.execute(
         "
@@ -1004,7 +1229,7 @@ fn enforce_retention_quotas(
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                 ) AS retained_bytes
             FROM entry
-            WHERE feed_id = ?1
+            WHERE feed_id = ?1 AND bookmarked_at IS NULL
         )
         DELETE FROM entry
         WHERE id IN (
@@ -1015,8 +1240,8 @@ fn enforce_retention_quotas(
         ",
         params![
             feed_id,
-            MAX_RETAINED_ENTRIES_PER_FEED as i64,
-            MAX_RETAINED_CONTENT_BYTES_PER_FEED as i64
+            limits.per_feed_entries as i64,
+            limits.per_feed_content_bytes as i64
         ],
     )?;
     transaction.execute(
@@ -1030,6 +1255,7 @@ fn enforce_retention_quotas(
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                 ) AS retained_bytes
             FROM entry
+            WHERE bookmarked_at IS NULL
         )
         DELETE FROM entry
         WHERE id IN (
@@ -1039,8 +1265,8 @@ fn enforce_retention_quotas(
         )
         ",
         params![
-            MAX_RETAINED_ENTRIES_GLOBAL as i64,
-            MAX_RETAINED_CONTENT_BYTES_GLOBAL as i64
+            limits.global_entries as i64,
+            limits.global_content_bytes as i64
         ],
     )?;
     Ok(())
@@ -1492,10 +1718,106 @@ pub fn snapshot_database(source: &Path, destination: &Path) -> Result<(), FeedSt
     if source == destination {
         return Err(FeedStoreError::InvalidPath(destination.to_path_buf()));
     }
+    #[cfg(unix)]
+    {
+        let source = open_snapshot_source(source)?;
+        snapshot_database_file(
+            &source.directory,
+            &source.filename,
+            &source.file,
+            &source.path,
+            destination,
+        )
+    }
+    #[cfg(not(unix))]
+    {
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        let connection = Connection::open_with_flags(source, flags)?;
+        snapshot_connection(&connection, destination)
+    }
+}
+
+#[cfg(unix)]
+struct VerifiedSnapshotSource {
+    path: PathBuf,
+    directory: std::os::fd::OwnedFd,
+    filename: std::ffi::OsString,
+    file: std::fs::File,
+}
+
+#[cfg(unix)]
+fn open_snapshot_source(source: &Path) -> Result<VerifiedSnapshotSource, FeedStoreError> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, open, openat};
+
+    let filename = source
+        .file_name()
+        .ok_or_else(|| FeedStoreError::InvalidPath(source.to_path_buf()))?;
+    let parent = source
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = std::fs::canonicalize(parent).map_err(|source_error| FeedStoreError::Io {
+        operation: "resolve snapshot source directory",
+        path: parent.to_path_buf(),
+        source: source_error,
+    })?;
+    let directory = open(
+        &parent,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|source_error| FeedStoreError::Io {
+        operation: "open snapshot source directory without following links",
+        path: parent.clone(),
+        source: source_error.into(),
+    })?;
+    let file = openat(
+        &directory,
+        filename,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|source_error| FeedStoreError::Io {
+        operation: "open snapshot source without following links",
+        path: source.to_path_buf(),
+        source: source_error.into(),
+    })?;
+    let metadata = fstat(&file).map_err(|source_error| FeedStoreError::Io {
+        operation: "inspect snapshot source",
+        path: source.to_path_buf(),
+        source: source_error.into(),
+    })?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(FeedStoreError::UnsafePath {
+            path: source.to_path_buf(),
+            expected: "regular snapshot source",
+        });
+    }
+    Ok(VerifiedSnapshotSource {
+        path: parent.join(filename),
+        directory,
+        filename: filename.to_os_string(),
+        file: file.into(),
+    })
+}
+
+#[cfg(unix)]
+pub(crate) fn snapshot_database_file(
+    source_directory: &std::os::fd::OwnedFd,
+    source_filename: &std::ffi::OsStr,
+    source_file: &std::fs::File,
+    source_path: &Path,
+    destination: &Path,
+) -> Result<(), FeedStoreError> {
+    verify_retained_file_identity(source_directory, source_filename, source_file, source_path)?;
+    let directory_path = descriptor_directory_path(source_directory, source_path)?;
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
         | OpenFlags::SQLITE_OPEN_NO_MUTEX
         | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let connection = Connection::open_with_flags(source, flags)?;
+    let connection = Connection::open_with_flags(directory_path.join(source_filename), flags)?;
+    verify_retained_file_identity(source_directory, source_filename, source_file, source_path)?;
     snapshot_connection(&connection, destination)
 }
 
@@ -1511,8 +1833,7 @@ struct PreparedSnapshotDestination {
 fn prepare_snapshot_destination(
     destination: &Path,
 ) -> Result<PreparedSnapshotDestination, FeedStoreError> {
-    use rustix::fs::{AtFlags, Mode, OFlags, open, statat};
-    use rustix::io::Errno;
+    use rustix::fs::{Mode, OFlags, open};
 
     let filename = destination
         .file_name()
@@ -1537,27 +1858,38 @@ fn prepare_snapshot_destination(
         path: parent.clone(),
         source: source.into(),
     })?;
-    match statat(&directory, &filename, AtFlags::SYMLINK_NOFOLLOW) {
-        Ok(_) => {
-            return Err(FeedStoreError::UnsafePath {
-                path: parent.join(&filename),
-                expected: "absent snapshot target",
-            });
-        }
-        Err(Errno::NOENT) => {}
-        Err(source) => {
-            return Err(FeedStoreError::Io {
-                operation: "inspect snapshot target without following links",
-                path: parent.join(&filename),
-                source: source.into(),
-            });
-        }
-    }
-    Ok(PreparedSnapshotDestination {
+    let prepared = PreparedSnapshotDestination {
         path: parent.join(&filename),
         directory,
         filename,
-    })
+    };
+    verify_snapshot_destination_absent(&prepared)?;
+    Ok(prepared)
+}
+
+#[cfg(unix)]
+fn verify_snapshot_destination_absent(
+    destination: &PreparedSnapshotDestination,
+) -> Result<(), FeedStoreError> {
+    use rustix::fs::{AtFlags, statat};
+    use rustix::io::Errno;
+
+    match statat(
+        &destination.directory,
+        &destination.filename,
+        AtFlags::SYMLINK_NOFOLLOW,
+    ) {
+        Ok(_) => Err(FeedStoreError::UnsafePath {
+            path: destination.path.clone(),
+            expected: "absent snapshot target",
+        }),
+        Err(Errno::NOENT) => Ok(()),
+        Err(source) => Err(FeedStoreError::Io {
+            operation: "inspect snapshot target without following links",
+            path: destination.path.clone(),
+            source: source.into(),
+        }),
+    }
 }
 
 #[cfg(not(unix))]
@@ -1672,13 +2004,21 @@ fn finish_snapshot_destination(
 }
 
 fn snapshot_connection(connection: &Connection, destination: &Path) -> Result<(), FeedStoreError> {
-    let destination = prepare_snapshot_destination(destination)?;
-    let destination_text = destination
-        .path
+    let prepared = prepare_snapshot_destination(destination)?;
+    #[cfg(test)]
+    pause_at_test_path_barrier(&AFTER_SNAPSHOT_DESTINATION_PREPARED, destination);
+    #[cfg(unix)]
+    let publication_path = {
+        verify_snapshot_destination_absent(&prepared)?;
+        descriptor_directory_path(&prepared.directory, &prepared.path)?.join(&prepared.filename)
+    };
+    #[cfg(not(unix))]
+    let publication_path = prepared.path.clone();
+    let destination_text = publication_path
         .to_str()
-        .ok_or_else(|| FeedStoreError::InvalidPath(destination.path.clone()))?;
+        .ok_or_else(|| FeedStoreError::InvalidPath(prepared.path.clone()))?;
     connection.execute("VACUUM INTO ?1", [destination_text])?;
-    finish_snapshot_destination(&destination)
+    finish_snapshot_destination(&prepared)
 }
 
 #[cfg(test)]
@@ -1807,6 +2147,13 @@ mod tests {
             .unwrap()
     }
 
+    fn apply_test_retention_quotas(path: &Path, feed_id: i64, limits: super::RetentionQuotaLimits) {
+        let mut connection = Connection::open(path).unwrap();
+        let transaction = connection.transaction().unwrap();
+        super::enforce_retention_quotas(&transaction, feed_id, limits).unwrap();
+        transaction.commit().unwrap();
+    }
+
     #[test]
     fn ingestion_and_retention_limits_match_the_approved_hard_caps() {
         assert_eq!(super::MAX_ENTRY_PAGE_BYTES, 8 * 1_048_576);
@@ -1925,6 +2272,92 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn startup_opens_the_verified_regular_database_identity_after_path_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        fs::create_dir(&vault).unwrap();
+        let metadata = vault.join(".clepsydra");
+        let database = metadata.join("feeds.db");
+        let trusted_store = FeedStoreHandle::open(&database).unwrap();
+        add_feed(
+            &trusted_store,
+            manifest_feed("https://trusted.example/feed", "Trusted", &[]),
+        )
+        .await;
+        drop(trusted_store);
+
+        let replacement_metadata = vault.join("replacement-metadata");
+        fs::create_dir(&replacement_metadata).unwrap();
+        let replacement_store =
+            FeedStoreHandle::open(&replacement_metadata.join("feeds.db")).unwrap();
+        add_feed(
+            &replacement_store,
+            manifest_feed("https://attacker.example/feed", "Attacker", &[]),
+        )
+        .await;
+        drop(replacement_store);
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let verified_database_path = database.canonicalize().unwrap();
+        super::install_after_database_path_prepared_barrier(
+            verified_database_path,
+            barrier.clone(),
+        );
+        let database_for_open = database.clone();
+        let opener = std::thread::spawn(move || FeedStoreHandle::open(&database_for_open));
+
+        barrier.wait();
+        let displaced_metadata = vault.join("verified-metadata");
+        fs::rename(&metadata, &displaced_metadata).unwrap();
+        fs::rename(&replacement_metadata, &metadata).unwrap();
+        barrier.wait();
+
+        let opened = opener.join().unwrap().unwrap();
+        let urls = opened
+            .list_feeds()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|feed| feed.url)
+            .collect::<Vec<_>>();
+        assert_eq!(urls, vec!["https://trusted.example/feed"]);
+        opened
+            .reconcile(vec![
+                manifest_feed("https://trusted.example/feed", "Trusted", &[]),
+                manifest_feed("https://written.example/feed", "Written", &[]),
+            ])
+            .await
+            .unwrap();
+        drop(opened);
+
+        let read_urls = |path: &Path| {
+            let connection = Connection::open(path).unwrap();
+            let mut statement = connection
+                .prepare("SELECT url FROM feed ORDER BY url")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            read_urls(&displaced_metadata.join("feeds.db")),
+            vec![
+                "https://trusted.example/feed",
+                "https://written.example/feed"
+            ],
+            "startup writes did not stay on the originally verified database inode"
+        );
+        assert_eq!(
+            read_urls(&metadata.join("feeds.db")),
+            vec!["https://attacker.example/feed"],
+            "startup mutated the replacement database"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn worker_snapshot_uses_the_stable_open_database_identity() {
         use std::os::unix::fs::symlink;
 
@@ -1966,6 +2399,75 @@ mod tests {
             .unwrap();
 
         assert_eq!(urls, vec!["https://trusted.example/feed"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_destination_stays_in_verified_parent_when_path_is_replaced_before_vacuum() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.db");
+        let connection = Connection::open(&source).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE snapshot_probe (
+                    value TEXT NOT NULL
+                );
+                INSERT INTO snapshot_probe (value) VALUES ('trusted');
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let destination_parent = temp.path().join("snapshot-output");
+        fs::create_dir(&destination_parent).unwrap();
+        let destination = destination_parent.join("snapshot.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let verified_destination = destination_parent
+            .canonicalize()
+            .unwrap()
+            .join("snapshot.db");
+        super::install_after_snapshot_destination_prepared_barrier(
+            verified_destination,
+            barrier.clone(),
+        );
+        let source_for_snapshot = source.clone();
+        let destination_for_snapshot = destination.clone();
+        let snapshotter = std::thread::spawn(move || {
+            super::snapshot_database(&source_for_snapshot, &destination_for_snapshot)
+        });
+
+        barrier.wait();
+        let verified_parent = temp.path().join("verified-snapshot-output");
+        fs::rename(&destination_parent, &verified_parent).unwrap();
+        fs::create_dir(&destination_parent).unwrap();
+        barrier.wait();
+
+        let snapshot_result = snapshotter.join().unwrap();
+        assert!(
+            !destination.exists(),
+            "failed identity publication leaked a snapshot beneath the replacement pathname"
+        );
+        snapshot_result.unwrap();
+        let verified_snapshot = verified_parent.join("snapshot.db");
+        assert!(
+            verified_snapshot.is_file(),
+            "snapshot was not created in the descriptor-verified parent"
+        );
+        assert!(
+            !destination.exists(),
+            "snapshot followed the replacement destination pathname"
+        );
+        use std::os::unix::fs::PermissionsExt;
+
+        let snapshot_metadata = fs::symlink_metadata(&verified_snapshot).unwrap();
+        assert!(snapshot_metadata.file_type().is_file());
+        assert_eq!(snapshot_metadata.permissions().mode() & 0o777, 0o600);
+        let snapshot = Connection::open(verified_snapshot).unwrap();
+        let value: String = snapshot
+            .query_row("SELECT value FROM snapshot_probe", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, "trusted");
     }
 
     fn create_legacy_database(path: &Path) {
@@ -3304,6 +3806,276 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fresh_count, 1);
+    }
+
+    #[tokio::test]
+    async fn per_feed_count_quota_keeps_bookmarks_outside_the_publisher_budget() {
+        let (store, temp) = open_test_store().await;
+        let path = temp.path().join("feeds.db");
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![
+                        fetched_entry("bookmarked-oldest", None),
+                        fetched_entry("unbookmarked-evicted", None),
+                        fetched_entry("unbookmarked-old", None),
+                        fetched_entry("unbookmarked-fresh", None),
+                    ],
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+        let bookmarked = entries_by_guid(&store).await["bookmarked-oldest"].id;
+        store
+            .patch_entry(
+                bookmarked,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        apply_test_retention_quotas(
+            &path,
+            feed_id,
+            super::RetentionQuotaLimits {
+                per_feed_entries: 2,
+                per_feed_content_bytes: 1_024,
+                global_entries: 100,
+                global_content_bytes: 1_024,
+            },
+        );
+
+        let retained = entries_by_guid(&store).await;
+        assert_eq!(retained.len(), 3);
+        assert!(retained["bookmarked-oldest"].bookmarked);
+        assert!(!retained.contains_key("unbookmarked-evicted"));
+        assert!(retained.contains_key("unbookmarked-old"));
+        assert!(retained.contains_key("unbookmarked-fresh"));
+    }
+
+    #[tokio::test]
+    async fn per_feed_byte_quota_keeps_bookmark_bodies_outside_the_publisher_budget() {
+        let (store, temp) = open_test_store().await;
+        let path = temp.path().join("feeds.db");
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        let mut bookmarked = fetched_entry("bookmarked-body", None);
+        bookmarked.content_html = Some("mark".to_owned());
+        let mut evicted = fetched_entry("unbookmarked-body-evicted", None);
+        evicted.content_html = Some("gone".to_owned());
+        let mut unbookmarked = fetched_entry("unbookmarked-body-retained", None);
+        unbookmarked.content_html = Some("body".to_owned());
+        let mut fresh = fetched_entry("fresh-without-body", None);
+        fresh.content_html = None;
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![bookmarked, evicted, unbookmarked, fresh],
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+        let bookmarked = entries_by_guid(&store).await["bookmarked-body"].id;
+        store
+            .patch_entry(
+                bookmarked,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        apply_test_retention_quotas(
+            &path,
+            feed_id,
+            super::RetentionQuotaLimits {
+                per_feed_entries: 100,
+                per_feed_content_bytes: 4,
+                global_entries: 100,
+                global_content_bytes: 1_024,
+            },
+        );
+
+        let retained = entries_by_guid(&store).await;
+        assert_eq!(retained.len(), 3);
+        assert!(retained["bookmarked-body"].bookmarked);
+        assert_eq!(
+            retained["unbookmarked-body-retained"]
+                .content_html
+                .as_deref(),
+            Some("body")
+        );
+        assert!(!retained.contains_key("unbookmarked-body-evicted"));
+        assert!(retained.contains_key("fresh-without-body"));
+    }
+
+    #[tokio::test]
+    async fn global_count_quota_cannot_evict_an_unrelated_feed_bookmark() {
+        let (store, temp) = open_test_store().await;
+        let path = temp.path().join("feeds.db");
+        store
+            .reconcile(vec![
+                manifest_feed("https://bookmarks.example/feed", "News", &[]),
+                manifest_feed("https://old.example/feed", "News", &[]),
+                manifest_feed("https://victim.example/feed", "News", &[]),
+                manifest_feed("https://attacker.example/feed", "News", &[]),
+            ])
+            .await
+            .unwrap();
+        let feed_ids = store
+            .list_feeds()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|feed| feed.id)
+            .collect::<Vec<_>>();
+        for (feed_id, guid) in feed_ids.iter().copied().zip([
+            "unrelated-bookmark",
+            "unbookmarked-evicted",
+            "unbookmarked-old",
+            "attacker-fresh",
+        ]) {
+            store
+                .apply_fetch(
+                    feed_id,
+                    success(
+                        vec![fetched_entry(guid, None)],
+                        ts("2026-08-09T12:00:00Z"),
+                        ts("2026-08-09T12:30:00Z"),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+        let bookmarked = entries_by_guid(&store).await["unrelated-bookmark"].id;
+        store
+            .patch_entry(
+                bookmarked,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        apply_test_retention_quotas(
+            &path,
+            feed_ids[3],
+            super::RetentionQuotaLimits {
+                per_feed_entries: 100,
+                per_feed_content_bytes: 1_024,
+                global_entries: 2,
+                global_content_bytes: 1_024,
+            },
+        );
+
+        let retained = entries_by_guid(&store).await;
+        assert_eq!(retained.len(), 3);
+        assert!(retained["unrelated-bookmark"].bookmarked);
+        assert!(!retained.contains_key("unbookmarked-evicted"));
+        assert!(retained.contains_key("unbookmarked-old"));
+        assert!(retained.contains_key("attacker-fresh"));
+    }
+
+    #[tokio::test]
+    async fn global_byte_quota_cannot_charge_an_unrelated_bookmark_body() {
+        let (store, temp) = open_test_store().await;
+        let path = temp.path().join("feeds.db");
+        store
+            .reconcile(vec![
+                manifest_feed("https://bookmarks.example/feed", "News", &[]),
+                manifest_feed("https://old.example/feed", "News", &[]),
+                manifest_feed("https://victim.example/feed", "News", &[]),
+                manifest_feed("https://attacker.example/feed", "News", &[]),
+            ])
+            .await
+            .unwrap();
+        let feed_ids = store
+            .list_feeds()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|feed| feed.id)
+            .collect::<Vec<_>>();
+        let mut bookmark = fetched_entry("unrelated-bookmark-body", None);
+        bookmark.content_html = Some("mark".to_owned());
+        let mut evicted = fetched_entry("unbookmarked-body-evicted", None);
+        evicted.content_html = Some("gone".to_owned());
+        let mut old = fetched_entry("unbookmarked-body-retained", None);
+        old.content_html = Some("body".to_owned());
+        let mut fresh = fetched_entry("attacker-fresh-without-body", None);
+        fresh.content_html = None;
+        for (feed_id, entry) in feed_ids
+            .iter()
+            .copied()
+            .zip([bookmark, evicted, old, fresh])
+        {
+            store
+                .apply_fetch(
+                    feed_id,
+                    success(
+                        vec![entry],
+                        ts("2026-08-09T12:00:00Z"),
+                        ts("2026-08-09T12:30:00Z"),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+        let bookmarked = entries_by_guid(&store).await["unrelated-bookmark-body"].id;
+        store
+            .patch_entry(
+                bookmarked,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        apply_test_retention_quotas(
+            &path,
+            feed_ids[3],
+            super::RetentionQuotaLimits {
+                per_feed_entries: 100,
+                per_feed_content_bytes: 1_024,
+                global_entries: 100,
+                global_content_bytes: 4,
+            },
+        );
+
+        let retained = entries_by_guid(&store).await;
+        assert_eq!(retained.len(), 3);
+        assert!(retained["unrelated-bookmark-body"].bookmarked);
+        assert_eq!(
+            retained["unbookmarked-body-retained"]
+                .content_html
+                .as_deref(),
+            Some("body")
+        );
+        assert!(!retained.contains_key("unbookmarked-body-evicted"));
+        assert!(retained.contains_key("attacker-fresh-without-body"));
     }
 
     #[tokio::test]

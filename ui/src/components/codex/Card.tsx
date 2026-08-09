@@ -15,6 +15,7 @@ export function Card({
   action,
   pip = "cool",
   tight = false,
+  wrapHeader = false,
   className,
   children,
 }: {
@@ -23,12 +24,18 @@ export function Card({
   action?: ReactNode;
   pip?: Pip;
   tight?: boolean;
+  wrapHeader?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <section className={clsx("border border-rule bg-paper-2", className)}>
-      <div className="flex items-center justify-between gap-3 border-b border-rule bg-paper px-3 py-1.5">
+      <div
+        className={clsx(
+          "flex items-center justify-between gap-3 border-b border-rule bg-paper px-3 py-1.5",
+          wrapHeader && "min-w-0 flex-wrap",
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <span
             className={clsx("h-[7px] w-[7px] flex-shrink-0", PIP_CLASS[pip])}
@@ -37,9 +44,19 @@ export function Card({
             {label}
           </span>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2.5">
+        <div
+          className={clsx(
+            "flex items-center gap-2.5",
+            wrapHeader ? "min-w-0 flex-wrap" : "flex-shrink-0",
+          )}
+        >
           {caption ? (
-            <span className="cl-mono whitespace-nowrap text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+            <span
+              className={clsx(
+                "cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute",
+                wrapHeader ? "whitespace-normal" : "whitespace-nowrap",
+              )}
+            >
               {caption}
             </span>
           ) : null}

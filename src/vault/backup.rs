@@ -6,7 +6,11 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
 
-use crate::feeds::store::{FeedStoreError, snapshot_database};
+use crate::feeds::store::FeedStoreError;
+#[cfg(not(unix))]
+use crate::feeds::store::snapshot_database;
+#[cfg(unix)]
+use crate::feeds::store::snapshot_database_file;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
@@ -65,13 +69,23 @@ pub fn create_backup(
     }
 
     let feed_snapshot = if let Some(live_feed_database) = verified_feed_database(&vault_root)? {
+        #[cfg(test)]
+        pause_after_feed_database_verified(&live_feed_database.path);
         let temporary = snapshot_tempdir(&vault_root, &destination)?;
         let snapshot = temporary.path().join("feeds.db");
-        snapshot_database(&live_feed_database.path, &snapshot).map_err(|source| {
-            BackupError::FeedSnapshot {
-                path: live_feed_database.path.clone(),
-                source,
-            }
+        #[cfg(unix)]
+        let snapshot_result = snapshot_database_file(
+            &live_feed_database.metadata_directory,
+            Path::new("feeds.db").as_os_str(),
+            &live_feed_database.database,
+            &live_feed_database.path,
+            &snapshot,
+        );
+        #[cfg(not(unix))]
+        let snapshot_result = snapshot_database(&live_feed_database.path, &snapshot);
+        snapshot_result.map_err(|source| BackupError::FeedSnapshot {
+            path: live_feed_database.path.clone(),
+            source,
         })?;
         Some((temporary, snapshot))
     } else {
@@ -193,12 +207,62 @@ impl Drop for PartialArchive {
     }
 }
 
+#[cfg(test)]
+type TestPathBarrier = (PathBuf, std::sync::Arc<std::sync::Barrier>);
+
+#[cfg(test)]
+static AFTER_FEED_DATABASE_VERIFIED: std::sync::LazyLock<
+    parking_lot::Mutex<Option<TestPathBarrier>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
+fn normalize_test_barrier_path(path: &Path) -> PathBuf {
+    if let Ok(path) = fs::canonicalize(path) {
+        return path;
+    }
+    let Some(filename) = path.file_name() else {
+        return path.to_path_buf();
+    };
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::canonicalize(parent)
+        .map(|parent| parent.join(filename))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+fn install_after_feed_database_verified_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    let path = normalize_test_barrier_path(&path);
+    let prior = AFTER_FEED_DATABASE_VERIFIED.lock().replace((path, barrier));
+    assert!(prior.is_none(), "test path barrier was already installed");
+}
+
+#[cfg(test)]
+fn pause_after_feed_database_verified(path: &Path) {
+    let path = normalize_test_barrier_path(path);
+    let barrier = {
+        let mut slot = AFTER_FEED_DATABASE_VERIFIED.lock();
+        match slot.as_ref() {
+            Some((expected, _)) if expected == &path => slot.take().map(|(_, barrier)| barrier),
+            _ => None,
+        }
+    };
+    if let Some(barrier) = barrier {
+        barrier.wait();
+        barrier.wait();
+    }
+}
 struct VerifiedFeedDatabase {
     path: PathBuf,
     #[cfg(unix)]
-    _metadata_directory: OwnedFd,
+    metadata_directory: OwnedFd,
     #[cfg(unix)]
-    _database: OwnedFd,
+    database: File,
 }
 
 #[cfg(unix)]
@@ -260,8 +324,8 @@ fn verified_feed_database(vault_root: &Path) -> Result<Option<VerifiedFeedDataba
 
     Ok(Some(VerifiedFeedDatabase {
         path: database_path,
-        _metadata_directory: metadata_directory,
-        _database: database,
+        metadata_directory,
+        database: database.into(),
     }))
 }
 
@@ -465,6 +529,88 @@ mod tests {
             })
             .unwrap();
         assert_eq!(value, "committed-in-wal");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshots_the_verified_regular_database_identity_after_path_replacement() {
+        let (temp, vault) = populated_vault();
+        let metadata = vault.join(".clepsydra");
+        let database = metadata.join("feeds.db");
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE snapshot_probe (
+                    value TEXT NOT NULL
+                );
+                INSERT INTO snapshot_probe (value) VALUES ('trusted');
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let replacement_metadata = temp.path().join("replacement-metadata");
+        fs::create_dir(&replacement_metadata).unwrap();
+        let replacement = Connection::open(replacement_metadata.join("feeds.db")).unwrap();
+        replacement
+            .execute_batch(
+                "
+                CREATE TABLE snapshot_probe (
+                    value TEXT NOT NULL
+                );
+                INSERT INTO snapshot_probe (value) VALUES ('attacker');
+                ",
+            )
+            .unwrap();
+        drop(replacement);
+
+        let destination = temp.path().join("backups");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let verified_database_path = database.canonicalize().unwrap();
+        install_after_feed_database_verified_barrier(verified_database_path, barrier.clone());
+        let vault_for_backup = vault.clone();
+        let destination_for_backup = destination.clone();
+        let backup = std::thread::spawn(move || {
+            create_backup(&vault_for_backup, &destination_for_backup, timestamp())
+        });
+
+        barrier.wait();
+        let verified_metadata = temp.path().join("verified-metadata");
+        fs::rename(&metadata, &verified_metadata).unwrap();
+        fs::rename(&replacement_metadata, &metadata).unwrap();
+        barrier.wait();
+
+        let archive = backup.join().unwrap().unwrap();
+        let extracted = temp.path().join("identity-checked-feeds.db");
+        fs::write(
+            &extracted,
+            archive_entry_bytes(&archive, Path::new(".clepsydra/feeds.db")),
+        )
+        .unwrap();
+        let snapshot = Connection::open(extracted).unwrap();
+        let value: String = snapshot
+            .query_row("SELECT value FROM snapshot_probe", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, "trusted");
+        let read_probe = |path: &Path| {
+            Connection::open(path)
+                .unwrap()
+                .query_row("SELECT value FROM snapshot_probe", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            read_probe(&verified_metadata.join("feeds.db")),
+            "trusted",
+            "backup mutated the originally verified source"
+        );
+        assert_eq!(
+            read_probe(&metadata.join("feeds.db")),
+            "attacker",
+            "backup mutated the replacement database"
+        );
     }
 
     #[test]

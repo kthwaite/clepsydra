@@ -197,4 +197,32 @@ describe("FeedRiverPanel", () => {
       }),
     );
   });
+
+  it("keeps counts and the reader action in a wrapping 320px Card header", () => {
+    panelMocks.feedsQuery.data = activeFeedList;
+    render(
+      <div style={{ width: 320 }}>
+        <FeedRiverPanel />
+      </div>,
+    );
+
+    const caption = screen.getByText("12 UNREAD · 6 SAVED · 1 SOURCE");
+    const action = screen.getByRole("button", { name: "Open feed reader" });
+    const headerCluster = action.parentElement;
+    const cardHeader = headerCluster?.parentElement;
+    if (!headerCluster || !cardHeader) {
+      throw new Error("Expected caption and action inside the Card header");
+    }
+
+    expect(cardHeader).toHaveClass("min-w-0", "flex-wrap");
+    expect(headerCluster).toHaveClass("min-w-0", "flex-wrap");
+    expect(headerCluster).not.toHaveClass("flex-shrink-0");
+    expect(caption).toHaveClass("whitespace-normal");
+    expect(action).toHaveClass("shrink-0");
+
+    expect(screen.getByRole("button", { name: "Unread (12)" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "All (45)" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Saved (6)" })).toBeVisible();
+    expect(action).toBeVisible();
+  });
 });
