@@ -115,6 +115,19 @@ bun run --cwd ui build
 PASS (tsc -b && vite build; 4033 modules transformed)
 ```
 
+### UI Verification Review
+
+The definition-workspace mutation fixture now removes detail-only `member_creation` metadata before constructing `BaseMutationResponse`, matching the native mutation wire schema instead of relying on structural excess properties.
+
+```text
+bun run --cwd ui test src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
+Test Files  1 passed (1)
+Tests       25 passed (25)
+
+bun run --cwd ui typecheck
+PASS
+```
+
 ## Concerns
 
 None known within focused coverage, UI typecheck/build, or Task 7 browser smoke. Formatter, lint, and the broad UI suite were intentionally skipped per controller instruction.
