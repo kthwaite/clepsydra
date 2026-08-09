@@ -6,20 +6,23 @@ import type {
 import type { CellValue } from "./cells/types";
 import { asciiCaseFold } from "./local-validation";
 
-const CREATABLE_SYSTEM: ReadonlySet<string> = new Set([
-  "kind",
-  "project",
-  "tags",
-  "aliases",
-]);
-const READ_ONLY_SYSTEM: ReadonlySet<string> = new Set([
-  "id",
-  "path",
-  "created_at",
-  "updated_at",
-  "journal_date",
-  "word_count",
-]);
+const CREATABLE_SYSTEM: Record<
+  Exclude<DraftFieldKind, "title" | "property">,
+  true
+> = {
+  kind: true,
+  project: true,
+  tags: true,
+  aliases: true,
+};
+const READ_ONLY_SYSTEM: Record<string, true> = {
+  id: true,
+  path: true,
+  created_at: true,
+  updated_at: true,
+  journal_date: true,
+  word_count: true,
+};
 
 export type DraftFieldKind =
   | "title"
@@ -42,16 +45,56 @@ export interface BaseMemberDraftValue {
   fields: Record<string, CellValue>;
 }
 
-function normalizedField(field: string): string {
-  if (field.startsWith("sys.")) return field.slice(4);
-  if (field.startsWith("prop.")) return field.slice(5);
-  return field;
+const SYSTEM_FIELDS: Record<string, true> = {
+  title: true,
+  ...CREATABLE_SYSTEM,
+  ...READ_ONLY_SYSTEM,
+};
+
+interface ResolvedDraftField {
+  identity: string;
+  key: string;
+  bare: string;
+  source: "system" | "property";
+}
+
+function resolveDraftField(
+  rawField: string,
+  properties: NonNullable<BaseDetailResponse["properties"]>,
+): ResolvedDraftField | undefined {
+  if (rawField.startsWith("prop.")) {
+    const bare = rawField.slice(5);
+    if (!Object.hasOwn(properties, bare)) return undefined;
+    return {
+      identity: `property:${bare}`,
+      key: Object.hasOwn(SYSTEM_FIELDS, bare) ? `prop.${bare}` : bare,
+      bare,
+      source: "property",
+    };
+  }
+
+  const bare = rawField.startsWith("sys.") ? rawField.slice(4) : rawField;
+  if (Object.hasOwn(SYSTEM_FIELDS, bare)) {
+    return {
+      identity: `system:${bare}`,
+      key: bare,
+      bare,
+      source: "system",
+    };
+  }
+  if (!Object.hasOwn(properties, bare)) return undefined;
+  return {
+    identity: `property:${bare}`,
+    key: bare,
+    bare,
+    source: "property",
+  };
 }
 
 function isCreatableSystemField(
   field: string,
 ): field is Exclude<DraftFieldKind, "title" | "property"> {
-  return CREATABLE_SYSTEM.has(field);
+  return Object.hasOwn(CREATABLE_SYSTEM, field);
 }
 
 export function composeMemberDraftFields(
@@ -62,6 +105,7 @@ export function composeMemberDraftFields(
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === asciiCaseFold(viewName),
   );
+  const properties = definition.properties ?? {};
   const ordered = [
     "title",
     ...(view?.columns ?? []),
@@ -69,48 +113,45 @@ export function composeMemberDraftFields(
   ];
   const requirements = new Map<
     string,
-    BaseMemberCapability["fields"][number]
+    { membership: boolean; viewOnly: boolean }
   >();
   for (const requirement of capability.fields) {
-    const key = normalizedField(requirement.field);
-    if (!requirements.has(key)) requirements.set(key, requirement);
+    const resolved = resolveDraftField(requirement.field, properties);
+    if (!resolved) continue;
+    const current = requirements.get(resolved.identity);
+    requirements.set(resolved.identity, {
+      membership: (current?.membership ?? false) || requirement.membership,
+      viewOnly: (current?.viewOnly ?? false) || requirement.view,
+    });
   }
 
-  const properties = definition.properties ?? {};
   const seen = new Set<string>();
   const fields: BaseMemberDraftField[] = [];
   for (const rawField of ordered) {
-    const key = normalizedField(rawField);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const resolved = resolveDraftField(rawField, properties);
+    if (!resolved || seen.has(resolved.identity)) continue;
+    seen.add(resolved.identity);
 
-    if (READ_ONLY_SYSTEM.has(key)) continue;
-    const requirement = requirements.get(key);
-    const labels = {
-      membership: requirement?.membership ?? false,
-      viewOnly: requirement?.view ?? false,
+    const labels = requirements.get(resolved.identity) ?? {
+      membership: false,
+      viewOnly: false,
     };
-    if (key === "title") {
-      fields.push({ key, kind: "title", ...labels });
+    if (resolved.source === "system") {
+      if (Object.hasOwn(READ_ONLY_SYSTEM, resolved.bare)) continue;
+      if (resolved.bare === "title") {
+        fields.push({ key: resolved.key, kind: "title", ...labels });
+      } else if (isCreatableSystemField(resolved.bare)) {
+        fields.push({ key: resolved.key, kind: resolved.bare, ...labels });
+      }
       continue;
     }
 
-    const propertyDefinition = Object.hasOwn(properties, key)
-      ? properties[key]
-      : undefined;
-    if (propertyDefinition) {
-      fields.push({
-        key,
-        kind: "property",
-        definition: propertyDefinition,
-        ...labels,
-      });
-      continue;
-    }
-
-    if (isCreatableSystemField(key)) {
-      fields.push({ key, kind: key, ...labels });
-    }
+    fields.push({
+      key: resolved.key,
+      kind: "property",
+      definition: properties[resolved.bare],
+      ...labels,
+    });
   }
   return fields;
 }

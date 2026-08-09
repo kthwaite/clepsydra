@@ -60,7 +60,10 @@ export function TagInput({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter" || e.key === ",") {
+      if (
+        (e.key === "Enter" && !e.metaKey && !e.ctrlKey) ||
+        e.key === ","
+      ) {
         e.preventDefault();
         addValue(inputValue);
       } else if (e.key === "Tab" && inputValue.trim() !== "") {

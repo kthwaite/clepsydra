@@ -43,6 +43,8 @@ const definition: BaseDetailResponse = {
   properties: {
     status: { type: "select", options: ["queued", "reading"] },
     rating: { type: "number" },
+    optional_rating: { type: "number" },
+    optional_status: { type: "select", options: ["one", "two"] },
   },
   views: [
     {
@@ -63,8 +65,13 @@ const definition: BaseDetailResponse = {
       view: "continues",
       enabled: true,
       fields: [
-        { field: "sys.kind", membership: true, view: false },
-        { field: "prop.status", membership: false, view: true },
+        { field: "kind", membership: true, view: false },
+        { field: "status", membership: false, view: true },
+        { field: "project", membership: false, view: false },
+        { field: "tags", membership: false, view: false },
+        { field: "aliases", membership: false, view: false },
+        { field: "optional_rating", membership: false, view: false },
+        { field: "optional_status", membership: false, view: false },
       ],
       blockers: [],
     },
@@ -192,7 +199,13 @@ describe("BaseTable member creation", () => {
         base_revision: "base-rev-1",
         view: "Continues",
         title: "The Dispossessed",
-        fields: { kind: "BOOK", status: "reading", rating: 9 },
+        fields: {
+          kind: "BOOK",
+          status: "reading",
+          rating: 9,
+          tags: [],
+          aliases: [],
+        },
       },
     });
     expect(title).toHaveValue("The Dispossessed");
@@ -212,7 +225,13 @@ describe("BaseTable member creation", () => {
         base_revision: "base-rev-1",
         view: "Continues",
         title: "The Dispossessed",
-        fields: { kind: "BOOK", status: "reading", rating: 9 },
+        fields: {
+          kind: "BOOK",
+          status: "reading",
+          rating: 9,
+          tags: [],
+          aliases: [],
+        },
       },
     });
     expect(mocks.refetchView).toHaveBeenCalledTimes(1);
@@ -429,5 +448,80 @@ describe("BaseTable member creation", () => {
       screen.getByRole("textbox", { name: "New member — Title" }),
     ).toHaveFocus();
     expect(oldCreatedTitle).not.toHaveFocus();
+  });
+
+  it("omits cleared project and nullable property values from the endpoint payload", async () => {
+    const user = userEvent.setup();
+    mocks.viewState.data = groupedOutput();
+    mocks.viewState.error = null;
+    mocks.viewState.isLoading = false;
+    mocks.viewState.isFetching = false;
+    mocks.createMember.mockReset();
+    mocks.createMember.mockRejectedValue({
+      status: 422,
+      error: "Candidate rejected",
+    });
+
+    render(<BaseTable slug="reading" />);
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+    await fillMemberDraft(user);
+
+    const project = screen.getByRole("combobox", {
+      name: "New member — Project",
+    });
+    await user.type(project, "clepsydra{Enter}");
+    await user.click(
+      screen.getByRole("button", { name: "Clear New member — Project" }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Edit New member — Optional Rating",
+      }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", {
+        name: "New member — Optional Rating",
+      }),
+      "7{Enter}",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Optional Rating" }),
+    );
+    const rating = screen.getByRole("spinbutton", {
+      name: "New member — Optional Rating",
+    });
+    await user.clear(rating);
+    await user.keyboard("{Enter}");
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Edit New member — Optional Status",
+      }),
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", {
+        name: "New member — Optional Status",
+      }),
+      "one",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Optional Status" }),
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", {
+        name: "New member — Optional Status",
+      }),
+      "",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    await waitFor(() => expect(mocks.createMember).toHaveBeenCalledOnce());
+    const fields = mocks.createMember.mock.calls[0][0].body.fields;
+    expect(fields).not.toHaveProperty("project");
+    expect(fields).not.toHaveProperty("optional_rating");
+    expect(fields).not.toHaveProperty("optional_status");
+    expect(Object.values(fields)).not.toContain(null);
+    expect(fields.tags).toEqual([]);
+    expect(fields.aliases).toEqual([]);
   });
 });

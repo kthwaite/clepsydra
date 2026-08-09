@@ -59,8 +59,8 @@ describe("composeMemberDraftFields", () => {
       "continues",
       makeCapability({
         fields: [
-          { field: "sys.kind", membership: true, view: false },
-          { field: "prop.status", membership: false, view: true },
+          { field: "kind", membership: true, view: false },
+          { field: "status", membership: false, view: true },
           { field: "author", membership: true, view: false },
         ],
       }),
@@ -92,8 +92,8 @@ describe("composeMemberDraftFields", () => {
       makeCapability({
         view: "Inbox",
         fields: [
-          { field: "sys.project", membership: true, view: false },
-          { field: "prop.status", membership: false, view: true },
+          { field: "project", membership: true, view: false },
+          { field: "status", membership: false, view: true },
         ],
       }),
     );
@@ -125,14 +125,66 @@ describe("composeMemberDraftFields", () => {
       "Continues",
       makeCapability({
         fields: [
-          { field: "sys.kind", membership: true, view: false },
-          { field: "prop.status", membership: false, view: true },
-          { field: "sys.updated_at", membership: false, view: true },
+          { field: "kind", membership: true, view: false },
+          { field: "status", membership: false, view: true },
+          { field: "updated_at", membership: false, view: true },
         ],
       }),
     );
 
     expect(fields.map((field) => field.key)).toEqual(["title", "kind", "status"]);
+  });
+
+  it("preserves canonical property namespaces when custom fields shadow system and derived fields", () => {
+    const customKind: PropertyDefinition = { type: "text" };
+    const customWordCount: PropertyDefinition = { type: "number" };
+    const customJournalDate: PropertyDefinition = { type: "date" };
+    const fields = composeMemberDraftFields(
+      makeDefinition({
+        properties: {
+          kind: customKind,
+          word_count: customWordCount,
+          journal_date: customJournalDate,
+        },
+        views: [
+          {
+            name: "Continues",
+            columns: [
+              "kind",
+              "prop.kind",
+              "prop.word_count",
+              "prop.journal_date",
+            ],
+          },
+        ],
+      }),
+      "Continues",
+      makeCapability({
+        fields: [
+          { field: "kind", membership: true, view: false },
+          { field: "prop.kind", membership: false, view: true },
+          { field: "prop.word_count", membership: false, view: true },
+          { field: "prop.journal_date", membership: false, view: true },
+        ],
+      }),
+    );
+
+    expect(fields.map(({ key, kind }) => ({ key, kind }))).toEqual([
+      { key: "title", kind: "title" },
+      { key: "kind", kind: "kind" },
+      { key: "prop.kind", kind: "property" },
+      { key: "prop.word_count", kind: "property" },
+      { key: "prop.journal_date", kind: "property" },
+    ]);
+    expect(fields.slice(1).map(({ membership, viewOnly }) => ({
+      membership,
+      viewOnly,
+    }))).toEqual([
+      { membership: true, viewOnly: false },
+      { membership: false, viewOnly: true },
+      { membership: false, viewOnly: true },
+      { membership: false, viewOnly: true },
+    ]);
   });
 
   it("uses own-property checks for names that collide with Object.prototype", () => {
@@ -144,7 +196,7 @@ describe("composeMemberDraftFields", () => {
       "Continues",
       makeCapability({
         fields: [
-          { field: "prop.constructor", membership: true, view: false },
+          { field: "constructor", membership: true, view: false },
         ],
       }),
     );
@@ -168,7 +220,7 @@ describe("composeMemberDraftFields", () => {
   it("does not turn undeclared filter keys into controls or consume their diagnostics", () => {
     const capability = makeCapability({
       enabled: false,
-      fields: [{ field: "prop.missing", membership: true, view: false }],
+      fields: [{ field: "missing", membership: true, view: false }],
       blockers: [
         {
           scope: "field",
@@ -200,7 +252,7 @@ describe("composeMemberDraftFields", () => {
   it("does not mutate generated definition or capability objects", () => {
     const definition = makeDefinition();
     const capability = makeCapability({
-      fields: [{ field: "prop.status", membership: false, view: true }],
+      fields: [{ field: "status", membership: false, view: true }],
     });
     const definitionBefore = structuredClone(definition);
     const capabilityBefore = structuredClone(capability);

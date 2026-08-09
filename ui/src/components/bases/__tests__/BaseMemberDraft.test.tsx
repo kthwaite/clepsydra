@@ -1,8 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { BaseDetailResponse, BaseMemberCapability } from "#/api/bases";
 import { BaseMemberDraft } from "#/components/bases/BaseMemberDraft";
-import type { BaseMemberDraftField } from "#/components/bases/member-draft";
+import {
+  type BaseMemberDraftField,
+  composeMemberDraftFields,
+} from "#/components/bases/member-draft";
 
 const fields: BaseMemberDraftField[] = [
   {
@@ -96,6 +100,90 @@ describe("BaseMemberDraft", () => {
         tags: ["anarchism"],
         aliases: [],
         rating: 9,
+      },
+    });
+  });
+
+  it("renders and submits canonical keys for simultaneous system and shadow properties", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const definition: BaseDetailResponse = {
+      slug: "notes",
+      revision: "base-rev",
+      name: "Notes",
+      diagnostics: [],
+      member_creation: [],
+      properties: {
+        kind: { type: "text" },
+        word_count: { type: "number" },
+        journal_date: { type: "date" },
+      },
+      views: [
+        {
+          name: "All",
+          columns: [
+            "kind",
+            "prop.kind",
+            "prop.word_count",
+            "prop.journal_date",
+          ],
+        },
+      ],
+    };
+    const capability: BaseMemberCapability = {
+      view: "All",
+      enabled: true,
+      blockers: [],
+      fields: [
+        { field: "kind", membership: true, view: false },
+        { field: "prop.kind", membership: false, view: true },
+        { field: "prop.word_count", membership: false, view: true },
+        { field: "prop.journal_date", membership: false, view: true },
+      ],
+    };
+    render(
+      draftElement({
+        fields: composeMemberDraftFields(definition, "All", capability),
+        onSave,
+      }),
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+      "Namespaced",
+    );
+    await user.click(screen.getByRole("button", { name: "New member — Kind" }));
+    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Kind" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Kind" }),
+      "essay{Enter}",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Word Count" }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: "New member — Word Count" }),
+      "42{Enter}",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Journal Date" }),
+    );
+    await user.type(
+      screen.getByLabelText("New member — Journal Date"),
+      "2026-08-09{Enter}",
+    );
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      title: "Namespaced",
+      fields: {
+        kind: "BOOK",
+        "prop.kind": "essay",
+        "prop.word_count": 42,
+        "prop.journal_date": "2026-08-09",
       },
     });
   });
@@ -224,6 +312,42 @@ describe("BaseMemberDraft", () => {
 
     expect(onSave).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    ["Tags", "", "{Meta>}{Enter}{/Meta}", []],
+    ["Tags", "pending-tag", "{Meta>}{Enter}{/Meta}", ["pending-tag"]],
+    ["Aliases", "", "{Control>}{Enter}{/Control}", []],
+    [
+      "Aliases",
+      "pending-alias",
+      "{Control>}{Enter}{/Control}",
+      ["pending-alias"],
+    ],
+  ] as const)(
+    "saves %s with %s pending on modified Enter",
+    async (label, pending, shortcut, expected) => {
+      const user = userEvent.setup();
+      const onSave = vi.fn();
+      render(draftElement({ onSave }));
+      await user.type(
+        screen.getByRole("textbox", { name: "New member — Title" }),
+        "Shortcut",
+      );
+      const input = screen.getByRole("textbox", {
+        name: `New member — ${label}`,
+      });
+      if (pending) await user.type(input, pending);
+      await user.keyboard(shortcut);
+
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fields: expect.objectContaining({
+            [label.toLowerCase()]: expected,
+          }),
+        }),
+      );
+    },
+  );
 
   it("lets an active property editor consume Escape before the row cancels", async () => {
     const user = userEvent.setup();

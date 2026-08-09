@@ -128,6 +128,25 @@ bun run --cwd ui typecheck
 PASS
 ```
 
+## Whole-branch UI Contract Review (Round 5)
+
+- Draft composition now resolves system/property identity before read-only classification, preserving canonical request keys such as simultaneous `kind` and `prop.kind`, plus custom `prop.word_count` and `prop.journal_date`.
+- Diagnostics and draft state use the exact canonical key; only labels/property lookup strip namespaces.
+- Create payloads omit draft-local `null` values while retaining empty arrays and other native values. Focused endpoint coverage selects then clears project, number, and select editors.
+- TagInput leaves Cmd/Ctrl+Enter to the form; the form’s synchronous plain-Enter flush commits pending Tags/Aliases before saving.
+
+Fresh verification:
+
+```text
+bun run --cwd ui test src/components/bases/__tests__/BaseTable.test.tsx src/components/bases/__tests__/BaseTableView.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/member-draft.test.ts src/components/ui/__tests__/tag-input.test.tsx
+Test Files  5 passed (5)
+Tests       66 passed (66)
+Duration    4.63s
+
+bun run --cwd ui typecheck
+PASS
+```
+
 ## Concerns
 
 None known within focused coverage, UI typecheck/build, or Task 7 browser smoke. Formatter, lint, and the broad UI suite were intentionally skipped per controller instruction.

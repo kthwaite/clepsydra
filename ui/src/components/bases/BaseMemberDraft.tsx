@@ -37,9 +37,6 @@ function fieldLabel(key: string): string {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function normalizedField(key: string): string {
-  return key.replace(/^sys\.|^prop\./, "");
-}
 
 function requirementText(field: BaseMemberDraftField): string | undefined {
   if (field.membership && field.viewOnly) {
@@ -201,7 +198,7 @@ export function BaseMemberDraft({
   useEffect(() => {
     for (const diagnostic of diagnostics) {
       if (!diagnostic.field) continue;
-      const node = fieldNodes.current.get(normalizedField(diagnostic.field));
+      const node = fieldNodes.current.get(diagnostic.field);
       if (node) {
         focusFirstControl(node);
         return;
@@ -242,10 +239,9 @@ export function BaseMemberDraft({
         <legend className="sr-only">New base member</legend>
         <div className="flex flex-wrap items-start gap-2 p-2">
           {fields.map((field) => {
-            const key = normalizedField(field.key);
+            const key = field.key;
             const fieldDiagnostics = diagnostics.filter(
-              (diagnostic) =>
-                diagnostic.field && normalizedField(diagnostic.field) === key,
+              (diagnostic) => diagnostic.field === key,
             );
             const requirement = requirementText(field);
             const localError = field.kind === "title" ? titleError : undefined;

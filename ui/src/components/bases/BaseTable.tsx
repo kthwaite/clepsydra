@@ -169,6 +169,12 @@ export function BaseTable({ slug }: BaseTableProps) {
     });
     setMemberError(undefined);
     setMemberDiagnostics([]);
+    const requestFields: BaseMemberDraftValue["fields"] = {};
+    for (const key in value.fields) {
+      if (!Object.hasOwn(value.fields, key)) continue;
+      const fieldValue = value.fields[key];
+      if (fieldValue !== null) requestFields[key] = fieldValue;
+    }
     let created;
     try {
       created = await createMemberMutation.mutateAsync({
@@ -177,7 +183,7 @@ export function BaseTable({ slug }: BaseTableProps) {
           base_revision: detail.data!.revision,
           view: operationView,
           title: value.title.trim(),
-          fields: value.fields,
+          fields: requestFields,
         },
       });
     } catch (error) {
