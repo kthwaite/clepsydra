@@ -958,10 +958,7 @@ async fn create_base_member_writes_one_matching_typed_page() {
         body["revision"],
         clepsydra::vault::page::page_revision(&page.raw_content)
     );
-    assert_eq!(
-        page.meta.kind,
-        Some(clepsydra::vault::kind::Kind::Book)
-    );
+    assert_eq!(page.meta.kind, Some(clepsydra::vault::kind::Kind::Book));
     assert_eq!(page.meta.extra["rating"], toml::Value::Integer(10));
     assert!(matches!(
         page.meta.extra["started"],
@@ -1169,10 +1166,7 @@ async fn member_creation_coerces_every_custom_property_type_and_compound_filters
             toml::Value::String("beta".into())
         ])
     );
-    assert_eq!(
-        page.meta.extra["select"],
-        toml::Value::String("one".into())
-    );
+    assert_eq!(page.meta.extra["select"], toml::Value::String("one".into()));
     assert_eq!(
         page.meta.extra["multi"],
         toml::Value::Array(vec![
@@ -1181,7 +1175,10 @@ async fn member_creation_coerces_every_custom_property_type_and_compound_filters
         ])
     );
     assert!(matches!(page.meta.extra["number"], toml::Value::Float(_)));
-    assert!(matches!(page.meta.extra["bool"], toml::Value::Boolean(true)));
+    assert!(matches!(
+        page.meta.extra["bool"],
+        toml::Value::Boolean(true)
+    ));
     assert!(matches!(page.meta.extra["date"], toml::Value::Datetime(_)));
     assert!(matches!(
         page.meta.extra["datetime"],
@@ -1303,18 +1300,9 @@ async fn bare_system_and_persistable_prop_shadow_fields_coexist() {
     let path = clepsydra::vault::path::VaultPath::new(body["path"].as_str().unwrap()).unwrap();
     let page =
         clepsydra::vault::page::Page::from_file(&fixture.state.vault.resolve(&path), path).unwrap();
-    assert_eq!(
-        page.meta.kind,
-        Some(clepsydra::vault::kind::Kind::Book)
-    );
-    assert_eq!(
-        page.meta.extra["kind"],
-        toml::Value::String("genre".into())
-    );
-    assert_eq!(
-        page.meta.extra["word_count"],
-        toml::Value::Integer(7)
-    );
+    assert_eq!(page.meta.kind, Some(clepsydra::vault::kind::Kind::Book));
+    assert_eq!(page.meta.extra["kind"], toml::Value::String("genre".into()));
+    assert_eq!(page.meta.extra["word_count"], toml::Value::Integer(7));
 }
 
 #[tokio::test]
@@ -1374,9 +1362,7 @@ async fn member_index_failure_rolls_back_generated_page_without_notification() {
 #[tokio::test]
 async fn openapi_registers_base_member_contract() {
     let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
-    assert!(
-        document["paths"]["/api/vault/bases/{slug}/members"]["post"].is_object()
-    );
+    assert!(document["paths"]["/api/vault/bases/{slug}/members"]["post"].is_object());
     for schema in [
         "BaseMemberCreateRequest",
         "BaseMemberCreateResponse",

@@ -7,10 +7,7 @@ use super::base::{PropertyDefinition, PropertyType};
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PropertyValueError {
     #[error("{key} must be {expected}")]
-    InvalidShape {
-        key: String,
-        expected: &'static str,
-    },
+    InvalidShape { key: String, expected: &'static str },
     #[error("{key} must be one of: {options}")]
     UnknownOption { key: String, options: String },
     #[error("{key} must contain unique values")]
@@ -41,9 +38,7 @@ pub fn coerce_property_value(
     definition: &PropertyDefinition,
 ) -> Result<toml::Value, PropertyValueError> {
     match definition.property_type {
-        PropertyType::Text | PropertyType::Url => {
-            string_value(key, value).map(toml::Value::String)
-        }
+        PropertyType::Text | PropertyType::Url => string_value(key, value).map(toml::Value::String),
         PropertyType::Relation => relation_value(key, value),
         PropertyType::Select => select_value(key, value, definition),
         PropertyType::MultiSelect => multi_select_value(key, value, definition),
@@ -57,20 +52,14 @@ pub fn coerce_property_value(
     }
 }
 
-fn string_value(
-    key: &str,
-    value: &serde_json::Value,
-) -> Result<String, PropertyValueError> {
+fn string_value(key: &str, value: &serde_json::Value) -> Result<String, PropertyValueError> {
     value
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| PropertyValueError::shape(key, "a string"))
 }
 
-fn relation_value(
-    key: &str,
-    value: &serde_json::Value,
-) -> Result<toml::Value, PropertyValueError> {
+fn relation_value(key: &str, value: &serde_json::Value) -> Result<toml::Value, PropertyValueError> {
     match value {
         serde_json::Value::String(value) => Ok(toml::Value::String(value.clone())),
         serde_json::Value::Array(values) => {
@@ -141,10 +130,7 @@ fn validate_option(
     }
 }
 
-fn number_value(
-    key: &str,
-    value: &serde_json::Value,
-) -> Result<toml::Value, PropertyValueError> {
+fn number_value(key: &str, value: &serde_json::Value) -> Result<toml::Value, PropertyValueError> {
     let number = value
         .as_number()
         .ok_or_else(|| PropertyValueError::shape(key, "a number"))?;
@@ -256,12 +242,7 @@ mod tests {
             toml::Value::Boolean(true)
         );
         assert!(matches!(
-            coerce(
-                "started",
-                json!("2026-08-09"),
-                property(PropertyType::Date)
-            )
-            .unwrap(),
+            coerce("started", json!("2026-08-09"), property(PropertyType::Date)).unwrap(),
             toml::Value::Datetime(_)
         ));
         assert!(matches!(
@@ -351,8 +332,7 @@ mod tests {
 
     #[test]
     fn relation_rejects_malformed_shapes_and_non_string_array_entries() {
-        let error = coerce("series", json!({ "page": "Solar Cycle" }), relation(None))
-            .unwrap_err();
+        let error = coerce("series", json!({ "page": "Solar Cycle" }), relation(None)).unwrap_err();
         assert_eq!(
             error.to_string(),
             "series must be a string or an array of strings"
@@ -367,16 +347,11 @@ mod tests {
 
     #[test]
     fn coercion_rejects_wrong_shapes_and_unknown_select_options() {
-        let error =
-            coerce("rating", json!("five"), property(PropertyType::Number)).unwrap_err();
+        let error = coerce("rating", json!("five"), property(PropertyType::Number)).unwrap_err();
         assert_eq!(error.to_string(), "rating must be a number");
 
-        let error = coerce(
-            "status",
-            json!("paused"),
-            select(&["reading", "finished"]),
-        )
-        .unwrap_err();
+        let error =
+            coerce("status", json!("paused"), select(&["reading", "finished"])).unwrap_err();
         assert_eq!(
             error.to_string(),
             "status must be one of: reading, finished"
@@ -442,6 +417,9 @@ mod tests {
             property(PropertyType::Number),
         )
         .unwrap_err();
-        assert_eq!(error.to_string(), "count must be a TOML-representable number");
+        assert_eq!(
+            error.to_string(),
+            "count must be a TOML-representable number"
+        );
     }
 }

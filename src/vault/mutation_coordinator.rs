@@ -119,7 +119,7 @@ pub enum MutationError {
     Index {
         filesystem_applied: bool,
         #[source]
-        source: IndexPolicyError,
+        source: Box<IndexPolicyError>,
     },
     #[error(
         "index mutation failed and filesystem rollback failed for {path}: index error: {source}; rollback error: {rollback}"
@@ -127,7 +127,7 @@ pub enum MutationError {
     IndexRollback {
         path: PathBuf,
         #[source]
-        source: IndexPolicyError,
+        source: Box<IndexPolicyError>,
         rollback: io::Error,
     },
     #[error(
@@ -136,8 +136,8 @@ pub enum MutationError {
     IndexCompensation {
         path: VaultPath,
         #[source]
-        source: IndexPolicyError,
-        rollback: IndexPolicyError,
+        source: Box<IndexPolicyError>,
+        rollback: Box<IndexPolicyError>,
     },
     #[error("move reconciliation failed after filesystem_applied={filesystem_applied}: {source}")]
     Reconcile {
@@ -221,7 +221,10 @@ fn rollback_created_publication(
     fs::remove_file(path).map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!("failed to remove published file {}: {error}", path.display()),
+            format!(
+                "failed to remove published file {}: {error}",
+                path.display()
+            ),
         )
     })?;
     let parent = path.parent().ok_or_else(|| {
@@ -374,65 +377,61 @@ impl MutationCoordinator {
                 let blocking_path = absolute.clone();
                 let page_path = command.path.clone();
                 let content = write_page_content(&command.meta, &command.body);
-                let (guard, content) =
-                    run_blocking_fs(absolute.clone(), guard, move || {
-                        if let Some(parent) = blocking_path.parent() {
-                            fs::create_dir_all(parent).map_err(|source| {
-                                MutationError::Filesystem {
-                                    filesystem_applied: false,
-                                    path: parent.to_path_buf(),
-                                    source,
-                                }
-                            })?;
+                let (guard, content) = run_blocking_fs(absolute.clone(), guard, move || {
+                    if let Some(parent) = blocking_path.parent() {
+                        fs::create_dir_all(parent).map_err(|source| MutationError::Filesystem {
+                            filesystem_applied: false,
+                            path: parent.to_path_buf(),
+                            source,
+                        })?;
+                    }
+                    let publication = match &create_publication_hook {
+                        Some(hook) => hook(&blocking_path, content.as_bytes()),
+                        None => atomic_create(&blocking_path, content.as_bytes()),
+                    };
+                    match publication {
+                        Ok(()) => Ok(content),
+                        Err(AtomicPublicationError::NotPublished(source))
+                            if source.kind() == io::ErrorKind::AlreadyExists =>
+                        {
+                            Err(MutationError::Conflict(format!(
+                                "page already exists: {}",
+                                page_path.as_str()
+                            )))
                         }
-                        let publication = match &create_publication_hook {
-                            Some(hook) => hook(&blocking_path, content.as_bytes()),
-                            None => atomic_create(&blocking_path, content.as_bytes()),
-                        };
-                        match publication {
-                            Ok(()) => Ok(content),
-                            Err(AtomicPublicationError::NotPublished(source))
-                                if source.kind() == io::ErrorKind::AlreadyExists =>
-                            {
-                                Err(MutationError::Conflict(format!(
-                                    "page already exists: {}",
-                                    page_path.as_str()
-                                )))
-                            }
-                            Err(AtomicPublicationError::NotPublished(source)) => {
-                                Err(MutationError::Filesystem {
+                        Err(AtomicPublicationError::NotPublished(source)) => {
+                            Err(MutationError::Filesystem {
+                                filesystem_applied: false,
+                                path: blocking_path,
+                                source,
+                            })
+                        }
+                        Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
+                            match rollback_created_publication(
+                                &blocking_path,
+                                create_rollback_sync_hook.as_deref(),
+                            ) {
+                                Ok(()) => Err(MutationError::Filesystem {
                                     filesystem_applied: false,
                                     path: blocking_path,
                                     source,
-                                })
-                            }
-                            Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                match rollback_created_publication(
-                                    &blocking_path,
-                                    create_rollback_sync_hook.as_deref(),
-                                ) {
-                                    Ok(()) => Err(MutationError::Filesystem {
-                                        filesystem_applied: false,
-                                        path: blocking_path,
-                                        source,
-                                    }),
-                                    Err(rollback) => Err(MutationError::FilesystemRollback {
-                                        path: blocking_path,
-                                        source,
-                                        rollback,
-                                    }),
-                                }
+                                }),
+                                Err(rollback) => Err(MutationError::FilesystemRollback {
+                                    path: blocking_path,
+                                    source,
+                                    rollback,
+                                }),
                             }
                         }
-                    })
-                    .await?;
+                    }
+                })
+                .await?;
                 filesystem_applied.store(true, Ordering::Release);
                 let index_result = index
                     .apply_mutation(command.path.clone(), IndexMutation::Created)
                     .await;
                 if let Err(source) = index_result {
-                    let index_may_be_partial =
-                        matches!(source, IndexPolicyError::Operation { .. });
+                    let index_may_be_partial = matches!(source, IndexPolicyError::Operation { .. });
                     let rollback_path = absolute.clone();
                     let rollback = tokio::task::spawn_blocking(move || {
                         let result = fs::remove_file(&rollback_path);
@@ -442,38 +441,34 @@ impl MutationCoordinator {
                     match rollback {
                         Ok((guard, Ok(()))) => {
                             filesystem_applied.store(false, Ordering::Release);
-                            if index_may_be_partial {
-                                if let Err(rollback) = index
-                                    .apply_mutation(
-                                        command.path.clone(),
-                                        IndexMutation::Deleted,
-                                    )
+                            if index_may_be_partial
+                                && let Err(rollback) = index
+                                    .apply_mutation(command.path.clone(), IndexMutation::Deleted)
                                     .await
-                                {
-                                    return Err(MutationError::IndexCompensation {
-                                        path: command.path,
-                                        source,
-                                        rollback,
-                                    });
-                                }
+                            {
+                                return Err(MutationError::IndexCompensation {
+                                    path: command.path,
+                                    source: Box::new(source),
+                                    rollback: Box::new(rollback),
+                                });
                             }
                             let _guard = guard;
                             return Err(MutationError::Index {
                                 filesystem_applied: false,
-                                source,
+                                source: Box::new(source),
                             });
                         }
                         Ok((_guard, Err(rollback))) => {
                             return Err(MutationError::IndexRollback {
                                 path: absolute,
-                                source,
+                                source: Box::new(source),
                                 rollback,
                             });
                         }
                         Err(error) => {
                             return Err(MutationError::IndexRollback {
                                 path: absolute,
-                                source,
+                                source: Box::new(source),
                                 rollback: io::Error::other(format!(
                                     "blocking filesystem rollback task failed: {error}"
                                 )),
@@ -548,7 +543,7 @@ impl MutationCoordinator {
                 .await
                 .map_err(|source| MutationError::Index {
                     filesystem_applied: true,
-                    source,
+                    source: Box::new(source),
                 })?;
             if let Some(source) = durability_error {
                 return Err(MutationError::Filesystem {
@@ -680,7 +675,7 @@ impl MutationCoordinator {
                     .await
                     .map_err(|source| MutationError::Index {
                         filesystem_applied: true,
-                        source,
+                        source: Box::new(source),
                     })?;
 
                 let final_path = if let Some(destination) = projected_path {
@@ -853,7 +848,7 @@ impl MutationCoordinator {
                     .await
                     .map_err(|source| MutationError::Index {
                         filesystem_applied: true,
-                        source,
+                        source: Box::new(source),
                     })?;
                 removed.push(path.as_str().to_string());
             }

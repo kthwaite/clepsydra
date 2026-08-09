@@ -23,9 +23,9 @@ use crate::vault::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
     SortDir, SortKey, ViewDefinition, validate_definition,
 };
-use crate::vault::base_member::{BaseMemberCapability, creation_capabilities};
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
+use crate::vault::base_member::{BaseMemberCapability, creation_capabilities};
 use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
 
 /// One entry in the registry listing.

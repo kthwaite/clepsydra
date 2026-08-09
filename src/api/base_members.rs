@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
 use axum::extract::rejection::JsonRejection;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -80,9 +80,10 @@ fn apply_system_field(
             let token = value
                 .as_str()
                 .ok_or_else(|| field_diagnostic(key, "kind must be a string"))?;
-            meta.kind = Some(Kind::from_token(token).ok_or_else(|| {
-                field_diagnostic(key, format!("unknown page kind `{token}`"))
-            })?);
+            meta.kind =
+                Some(Kind::from_token(token).ok_or_else(|| {
+                    field_diagnostic(key, format!("unknown page kind `{token}`"))
+                })?);
             Ok(true)
         }
         "project" => {
@@ -113,9 +114,9 @@ fn apply_custom_field(
     value: &serde_json::Value,
 ) -> Result<(), BaseMemberDiagnostic> {
     let bare = key.strip_prefix("prop.").unwrap_or(key);
-    let definition = base.property(bare).ok_or_else(|| {
-        field_diagnostic(key, format!("base has no declared property `{bare}`"))
-    })?;
+    let definition = base
+        .property(bare)
+        .ok_or_else(|| field_diagnostic(key, format!("base has no declared property `{bare}`")))?;
     let value = coerce_property_value(bare, value, definition)
         .map_err(|error| field_diagnostic(bare, error.to_string()))?;
     meta.extra.insert(bare.to_owned(), value);
@@ -133,15 +134,20 @@ fn validation_error(diagnostics: Vec<BaseMemberDiagnostic>) -> ApiError {
 fn is_reserved_field(key: &str) -> bool {
     matches!(
         key,
-        "id" | "path" | "title" | "created_at" | "updated_at" | "encryption" | "journal_date" | "word_count"
+        "id" | "path"
+            | "title"
+            | "created_at"
+            | "updated_at"
+            | "encryption"
+            | "journal_date"
+            | "word_count"
     )
 }
 
 fn is_unpersistable_custom_shadow(key: &str) -> bool {
     matches!(
         key,
-        "id"
-            | "path"
+        "id" | "path"
             | "title"
             | "project"
             | "tags"
@@ -158,8 +164,8 @@ async fn create_base_member_with_ids(
     request: BaseMemberCreateRequest,
     mut short_ids: impl Iterator<Item = String>,
 ) -> Result<BaseMemberCreateResponse, ApiError> {
-    let stored = base_document::load(state.vault.root(), &slug)
-        .map_err(super::bases::document_error)?;
+    let stored =
+        base_document::load(state.vault.root(), &slug).map_err(super::bases::document_error)?;
     if stored.revision != request.base_revision {
         return Err(ApiError::conflict_with_detail(
             "base changed since the draft was opened",
@@ -196,8 +202,7 @@ async fn create_base_member_with_ids(
     for (key, value) in &request.fields {
         let explicit_custom = key.starts_with("prop.");
         let logical = key.strip_prefix("prop.").unwrap_or(key);
-        let targets_custom_property =
-            explicit_custom || !SYSTEM_FIELDS.contains(&logical);
+        let targets_custom_property = explicit_custom || !SYSTEM_FIELDS.contains(&logical);
         if !targets.insert((logical, targets_custom_property)) {
             return Err(ApiError::bad_request(format!(
                 "field `{logical}` was provided more than once"
@@ -232,8 +237,7 @@ async fn create_base_member_with_ids(
                 "base `{slug}` has no declared property `{logical}`"
             )));
         }
-        if let Err(diagnostic) =
-            apply_custom_field(&mut meta, &stored.definition, original, value)
+        if let Err(diagnostic) = apply_custom_field(&mut meta, &stored.definition, original, value)
         {
             diagnostics.push(diagnostic);
         }
@@ -263,7 +267,9 @@ async fn create_base_member_with_ids(
             meta.project.as_deref(),
             &short_id,
         )
-        .map_err(|error| ApiError::internal(format!("failed to build Base member path: {error}")))?;
+        .map_err(|error| {
+            ApiError::internal(format!("failed to build Base member path: {error}"))
+        })?;
 
         candidate_matches(
             &stored.definition,
@@ -412,8 +418,7 @@ name = "All"
             change_tx,
             hooks: Arc::new(Vec::new()),
             delete_hooks: Arc::new(Vec::new()),
-            mutation_coordinator:
-                crate::vault::mutation_coordinator::MutationCoordinator::new(),
+            mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
             archive_ingest_lock: tokio::sync::Mutex::new(()),
             bcl: None,
             location: parking_lot::RwLock::new(None),
@@ -427,10 +432,7 @@ name = "All"
     #[tokio::test]
     async fn generated_path_collision_retries_without_overwriting_the_existing_page() {
         let (_temp, state, revision) = setup();
-        let collision_path = state
-            .vault
-            .root()
-            .join("notes/20260809.collision.taken.md");
+        let collision_path = state.vault.root().join("notes/20260809.collision.taken.md");
         let existing = fs::read_to_string(&collision_path).unwrap();
         let response = create_base_member_with_ids(
             Arc::clone(&state),
@@ -447,8 +449,7 @@ name = "All"
         .unwrap();
 
         assert_eq!(
-            response.path,
-            "notes/20260809.collision.free.md",
+            response.path, "notes/20260809.collision.free.md",
             "the second generated path should be used"
         );
         assert_eq!(fs::read_to_string(collision_path).unwrap(), existing);

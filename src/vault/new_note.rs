@@ -380,10 +380,9 @@ mod tests {
 
     #[test]
     fn projected_note_path_uses_kind_project_and_supplied_short_id() {
-        let created =
-            chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
-                .unwrap()
-                .to_utc();
+        let created = chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
+            .unwrap()
+            .to_utc();
 
         let path = build_projected_note_path(
             "The Left Hand of Darkness",
@@ -402,10 +401,9 @@ mod tests {
 
     #[test]
     fn projected_note_path_uses_canonical_kind_folder_without_project() {
-        let created =
-            chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
-                .unwrap()
-                .to_utc();
+        let created = chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
+            .unwrap()
+            .to_utc();
 
         let path = build_projected_note_path(
             "Inbox Thought",
@@ -416,18 +414,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            path.as_str(),
-            "notes/20260809.inbox-thought.Ab3xYz90.md"
-        );
+        assert_eq!(path.as_str(), "notes/20260809.inbox-thought.Ab3xYz90.md");
     }
 
     #[test]
     fn projected_note_path_rejects_project_traversal() {
-        let created =
-            chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
-                .unwrap()
-                .to_utc();
+        let created = chrono::DateTime::parse_from_rfc3339("2026-08-09T12:00:00Z")
+            .unwrap()
+            .to_utc();
 
         let error = build_projected_note_path(
             "Escaping Note",

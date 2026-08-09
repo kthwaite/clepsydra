@@ -379,10 +379,7 @@ pub fn base_matches_meta(
     }
 }
 
-pub(crate) fn filter_matches_meta(
-    filter: &Filter,
-    context: &MetaFilterContext<'_>,
-) -> bool {
+pub(crate) fn filter_matches_meta(filter: &Filter, context: &MetaFilterContext<'_>) -> bool {
     match filter {
         Filter::All(children) => children
             .iter()
@@ -411,11 +408,7 @@ pub(crate) fn derived_comparison_matches(
             Some(word_count) => match op {
                 Op::IsEmpty => false,
                 Op::NotEmpty => true,
-                _ => toml_value_matches(
-                    &toml::Value::Integer(i64::from(word_count)),
-                    op,
-                    value,
-                ),
+                _ => toml_value_matches(&toml::Value::Integer(i64::from(word_count)), op, value),
             },
             None => scalar_matches(None, op, value),
         }),
@@ -440,13 +433,9 @@ fn cmp_matches_meta(
     let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
 
     if is_system {
-        if let Some(matches) = derived_comparison_matches(
-            field,
-            op,
-            value,
-            context.word_count,
-            context.journal_date,
-        ) {
+        if let Some(matches) =
+            derived_comparison_matches(field, op, value, context.word_count, context.journal_date)
+        {
             return matches;
         }
 
@@ -472,7 +461,6 @@ fn cmp_matches_meta(
                 _ => false,
             };
         }
-
 
         let scalar: Option<String> = match bare {
             "id" => Some(context.meta.id.to_string()),

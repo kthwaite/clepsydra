@@ -52,9 +52,7 @@ enum Possibility {
 
 fn all(values: impl Iterator<Item = Possibility>) -> Possibility {
     values.fold(Possibility::AlwaysTrue, |acc, value| match (acc, value) {
-        (Possibility::AlwaysFalse, _) | (_, Possibility::AlwaysFalse) => {
-            Possibility::AlwaysFalse
-        }
+        (Possibility::AlwaysFalse, _) | (_, Possibility::AlwaysFalse) => Possibility::AlwaysFalse,
         (Possibility::AlwaysTrue, Possibility::AlwaysTrue) => Possibility::AlwaysTrue,
         _ => Possibility::Maybe,
     })
@@ -62,9 +60,7 @@ fn all(values: impl Iterator<Item = Possibility>) -> Possibility {
 
 fn any(values: impl Iterator<Item = Possibility>) -> Possibility {
     values.fold(Possibility::AlwaysFalse, |acc, value| match (acc, value) {
-        (Possibility::AlwaysTrue, _) | (_, Possibility::AlwaysTrue) => {
-            Possibility::AlwaysTrue
-        }
+        (Possibility::AlwaysTrue, _) | (_, Possibility::AlwaysTrue) => Possibility::AlwaysTrue,
         (Possibility::AlwaysFalse, Possibility::AlwaysFalse) => Possibility::AlwaysFalse,
         _ => Possibility::Maybe,
     })
@@ -85,25 +81,25 @@ pub fn candidate_matches(
     };
     let mut diagnostics = Vec::new();
 
-    if let Some(filter) = &base.file.filter {
-        if !filter_matches_meta(filter, &context) {
-            diagnostics.push(candidate_diagnostic(
-                BaseMemberScope::Membership,
-                filter,
-                "filter",
-                "candidate does not match the base membership filter",
-            ));
-        }
+    if let Some(filter) = &base.file.filter
+        && !filter_matches_meta(filter, &context)
+    {
+        diagnostics.push(candidate_diagnostic(
+            BaseMemberScope::Membership,
+            filter,
+            "filter",
+            "candidate does not match the base membership filter",
+        ));
     }
-    if let Some(filter) = &view.filter {
-        if !filter_matches_meta(filter, &context) {
-            diagnostics.push(candidate_diagnostic(
-                BaseMemberScope::View,
-                filter,
-                &format!("views.{}.filter", view.name),
-                "candidate does not match the selected view filter",
-            ));
-        }
+    if let Some(filter) = &view.filter
+        && !filter_matches_meta(filter, &context)
+    {
+        diagnostics.push(candidate_diagnostic(
+            BaseMemberScope::View,
+            filter,
+            &format!("views.{}.filter", view.name),
+            "candidate does not match the selected view filter",
+        ));
     }
 
     if diagnostics.is_empty() {
@@ -136,13 +132,16 @@ pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability>
                 collect_fields(filter, false, true, &mut fields);
             }
 
-            let enabled = all([membership, view_possibility].into_iter())
-                != Possibility::AlwaysFalse;
+            let enabled =
+                all([membership, view_possibility].into_iter()) != Possibility::AlwaysFalse;
             let mut blockers = Vec::new();
             if !enabled {
                 if membership == Possibility::AlwaysFalse {
                     collect_contributors(
-                        base.file.filter.as_ref().expect("analysed membership filter"),
+                        base.file
+                            .filter
+                            .as_ref()
+                            .expect("analysed membership filter"),
                         "filter",
                         Possibility::AlwaysFalse,
                         BaseMemberScope::Membership,
@@ -245,7 +244,6 @@ fn comparison_possibility(field: &str, op: Op, value: &serde_json::Value) -> Pos
     }
 }
 
-
 fn collect_contributors(
     filter: &Filter,
     path: &str,
@@ -286,13 +284,7 @@ fn collect_contributors(
                 Possibility::AlwaysFalse => Possibility::AlwaysTrue,
                 Possibility::Maybe => return,
             };
-            collect_contributors(
-                child,
-                &format!("{path}.not"),
-                opposite,
-                scope,
-                blockers,
-            );
+            collect_contributors(child, &format!("{path}.not"), opposite, scope, blockers);
         }
         Filter::Cmp { field, .. } => {
             if filter_possibility(filter) == desired {
@@ -386,10 +378,7 @@ layout = "table"
         );
         let capability = creation_capabilities(&base).remove(0);
         assert!(!capability.enabled);
-        assert_eq!(
-            capability.blockers[0].field.as_deref(),
-            Some("word_count")
-        );
+        assert_eq!(capability.blockers[0].field.as_deref(), Some("word_count"));
         assert_eq!(
             capability.blockers[0].filter_path.as_deref(),
             Some("filter")
@@ -403,10 +392,8 @@ layout = "table"
         let mut meta = PageMeta::new();
         meta.title = Some("New Book".into());
         meta.kind = Some(Kind::Book);
-        meta.extra.insert(
-            "status".into(),
-            toml::Value::String("queued".into()),
-        );
+        meta.extra
+            .insert("status".into(), toml::Value::String("queued".into()));
 
         let errors = candidate_matches(
             &base,
@@ -466,48 +453,13 @@ layout = "table"
             ("word_count", "links_to", ", value = \"0\"", false),
             ("word_count", "is_empty", "", false),
             ("word_count", "not_empty", "", true),
-            (
-                "journal_date",
-                "eq",
-                ", value = \"2026-08-09\"",
-                false,
-            ),
-            (
-                "journal_date",
-                "ne",
-                ", value = \"2026-08-09\"",
-                true,
-            ),
-            (
-                "journal_date",
-                "lt",
-                ", value = \"2026-08-09\"",
-                false,
-            ),
-            (
-                "journal_date",
-                "lte",
-                ", value = \"2026-08-09\"",
-                false,
-            ),
-            (
-                "journal_date",
-                "gt",
-                ", value = \"2026-08-09\"",
-                false,
-            ),
-            (
-                "journal_date",
-                "gte",
-                ", value = \"2026-08-09\"",
-                false,
-            ),
-            (
-                "journal_date",
-                "contains",
-                ", value = \"2026\"",
-                false,
-            ),
+            ("journal_date", "eq", ", value = \"2026-08-09\"", false),
+            ("journal_date", "ne", ", value = \"2026-08-09\"", true),
+            ("journal_date", "lt", ", value = \"2026-08-09\"", false),
+            ("journal_date", "lte", ", value = \"2026-08-09\"", false),
+            ("journal_date", "gt", ", value = \"2026-08-09\"", false),
+            ("journal_date", "gte", ", value = \"2026-08-09\"", false),
+            ("journal_date", "contains", ", value = \"2026\"", false),
             ("journal_date", "in", ", value = [\"2026-08-09\"]", false),
             (
                 "journal_date",
@@ -575,10 +527,8 @@ layout = "table"
         let mut meta = PageMeta::new();
         meta.extra
             .insert("word_count".into(), toml::Value::Integer(7));
-        meta.extra.insert(
-            "journal_date".into(),
-            toml::Value::String("manual".into()),
-        );
+        meta.extra
+            .insert("journal_date".into(), toml::Value::String("manual".into()));
 
         assert!(capability.enabled);
         assert!(
