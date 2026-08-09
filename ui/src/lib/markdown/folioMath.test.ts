@@ -232,26 +232,68 @@ x
   });
 
   it.each([
-    ["a$b", "$$a$b$$"],
+    ["a$b", String.raw`\(a$b\)`],
     ["a$$b", "$a$$b$"],
-    ["$x", "$$ $x $$"],
-    ["x$", "$$ x$ $$"],
-  ])("chooses a safe inline dollar fence for %s", (body, expected) => {
+    ["$x", String.raw`\($x\)`],
+    ["x$", String.raw`\(x$\)`],
+  ])("uses a supported inline delimiter for %s", (body, expected) => {
     const root: Root = {
       type: "root",
       children: [{ type: "paragraph", children: [inlineNode(body)] }],
     };
 
     expect(serialize(root).trim()).toBe(expected);
+    const reparsed = findMath(parse(expected))[0];
+    expect(reparsed).toMatchObject({
+      type: "inlineMath",
+      value: body,
+      data: { folioSourceBody: body },
+    });
   });
 
-  it("chooses a display fence longer than dollar streaks in the body", () => {
+  it("falls back to backslash display syntax on dollar collisions", () => {
+    const body = "a $$ b";
     const root: Root = {
       type: "root",
-      children: [blockNode("a $$ b")],
+      children: [blockNode(body)],
     };
 
-    expect(serialize(root).trim()).toBe("$$$\na $$ b\n$$$");
+    const output = serialize(root).trim();
+    expect(output).toBe(String.raw`\[a $$ b\]`);
+    expect(findMath(parse(output))[0]).toMatchObject({
+      type: "math",
+      value: body,
+      data: {
+        folioDelimiter: String.raw`\[`,
+        folioSourceBody: body,
+      },
+    });
+  });
+
+  it.each([
+    ["$ x $", " x "],
+    ["before $ a\nb $ after", " a\nb "],
+    ["before $ a\r\nb $ after", " a\r\nb "],
+  ])("preserves authored inline source and line endings: %s", (source, body) => {
+    const output = serialize(parse(source)).trimEnd();
+    expect(output).toBe(source);
+    expect(findMath(parse(output))[0]).toMatchObject({
+      type: "inlineMath",
+      value: body,
+      data: { folioDelimiter: "$", folioSourceBody: body },
+    });
+  });
+
+  it("preserves an authored display body containing dollar streaks", () => {
+    const source = "$$\na $$ b\n$$";
+    const output = serialize(parse(source)).trimEnd();
+
+    expect(output).toBe(source);
+    expect(findMath(parse(output))[0]).toMatchObject({
+      type: "math",
+      value: "\na $$ b\n",
+      data: { folioDelimiter: "$$", folioSourceBody: "\na $$ b\n" },
+    });
   });
 });
 

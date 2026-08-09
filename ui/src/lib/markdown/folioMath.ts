@@ -179,15 +179,29 @@ function longestDollarStreak(value: string): number {
   return longest;
 }
 
+function hasInlineDollarCollision(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if (
+      value[index] === "$" &&
+      value[index - 1] !== "$" &&
+      value[index + 1] !== "$"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function inlineOutputDelimiter(node: InlineMath): "$" | "\\(" {
+  return delimiterFor(node, "inline") === "\\(" ||
+    hasInlineDollarCollision(sourceBody(node))
+    ? "\\("
+    : "$";
+}
+
 function serializeDollarInline(node: InlineMath, state: State): string {
   let value = sourceBody(node);
-  let size = 1;
-
-  while (new RegExp(`(^|[^$])${"\\$".repeat(size)}([^$]|$)`).test(value)) {
-    size++;
-  }
-
-  const sequence = "$".repeat(size);
+  const sequence = "$";
 
   if (
     /[^ \r\n]/.test(value) &&
@@ -225,14 +239,18 @@ function inlineMath(
   _parent: Parents | undefined,
   state: State,
 ): string {
-  const delimiter = delimiterFor(node, "inline");
-  return delimiter === "\\("
-    ? formatMathSource(sourceBody(node), delimiter)
+  const delimiter = inlineOutputDelimiter(node);
+  const body = sourceBody(node);
+  if (delimiter === "\\(") return formatMathSource(body, delimiter);
+
+  const sourceData = node.data as FolioMathData | undefined;
+  return typeof sourceData?.folioSourceBody === "string"
+    ? formatMathSource(body, delimiter)
     : serializeDollarInline(node, state);
 }
 
 inlineMath.peek = (node: InlineMath): string =>
-  delimiterFor(node, "inline") === "\\(" ? "\\" : "$";
+  inlineOutputDelimiter(node) === "\\(" ? "\\" : "$";
 
 function serializeDollarDisplay(
   node: Math,
@@ -241,35 +259,25 @@ function serializeDollarDisplay(
 ): string {
   const raw = sourceBody(node);
   const tracker = state.createTracker(info);
-  const sequence = "$".repeat(Math.max(longestDollarStreak(raw) + 1, 2));
+  const sequence = "$$";
   const exit = state.enter("mathFlow");
   let value = tracker.move(sequence);
-  // Parsed dollar-display bodies include a line ending between their fences.
-  // Bare Slate-created TeX needs the canonical multiline flow layout instead.
-  const sourceData = node.data as FolioMathData | undefined;
-  const authoredBody =
-    typeof sourceData?.folioSourceBody === "string" &&
-    (raw.includes("\n") || raw.includes("\r"));
 
-  if (authoredBody) {
-    value += tracker.move(raw);
-  } else {
-    if (node.meta) {
-      const subexit = state.enter("mathFlowMeta");
-      value += tracker.move(
-        state.safe(node.meta, {
-          after: "\n",
-          before: value,
-          encode: ["$"],
-          ...tracker.current(),
-        }),
-      );
-      subexit();
-    }
-
-    value += tracker.move("\n");
-    if (raw) value += tracker.move(`${raw}\n`);
+  if (node.meta) {
+    const subexit = state.enter("mathFlowMeta");
+    value += tracker.move(
+      state.safe(node.meta, {
+        after: "\n",
+        before: value,
+        encode: ["$"],
+        ...tracker.current(),
+      }),
+    );
+    subexit();
   }
+
+  value += tracker.move("\n");
+  if (raw) value += tracker.move(`${raw}\n`);
 
   value += tracker.move(sequence);
   exit();
@@ -283,8 +291,21 @@ function math(
   info: Info,
 ): string {
   const delimiter = delimiterFor(node, "display");
-  return delimiter === "\\["
-    ? formatMathSource(sourceBody(node), delimiter)
+  const body = sourceBody(node);
+  if (delimiter === "\\[") return formatMathSource(body, delimiter);
+
+  const sourceData = node.data as FolioMathData | undefined;
+  const beginsWithLineEnding = body.startsWith("\n") || body.startsWith("\r");
+  const endsWithLineEnding = body.endsWith("\n") || body.endsWith("\r");
+  const authoredBody =
+    node.position !== undefined ||
+    (typeof sourceData?.folioSourceBody === "string" &&
+      beginsWithLineEnding &&
+      endsWithLineEnding);
+
+  if (authoredBody) return formatMathSource(body, delimiter);
+  return longestDollarStreak(body) >= 2
+    ? formatMathSource(body, "\\[")
     : serializeDollarDisplay(node, state, info);
 }
 
