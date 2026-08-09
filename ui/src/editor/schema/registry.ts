@@ -12,6 +12,10 @@ import {
   listItemDescriptor,
   numberedListDescriptor,
 } from "./elements/list";
+import {
+  inlineMathDescriptor,
+  mathBlockDescriptor,
+} from "./elements/math";
 import { paragraphDescriptor } from "./elements/paragraph";
 import { thematicBreakDescriptor } from "./elements/thematicBreak";
 import { wikilinkDescriptor } from "./elements/wikilink";
@@ -28,10 +32,12 @@ const ALL: ElementDescriptor[] = [
   thematicBreakDescriptor,
   journalTimeDescriptor,
   wikilinkDescriptor,
+  inlineMathDescriptor,
   linkDescriptor,
   blockRefDescriptor,
   footnoteRefDescriptor,
   footnoteDefDescriptor,
+  mathBlockDescriptor,
 ];
 
 export const REGISTRY = Object.fromEntries(

@@ -1,8 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
-import { type Descendant, type Editor, Node, Range, Transforms } from "slate";
+import {
+  type Descendant,
+  type Editor,
+  Element as SlateElement,
+  Node,
+  Range,
+  Transforms,
+} from "slate";
 import type { HistoryEditor } from "slate-history";
 import { beforeAll, beforeEach, expect, it, vi } from "vitest";
 
@@ -83,6 +90,42 @@ async function renderEditorWithSelectedB() {
   return { editor, user };
 }
 
+async function renderEditorWithInlineMath() {
+  const user = userEvent.setup();
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, enabled: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <SlateEditor
+        initialValue={[
+          {
+            type: "paragraph",
+            children: [
+              { text: "before" },
+              {
+                type: "inline-math",
+                tex: "x^2",
+                delimiter: "$",
+                children: [{ text: "" }],
+              },
+              { text: "after" },
+            ],
+          } as Descendant,
+        ]}
+        onChange={vi.fn()}
+        onSaveNow={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+
+  const editor = editorRef.current;
+  if (!editor) throw new Error("Slate editor is not active");
+  const editable = screen.getByRole("textbox");
+  await user.click(editable);
+  return { editable, editor, user };
+}
+
 it("replaces a one-character selection once before continuing to type", async () => {
   const { editor, user } = await renderEditorWithSelectedB();
 
@@ -114,4 +157,57 @@ it("restores the selected character when undoing one replacement", async () => {
   });
 
   expect(Node.string(editor)).toBe("abc");
+});
+
+it("opens source editing with Enter when an inline math void is selected", async () => {
+  const { editable, editor } = await renderEditorWithInlineMath();
+  act(() => Transforms.select(editor, [0, 1]));
+
+  fireEvent.keyDown(editable, { key: "Enter" });
+
+  expect(
+    screen.getByRole("textbox", { name: "Edit inline math" }),
+  ).toHaveValue("x^2");
+});
+
+it("leaves deletion of a selected math void to Slate", async () => {
+  const { editor } = await renderEditorWithInlineMath();
+  act(() => Transforms.select(editor, [0, 1]));
+
+  act(() => editor.deleteBackward("character"));
+
+  const paragraph = editor.children[0];
+  if (!SlateElement.isElement(paragraph)) {
+    throw new Error("Expected a paragraph");
+  }
+  expect(
+    paragraph.children.some(
+      (child) =>
+        SlateElement.isElement(child) && child.type === "inline-math",
+    ),
+  ).toBe(false);
+});
+
+it("leaves replacement of a selection spanning math to Slate", async () => {
+  const { editor } = await renderEditorWithInlineMath();
+  act(() =>
+    Transforms.select(editor, {
+      anchor: { path: [0, 0], offset: 6 },
+      focus: { path: [0, 2], offset: 0 },
+    }),
+  );
+
+  act(() => editor.insertText("z"));
+
+  expect(Node.string(editor)).toBe("beforezafter");
+  const paragraph = editor.children[0];
+  if (!SlateElement.isElement(paragraph)) {
+    throw new Error("Expected a paragraph");
+  }
+  expect(
+    paragraph.children.some(
+      (child) =>
+        SlateElement.isElement(child) && child.type === "inline-math",
+    ),
+  ).toBe(false);
 });

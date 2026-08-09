@@ -629,4 +629,47 @@ See [[Other Page]] for more.`;
       );
     });
   });
+
+  describe("math", () => {
+    it("maps positioned inline math to typed inline elements", () => {
+      expect(markdownToSlate(String.raw`before $x$ and \(y\) after`)).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "before " },
+            {
+              type: "inline-math",
+              tex: "x",
+              delimiter: "$",
+              children: [{ text: "" }],
+            },
+            { text: " and " },
+            {
+              type: "inline-math",
+              tex: "y",
+              delimiter: String.raw`\(`,
+              children: [{ text: "" }],
+            },
+            { text: " after" },
+          ],
+        },
+      ]);
+    });
+
+    it.each([
+      ["$$\nx\n$$", "$$", "\nx\n"],
+      [String.raw`\[
+x
+\]`, String.raw`\[`, "\nx\n"],
+    ])("maps display math separately: %s", (source, delimiter, tex) => {
+      expect(markdownToSlate(source)).toEqual([
+        {
+          type: "math-block",
+          tex,
+          delimiter,
+          children: [{ text: "" }],
+        },
+      ]);
+    });
+  });
 });

@@ -125,7 +125,7 @@ Add explicit cases for mixed/multiple expressions, multiline `\[…]`, inline co
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/lib/markdown/folioMath.test.ts
+bun run --cwd ui test -- src/lib/markdown/folioMath.test.ts
 ```
 
 Expected: FAIL because `remarkFolioMath` and math metadata do not exist.
@@ -176,7 +176,7 @@ Export `formatMathSource` from the same delimiter pairing logic. Do not register
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/lib/markdown/folioMath.test.ts
+bun run --cwd ui test -- src/lib/markdown/folioMath.test.ts
 ```
 
 Expected: PASS for all four forms, code exclusions, malformed input, positioned body preservation, new-node defaults, and embedded-dollar fence collision cases.
@@ -215,7 +215,7 @@ Add `InlineMathElement` and `MathBlockElement` to `schema/types.ts` and the `Cus
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/convert/__tests__/mdast-to-slate.test.ts src/editor/convert/__tests__/slate-to-mdast.test.ts src/editor/convert/__tests__/round-trip.test.ts
+bun run --cwd ui test -- src/editor/convert/__tests__/mdast-to-slate.test.ts src/editor/convert/__tests__/slate-to-mdast.test.ts src/editor/convert/__tests__/round-trip.test.ts
 ```
 
 Expected: PASS, including all pre-existing conversion cases.
@@ -273,7 +273,7 @@ Add `\href{javascript:alert(1)}{x}` and `\includegraphics{https://example.test/x
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/components/MathExpression.test.tsx
+bun run --cwd ui test -- src/components/MathExpression.test.tsx
 ```
 
 Expected: FAIL because the component does not exist.
@@ -372,7 +372,7 @@ Add normalization tests for missing `tex`, wrong-kind delimiter, extra/non-empty
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/schema/__tests__/classification.test.ts src/editor/schema/__tests__/normalize.test.ts
+bun run --cwd ui test -- src/editor/schema/__tests__/classification.test.ts src/editor/schema/__tests__/normalize.test.ts
 ```
 
 Expected: FAIL because math types/descriptors do not exist.
@@ -395,7 +395,7 @@ Then repair delimiter and child integrity on later passes. `toMdast` emits `inli
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/schema/__tests__/classification.test.ts src/editor/schema/__tests__/normalize.test.ts src/editor/convert/__tests__/mdast-to-slate.test.ts src/editor/convert/__tests__/slate-to-mdast.test.ts src/editor/convert/__tests__/round-trip.test.ts
+bun run --cwd ui test -- src/editor/schema/__tests__/classification.test.ts src/editor/schema/__tests__/normalize.test.ts src/editor/convert/__tests__/mdast-to-slate.test.ts src/editor/convert/__tests__/slate-to-mdast.test.ts src/editor/convert/__tests__/round-trip.test.ts
 ```
 
 Expected: PASS.
@@ -431,7 +431,7 @@ Wrap the editable surface with `MathEditingProvider`. Before global shortcuts, d
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/elements/MathElement.test.tsx src/editor/schema/__tests__/classification.test.ts src/editor/schema/__tests__/normalize.test.ts src/editor/__tests__/SlateEditor.selection-replacement.test.tsx
+bun run --cwd ui test -- src/editor/elements/MathElement.test.tsx src/editor/schema/__tests__/classification.test.ts src/editor/schema/__tests__/normalize.test.ts src/editor/__tests__/SlateEditor.selection-replacement.test.tsx
 bun run --cwd ui typecheck
 ```
 
@@ -484,7 +484,7 @@ Add `\(x\)` with auto-pair/overtype, standalone `$$…$$`, standalone `\[…\]`,
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts
+bun run --cwd ui test -- src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts
 ```
 
 Expected: new math cases FAIL while existing inline transforms remain green.
@@ -500,7 +500,7 @@ Extend `resolveComposedInline` to invoke the same transform in deterministic rig
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts
+bun run --cwd ui test -- src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts
 ```
 
 Expected: PASS for new math and all existing Markdown transforms.
@@ -527,7 +527,7 @@ Wrap the existing `setFragmentData`. Let the base method populate Slate's intern
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/editor/plugins/__tests__/withMathClipboard.test.ts src/editor/plugins/__tests__/withMarkdownPaste.test.ts src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts
+bun run --cwd ui test -- src/editor/plugins/__tests__/withMathClipboard.test.ts src/editor/plugins/__tests__/withMarkdownPaste.test.ts src/editor/plugins/autoformat/__tests__/withAutoformat.test.ts
 ```
 
 Expected: PASS.
@@ -579,7 +579,7 @@ Assert preview math has no links, buttons, textboxes, or activation handler; inv
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/components/MarkdownRenderer.test.tsx src/components/codex/PreviewMarkdown.test.tsx
+bun run --cwd ui test -- src/components/MarkdownRenderer.test.tsx src/components/codex/PreviewMarkdown.test.tsx
 ```
 
 Expected: FAIL because neither renderer installs the math plugin or component mapping.
@@ -603,7 +603,7 @@ Add a “Math” section to `getting-started.mdx` after the core Markdown author
 Run:
 
 ```bash
-bun --cwd ui x vitest run src/components/MarkdownRenderer.test.tsx src/components/codex/PreviewMarkdown.test.tsx src/components/MathExpression.test.tsx
+bun run --cwd ui test -- src/components/MarkdownRenderer.test.tsx src/components/codex/PreviewMarkdown.test.tsx src/components/MathExpression.test.tsx
 bun run --cwd ui typecheck
 bun run --cwd ui lint
 ```

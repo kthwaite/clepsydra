@@ -300,6 +300,84 @@ See [[Other Page]] for more.`;
     const mid2 = para2.children.find((c) => c.text === "mid");
     expect(mid2?.underline).toBe(true);
   });
+
+  it.each([
+    "$x$",
+    String.raw`\(x\)`,
+    "$$\nx\n$$",
+    String.raw`\[
+x
+\]`,
+  ])("preserves math source: %s", (source) => {
+    expect(slateToMarkdown(markdownToSlate(source)).trim()).toBe(source.trim());
+  });
+
+
+  it("round-trips programmatic inline dollar collisions through backslash math", () => {
+    const slate = [
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "inline-math",
+            tex: "a$b",
+            delimiter: "$",
+            children: [{ text: "" }],
+          },
+        ],
+      },
+    ] as Parameters<typeof slateToMarkdown>[0];
+
+    const markdown = slateToMarkdown(slate).trim();
+    expect(markdown).toBe(String.raw`\(a$b\)`);
+    expect(markdownToSlate(markdown)).toEqual([
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "inline-math",
+            tex: "a$b",
+            delimiter: String.raw`\(`,
+            children: [{ text: "" }],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("round-trips programmatic display dollar collisions through backslash math", () => {
+    const slate = [
+      {
+        type: "math-block",
+        tex: "a $$ b",
+        delimiter: "$$",
+        children: [{ text: "" }],
+      },
+    ] as Parameters<typeof slateToMarkdown>[0];
+
+    const markdown = slateToMarkdown(slate).trim();
+    expect(markdown).toBe(String.raw`\[a $$ b\]`);
+    expect(markdownToSlate(markdown)).toEqual([
+      {
+        type: "math-block",
+        tex: "a $$ b",
+        delimiter: String.raw`\[`,
+        children: [{ text: "" }],
+      },
+    ]);
+  });
+  it("keeps surrounding paragraphs and code blocks unchanged", () => {
+    const source = [
+      "before $x$ after",
+      "",
+      "```tex",
+      String.raw`\(not-math\)`,
+      "$not-math$",
+      "```",
+    ].join("\n");
+
+    expect(roundTrip(source).trim()).toBe(source);
+  });
 });
 
 describe("footnotes round-trip", () => {

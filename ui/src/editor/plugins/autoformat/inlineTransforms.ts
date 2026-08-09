@@ -23,6 +23,18 @@ function isOpenerBoundary(charBefore: string): boolean {
   return OPENER_BOUNDARY.test(charBefore);
 }
 
+function isEscaped(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (
+    let cursor = index - 1;
+    cursor >= 0 && text[cursor] === "\\";
+    cursor--
+  ) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+
 /**
  * Attempts an inline transform triggered by the typed character.
  * Returns true if a transform was applied, false otherwise.
@@ -269,6 +281,10 @@ function tryBracketTransform(editor: Editor, closerConsumed = false): boolean {
   const contentEnd = textBefore.length - (closerConsumed ? 1 : 0);
   const openBracketIdx = textBefore.lastIndexOf("[", contentEnd - 1);
   if (openBracketIdx === -1) return false;
+  // An odd backslash run before `[` starts backslash-bracket math syntax.
+  // An even run escapes the final backslash, so the bracket remains eligible
+  // for ordinary link-label autoformat.
+  if (isEscaped(textBefore, openBracketIdx)) return false;
   if (openBracketIdx > 0 && !isOpenerBoundary(textBefore[openBracketIdx - 1]))
     return false;
   if (hasInvalidBracketSyntax(textBefore, openBracketIdx, contentEnd))

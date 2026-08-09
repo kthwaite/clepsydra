@@ -294,6 +294,33 @@ Vimeo. Direct PDF, audio, video, and image links receive file-type marks. A
 specific service takes precedence over a generic file extension, so an arXiv
 PDF receives the arXiv mark rather than the generic PDF mark.
 
+## Math
+
+Author inline TeX with either dollar or backslash delimiters:
+
+```markdown
+Euler's identity is $e^{i\pi} + 1 = 0$.
+The same expression is \(e^{i\pi} + 1 = 0\).
+```
+
+Author display TeX on its own lines with either delimiter family:
+
+```markdown
+$$
+\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
+$$
+
+\[
+\sum_{k=1}^{n} k = \frac{n(n+1)}{2}
+\]
+```
+
+Click rendered math, or focus it with the keyboard and press `Enter`, to edit
+its exact TeX source. If KaTeX cannot render an expression, Folio leaves the
+authored delimiters and source visible unchanged so you can repair it.
+
+Folio supports KaTeX-compatible TeX, not complete LaTeX documents or every MathJax extension.
+
 ## 9) Optional: Edit the vault from Neovim (LSP)
 
 `clep lsp` starts a standalone language server on stdio — completion for

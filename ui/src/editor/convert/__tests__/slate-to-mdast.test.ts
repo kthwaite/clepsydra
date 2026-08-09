@@ -415,4 +415,37 @@ describe("slateToMarkdown", () => {
     expect(md).toContain("~");
     expect(md).toContain("both");
   });
+
+  it("serializes typed inline and block math without descriptor registration", () => {
+    const slate = [
+      {
+        type: "paragraph",
+        children: [
+          { text: "before " },
+          {
+            type: "inline-math",
+            tex: "x",
+            delimiter: String.raw`\(`,
+            children: [{ text: "" }],
+          },
+          { text: " after" },
+        ],
+      },
+      {
+        type: "math-block",
+        tex: "y",
+        delimiter: "$$",
+        children: [{ text: "" }],
+      },
+    ] as Descendant[];
+
+    expect(slateToMarkdown(slate)).toBe(
+      String.raw`before \(x\) after
+
+$$
+y
+$$
+`,
+    );
+  });
 });
