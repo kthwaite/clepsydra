@@ -182,15 +182,13 @@ fn set_checkbox(current: &mut Option<BlockBuilder>, checked: bool) {
     }
 }
 
-/// Handle `Start(Paragraph)`. Inside a blockquote a paragraph is a structural
-/// wrapper, so we (re)start a Blockquote builder spanning from the blockquote
-/// start WITHOUT flushing the current builder (matches the original); otherwise
-/// start a normal Paragraph builder.
+/// Handle `Start(Paragraph)`. Inside a blockquote a paragraph is represented as
+/// a Blockquote block using the paragraph's own source span; otherwise start a
+/// normal Paragraph builder.
 fn handle_paragraph_start(
     blocks: &mut Vec<Block>,
     current: &mut Option<BlockBuilder>,
     in_blockquote: bool,
-    blockquote_span_start: usize,
     range_start: usize,
     range_end: usize,
 ) {
@@ -200,7 +198,7 @@ fn handle_paragraph_start(
             text_parts: Vec::new(),
             checkbox: None,
             list_depth: 0,
-            span_start: blockquote_span_start,
+            span_start: range_start,
             span_end: range_end,
         });
     } else {
@@ -215,23 +213,14 @@ fn handle_paragraph_start(
     }
 }
 
-/// Handle `End(Paragraph)`: set the builder's span_end (blockquote end when in a
-/// blockquote, else the paragraph range end), then flush.
+/// Handle `End(Paragraph)`: set the builder's span_end to the paragraph range
+/// end, then flush.
 fn handle_paragraph_end(
     blocks: &mut Vec<Block>,
     current: &mut Option<BlockBuilder>,
-    in_blockquote: bool,
-    blockquote_span_end: usize,
     range_end: usize,
 ) {
-    if let Some(builder) = current.as_mut() {
-        builder.span_end = if in_blockquote {
-            blockquote_span_end
-        } else {
-            range_end
-        };
-    }
-    flush_current(blocks, current);
+    finish_block(blocks, current, range_end);
 }
 
 /// Append inline text to the in-progress builder (no-op if none open).
@@ -256,8 +245,6 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
     let mut current: Option<BlockBuilder> = None;
     let mut list_depth: usize = 0;
     let mut in_blockquote = false;
-    let mut blockquote_span_start: usize = 0;
-    let mut blockquote_span_end: usize = 0;
 
     for (event, range) in parser {
         match event {
@@ -286,17 +273,12 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 &mut blocks,
                 &mut current,
                 in_blockquote,
-                blockquote_span_start,
                 range.start,
                 range.end,
             ),
-            Event::End(TagEnd::Paragraph) => handle_paragraph_end(
-                &mut blocks,
-                &mut current,
-                in_blockquote,
-                blockquote_span_end,
-                range.end,
-            ),
+            Event::End(TagEnd::Paragraph) => {
+                handle_paragraph_end(&mut blocks, &mut current, range.end)
+            }
             Event::Start(Tag::CodeBlock(_)) => start_block_builder(
                 &mut blocks,
                 &mut current,
@@ -308,12 +290,9 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
             Event::End(TagEnd::CodeBlock) => finish_block(&mut blocks, &mut current, range.end),
             Event::Start(Tag::BlockQuote(_)) => {
                 in_blockquote = true;
-                blockquote_span_start = range.start;
-                blockquote_span_end = range.end;
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 in_blockquote = false;
-                blockquote_span_end = range.end;
             }
             Event::Text(text) => append_text(&mut current, text.to_string()),
             Event::Code(code) => append_text(&mut current, format!("`{code}`")),
@@ -458,9 +437,9 @@ mod tests {
     }
 
     #[test]
-    fn paragraph_start_in_blockquote_replaces_without_flushing() {
-        // Pins the non-obvious invariant: a blockquote-wrapped paragraph start
-        // overwrites the in-progress builder WITHOUT emitting it.
+    fn paragraph_start_in_blockquote_uses_paragraph_span_without_flushing() {
+        // A blockquote-wrapped paragraph start overwrites the in-progress
+        // builder without emitting it and keeps its own source span.
         let mut blocks: Vec<Block> = Vec::new();
         let mut current = Some(BlockBuilder {
             block_type: BlockType::Paragraph,
@@ -470,17 +449,16 @@ mod tests {
             span_start: 0,
             span_end: 5,
         });
-        handle_paragraph_start(&mut blocks, &mut current, true, 10, 20, 30);
+        handle_paragraph_start(&mut blocks, &mut current, true, 20, 30);
         // The previous builder was dropped, not emitted.
         assert!(blocks.is_empty(), "blockquote start must not flush");
         let b = current.as_ref().expect("a builder should be present");
         assert_eq!(b.block_type, BlockType::Blockquote);
-        assert_eq!(b.span_start, 10, "span_start comes from blockquote start");
+        assert_eq!(b.span_start, 20, "span_start comes from paragraph start");
     }
 
     #[test]
-    fn paragraph_end_in_blockquote_uses_blockquote_span_end() {
-        // The blockquote branch must emit span_end == blockquote_span_end, not range_end.
+    fn paragraph_end_uses_paragraph_span_end() {
         let mut blocks: Vec<Block> = Vec::new();
         let mut current = Some(BlockBuilder {
             block_type: BlockType::Blockquote,
@@ -490,12 +468,12 @@ mod tests {
             span_start: 10,
             span_end: 0,
         });
-        handle_paragraph_end(&mut blocks, &mut current, true, 42, 99);
+        handle_paragraph_end(&mut blocks, &mut current, 99);
         assert!(current.is_none());
         assert_eq!(blocks.len(), 1);
         assert_eq!(
-            blocks[0].span.end, 42,
-            "blockquote end span should win over range_end"
+            blocks[0].span.end, 99,
+            "paragraph range end should be retained"
         );
     }
 }
