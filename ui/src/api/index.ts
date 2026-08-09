@@ -1,5 +1,13 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
+import { invalidateByPath, invalidatePageStructure, queryKeys } from "./keys";
+
+export type AmbiguousName = components["schemas"]["AmbiguousName"];
+export type CreateFromLinkRequest =
+  components["schemas"]["CreateFromLinkRequest"];
+export type RebuildResponse = components["schemas"]["RebuildResponse"];
+export type UnresolvedLink = components["schemas"]["UnresolvedLink"];
 
 export type MutationOperation = "move_page" | "delete_page" | "move_folder";
 export type MutationRewrite = "plain_text" | "unlink" | "none";
@@ -87,6 +95,57 @@ export function useBacklinks(path: string) {
     { params: { path: { path } } },
     { enabled: !!path },
   );
+}
+
+export function useUnresolvedLinks() {
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/unresolved",
+    {},
+    { throwOnError: false },
+  );
+}
+
+export function useAmbiguousNames() {
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/ambiguous",
+    {},
+    { throwOnError: false },
+  );
+}
+
+export function useIndexWarnings() {
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/warnings",
+    {},
+    { throwOnError: false },
+  );
+}
+
+function useIndexInvalidation(includeAcademic = false) {
+  const queryClient = useQueryClient();
+  return () => {
+    invalidatePageStructure(queryClient);
+    if (includeAcademic) {
+      invalidateByPath(queryClient, queryKeys.academic.pathPrefix);
+    }
+  };
+}
+
+export function useCreateFromLink() {
+  const invalidate = useIndexInvalidation();
+  return $api.useMutation("post", "/api/vault/index/create-from-link", {
+    onSuccess: invalidate,
+  });
+}
+
+export function useRebuildIndex() {
+  const invalidate = useIndexInvalidation(true);
+  return $api.useMutation("post", "/api/vault/index/rebuild", {
+    onSuccess: invalidate,
+  });
 }
 
 export function useTags(enabled = true) {
