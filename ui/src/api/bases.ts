@@ -1,11 +1,20 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
+import { isApiError } from "./error";
 import { invalidateByPath, queryKeys } from "./keys";
 
 export type BaseDetailResponse = components["schemas"]["BaseDetailResponse"];
+export type BaseMemberCreateRequest =
+  components["schemas"]["BaseMemberCreateRequest"];
+export type BaseMemberCreateResponse =
+  components["schemas"]["BaseMemberCreateResponse"];
+export type BaseMemberCapability =
+  components["schemas"]["BaseMemberCapability"];
+export type BaseMemberDiagnostic =
+  components["schemas"]["BaseMemberDiagnostic"];
 export type BaseFile = components["schemas"]["BaseFile"];
 export type BaseListResponse = components["schemas"]["BaseListResponse"];
 export type BaseSummary = components["schemas"]["BaseSummary"];
@@ -23,6 +32,23 @@ export type QueryOutput = components["schemas"]["QueryOutput"];
 export type QueryRow = components["schemas"]["QueryRow"];
 export type GroupResult = components["schemas"]["GroupResult"];
 
+export function decodeBaseMemberDiagnostics(
+  error: unknown,
+): BaseMemberDiagnostic[] {
+  if (
+    !isApiError(error) ||
+    typeof error.detail !== "object" ||
+    !error.detail ||
+    !("diagnostics" in error.detail)
+  ) {
+    return [];
+  }
+  const diagnostics = error.detail.diagnostics;
+  return Array.isArray(diagnostics)
+    ? (diagnostics as BaseMemberDiagnostic[])
+    : [];
+}
+
 function useInvalidateBaseQueries() {
   const qc = useQueryClient();
   return useCallback(() => {
@@ -31,11 +57,24 @@ function useInvalidateBaseQueries() {
   }, [qc]);
 }
 
+export function invalidateBaseMemberQueries(queryClient: QueryClient): void {
+  invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
+  invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+  invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
+}
+
 export const useBases = () => $api.useQuery("get", "/api/vault/bases", {});
 
 export function useCreateBase() {
   const onSuccess = useInvalidateBaseQueries();
   return $api.useMutation("post", "/api/vault/bases", { onSuccess });
+}
+
+export function useCreateBaseMember() {
+  const queryClient = useQueryClient();
+  return $api.useMutation("post", "/api/vault/bases/{slug}/members", {
+    onSuccess: () => invalidateBaseMemberQueries(queryClient),
+  });
 }
 
 export function useUpdateBase() {
