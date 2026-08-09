@@ -18,6 +18,7 @@ import {
 import { tryInlineTransform } from "./inlineTransforms";
 import {
   isInMathCandidate,
+  tryDisplayMathNewline,
   tryMathTransform,
 } from "./mathTransforms";
 import { tryListContinuation } from "./listContinuation";
@@ -99,6 +100,7 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
     if (tryCodeBlockNewline(editor)) return;
+    if (tryDisplayMathNewline(editor)) return;
     if (
       tryPrefixedLinkBreakTransform(editor, () => {
         if (!trySemanticBreak(editor, false)) insertBreak();

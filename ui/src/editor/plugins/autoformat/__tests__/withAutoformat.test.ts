@@ -182,6 +182,128 @@ describe("withAutoformat integration", () => {
       },
     );
 
+    it.each([
+      ["$$", "$$", "$$"],
+      [String.raw`\[`, "\\[", String.raw`\]`],
+    ])(
+      "keeps Enter literal inside an unmatched %s display and converts multiline source",
+      (opener, delimiter, closer) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, `${opener}first`);
+        editor.insertBreak();
+        type(editor, `second${closer}`);
+
+        expect(editor.children).toEqual([
+          {
+            type: "math-block",
+            tex: "first\nsecond",
+            delimiter,
+            children: [{ text: "" }],
+          },
+          { type: "paragraph", children: [{ text: "" }] },
+        ]);
+        expect(editor.selection).toEqual({
+          anchor: { path: [1, 0], offset: 0 },
+          focus: { path: [1, 0], offset: 0 },
+        });
+      },
+    );
+
+    it.each([
+      [
+        "blockquote",
+        "$$nested$$",
+        "$$",
+        [
+          {
+            type: "blockquote",
+            children: [{ type: "paragraph", children: [{ text: "" }] }],
+          },
+        ],
+        [0],
+        [0, 1, 0],
+      ],
+      [
+        "blockquote",
+        String.raw`\[nested\]`,
+        "\\[",
+        [
+          {
+            type: "blockquote",
+            children: [{ type: "paragraph", children: [{ text: "" }] }],
+          },
+        ],
+        [0],
+        [0, 1, 0],
+      ],
+      [
+        "list item",
+        "$$nested$$",
+        "$$",
+        [
+          {
+            type: "bulleted-list",
+            children: [
+              {
+                type: "list-item",
+                children: [
+                  { type: "paragraph", children: [{ text: "" }] },
+                ],
+              },
+            ],
+          },
+        ],
+        [0, 0],
+        [0, 0, 1, 0],
+      ],
+      [
+        "list item",
+        String.raw`\[nested\]`,
+        "\\[",
+        [
+          {
+            type: "bulleted-list",
+            children: [
+              {
+                type: "list-item",
+                children: [
+                  { type: "paragraph", children: [{ text: "" }] },
+                ],
+              },
+            ],
+          },
+        ],
+        [0, 0],
+        [0, 0, 1, 0],
+      ],
+    ])(
+      "converts standalone %s display source %s at its nested paragraph path",
+      (_containerName, source, delimiter, value, containerPath, caretPath) => {
+        const editor = makeSchemaEditor(value as Descendant[]);
+
+        type(editor, source);
+
+        const [container] = Editor.node(editor, containerPath);
+        if (!SlateElement.isElement(container)) {
+          throw new Error("Expected a nested display container");
+        }
+        expect(container.children).toEqual([
+          {
+            type: "math-block",
+            tex: "nested",
+            delimiter,
+            children: [{ text: "" }],
+          },
+          { type: "paragraph", children: [{ text: "" }] },
+        ]);
+        expect(editor.selection).toEqual({
+          anchor: { path: caretPath, offset: 0 },
+          focus: { path: caretPath, offset: 0 },
+        });
+      },
+    );
+
     it.each(["before $$x$$", String.raw`before \[x\]`])(
       "leaves non-standalone display syntax as text: %s",
       (source) => {

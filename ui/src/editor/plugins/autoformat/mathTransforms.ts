@@ -60,7 +60,6 @@ export function tryMathTransform(
     sourceBefore,
     leaf,
     block,
-    blockPath,
     anchor,
     closerConsumed,
   );
@@ -77,18 +76,63 @@ export function tryMathTransform(
 }
 
 /**
+ * Insert a literal newline while authoring a standalone display expression.
+ * Display math is stored in one paragraph text leaf until its closer converts
+ * the paragraph, so Slate's default block split would strand the opener.
+ */
+export function tryDisplayMathNewline(editor: Editor): boolean {
+  const context = currentMathCandidateContext(editor);
+  if (!context) return false;
+
+  const { block, leaf, textBefore } = context;
+  if (
+    block.type !== "paragraph" ||
+    block.children.length !== 1 ||
+    block.children[0] !== leaf ||
+    !hasUnmatchedDisplayOpener(textBefore)
+  ) {
+    return false;
+  }
+
+  Transforms.insertText(editor, "\n");
+  return true;
+}
+
+/**
  * Whether the collapsed selection is inside an unmatched, supported math
  * opener in the current leaf. Autoformat callers use this to keep TeX body
  * punctuation literal until the matching math closer is typed.
  */
 export function isInMathCandidate(editor: Editor): boolean {
+  const context = currentMathCandidateContext(editor);
+  if (!context) return false;
+
+  const { block, leaf, textBefore } = context;
+  if (
+    block.type === "paragraph" &&
+    block.children.length === 1 &&
+    block.children[0] === leaf &&
+    hasUnmatchedDisplayOpener(textBefore)
+  ) {
+    return true;
+  }
+
+  return (
+    hasUnclosedBackslashParen(textBefore) ||
+    hasUnclosedInlineDollar(textBefore)
+  );
+}
+
+function currentMathCandidateContext(
+  editor: Editor,
+): { block: SlateElement; leaf: Text; textBefore: string } | null {
   const { selection } = editor;
-  if (!selection || !Range.isCollapsed(selection)) return false;
+  if (!selection || !Range.isCollapsed(selection)) return null;
 
   const { anchor } = selection;
   const [leaf] = Editor.node(editor, anchor.path);
-  if (!Text.isText(leaf) || leaf.code === true) return false;
-  if (Editor.marks(editor)?.code === true) return false;
+  if (!Text.isText(leaf) || leaf.code === true) return null;
+  if (Editor.marks(editor)?.code === true) return null;
 
   const blockEntry = Editor.above(editor, {
     at: anchor,
@@ -98,38 +142,26 @@ export function isInMathCandidate(editor: Editor): boolean {
       Editor.isBlock(editor, node),
     mode: "lowest",
   });
-  if (!blockEntry) return false;
+  if (!blockEntry) return null;
 
-  const [block, blockPath] = blockEntry;
-  if (!SlateElement.isElement(block) || block.type === "code-block") {
-    return false;
-  }
+  const [block] = blockEntry;
+  if (!SlateElement.isElement(block) || block.type === "code-block") return null;
 
-  const textBefore = leaf.text.slice(0, anchor.offset);
-  if (
-    blockPath.length === 1 &&
-    block.type === "paragraph" &&
-    block.children.length === 1 &&
-    block.children[0] === leaf
-  ) {
-    if (
-      textBefore.startsWith("$$") &&
-      !textBefore.startsWith("$$$") &&
-      !hasDisplayDollarCloser(textBefore)
-    ) {
-      return true;
-    }
-    if (
-      textBefore.startsWith("\\[") &&
-      !hasUnescapedSequence(textBefore, "\\]", 2)
-    ) {
-      return true;
-    }
-  }
+  return {
+    block,
+    leaf,
+    textBefore: leaf.text.slice(0, anchor.offset),
+  };
+}
 
+
+function hasUnmatchedDisplayOpener(textBefore: string): boolean {
   return (
-    hasUnclosedBackslashParen(textBefore) ||
-    hasUnclosedInlineDollar(textBefore)
+    (textBefore.startsWith("$$") &&
+      !textBefore.startsWith("$$$") &&
+      !hasDisplayDollarCloser(textBefore)) ||
+    (textBefore.startsWith("\\[") &&
+      !hasUnescapedSequence(textBefore, "\\]", 2))
   );
 }
 
@@ -227,12 +259,10 @@ function matchDisplay(
   sourceBefore: string,
   leaf: Text,
   block: SlateElement,
-  blockPath: Path,
   anchor: Point,
   closerConsumed: boolean,
 ): MathMatch | null {
   if (
-    blockPath.length !== 1 ||
     block.type !== "paragraph" ||
     block.children.length !== 1 ||
     block.children[0] !== leaf ||
