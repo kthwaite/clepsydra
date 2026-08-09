@@ -154,3 +154,30 @@ bunx biome check --write \
   src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
 OK
 ```
+
+## Review fix round 3
+
+Selection-only navigation during an in-flight Save now survives winning response rehydration. A synchronous selection ref tracks the latest view choice independently of `editGeneration`. When the response wins, that latest ID is resolved against the submitted draft, converted to its submitted logical name/index, and mapped to the response’s fresh IDs. The submission-time selection is used only when the latest selection cannot be resolved.
+
+The failing-first deferred regression began Save with **All**, selected **Later** while the mutation was pending, then resolved fresh response IDs. Before the fix the response reset the editor and preview to **All**. Final behavior retains **Later** in both the editor and preview. The rename-plus-reorder regression from round 2 remains green.
+
+Final round-three verification:
+
+```text
+bun run --cwd ui test \
+  src/components/bases/__tests__/definition-model.test.ts \
+  src/components/bases/__tests__/BaseTableView.test.tsx \
+  src/components/bases/__tests__/ViewsEditor.test.tsx \
+  src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
+
+Test Files  4 passed (4)
+Tests       55 passed (55)
+
+bun run --cwd ui typecheck
+exit 0
+
+bunx biome check --write \
+  src/components/bases/BaseDefinitionWorkspace.tsx \
+  src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
+OK
+```

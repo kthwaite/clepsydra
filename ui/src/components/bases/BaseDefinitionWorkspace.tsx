@@ -38,6 +38,26 @@ export interface BaseDefinitionWorkspaceProps {
 
 type SectionId = "general" | "filter" | "properties" | "views";
 
+interface ViewSelection {
+  id?: string;
+  name?: string;
+  index: number;
+}
+
+function selectionIndex(views: BaseDraft["views"], selection: ViewSelection) {
+  const idIndex = views.findIndex((view) => view.id === selection.id);
+  if (idIndex >= 0) return idIndex;
+  if (selection.name) {
+    const matchingIndexes = views.flatMap((view, index) =>
+      view.name === selection.name ? [index] : [],
+    );
+    if (matchingIndexes.length === 1) return matchingIndexes[0];
+  }
+  return selection.index >= 0 && selection.index < views.length
+    ? selection.index
+    : -1;
+}
+
 const sectionOrder: Array<{ id: SectionId; label: string }> = [
   { id: "general", label: "General" },
   { id: "filter", label: "Filter" },
@@ -111,11 +131,10 @@ export function BaseDefinitionWorkspace({
     path: string;
     sequence: number;
   }>();
-  const [selectedView, setSelectedView] = useState<{
-    id?: string;
-    name?: string;
-    index: number;
-  }>({ index: 0 });
+  const [selectedView, setSelectedView] = useState<ViewSelection>({
+    index: 0,
+  });
+  const selectedViewRef = useRef<ViewSelection>(selectedView);
 
   const editGeneration = useRef(0);
   const savedGeneration = useRef(0);
@@ -203,22 +222,12 @@ export function BaseDefinitionWorkspace({
     const submittedGeneration = editGeneration.current;
     const submittedRevision = revision;
     const submittedDraft = structuredClone(draft);
-    let submittedSelectedIndex = submittedDraft.views.findIndex(
-      (view) => view.id === selectedView.id,
+    let submittedSelectedIndex = selectionIndex(
+      submittedDraft.views,
+      selectedViewRef.current,
     );
-    if (submittedSelectedIndex < 0 && selectedView.name) {
-      const matchingIndexes = submittedDraft.views.flatMap((view, index) =>
-        view.name === selectedView.name ? [index] : [],
-      );
-      if (matchingIndexes.length === 1) {
-        submittedSelectedIndex = matchingIndexes[0];
-      }
-    }
-    if (submittedSelectedIndex < 0) {
-      submittedSelectedIndex = Math.min(
-        selectedView.index,
-        Math.max(0, submittedDraft.views.length - 1),
-      );
+    if (submittedSelectedIndex < 0 && submittedDraft.views.length > 0) {
+      submittedSelectedIndex = 0;
     }
     const submittedSelectedView = submittedDraft.views[submittedSelectedIndex];
     setSaving(true);
@@ -239,23 +248,35 @@ export function BaseDefinitionWorkspace({
       obsoleteQueryRevisions.current.add(submittedRevision);
       if (editGeneration.current === submittedGeneration) {
         setDraftState(serverDraft);
-        if (submittedSelectedView) {
+        const latestSelectedIndex = selectionIndex(
+          submittedDraft.views,
+          selectedViewRef.current,
+        );
+        const logicalSelectedIndex =
+          latestSelectedIndex >= 0
+            ? latestSelectedIndex
+            : submittedSelectedIndex;
+        const logicalSelectedView =
+          submittedDraft.views[logicalSelectedIndex] ?? submittedSelectedView;
+        if (logicalSelectedView) {
           const matchingIndexes = serverDraft.views.flatMap((view, index) =>
-            view.name === submittedSelectedView.name ? [index] : [],
+            view.name === logicalSelectedView.name ? [index] : [],
           );
           const nextIndex =
             matchingIndexes.length === 1
               ? matchingIndexes[0]
               : Math.min(
-                  submittedSelectedIndex,
+                  logicalSelectedIndex,
                   Math.max(0, serverDraft.views.length - 1),
                 );
           const nextView = serverDraft.views[nextIndex];
-          setSelectedView({
+          const nextSelection = {
             id: nextView?.id,
             name: nextView?.name,
             index: nextIndex,
-          });
+          };
+          selectedViewRef.current = nextSelection;
+          setSelectedView(nextSelection);
         }
       }
     } catch (error) {
@@ -324,16 +345,20 @@ export function BaseDefinitionWorkspace({
 
   function selectView(id: string | undefined) {
     if (!id) {
-      setSelectedView({ index: 0 });
+      const nextSelection = { index: 0 };
+      selectedViewRef.current = nextSelection;
+      setSelectedView(nextSelection);
       return;
     }
     const index = draftViews.findIndex((view) => view.id === id);
     const view = draftViews[index];
-    setSelectedView({
+    const nextSelection = {
       id,
       name: view?.name,
       index: index >= 0 ? index : 0,
-    });
+    };
+    selectedViewRef.current = nextSelection;
+    setSelectedView(nextSelection);
   }
 
   const status: DefinitionSaveStatus = saving

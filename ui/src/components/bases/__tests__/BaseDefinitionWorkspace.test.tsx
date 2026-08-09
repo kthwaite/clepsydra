@@ -631,4 +631,43 @@ describe("BaseDefinitionWorkspace", () => {
       ),
     );
   });
+
+  it("keeps a view selected while an unchanged draft save is in flight", async () => {
+    const twoViews: BaseDetailResponse = {
+      ...detail,
+      views: [
+        { name: "All", layout: "table", columns: ["title"] },
+        { name: "Later", layout: "table", columns: ["title"] },
+      ],
+    };
+    const pending = deferred<BaseMutationResponse>();
+    baseState.data = twoViews;
+    updateMock.mockReturnValue(pending.promise);
+    renderWorkspace();
+    const user = await renameBase("Saved name");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Select Later" }));
+
+    await act(async () => {
+      pending.resolve({
+        ...twoViews,
+        name: "Saved name",
+        revision: "revision-2",
+      });
+      await pending.promise;
+    });
+
+    expect(screen.getByLabelText("View name")).toHaveValue("Later");
+    expect(
+      screen.getByRole("button", { name: "Select Later" }),
+    ).toHaveAttribute("aria-current", "true");
+    await waitFor(() =>
+      expect(previewMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({ view: "Later" }),
+        }),
+      ),
+    );
+  });
 });
