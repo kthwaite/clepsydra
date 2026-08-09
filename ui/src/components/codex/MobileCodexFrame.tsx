@@ -5,6 +5,7 @@ import {
   type CodexView,
   resolveCodexView,
 } from "#/components/codex/useCodexView";
+import { useTheme } from "#/components/ThemeProvider";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
@@ -30,6 +31,9 @@ export function MobileCodexFrame({
   const navigate = useNavigate();
   const openSearch = useUiStore((state) => state.openSearch);
   const openInscribe = useUiStore((state) => state.openInscribe);
+  const openSettings = useUiStore((state) => state.openSettings);
+  const { toggle, resolvedTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
   const { tabs, activeTabId, openTab } = useWorkspaceStore();
   const view = forceView ?? resolveCodexView(pathname, tabs, activeTabId);
 
@@ -69,6 +73,23 @@ export function MobileCodexFrame({
           aria-label="New note"
         >
           New note
+        </button>
+        <button
+          type="button"
+          onClick={() => openSettings("appearance")}
+          className="cl-mono min-h-11 border-l border-rule-soft px-3 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+          aria-label="Status"
+        >
+          Status
+        </button>
+        <button
+          type="button"
+          onClick={toggle}
+          className="cl-mono min-h-11 border-l border-rule-soft px-3 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+          aria-label={dark ? "Switch to paper mode" : "Switch to dark mode"}
+          title={dark ? "Switch to paper mode" : "Switch to dark mode"}
+        >
+          [{dark ? "Dark" : "Paper"}]
         </button>
       </header>
 

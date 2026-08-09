@@ -330,7 +330,9 @@ function useMappedMutation<TData, TError, TRawVariables, TVariables, TContext>(
 }
 
 export function useFeeds() {
-  return $api.useQuery("get", FEEDS_PATH);
+  return $api.useQuery("get", FEEDS_PATH, undefined, {
+    throwOnError: false,
+  });
 }
 
 export function feedEntriesInfiniteOptions(filters: EntryFilters = {}) {
@@ -338,6 +340,7 @@ export function feedEntriesInfiniteOptions(filters: EntryFilters = {}) {
   delete ownedFilters.cursor;
   const queryInit = { params: { query: ownedFilters } } as const;
   return infiniteQueryOptions({
+    throwOnError: false,
     queryKey: ["get", ENTRIES_PATH, queryInit] as const,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {

@@ -5,22 +5,41 @@ import { MOBILE_LAYOUT_QUERY, useMobileLayout } from "#/hooks/useMobileLayout";
 function installMatchMedia(initial: boolean) {
   let matches = initial;
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
-  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
-    media: query,
-    get matches() { return matches; },
-    onchange: null,
-    addEventListener: (_type: "change", listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
-    removeEventListener: (_type: "change", listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
-    dispatchEvent: () => true,
-  })));
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      media: query,
+      get matches() {
+        return matches;
+      },
+      onchange: null,
+      addEventListener: (
+        _type: "change",
+        listener: (event: MediaQueryListEvent) => void,
+      ) => listeners.add(listener),
+      removeEventListener: (
+        _type: "change",
+        listener: (event: MediaQueryListEvent) => void,
+      ) => listeners.delete(listener),
+      dispatchEvent: () => true,
+    })),
+  );
   return (next: boolean) => {
     matches = next;
-    act(() => listeners.forEach((listener) => listener({ matches: next, media: MOBILE_LAYOUT_QUERY } as MediaQueryListEvent)));
+    act(() =>
+      listeners.forEach((listener) =>
+        listener({
+          matches: next,
+          media: MOBILE_LAYOUT_QUERY,
+        } as MediaQueryListEvent),
+      ),
+    );
   };
 }
 
 describe("useMobileLayout", () => {
-  it("tracks the shared 768px boundary", () => {
+  it("keeps the compact shell through 1199px", () => {
+    expect(MOBILE_LAYOUT_QUERY).toBe("(max-width: 1199px)");
     const setMobile = installMatchMedia(false);
     const { result, unmount } = renderHook(() => useMobileLayout());
     expect(matchMedia).toHaveBeenCalledWith(MOBILE_LAYOUT_QUERY);

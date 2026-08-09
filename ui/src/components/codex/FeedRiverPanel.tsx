@@ -16,17 +16,23 @@ export function FeedRiverPanel() {
   const navigate = useNavigate();
   const feedsQuery = useFeeds();
   const [view, setView] = useState<EntryView>("unread");
+  const queryErrorMessage =
+    feedsQuery.error instanceof Error
+      ? feedsQuery.error.message
+      : typeof feedsQuery.error === "object" &&
+          feedsQuery.error !== null &&
+          "message" in feedsQuery.error
+        ? String(feedsQuery.error.message)
+        : "Feed subscriptions could not be loaded.";
 
-  if (feedsQuery.isError) {
+  if (feedsQuery.isError && !feedsQuery.data) {
     return (
       <section aria-label="Feed river panel" className="col-span-12">
         <div
           role="alert"
           className="border border-hot bg-paper-2 px-3 py-3 text-[12px] text-hot"
         >
-          {feedsQuery.error instanceof Error
-            ? feedsQuery.error.message
-            : "Feed subscriptions could not be loaded."}
+          {queryErrorMessage}
         </div>
       </section>
     );
@@ -56,7 +62,11 @@ export function FeedRiverPanel() {
       <Card
         label="Feed river"
         caption={`${subscriptionCount} ${subscriptionCount === 1 ? "SOURCE" : "SOURCES"}`}
-        pip={feedsQuery.data.diagnostics.length ? "hot" : "cool"}
+        pip={
+          feedsQuery.isError || feedsQuery.data.diagnostics.length
+            ? "hot"
+            : "cool"
+        }
         action={
           subscriptionCount > 0 ? (
             <Button
@@ -73,6 +83,15 @@ export function FeedRiverPanel() {
           ) : null
         }
       >
+        {feedsQuery.isError ? (
+          <div
+            role="alert"
+            className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+          >
+            {queryErrorMessage}
+          </div>
+        ) : null}
+
         {feedsQuery.data.diagnostics.length > 0 ? (
           <div
             role="alert"

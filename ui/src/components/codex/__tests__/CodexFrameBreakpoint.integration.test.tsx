@@ -1,7 +1,13 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Descendant } from "slate";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   graph,
@@ -17,16 +23,31 @@ const {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
   const mediaQuery = {
     matches: false,
-    media: "(max-width: 767px)",
+    media: "(max-width: 1199px)",
     onchange: null,
-    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+    addEventListener: (
+      _type: string,
+      listener: (event: MediaQueryListEvent) => void,
+    ) => listeners.add(listener),
+    removeEventListener: (
+      _type: string,
+      listener: (event: MediaQueryListEvent) => void,
+    ) => listeners.delete(listener),
+    addListener: (listener: (event: MediaQueryListEvent) => void) =>
       listeners.add(listener),
-    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+    removeListener: (listener: (event: MediaQueryListEvent) => void) =>
       listeners.delete(listener),
-    addListener: (listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
-    removeListener: (listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
     dispatchEvent: () => true,
   } as MediaQueryList;
+
+  const setMatches = (matches: boolean) => {
+    Object.defineProperty(mediaQuery, "matches", {
+      configurable: true,
+      value: matches,
+    });
+    const event = { matches, media: mediaQuery.media } as MediaQueryListEvent;
+    for (const listener of listeners) listener(event);
+  };
 
   return {
     graph: {
@@ -38,13 +59,9 @@ const {
     },
     matchMediaController: {
       query: vi.fn(() => mediaQuery),
-      setMatches(matches: boolean) {
-        Object.defineProperty(mediaQuery, "matches", {
-          configurable: true,
-          value: matches,
-        });
-        const event = { matches, media: mediaQuery.media } as MediaQueryListEvent;
-        for (const listener of listeners) listener(event);
+      setMatches,
+      setWidth(width: number) {
+        setMatches(width <= 1199);
       },
     },
     navigateMock: vi.fn(),
@@ -184,12 +201,22 @@ describe("CodexFrame real breakpoint transitions", () => {
       mode: "graph",
     });
     useWorkspaceStore.setState({
-      tabs: [{ id: "page-alpha", type: "page", path: "notes/alpha.md", label: "Alpha" }],
+      tabs: [
+        {
+          id: "page-alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
       activeTabId: "page-alpha",
     });
     saveNowMock.mockRejectedValue(new Error("offline"));
     let editorValue: Descendant[] = [
-      { type: "paragraph", children: [{ text: "Original body" }] } as Descendant,
+      {
+        type: "paragraph",
+        children: [{ text: "Original body" }],
+      } as Descendant,
     ];
     usePageEditorMock.mockReturnValue({
       isLoading: false,
@@ -225,6 +252,43 @@ describe("CodexFrame real breakpoint transitions", () => {
       getPlaintext: vi.fn(),
       getRevision: vi.fn(),
     });
+  });
+
+  it("keeps intermediate widths compact without hiding Status or theme", async () => {
+    const user = userEvent.setup();
+    matchMediaController.setWidth(1024);
+    render(
+      <CodexFrame forceView="atrium">
+        <div>Responsive content</div>
+      </CodexFrame>,
+    );
+
+    expect(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("navigation", { name: "Primary navigation" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Status" }));
+    await user.click(
+      screen.getByRole("button", { name: "Switch to dark mode" }),
+    );
+    expect(openSettingsMock).toHaveBeenCalledWith("appearance");
+    expect(toggleThemeMock).toHaveBeenCalledOnce();
+
+    act(() => matchMediaController.setWidth(1200));
+
+    expect(
+      screen.queryByRole("navigation", { name: "Mobile roots" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /08.*STATUS/i })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Switch to dark mode" }),
+    ).toBeVisible();
   });
 
   it("preserves real Constellation controls through real media-query changes", async () => {

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export const MOBILE_LAYOUT_QUERY = "(max-width: 767px)";
+export const MOBILE_LAYOUT_QUERY = "(max-width: 1199px)";
 
 function media(): MediaQueryList | undefined {
   return typeof window.matchMedia === "function"
