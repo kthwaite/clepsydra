@@ -435,4 +435,3 @@ git diff --stat develop...HEAD
 ```
 
 Expected: only planned files, clean worktree, checkpoint commits present.
-
