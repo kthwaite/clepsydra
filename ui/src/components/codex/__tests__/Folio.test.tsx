@@ -220,6 +220,29 @@ describe("Folio invalid-tab recovery", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps raw tag editing and blur-save operational without a tag index", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    useTagsMock.mockReturnValue({
+      data: undefined,
+      error: new Error("tag index unavailable"),
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "ad-hoc");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+    fireEvent.blur(input);
+
+    expect(editor.setTags).toHaveBeenCalledOnce();
+    expect(editor.setTags).toHaveBeenCalledWith(["mobile", "ad-hoc"]);
+    expect(editor.saveNow).toHaveBeenCalledOnce();
+  });
+
   it("renders a locked folio without mounting Slate or exposing armor", () => {
     const armor = "-----BEGIN AGE ENCRYPTED FILE----- SECRET ARMOR";
     usePageEditorMock.mockReturnValue({

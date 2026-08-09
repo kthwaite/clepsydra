@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TagInput } from "#/components/ui/tag-input";
@@ -281,6 +281,99 @@ describe("TagInput", () => {
     expect(
       screen.queryByRole("listbox", { name: "Tag suggestions" }),
     ).toBeNull();
+  });
+
+  it("commits the raw draft on Enter while suggestions are open", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research", "react"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "re");
+    expect(
+      screen.getByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["re"]);
+  });
+
+  it("commits only the mouse-selected suggestion before blur", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research", "react"]}
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "re");
+    fireEvent.mouseDown(screen.getByRole("option", { name: "research" }));
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["research"]);
+  });
+
+  it("renders at most five matching suggestions", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["alpha", "beta", "gamma", "delta", "zeta", "eta"]}
+        onChange={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "a");
+
+    expect(screen.getAllByRole("option")).toHaveLength(5);
+    expect(screen.queryByRole("option", { name: "eta" })).toBeNull();
+  });
+
+  it("links the combobox to its listbox and active option across navigation", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react"]}
+        onChange={() => {}}
+      />,
+    );
+
+    const combobox = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(combobox, "r");
+    const listbox = screen.getByRole("listbox", { name: "Tag suggestions" });
+    const initialOption = screen.getByRole("option", { selected: true });
+
+    expect(combobox).toHaveAttribute("aria-controls", listbox.id);
+    expect(combobox).toHaveAttribute(
+      "aria-activedescendant",
+      initialOption.id,
+    );
+
+    await user.keyboard("{ArrowDown}");
+    const navigatedOption = screen.getByRole("option", { selected: true });
+
+    expect(navigatedOption.id).not.toBe(initialOption.id);
+    expect(combobox).toHaveAttribute("aria-controls", listbox.id);
+    expect(combobox).toHaveAttribute(
+      "aria-activedescendant",
+      navigatedOption.id,
+    );
   });
 
   it("tab-completes the initially highlighted suggestion", async () => {
