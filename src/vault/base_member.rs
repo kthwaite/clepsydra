@@ -374,7 +374,11 @@ fn collect_contributors(
             if filter_possibility(base, filter) == desired {
                 blockers.push(BaseMemberDiagnostic {
                     scope,
-                    field: Some(bare_field(field).to_owned()),
+                    field: Some(
+                        resolved_requirement(base, field)
+                            .map(|(_, request_key)| request_key)
+                            .unwrap_or_else(|| bare_field(field).to_owned()),
+                    ),
                     filter_path: Some(path.to_owned()),
                     message: "fixed candidate state prevents blank member creation".to_owned(),
                 });
@@ -1003,5 +1007,41 @@ layout = "table"
         )
         .unwrap_err();
         assert_eq!(errors[0].field.as_deref(), Some("prop.word_count"));
+    }
+
+    #[test]
+    fn capability_blockers_preserve_fixed_field_request_identity() {
+        let base = base(
+            r#"
+name = "Blocker keys"
+[filter]
+all = [
+  { field = "word_count", op = "gt", value = 0 },
+  { field = "prop.word_count", op = "eq", value = 7 }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        assert!(!capability.enabled);
+        assert_eq!(
+            capability
+                .blockers
+                .iter()
+                .map(|diagnostic| {
+                    (
+                        diagnostic.field.as_deref(),
+                        diagnostic.filter_path.as_deref(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("word_count"), Some("filter.all[0]")),
+                (Some("prop.word_count"), Some("filter.all[1]")),
+            ]
+        );
     }
 }

@@ -68,6 +68,12 @@ impl PropertyType {
         )
     }
 
+    /// Whether `contains` is defined for the type. Text-like values use
+    /// literal substring matching; categorical values use exact membership.
+    pub fn supports_contains(self) -> bool {
+        !matches!(self, PropertyType::Number | PropertyType::Bool)
+    }
+
     /// Whether saved-view evaluation can order this property as one scalar
     /// value per page.
     pub fn is_scalar_sortable(self) -> bool {
@@ -419,8 +425,7 @@ pub(crate) fn fixed_candidate_comparison_matches(
             false,
         )),
         ResolvedField::Prop { ty, .. }
-            if op == Op::Contains
-                && matches!(ty, PropertyType::Number | PropertyType::Bool) =>
+            if op == Op::Contains && !ty.supports_contains() =>
         {
             Some(false)
         }
@@ -698,14 +703,7 @@ fn scalar_matches(
                 })
             })
             .unwrap_or(false),
-        Op::Contains
-            if matches!(
-                property_type,
-                PropertyType::Number | PropertyType::Bool
-            ) =>
-        {
-            false
-        }
+        Op::Contains if !property_type.supports_contains() => false,
         Op::Contains => expected_scalar(property_type, value).is_some_and(|expected| {
             if contains_is_membership {
                 scalar_equal(&current, &expected)
@@ -1124,6 +1122,29 @@ fn validate_filter(
             validate_filter(base, child, &format!("{path}.not"), context, push);
         }
         Filter::Cmp { field, op, .. } => {
+            if *op == Op::Contains {
+                use crate::vault::query::{
+                    QueryContext, ResolvedField, SysField, resolve_field,
+                };
+
+                let query_context = QueryContext::for_base(base);
+                let supported = match resolve_field(field, &query_context) {
+                    Ok(ResolvedField::Sys(SysField::WordCount)) => false,
+                    Ok(ResolvedField::Sys(_)) => true,
+                    Ok(ResolvedField::Prop { ty, .. }) => ty.supports_contains(),
+                    Err(_) => false,
+                };
+                if !supported {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.op")),
+                        format!(
+                            "{context}: op `contains` is not valid for non-text field `{field}`"
+                        ),
+                    );
+                    return;
+                }
+            }
             let bare = field
                 .strip_prefix("prop.")
                 .or_else(|| field.strip_prefix("sys."))
@@ -1407,6 +1428,79 @@ value = "BOOK"
         assert!(base.property("title").is_some());
         assert!(base.property("kind").is_some());
         assert!(base.property("encryption").is_some());
+    }
+
+    #[test]
+    fn contains_validation_rejects_non_text_system_and_property_fields() {
+        let content = r#"
+name = "Invalid contains"
+[filter]
+all = [
+  { field = "word_count", op = "contains", value = 0 },
+  { field = "rating", op = "contains", value = 1.5 },
+  { field = "done", op = "contains", value = true }
+]
+[properties]
+rating = { type = "number" }
+done = { type = "bool" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("filter.all[0].op"),
+                Some("filter.all[1].op"),
+                Some("filter.all[2].op"),
+            ]
+        );
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic
+                .message
+                .contains("op `contains` is not valid for non-text field")
+        }));
+    }
+
+    #[test]
+    fn contains_validation_accepts_text_like_and_membership_fields() {
+        let content = r#"
+name = "Valid contains"
+[filter]
+all = [
+  { field = "text", op = "contains", value = "x" },
+  { field = "url", op = "contains", value = "x" },
+  { field = "date", op = "contains", value = "2026" },
+  { field = "datetime", op = "contains", value = "2026" },
+  { field = "select", op = "contains", value = "x" },
+  { field = "multi", op = "contains", value = "x" },
+  { field = "relation", op = "contains", value = "[[X]]" }
+]
+[properties]
+text = { type = "text" }
+url = { type = "url" }
+date = { type = "date" }
+datetime = { type = "datetime" }
+select = { type = "select", options = ["x"] }
+multi = { type = "multi_select", options = ["x"] }
+relation = { type = "relation" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(base.is_some());
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != BaseDiagnosticSeverity::Error)
+        );
     }
 
     #[test]

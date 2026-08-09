@@ -966,6 +966,77 @@ async fn blocking_diagnostics_are_bad_request_detail_without_notification() {
 }
 
 #[tokio::test]
+async fn non_text_contains_definition_is_rejected_with_stable_diagnostics() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "invalid-contains",
+            "definition": {
+                "name": "Invalid contains",
+                "filter": {
+                    "all": [
+                        { "field": "word_count", "op": "contains", "value": 0 },
+                        { "field": "rating", "op": "contains", "value": 1.5 },
+                        { "field": "done", "op": "contains", "value": true }
+                    ]
+                },
+                "properties": {
+                    "rating": { "type": "number" },
+                    "done": { "type": "bool" }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic["path"].as_str(),
+                    diagnostic["severity"].as_str(),
+                    diagnostic["message"].as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                Some("filter.all[0].op"),
+                Some("error"),
+                Some("filter: op `contains` is not valid for non-text field `word_count`"),
+            ),
+            (
+                Some("filter.all[1].op"),
+                Some("error"),
+                Some("filter: op `contains` is not valid for non-text field `rating`"),
+            ),
+            (
+                Some("filter.all[2].op"),
+                Some("error"),
+                Some("filter: op `contains` is not valid for non-text field `done`"),
+            ),
+        ]
+    );
+    assert_no_notification(&mut notifications);
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/invalid-contains.base.toml")
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn case_only_duplicate_view_names_are_rejected_before_publication() {
     let fixture = ApiFixture::builder().pre_index_seed(seed).build();
     let mut notifications = fixture.state.change_tx.subscribe();

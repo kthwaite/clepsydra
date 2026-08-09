@@ -481,17 +481,10 @@ fn compile_prop(
             }
             Ok(exists(&format!("pp.{column} IN ({})", holes.join(", "))))
         }
-        Op::Contains
-            if matches!(
-                ty,
-                PropertyType::Number | PropertyType::Bool
-            ) =>
-        {
-            Err(QueryError::InvalidOp {
-                field: field.to_string(),
-                op,
-            })
-        }
+        Op::Contains if !ty.supports_contains() => Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op,
+        }),
         Op::Contains => {
             params.push(SqlValue::Text(key.to_string()));
             if matches!(
