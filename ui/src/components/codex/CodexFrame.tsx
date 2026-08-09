@@ -1,6 +1,6 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { useLocation, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useStats } from "#/api/index";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
@@ -52,6 +52,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const { tabs: workspaceTabs, activeTabId, openTab } = useWorkspaceStore();
   const { data: stats, isError: statsError } = useStats();
   const syncStatus = useVaultEvents();
+  const mobileNavRef = useRef<HTMLDetailsElement>(null);
 
   const view: View = useMemo(() => {
     if (forceView) return forceView;
@@ -68,28 +69,20 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     return "atrium";
   }, [forceView, location.pathname, workspaceTabs, activeTabId]);
 
-  const onNav = (target: View) => {
-    if (target === "atrium") navigate({ to: "/" });
-    else if (target === "bases") navigate({ to: "/bases" });
-    else if (target === "gazetteer") navigate({ to: "/gazetteer" });
-    else if (target === "docs") {
-      navigate({
-        to: "/docs/$slug",
-        params: { slug: DEFAULT_DOC_SLUG },
-      });
-    } else if (target === "constellation") {
+  const onWorkspaceNav = (target: "folio" | "constellation") => {
+    mobileNavRef.current?.removeAttribute("open");
+    if (target === "constellation") {
       openTab("graph");
       navigate({ to: "/workspace" });
-    } else if (target === "tasking") navigate({ to: "/tasking" });
-    else if (target === "folio") {
-      const store = useWorkspaceStore.getState();
-      const firstPage = workspaceTabs.find((t) => t.type === "page");
-      // With no folio open, drop focus off any lingering graph tab so the
-      // workspace shows the FolioLauncher empty state rather than the graph.
-      if (firstPage) store.activateTab(firstPage.id);
-      else store.clearActiveTab();
-      navigate({ to: "/workspace" });
+      return;
     }
+    const store = useWorkspaceStore.getState();
+    const firstPage = workspaceTabs.find((tab) => tab.type === "page");
+    // With no folio open, drop focus off any lingering graph tab so the
+    // workspace shows the FolioLauncher empty state rather than the graph.
+    if (firstPage) store.activateTab(firstPage.id);
+    else store.clearActiveTab();
+    navigate({ to: "/workspace" });
   };
 
   const folioCode = useFolioCode(view);
@@ -106,45 +99,150 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       ? "var(--warn)"
       : "var(--hot)";
 
+  const navItem = (key: View, label: string, index: number, mobile = false) => {
+    const active = view === key;
+    const className = cn(
+      "cl-mono flex cursor-pointer items-center gap-1.5 uppercase tracking-[0.18em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+      mobile
+        ? "w-full border-b border-rule-soft px-3 py-2"
+        : "h-full border-r border-rule-soft px-3",
+      active
+        ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
+        : "text-ink-mute hover:text-ink",
+    );
+    const content = (
+      <>
+        <span className="text-[9px] text-ink-mute">{pad2(index)}</span>
+        <span className="text-[10px]">{label}</span>
+      </>
+    );
+    const closeMobile = () => mobileNavRef.current?.removeAttribute("open");
+
+    if (key === "atrium") {
+      return (
+        <Link
+          key={key}
+          to="/"
+          aria-current={active ? "page" : undefined}
+          className={className}
+          onClick={closeMobile}
+        >
+          {content}
+        </Link>
+      );
+    }
+    if (key === "gazetteer") {
+      return (
+        <Link
+          key={key}
+          to="/gazetteer"
+          aria-current={active ? "page" : undefined}
+          className={className}
+          onClick={closeMobile}
+        >
+          {content}
+        </Link>
+      );
+    }
+    if (key === "tasking") {
+      return (
+        <Link
+          key={key}
+          to="/tasking"
+          aria-current={active ? "page" : undefined}
+          className={className}
+          onClick={closeMobile}
+        >
+          {content}
+        </Link>
+      );
+    }
+    if (key === "bases") {
+      return (
+        <Link
+          key={key}
+          to="/bases"
+          aria-current={active ? "page" : undefined}
+          className={className}
+          onClick={closeMobile}
+        >
+          {content}
+        </Link>
+      );
+    }
+    if (key === "docs") {
+      return (
+        <Link
+          key={key}
+          to="/docs/$slug"
+          params={{ slug: DEFAULT_DOC_SLUG }}
+          aria-current={active ? "page" : undefined}
+          className={className}
+          onClick={closeMobile}
+        >
+          {content}
+        </Link>
+      );
+    }
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={() => onWorkspaceNav(key)}
+        aria-current={active ? "page" : undefined}
+        className={className}
+      >
+        {content}
+      </button>
+    );
+  };
+
   return (
     <div className="cl-root cl-paper flex h-screen w-screen flex-col overflow-hidden">
+      <a
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          window.location.hash = "main-content";
+          document.getElementById("main-content")?.focus();
+        }}
+        className="cl-mono absolute left-2 top-2 z-[100] -translate-y-16 border border-ink bg-paper px-3 py-2 text-[11px] text-ink transition-transform focus:translate-y-0 focus:outline focus:outline-2 focus:outline-ring"
+      >
+        Skip to main content
+      </a>
       {/* ── HEADER RAIL ─────────────────────────────────────────────── */}
-      <header className="flex flex-shrink-0 items-stretch border-b border-rule text-[11px] h-8">
-        <button
-          type="button"
-          onClick={() => navigate({ to: "/" })}
-          className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-2 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink sm:px-3"
+      <header className="relative z-40 flex h-8 flex-shrink-0 items-stretch border-b border-rule text-[11px]">
+        <Link
+          to="/"
+          className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-2 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring sm:px-3"
           aria-label="CLEPSYDRA — return to Atrium"
         >
           <span className="text-accent">C</span>
           <span className="hidden sm:inline">LEPSYDRA</span>
-        </button>
+        </Link>
 
         <nav
           aria-label="Primary navigation"
-          className="cl-noscroll flex min-w-0 flex-1 items-stretch overflow-x-auto"
+          className="hidden min-w-0 flex-1 items-stretch md:flex"
         >
-          {NAV.map(([key, label], i) => {
-            const active = view === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onNav(key)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
-                  active
-                    ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-                    : "text-ink-mute hover:text-ink",
-                )}
-              >
-                <span className="text-[9px] text-ink-mute">{pad2(i)}</span>
-                <span className="text-[10px]">{label}</span>
-              </button>
-            );
-          })}
+          {NAV.map(([key, label], index) => navItem(key, label, index))}
         </nav>
+
+        <details
+          ref={mobileNavRef}
+          className="relative min-w-0 flex-1 md:hidden"
+        >
+          <summary className="cl-mono flex h-full cursor-pointer list-none items-center border-r border-rule-soft px-3 text-[10px] uppercase tracking-[0.12em] text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring">
+            Navigation — {view[0].toUpperCase()}
+            {view.slice(1)}
+          </summary>
+          <nav
+            aria-label="Mobile primary navigation"
+            className="absolute left-0 top-full z-50 w-56 border-x border-b border-rule bg-paper shadow-md"
+          >
+            {NAV.map(([key, label], index) => navItem(key, label, index, true))}
+          </nav>
+        </details>
 
         {/* HEADER META — minimal status that survives diegetic-off */}
         <div className="cl-mono flex flex-shrink-0 items-stretch text-[10px]">
@@ -203,7 +301,11 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           FOLIO prose gutter (see Folio.tsx). The footer keeps the % readout. */}
 
       {/* ── WORKSPACE ───────────────────────────────────────────────── */}
-      <main className="cl-noscroll relative flex-1 overflow-auto">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="cl-noscroll relative flex-1 overflow-auto focus:outline-none"
+      >
         <div key={location.pathname} className="view-anim h-full">
           {children}
         </div>

@@ -1,6 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { MouseEvent, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const NAV_LABELS = [
+  "ATRIUM",
+  "FOLIO",
+  "GAZETTEER",
+  "CONSTELLATION",
+  "TASKING",
+  "BASES",
+  "DOCS",
+];
 
 const {
   locationState,
@@ -28,6 +39,37 @@ vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
 }));
 vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    children,
+    to,
+    params,
+    onClick,
+    ...props
+  }: {
+    children: ReactNode;
+    to: string;
+    params?: Record<string, string>;
+    onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+    [key: string]: unknown;
+  }) => {
+    const href = Object.entries(params ?? {}).reduce(
+      (path, [key, value]) => path.replace(`$${key}`, value),
+      to,
+    );
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          onClick?.(event);
+          navigateMock(params ? { to, params } : { to });
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
   useLocation: () => locationState,
   useNavigate: () => navigateMock,
 }));
@@ -87,6 +129,10 @@ function renderFrame(forceView?: "folio") {
   );
 }
 
+function primaryNavigation() {
+  return within(screen.getByRole("navigation", { name: "Primary navigation" }));
+}
+
 describe("CodexFrame Docs integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -98,9 +144,9 @@ describe("CodexFrame Docs integration", () => {
   it("renders a nested Docs guide as the active shell view", () => {
     renderFrame();
 
-    expect(screen.getByRole("button", { name: /06.*DOCS/i })).toHaveClass(
-      "shadow-[inset_0_-2px_0_0_var(--accent)]",
-    );
+    expect(
+      primaryNavigation().getByRole("link", { name: /06.*DOCS/i }),
+    ).toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
     expect(
       screen.getByRole("button", { name: /07.*STATUS/i }),
     ).toBeInTheDocument();
@@ -114,9 +160,9 @@ describe("CodexFrame Docs integration", () => {
     locationState.pathname = "/docs";
     renderFrame();
 
-    expect(screen.getByRole("button", { name: /06.*DOCS/i })).toHaveClass(
-      "shadow-[inset_0_-2px_0_0_var(--accent)]",
-    );
+    expect(
+      primaryNavigation().getByRole("link", { name: /06.*DOCS/i }),
+    ).toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
     expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
   });
 
@@ -127,12 +173,12 @@ describe("CodexFrame Docs integration", () => {
     locationState.pathname = pathname;
     renderFrame();
 
-    expect(screen.getByRole("button", { name: /00.*ATRIUM/i })).toHaveClass(
-      "shadow-[inset_0_-2px_0_0_var(--accent)]",
-    );
-    expect(screen.getByRole("button", { name: /06.*DOCS/i })).not.toHaveClass(
-      "shadow-[inset_0_-2px_0_0_var(--accent)]",
-    );
+    expect(
+      primaryNavigation().getByRole("link", { name: /00.*ATRIUM/i }),
+    ).toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
+    expect(
+      primaryNavigation().getByRole("link", { name: /06.*DOCS/i }),
+    ).not.toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
     expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeInTheDocument();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
   });
@@ -142,7 +188,9 @@ describe("CodexFrame Docs integration", () => {
     locationState.pathname = "/";
     renderFrame();
 
-    const docsButton = screen.getByRole("button", { name: /06.*DOCS/i });
+    const docsButton = primaryNavigation().getByRole("link", {
+      name: /06.*DOCS/i,
+    });
     expect(docsButton).not.toHaveClass(
       "shadow-[inset_0_-2px_0_0_var(--accent)]",
     );
@@ -164,7 +212,9 @@ describe("CodexFrame Docs integration", () => {
     locationState.pathname = pathname;
     renderFrame();
 
-    const basesButton = screen.getByRole("button", { name: /05.*BASES/i });
+    const basesButton = primaryNavigation().getByRole("link", {
+      name: /05.*BASES/i,
+    });
     expect(basesButton).toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
     expect(basesButton).toHaveAttribute("aria-current", "page");
     expect(screen.getByText(/FILE BASES.*VIEW BASES/)).toBeInTheDocument();
@@ -178,7 +228,7 @@ describe("CodexFrame Docs integration", () => {
     renderFrame();
 
     expect(
-      screen.getByRole("button", { name: /05.*BASES/i }),
+      primaryNavigation().getByRole("link", { name: /05.*BASES/i }),
     ).not.toHaveAttribute("aria-current");
     expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeInTheDocument();
   });
@@ -188,16 +238,56 @@ describe("CodexFrame Docs integration", () => {
     locationState.pathname = "/";
     renderFrame();
 
-    const basesButton = screen.getByRole("button", { name: /05.*BASES/i });
+    const basesButton = primaryNavigation().getByRole("link", {
+      name: /05.*BASES/i,
+    });
     basesButton.focus();
     await user.keyboard("{Enter}");
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
     expect(basesButton).toHaveFocus();
     expect(screen.getAllByRole("main")).toHaveLength(1);
-    expect(screen.getByRole("navigation")).toHaveAccessibleName(
-      "Primary navigation",
-    );
+    expect(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    ).toBeInTheDocument();
+  });
+
+  it("starts keyboard navigation with a skip link targeting the sole main", async () => {
+    const user = userEvent.setup();
+    renderFrame();
+
+    await user.tab();
+
+    expect(
+      screen.getByRole("link", { name: "Skip to main content" }),
+    ).toHaveFocus();
+    expect(
+      screen.getByRole("link", { name: "Skip to main content" }),
+    ).toHaveAttribute("href", "#main-content");
+    expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("main")).toHaveFocus();
+  });
+
+  it("offers every destination in a compact mobile navigation menu", () => {
+    locationState.pathname = "/";
+    renderFrame();
+
+    expect(
+      screen.getByText("Navigation — Atrium", { selector: "summary" }),
+    ).toBeInTheDocument();
+    const mobileNav = screen.getByRole("navigation", {
+      name: "Mobile primary navigation",
+    });
+    for (const destination of NAV_LABELS) {
+      expect(within(mobileNav).getByText(destination)).toBeInTheDocument();
+    }
+    expect(
+      within(mobileNav).getByRole("link", { name: /Bases/i }),
+    ).toHaveAttribute("href", "/bases");
+    expect(
+      within(mobileNav).getByRole("link", { name: /Atrium/i }),
+    ).toHaveAttribute("aria-current", "page");
   });
 
   it("retains the reading percentage for Folio", () => {

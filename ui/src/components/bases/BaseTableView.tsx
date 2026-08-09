@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import {
   Cell,
@@ -15,7 +16,7 @@ import type {
   QueryRow,
   ViewOverrides,
 } from "#/api/bases";
-import { Button } from "#/components/ui/button";
+import { buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { EditableCell } from "./EditableCell";
@@ -31,7 +32,7 @@ export interface BaseTableViewProps {
   sortOverride: ViewOverrides;
   onSortChange: (override: ViewOverrides) => void;
   onOpenPage: (path: string) => void;
-  onConfigure?: () => void;
+  configureSlug?: string;
   onCommitCell: (
     row: QueryRow,
     key: string,
@@ -89,7 +90,7 @@ export function BaseTableView({
   sortOverride,
   onSortChange,
   onOpenPage,
-  onConfigure,
+  configureSlug,
   onCommitCell,
   readOnly = false,
 }: BaseTableViewProps) {
@@ -240,17 +241,16 @@ export function BaseTableView({
             ),
           )}
         </nav>
-        {!readOnly && onConfigure && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="ml-auto"
-            onPress={onConfigure}
+        {!readOnly && configureSlug && (
+          <Link
+            to="/bases/$slug/edit"
+            params={{ slug: configureSlug }}
+            className={buttonStyles("secondary", "sm", "ml-auto")}
             aria-label={`Configure ${definition.name}`}
           >
             <Settings aria-hidden="true" className="h-3.5 w-3.5" />
             Configure
-          </Button>
+          </Link>
         )}
       </div>
 

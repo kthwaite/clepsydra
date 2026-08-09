@@ -1,4 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   useBase,
@@ -15,7 +14,6 @@ export interface BaseTableProps {
 
 /** Data wiring for {@link BaseTableView}: queries, cell commits, navigation. */
 export function BaseTable({ slug }: BaseTableProps) {
-  const navigate = useNavigate();
   const openTab = useOpenTab();
   const detail = useBase(slug);
   const [viewName, setViewName] = useState<string | undefined>(undefined);
@@ -54,9 +52,7 @@ export function BaseTable({ slug }: BaseTableProps) {
       sortOverride={sortOverride}
       onSortChange={setSortOverride}
       onOpenPage={(path) => openTab("page", path)}
-      onConfigure={() =>
-        void navigate({ to: "/bases/$slug/edit", params: { slug } })
-      }
+      configureSlug={slug}
       onCommitCell={(row, key, value, hint) => {
         void commit(row, key, value, hint);
       }}

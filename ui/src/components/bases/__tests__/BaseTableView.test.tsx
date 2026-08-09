@@ -1,6 +1,26 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    children,
+    to,
+    params,
+    ...props
+  }: {
+    children: ReactNode;
+    to: string;
+    params: { slug: string };
+    [key: string]: unknown;
+  }) => (
+    <a {...props} href={to.replace("$slug", params.slug)}>
+      {children}
+    </a>
+  ),
+}));
+
 import type { BaseDetailResponse, QueryOutput } from "#/api/bases";
 import { BaseTableView } from "#/components/bases/BaseTableView";
 
@@ -42,7 +62,7 @@ function renderView(overrides: Partial<Parameters<typeof BaseTableView>[0]>) {
     onSortChange: vi.fn(),
     onOpenPage: vi.fn(),
     onCommitCell: vi.fn(),
-    onConfigure: vi.fn(),
+    configureSlug: "reading",
   };
   render(
     <BaseTableView
@@ -66,16 +86,13 @@ describe("BaseTableView", () => {
     expect(props.onViewChange).toHaveBeenCalledWith("Shelf");
   });
 
-  it("opens the definition workspace from a saved base", async () => {
-    const user = userEvent.setup();
-    const props = renderView({});
-    const configure = screen.getByRole("button", {
+  it("links to the definition workspace from a saved base", () => {
+    renderView({});
+    const configure = screen.getByRole("link", {
       name: "Configure Reading Log",
     });
-    configure.focus();
-    await user.keyboard("{Enter}");
-    expect(configure).toHaveFocus();
-    expect(props.onConfigure).toHaveBeenCalledOnce();
+
+    expect(configure).toHaveAttribute("href", "/bases/reading/edit");
   });
 
   it("renders group header rows with aggregate chips", () => {
@@ -176,7 +193,7 @@ describe("BaseTableView", () => {
     expect(screen.queryByRole("button", { name: "Continues" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Shelf" })).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "Configure Reading Log" }),
+      screen.queryByRole("link", { name: "Configure Reading Log" }),
     ).toBeNull();
     expect(
       screen.queryByRole("button", { name: "The Book of the New Sun" }),
@@ -189,7 +206,5 @@ describe("BaseTableView", () => {
     expect(props.onViewChange).not.toHaveBeenCalled();
     expect(props.onSortChange).not.toHaveBeenCalled();
     expect(props.onOpenPage).not.toHaveBeenCalled();
-    expect(props.onCommitCell).not.toHaveBeenCalled();
-    expect(props.onConfigure).not.toHaveBeenCalled();
   });
 });
