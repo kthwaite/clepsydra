@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
 
+use crate::feeds::store::{FeedStoreError, snapshot_database};
+
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
     #[error("{operation} `{path}`: {source}")]
@@ -19,6 +21,14 @@ pub enum BackupError {
         #[source]
         source: walkdir::Error,
     },
+    #[error("snapshot feed database `{path}`: {source}")]
+    FeedSnapshot {
+        path: PathBuf,
+        #[source]
+        source: FeedStoreError,
+    },
+    #[error("no temporary directory outside vault `{root}` is available")]
+    SnapshotLocation { root: PathBuf },
 }
 
 pub fn create_backup(
@@ -46,6 +56,21 @@ pub fn create_backup(
             ),
         ));
     }
+
+    let live_feed_database = vault_root.join(".clepsydra/feeds.db");
+    let feed_snapshot = if live_feed_database.is_file() {
+        let temporary = snapshot_tempdir(&vault_root, &destination)?;
+        let snapshot = temporary.path().join("feeds.db");
+        snapshot_database(&live_feed_database, &snapshot).map_err(|source| {
+            BackupError::FeedSnapshot {
+                path: live_feed_database.clone(),
+                source,
+            }
+        })?;
+        Some((temporary, snapshot))
+    } else {
+        None
+    };
 
     let filename = format!(
         "clepsydra-backup-{}.tar",
@@ -93,6 +118,9 @@ pub fn create_backup(
             .strip_prefix(&vault_root)
             .expect("WalkDir entries remain beneath their root");
         if relative == Path::new(".clepsydra/cache.db")
+            || relative == Path::new(".clepsydra/feeds.db")
+            || relative == Path::new(".clepsydra/feeds.db-wal")
+            || relative == Path::new(".clepsydra/feeds.db-shm")
             || path == final_path
             || path == partial_path
         {
@@ -109,6 +137,15 @@ pub fn create_backup(
             builder.append_path_with_name(path, relative)
         };
         result.map_err(|source| io_error("append backup entry", path, source))?;
+    }
+
+    if let Some((_temporary, snapshot)) = &feed_snapshot {
+        partial
+            .builder
+            .as_mut()
+            .expect("uncommitted archive has a builder")
+            .append_path_with_name(snapshot, Path::new(".clepsydra/feeds.db"))
+            .map_err(|source| io_error("append feed database snapshot", snapshot, source))?;
     }
 
     partial.commit(&final_path)
@@ -158,12 +195,32 @@ fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> Bac
     }
 }
 
+fn snapshot_tempdir(
+    vault_root: &Path,
+    destination: &Path,
+) -> Result<tempfile::TempDir, BackupError> {
+    let temporary = if destination.starts_with(vault_root) {
+        tempfile::tempdir()
+    } else {
+        tempfile::tempdir_in(destination)
+    }
+    .map_err(|source| io_error("create feed snapshot directory", destination, source))?;
+    if temporary.path().starts_with(vault_root) {
+        return Err(BackupError::SnapshotLocation {
+            root: vault_root.to_path_buf(),
+        });
+    }
+    Ok(temporary)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
     use std::fs::{self, OpenOptions};
+    use std::io::Read;
 
     use chrono::TimeZone;
+    use rusqlite::Connection;
     use tempfile::TempDir;
 
     use super::*;
@@ -181,6 +238,20 @@ mod tests {
             .unwrap()
             .map(|entry| entry.unwrap().path().unwrap().into_owned())
             .collect()
+    }
+
+    fn archive_entry_bytes(path: &Path, target: &Path) -> Vec<u8> {
+        let file = File::open(path).unwrap();
+        let mut archive = tar::Archive::new(file);
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            if entry.path().unwrap() == target {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).unwrap();
+                return bytes;
+            }
+        }
+        panic!("archive entry `{}` was absent", target.display());
     }
 
     fn populated_vault() -> (TempDir, PathBuf) {
@@ -208,6 +279,76 @@ mod tests {
         assert!(paths.contains(Path::new("_attachments/image.bin")));
         assert!(paths.contains(Path::new(".clepsydra/config.toml")));
         assert!(!paths.contains(Path::new(".clepsydra/cache.db")));
+    }
+
+    #[test]
+    fn archives_one_reopenable_feed_snapshot_without_live_database_sidecars() {
+        let (_temp, vault) = populated_vault();
+        let live_database = vault.join(".clepsydra/feeds.db");
+        let connection = Connection::open(&live_database).unwrap();
+        connection
+            .execute_batch(
+                "
+                PRAGMA journal_mode = WAL;
+                PRAGMA wal_autocheckpoint = 0;
+                CREATE TABLE snapshot_probe (
+                    id INTEGER PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                INSERT INTO snapshot_probe (value) VALUES ('committed-in-wal');
+                ",
+            )
+            .unwrap();
+        let live_wal = vault.join(".clepsydra/feeds.db-wal");
+        let live_shm = vault.join(".clepsydra/feeds.db-shm");
+        assert!(live_wal.is_file(), "fixture must have a live WAL");
+        assert!(live_shm.is_file(), "fixture must have a live SHM file");
+        let destination = vault.parent().unwrap().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+        let file = File::open(&archive).unwrap();
+        let archived_paths: Vec<PathBuf> = tar::Archive::new(file)
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().into_owned())
+            .collect();
+
+        assert_eq!(
+            archived_paths
+                .iter()
+                .filter(|path| path.as_path() == Path::new(".clepsydra/feeds.db"))
+                .count(),
+            1
+        );
+        assert!(
+            !archived_paths
+                .iter()
+                .any(|path| path.as_path() == Path::new(".clepsydra/feeds.db-wal"))
+        );
+        assert!(
+            !archived_paths
+                .iter()
+                .any(|path| path.as_path() == Path::new(".clepsydra/feeds.db-shm"))
+        );
+        assert!(
+            !archived_paths
+                .iter()
+                .any(|path| path.as_path() == Path::new(".clepsydra/cache.db"))
+        );
+
+        let extracted = vault.parent().unwrap().join("archived-feeds.db");
+        fs::write(
+            &extracted,
+            archive_entry_bytes(&archive, Path::new(".clepsydra/feeds.db")),
+        )
+        .unwrap();
+        let reopened = Connection::open(extracted).unwrap();
+        let value: String = reopened
+            .query_row("SELECT value FROM snapshot_probe WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(value, "committed-in-wal");
     }
 
     #[test]
