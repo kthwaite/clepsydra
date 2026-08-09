@@ -15,7 +15,7 @@ describe("expandPrefixedLink", () => {
     });
   });
 
-  it.each(["", "   ", "title\u0000suffix"])(
+  it.each(["", "   ", "title\u0000suffix", "title\u0009suffix"])(
     "rejects invalid Wikipedia value %j",
     (value) => expect(expandPrefixedLink("wiki", value)).toBeNull(),
   );
@@ -40,6 +40,8 @@ describe("expandPrefixedLink", () => {
     "2401.00001v0",
     "https://arxiv.org/abs/2401.00001",
     "hep-th/990101",
+    "\u00092401.00001",
+    "2401.00001\u000a",
   ])("rejects malformed arXiv identifier %s", (input) => {
     expect(expandPrefixedLink("arxiv", input)).toBeNull();
   });
@@ -64,6 +66,8 @@ describe("expandPrefixedLink", () => {
     "https://youtube.com.example.test/watch?v=dQw4w9WgXcQ",
     "https://example.test/watch?v=dQw4w9WgXcQ",
     "ftp://youtube.com/watch?v=dQw4w9WgXcQ",
+    "\u0009dQw4w9WgXcQ",
+    "dQw4w9WgXcQ\u000a",
   ])("rejects invalid YouTube value %s", (input) => {
     expect(expandPrefixedLink("youtube", input)).toBeNull();
   });

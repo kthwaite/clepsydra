@@ -13,8 +13,9 @@ type ProviderRule = (
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 function expandWiki(rawValue: string) {
+  if (CONTROL_CHARACTER.test(rawValue)) return null;
   const label = rawValue.trim().replace(/\s+/g, " ");
-  if (!label || CONTROL_CHARACTER.test(label) || label.includes('"')) return null;
+  if (!label || label.includes('"')) return null;
   const slug = encodeURIComponent(label.replaceAll(" ", "_"));
   return { url: `https://en.wikipedia.org/wiki/${slug}`, label };
 }
@@ -23,8 +24,8 @@ const MODERN_ARXIV = /^(\d{4}\.\d{4,5})(?:v([1-9]\d*))?$/i;
 const LEGACY_ARXIV = /^([a-z0-9.-]+\/\d{7})(?:v([1-9]\d*))?$/i;
 
 function expandArxiv(rawValue: string) {
+  if (CONTROL_CHARACTER.test(rawValue)) return null;
   const value = rawValue.trim();
-  if (CONTROL_CHARACTER.test(value)) return null;
   const match = MODERN_ARXIV.exec(value) ?? LEGACY_ARXIV.exec(value);
   if (!match) return null;
   const normalized = `${match[1].toLowerCase()}${match[2] ? `v${match[2]}` : ""}`;
@@ -60,8 +61,8 @@ function youtubeIdFromUrl(value: string): string | null {
 }
 
 function expandYoutube(rawValue: string) {
+  if (CONTROL_CHARACTER.test(rawValue)) return null;
   const value = rawValue.trim();
-  if (CONTROL_CHARACTER.test(value)) return null;
   const id = YOUTUBE_ID.test(value) ? value : youtubeIdFromUrl(value);
   if (!id) return null;
   return {
