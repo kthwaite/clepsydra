@@ -88,7 +88,7 @@ export function BookImportModal() {
             autoComplete="off"
             autoFocus
             className="cl-mono mt-1 w-full border border-rule bg-transparent p-1.5 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-            inputMode="numeric"
+            inputMode="text"
             onChange={(event) => {
               setIsbn(event.target.value);
               if (error) setError(null);

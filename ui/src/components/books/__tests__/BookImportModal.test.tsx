@@ -51,6 +51,14 @@ describe("BookImportModal", () => {
     expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveFocus();
   });
 
+  it("allows the ISBN-10 X check digit on mobile keyboards", () => {
+    render(<BookImportModal />);
+    expect(screen.getByRole("textbox", { name: "ISBN" })).toHaveAttribute(
+      "inputmode",
+      "text",
+    );
+  });
+
   it("keeps invalid input local", async () => {
     const user = userEvent.setup();
     render(<BookImportModal />);
