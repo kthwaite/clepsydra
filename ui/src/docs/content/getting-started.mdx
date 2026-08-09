@@ -248,6 +248,33 @@ Design Notes. After completing a page from the dropdown, press Left to move
 back into the link and type `|the design doc`. Plain click edits a wikilink;
 Cmd-click on macOS or Ctrl-click elsewhere opens it.
 
+## Prefixed external links
+
+In the web editor, provider prefixes expand into ordinary external Markdown
+links. Quote values that contain spaces; the closing quote performs the
+conversion:
+
+```text
+wiki:"Vichy Catalán"
+```
+
+Bare values convert when you type Space or Enter:
+
+```text
+arxiv:2401.00001
+youtube:dQw4w9WgXcQ
+youtube:https://youtu.be/dQw4w9WgXcQ
+```
+
+Clepsydra uses deterministic labels such as `arXiv: 2401.00001` and
+`YouTube: dQw4w9WgXcQ`. Wikipedia targets English Wikipedia. arXiv accepts
+identifiers, not full arXiv URLs: use modern `NNNN.NNNN` or `NNNN.NNNNN`
+form and legacy `archive/NNNNNNN` form.
+Either form may have an optional positive `vN` version suffix. YouTube accepts
+video IDs and `watch`, `youtu.be`, `shorts`, and `embed` URLs. Invalid input
+stays as typed. Saved pages contain standard `[label](https://…)` Markdown,
+not Clepsydra-specific link schemes.
+
 ## External resource marks
 
 Clepsydra adds a small decorative mark to recognized external links in the web

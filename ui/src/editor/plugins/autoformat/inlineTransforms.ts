@@ -83,7 +83,10 @@ function getTextBefore(
   return { text: textBefore, path: anchor.path as unknown as number[] };
 }
 
-function selectTextAfterInline(editor: Editor, inlinePath: Path): void {
+export function selectTextAfterInline(
+  editor: Editor,
+  inlinePath: Path,
+): void {
   const textPath = Path.next(inlinePath);
   const nextNode = Editor.hasPath(editor, textPath)
     ? Editor.node(editor, textPath)[0]

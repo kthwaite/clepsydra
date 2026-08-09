@@ -8,6 +8,7 @@ import {
 } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
+import { slateToMdast } from "../../../convert/slate-to-mdast";
 import { withSchema } from "../../../schema/withSchema";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
@@ -507,6 +508,262 @@ describe("withAutoformat integration", () => {
         ).toBe(false);
         expect(editor.children).toHaveLength(1);
       }
+    });
+  });
+
+  describe("prefixed external links", () => {
+    it("expands a quoted multi-word Wikipedia shorthand on closing quote", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, 'wiki:"Vichy Catalán"');
+
+      expect(elementChildren(editor.children[0])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "link",
+            url: "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n",
+            children: [{ text: "Vichy Catalán" }],
+          }),
+        ]),
+      );
+    });
+
+    it("expands a bare arXiv shorthand on Space and continues in plain text", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, "arxiv:2401.00001 after");
+
+      expect(Node.string(editor.children[0])).toBe("arXiv: 2401.00001 after");
+      const children = elementChildren(editor.children[0]);
+      const linkIndex = children.findIndex(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
+      expect(linkIndex).toBeGreaterThanOrEqual(0);
+      expect(children[linkIndex]).toMatchObject({ type: "link" });
+      expect(children[linkIndex + 1]).toEqual({ text: " after" });
+    });
+
+    it("expands a bare YouTube shorthand before Enter", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "youtube:dQw4w9WgXcQ");
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(2);
+      expect(Node.string(editor.children[0])).toBe(
+        "YouTube: dQw4w9WgXcQ",
+      );
+      expect(editor.selection).toEqual({
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: 0 },
+      });
+    });
+
+    it("expands at the end of a heading, exits to a paragraph, and undoes once", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ text: "arxiv:2401.00001" }],
+        },
+      ]);
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(2);
+      expect(editor.children[0]).toMatchObject({
+        type: "heading",
+        level: 2,
+        children: expect.arrayContaining([
+          expect.objectContaining({
+            type: "link",
+            url: "https://arxiv.org/abs/2401.00001",
+          }),
+        ]),
+      });
+      expect(editor.children[1]).toEqual({
+        type: "paragraph",
+        children: [{ text: "" }],
+      });
+      expect(editor.selection).toEqual({
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: 0 },
+      });
+
+      editor.undo();
+
+      expect(editor.children).toEqual([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ text: "arxiv:2401.00001" }],
+        },
+      ]);
+    });
+
+    it("expands at the end of a list item, continues the list, and undoes once", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [{ text: "youtube:dQw4w9WgXcQ" }],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(1);
+      expect(editor.children[0]).toMatchObject({
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              {
+                type: "paragraph",
+                children: expect.arrayContaining([
+                  expect.objectContaining({
+                    type: "link",
+                    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                  }),
+                ]),
+              },
+            ],
+          },
+          {
+            type: "list-item",
+            children: [
+              {
+                type: "paragraph",
+                children: [{ text: "" }],
+              },
+            ],
+          },
+        ],
+      });
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 1, 0, 0], offset: 0 },
+        focus: { path: [0, 1, 0, 0], offset: 0 },
+      });
+
+      editor.undo();
+
+      expect(editor.children).toEqual([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [{ text: "youtube:dQw4w9WgXcQ" }],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("restores the pre-trigger quoted shorthand with one undo", () => {
+      const editor = makeSchemaEditor();
+      type(editor, 'wiki:"Vichy Catalán"');
+
+      editor.undo();
+
+      expect(Node.string(editor.children[0])).toBe('wiki:"Vichy Catalán');
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: 'wiki:"Vichy Catalán' },
+      ]);
+    });
+
+    it("restores a bare shorthand without its trigger Space with one undo", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "arxiv:2401.00001 ");
+
+      editor.undo();
+
+      expect(Node.string(editor.children[0])).toBe("arxiv:2401.00001");
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "arxiv:2401.00001" },
+      ]);
+    });
+
+    it("leaves comma-terminated bare shorthand literal", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, "arxiv:2401.00001,");
+
+      expect(Node.string(editor.children[0])).toBe("arxiv:2401.00001,");
+      expect(
+        elementChildren(editor.children[0]).some(
+          (child) => SlateElement.isElement(child) && child.type === "link",
+        ),
+      ).toBe(false);
+    });
+
+    it.each(["\ud800", "\udc00"])(
+      "keeps ill-formed UTF-16 Wikipedia shorthand literal on Space",
+      (surrogate) => {
+        const shorthand = `wiki:${surrogate}`;
+        const editor = makeSchemaEditor();
+
+        type(editor, `${shorthand} `);
+
+        expect(Node.string(editor.children[0])).toBe(`${shorthand} `);
+        expect(
+          elementChildren(editor.children[0]).some(
+            (child) => SlateElement.isElement(child) && child.type === "link",
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it("places punctuation after a quoted shorthand in plain text", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, 'wiki:"Vichy Catalán",');
+      const children = elementChildren(editor.children[0]);
+
+      const linkIndex = children.findIndex(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
+      expect(linkIndex).toBeGreaterThanOrEqual(0);
+      expect(children[linkIndex]).toMatchObject({
+        type: "link",
+        url: "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n",
+        children: [{ text: "Vichy Catalán" }],
+      });
+      expect(children[linkIndex + 1]).toEqual({ text: "," });
+    });
+
+    it("serializes a typed Wikipedia shorthand as a standard Markdown link", () => {
+      const editor = makeSchemaEditor();
+      type(editor, 'wiki:"Vichy Catalán"');
+
+      expect(slateToMdast(editor.children).trim()).toBe(
+        "[Vichy Catalán](https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n)",
+      );
+    });
+
+    it("serializes a typed YouTube shorthand as a standard Markdown link", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "youtube:dQw4w9WgXcQ");
+      editor.insertBreak();
+
+      expect(slateToMdast(editor.children).trim()).toBe(
+        "[YouTube: dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)",
+      );
     });
   });
 

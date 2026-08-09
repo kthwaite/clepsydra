@@ -17,6 +17,10 @@ import {
 } from "./blockTransforms";
 import { tryInlineTransform } from "./inlineTransforms";
 import { tryListContinuation } from "./listContinuation";
+import {
+  tryPrefixedLinkBreakTransform,
+  tryPrefixedLinkTextTransform,
+} from "./prefixedLinkTransform";
 
 const INLINE_CLOSERS: Record<string, true> = {
   "`": true,
@@ -47,22 +51,31 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
 
-    // Step 1: overtype -> inline transform -> return
+    // Step 1: overtype -> prefixed link -> inline transform -> return
     // After overtype the closer is already in the text, so pass closerConsumed.
     if (tryOvertype(editor, ch)) {
+      if (
+        ch === '"' &&
+        tryPrefixedLinkTextTransform(editor, ch, /* closerConsumed */ true)
+      )
+        return;
       tryInlineTransform(editor, ch, /* closerConsumed */ true);
       return;
     }
     // Step 2: thematic break
     if (ch === "-" && tryThematicBreak(editor)) return;
-    // Step 3: block transforms
+    // Step 3: prefixed link on Space
+    if (ch === " " && tryPrefixedLinkTextTransform(editor, ch)) return;
+    // Step 4: block transforms
     if (ch === " " && Range.isCollapsed(selection) && tryBlockTransform(editor))
       return;
-    // Step 4: inline transform
+    // Step 5: inline transform
     if (tryInlineTransform(editor, ch)) return;
-    // Step 5: auto-pair
+    // Step 6: prefixed link on a non-overtype closing quote
+    if (ch === '"' && tryPrefixedLinkTextTransform(editor, ch)) return;
+    // Step 7: auto-pair
     if (tryAutoPair(editor, ch)) return;
-    // Step 6: fallback
+    // Step 8: fallback
     insertText(ch);
   };
 
@@ -73,14 +86,25 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
     if (tryCodeBlockNewline(editor)) return;
-    if (tryListContinuation(editor)) return;
-    if (tryBlockquoteContinuation(editor)) return;
-    if (tryHeadingExit(editor)) return;
-    if (tryCodeFence(editor)) return;
+    if (
+      tryPrefixedLinkBreakTransform(editor, () => {
+        if (!trySemanticBreak(editor, false)) insertBreak();
+      })
+    )
+      return;
+    if (trySemanticBreak(editor)) return;
     insertBreak();
   };
 
   return editor;
+}
+
+function trySemanticBreak(editor: Editor, historyBatch = true): boolean {
+  if (tryListContinuation(editor, { historyBatch })) return true;
+  if (tryBlockquoteContinuation(editor)) return true;
+  if (tryHeadingExit(editor, historyBatch)) return true;
+  if (tryCodeFence(editor)) return true;
+  return false;
 }
 
 /**
@@ -159,7 +183,7 @@ function resolveComposedInline(editor: Editor): void {
  * of carrying the heading style onto the next line. A mid-heading Enter is left
  * to Slate's default split (which keeps both halves as headings).
  */
-function tryHeadingExit(editor: Editor): boolean {
+function tryHeadingExit(editor: Editor, historyBatch = true): boolean {
   const { selection } = editor;
   if (!selection || !Range.isCollapsed(selection)) return false;
 
@@ -172,21 +196,27 @@ function tryHeadingExit(editor: Editor): boolean {
   const [, headingPath] = headingEntry;
   if (!Editor.isEnd(editor, selection.anchor, headingPath)) return false;
 
-  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+  const exitHeading = () => {
     const afterPath = Path.next(headingPath);
     Transforms.insertNodes(
       editor,
       {
         type: "paragraph",
         children: [{ text: "" }],
-      } as any,
+      } as CustomElement,
       { at: afterPath },
     );
     Transforms.select(editor, {
       anchor: { path: [...afterPath, 0], offset: 0 },
       focus: { path: [...afterPath, 0], offset: 0 },
     });
-  });
+  };
+
+  if (historyBatch) {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, exitHeading);
+  } else {
+    exitHeading();
+  }
   return true;
 }
 function tryBlockquoteContinuation(editor: Editor): boolean {
