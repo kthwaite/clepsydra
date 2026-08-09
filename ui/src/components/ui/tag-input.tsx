@@ -82,13 +82,14 @@ export function TagInput({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "ArrowDown" && open) {
+      if (e.key === "ArrowDown" && matches.length > 0) {
         e.preventDefault();
-        setHighlight((selected + 1) % matches.length);
+        setDismissed(false);
+        setHighlight(Math.min(selected + 1, matches.length - 1));
         setNavigated(true);
       } else if (e.key === "ArrowUp" && open) {
         e.preventDefault();
-        setHighlight((selected - 1 + matches.length) % matches.length);
+        setHighlight(Math.max(selected - 1, 0));
         setNavigated(true);
       } else if (e.key === "Tab") {
         if (open) {

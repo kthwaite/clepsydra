@@ -223,23 +223,25 @@ describe("TagInput", () => {
     expect(screen.getByRole("grid")).toBeDefined();
   });
 
-  it("shows matching suggestions and excludes attached and derived tags", async () => {
+  it("matches case-insensitively and excludes attached and derived tags", async () => {
     const user = userEvent.setup();
     render(
       <TagInput
         label="Tags"
         values={["rust"]}
-        readOnlyValues={["journal"]}
-        suggestions={["rust", "journal", "ritual", "slate"]}
+        readOnlyValues={["brunch"]}
+        suggestions={["rust", "brunch", "RUMination", "slate"]}
         onChange={() => {}}
       />,
     );
 
-    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "ri");
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "rU");
 
-    expect(screen.getByRole("option", { name: "ritual" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "RUMination" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "rust" })).toBeNull();
-    expect(screen.queryByRole("option", { name: "journal" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "brunch" })).toBeNull();
     expect(screen.queryByRole("option", { name: "slate" })).toBeNull();
   });
 
@@ -269,7 +271,7 @@ describe("TagInput", () => {
     ).toBeNull();
   });
 
-  it("tab-completes the highlighted suggestion", async () => {
+  it("tab-completes the initially highlighted suggestion", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
@@ -281,7 +283,10 @@ describe("TagInput", () => {
       />,
     );
 
-    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "ru");
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Tab}");
 
     expect(onChange).toHaveBeenLastCalledWith(["rust"]);
@@ -303,6 +308,70 @@ describe("TagInput", () => {
     await user.keyboard("{ArrowDown}{Enter}");
 
     expect(onChange).toHaveBeenLastCalledWith(["react"]);
+  });
+
+  it("keeps the first suggestion highlighted on ArrowUp", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react", "ritual"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{ArrowUp}{Enter}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["rust"]);
+  });
+
+  it("keeps the last suggestion highlighted on repeated ArrowDown", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react", "ritual"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["ritual"]);
+  });
+
+  it("reopens dismissed suggestions on ArrowDown", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react"]}
+        onChange={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+
+    await user.keyboard("{ArrowDown}");
+
+    expect(
+      screen.getByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "react" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("dismisses suggestions with Escape without committing the draft", async () => {
