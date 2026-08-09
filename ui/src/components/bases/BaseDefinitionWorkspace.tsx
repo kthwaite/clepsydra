@@ -6,6 +6,7 @@ import { formatApiError, isApiConflict, isApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { Dialog } from "#/components/ui/dialog";
+import { BasePreview } from "./BasePreview";
 import {
   DefinitionHeader,
   type DefinitionSaveStatus,
@@ -15,6 +16,7 @@ import { GeneralEditor } from "./GeneralEditor";
 import { MembershipEditor } from "./MembershipEditor";
 import { PropertiesEditor } from "./PropertiesEditor";
 import { ValidationSummary } from "./ValidationSummary";
+import { ViewsEditor } from "./ViewsEditor";
 
 export type BaseDiagnostic = BaseDetailResponse["diagnostics"][number];
 export type RegisterFocusTarget = (
@@ -58,47 +60,6 @@ function diagnosticsFromError(error: unknown): BaseDiagnostic[] {
   return Array.isArray(detail.diagnostics)
     ? (detail.diagnostics as BaseDiagnostic[])
     : [];
-}
-
-interface SectionPlaceholderProps extends SectionEditorProps {
-  section: Exclude<SectionId, "general">;
-  heading: string;
-  message: string;
-}
-
-function SectionPlaceholder({
-  section,
-  heading,
-  message,
-  diagnostics,
-  registerFocusTarget,
-}: SectionPlaceholderProps) {
-  const sectionDiagnostics = diagnostics.filter(
-    (diagnostic) =>
-      diagnostic.path && sectionForDiagnostic(diagnostic.path) === section,
-  );
-  return (
-    <section
-      ref={(element) => {
-        for (const diagnostic of sectionDiagnostics) {
-          registerFocusTarget(diagnostic.path as string, element);
-        }
-      }}
-      tabIndex={-1}
-      aria-labelledby={`${section}-editor-heading`}
-      className="outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-    >
-      <h2
-        id={`${section}-editor-heading`}
-        className="text-sm font-bold uppercase tracking-widest text-foreground"
-      >
-        {heading}
-      </h2>
-      <p className="mt-3 border-y border-border py-6 text-sm text-muted-foreground">
-        {message}
-      </p>
-    </section>
-  );
 }
 
 function RecoveryState({ slug, error }: { slug: string; error: unknown }) {
@@ -150,6 +111,7 @@ export function BaseDefinitionWorkspace({
     path: string;
     sequence: number;
   }>();
+  const [selectedViewId, setSelectedViewId] = useState<string>();
 
   const editGeneration = useRef(0);
   const savedGeneration = useRef(0);
@@ -437,12 +399,24 @@ export function BaseDefinitionWorkspace({
             />
           )}
           {selectedSection === "views" && (
-            <SectionPlaceholder
-              section="views"
-              heading="Views"
-              message="View editing is added in Task 10."
-              {...editorProps}
-            />
+            <>
+              <ViewsEditor
+                views={draft.views}
+                properties={draft.properties}
+                diagnostics={visibleDiagnostics}
+                onChange={(views) =>
+                  changeDraft((current) => ({ ...current, views }))
+                }
+                registerFocus={registerFocusTarget}
+                selectedViewId={selectedViewId ?? draft.views[0]?.id}
+                onSelectedViewChange={setSelectedViewId}
+              />
+              <BasePreview
+                draft={draft}
+                selectedViewId={selectedViewId ?? draft.views[0]?.id}
+                onDiagnosticFocus={focusDiagnostic}
+              />
+            </>
           )}
         </div>
         <ValidationSummary

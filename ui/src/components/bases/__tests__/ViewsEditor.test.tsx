@@ -1,0 +1,511 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { BasePreviewResponse, PropertyDefinition } from "#/api/bases";
+import { BasePreview } from "#/components/bases/BasePreview";
+import {
+  type BaseDraft,
+  type DraftProperty,
+  type DraftView,
+} from "#/components/bases/definition-model";
+import { ViewsEditor } from "#/components/bases/ViewsEditor";
+
+const { previewMock } = vi.hoisted(() => ({ previewMock: vi.fn() }));
+
+vi.mock("#/api/bases", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#/api/bases")>();
+  return { ...actual, usePreviewBase: () => ({ mutateAsync: previewMock }) };
+});
+
+function property(
+  key: string,
+  type: PropertyDefinition["type"],
+): DraftProperty {
+  return { id: `property-${key}`, key, definition: { type } };
+}
+
+function view(overrides: Partial<DraftView> = {}): DraftView {
+  return {
+    id: overrides.id ?? crypto.randomUUID(),
+    name: overrides.name ?? "All",
+    layout: "table",
+    sort: [],
+    aggregates: [],
+    columns: ["title"],
+    ...overrides,
+  };
+}
+
+function draft(overrides: Partial<BaseDraft> = {}): BaseDraft {
+  return {
+    name: "Reading Log",
+    properties: [property("rating", "number"), property("status", "select")],
+    views: [view({ id: "view-all", columns: ["title", "rating"] })],
+    ...overrides,
+  };
+}
+
+function latest<T>(mock: { mock: { calls: unknown[][] } }): T {
+  return mock.mock.calls.at(-1)?.[0] as T;
+}
+
+function renderViews(
+  overrides: {
+    views?: DraftView[];
+    properties?: DraftProperty[];
+    onChange?: ReturnType<typeof vi.fn<(views: DraftView[]) => void>>;
+  } = {},
+) {
+  const onChange = overrides.onChange ?? vi.fn<(views: DraftView[]) => void>();
+  const initialViews = overrides.views ?? [view({ id: "view-all" })];
+  function Harness() {
+    const [views, setViews] = useState(initialViews);
+    return (
+      <ViewsEditor
+        views={views}
+        properties={overrides.properties ?? draft().properties}
+        diagnostics={[]}
+        onChange={(next) => {
+          onChange(next);
+          setViews(next);
+        }}
+        registerFocus={() => undefined}
+      />
+    );
+  }
+  render(<Harness />);
+  return onChange;
+}
+
+beforeEach(() => previewMock.mockReset());
+
+describe("ViewsEditor", () => {
+  it("adds a table view with a stable fresh identity", async () => {
+    const onChange = renderViews();
+    await userEvent.click(screen.getByRole("button", { name: "Add view" }));
+    const result = latest<DraftView[]>(onChange);
+    expect(result.map((item) => item.name)).toEqual(["All", "View"]);
+    expect(result[1].id).not.toBe(result[0].id);
+    expect(result[1]).toMatchObject({
+      layout: "table",
+      columns: ["title"],
+      sort: [],
+      aggregates: [],
+    });
+  });
+
+  it("duplicates a view as an independent deep copy with a unique name and ID", async () => {
+    const original = view({
+      id: "original",
+      name: "All",
+      columns: ["title", "status"],
+      filter: { all: [{ field: "kind", op: "eq", value: "book" }] },
+    });
+    const onChange = renderViews({ views: [original] });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Duplicate All" }),
+    );
+    const result = latest<DraftView[]>(onChange);
+    expect(result.map((item) => item.name)).toEqual(["All", "All copy"]);
+    expect(result[1].id).not.toBe(result[0].id);
+    expect(result[1]).not.toBe(result[0]);
+    expect(result[1].columns).not.toBe(result[0].columns);
+    expect(result[1].filter).not.toBe(result[0].filter);
+  });
+
+  it("renames and reorders views without replacing their IDs", async () => {
+    const views = [
+      view({ id: "all", name: "All" }),
+      view({ id: "later", name: "Later" }),
+    ];
+    const onChange = renderViews({ views });
+    const user = userEvent.setup();
+    const name = screen.getByLabelText("View name");
+    await user.clear(name);
+    await user.type(name, "Everything");
+    expect(latest<DraftView[]>(onChange)[0]).toMatchObject({
+      id: "all",
+      name: "Everything",
+    });
+    await user.click(screen.getByRole("button", { name: "Move Later up" }));
+    expect(latest<DraftView[]>(onChange).map((item) => item.id)).toEqual([
+      "later",
+      "all",
+    ]);
+  });
+
+  it("keeps at least one guided view but does not fabricate a loaded viewless definition", async () => {
+    const oneChange = renderViews();
+    expect(screen.getByRole("button", { name: "Delete All" })).toBeDisabled();
+    expect(oneChange).not.toHaveBeenCalled();
+
+    const emptyChange = vi.fn();
+    const rendered = render(
+      <ViewsEditor
+        views={[]}
+        properties={[]}
+        diagnostics={[]}
+        onChange={emptyChange}
+        registerFocus={() => undefined}
+      />,
+    );
+    expect(screen.getByText("No views configured")).toBeInTheDocument();
+    expect(emptyChange).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "Add view" }).at(-1)!,
+    );
+    expect(latest<DraftView[]>(emptyChange)).toHaveLength(1);
+    rendered.unmount();
+  });
+
+  it("deletes a selected view and selects its nearest survivor", async () => {
+    const onChange = renderViews({
+      views: [
+        view({ id: "all", name: "All" }),
+        view({ id: "later", name: "Later" }),
+      ],
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Select Later" }));
+    await user.click(screen.getByRole("button", { name: "Delete Later" }));
+    expect(latest<DraftView[]>(onChange).map((item) => item.id)).toEqual([
+      "all",
+    ]);
+    expect(screen.getByLabelText("View name")).toHaveValue("All");
+  });
+
+  it("authors visible columns in exact order from system and declared fields", async () => {
+    const onChange = renderViews();
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Column to add"), "status");
+    await user.click(screen.getByRole("button", { name: "Add column" }));
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "title",
+      "status",
+    ]);
+    await user.click(screen.getByRole("button", { name: "Move status up" }));
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "status",
+      "title",
+    ]);
+    await user.click(
+      screen.getByRole("button", { name: "Remove title column" }),
+    );
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["status"]);
+  });
+
+  it("authors ordered sort keys and preserves their order", async () => {
+    const onChange = renderViews();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Add sort" }));
+    await user.selectOptions(screen.getByLabelText("Sort field 1"), "rating");
+    await user.selectOptions(screen.getByLabelText("Sort direction 1"), "desc");
+    await user.click(screen.getByRole("button", { name: "Add sort" }));
+    await user.selectOptions(screen.getByLabelText("Sort field 2"), "status");
+    await user.click(screen.getByRole("button", { name: "Move sort 2 up" }));
+    expect(latest<DraftView[]>(onChange)[0].sort).toEqual([
+      { field: "status", dir: "asc" },
+      { field: "rating", dir: "desc" },
+    ]);
+  });
+
+  it("offers grouping only for fields accepted by canGroup", () => {
+    renderViews({
+      properties: [
+        property("rating", "number"),
+        property("status", "select"),
+        property("related", "relation"),
+      ],
+    });
+    const options = Array.from(
+      screen.getByLabelText("Group by").querySelectorAll("option"),
+    ).map((option) => option.value);
+    expect(options).toContain("status");
+    expect(options).not.toContain("rating");
+    expect(options).not.toContain("related");
+    expect(options).not.toContain("tags");
+  });
+
+  it("uses aggregateFunctions and omits the field for count", async () => {
+    const onChange = renderViews();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Add aggregate" }));
+    expect(latest<DraftView[]>(onChange)[0].aggregates).toEqual([
+      { fn: "count" },
+    ]);
+    expect(screen.queryByLabelText("Aggregate field 1")).toBeNull();
+    await user.selectOptions(
+      screen.getByLabelText("Aggregate function 1"),
+      "sum",
+    );
+    const field = screen.getByLabelText("Aggregate field 1");
+    const options = Array.from(field.querySelectorAll("option")).map(
+      (option) => option.value,
+    );
+    expect(options).toContain("rating");
+    expect(options).toContain("word_count");
+    expect(options).not.toContain("status");
+    await user.selectOptions(field, "rating");
+    expect(latest<DraftView[]>(onChange)[0].aggregates).toEqual([
+      { fn: "sum", field: "rating" },
+    ]);
+  });
+
+  it("keeps the per-view filter exact and labels its AND semantics", async () => {
+    const onChange = renderViews();
+    const user = userEvent.setup();
+    expect(
+      screen.getByText("Additional filter; always ANDed with base membership."),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Add Match all group" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add condition to Match all" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Field for condition 1"),
+      "status",
+    );
+    await user.type(screen.getByLabelText("Value for condition 1"), "reading");
+    expect(latest<DraftView[]>(onChange)[0].filter).toEqual({
+      all: [{ field: "status", op: "eq", value: "reading" }],
+    });
+  });
+
+  it("renders an accessible diagnostic for an unsupported layout", () => {
+    const unsupported = { ...view(), layout: "board" } as unknown as DraftView;
+    renderViews({ views: [unsupported] });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /unsupported layout.*board.*only table/i,
+    );
+    expect(screen.getByLabelText("Layout")).toHaveValue("board");
+  });
+});
+
+describe("BasePreview", () => {
+  it("debounces unsaved definitions and sends only the latest full draft", async () => {
+    vi.useFakeTimers();
+    previewMock.mockResolvedValue({
+      diagnostics: [],
+      output: { shape: "flat", rows: [], total: 0 },
+    } satisfies BasePreviewResponse);
+    const initial = draft();
+    const rendered = render(
+      <BasePreview draft={initial} selectedViewId="view-all" />,
+    );
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...initial, name: "First" }}
+        selectedViewId="view-all"
+      />,
+    );
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...initial, name: "Newest" }}
+        selectedViewId="view-all"
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(249));
+    expect(previewMock).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(previewMock).toHaveBeenCalledWith({
+      body: {
+        definition: expect.objectContaining({ name: "Newest" }),
+        view: "All",
+        limit: 100,
+        offset: 0,
+      },
+    });
+    vi.useRealTimers();
+  });
+
+  it("suppresses an older response that resolves after a newer one", async () => {
+    vi.useFakeTimers();
+    let resolveOld!: (value: BasePreviewResponse) => void;
+    const oldPromise = new Promise<BasePreviewResponse>((resolve) => {
+      resolveOld = resolve;
+    });
+    previewMock.mockReturnValueOnce(oldPromise).mockResolvedValueOnce({
+      diagnostics: [],
+      output: {
+        shape: "flat",
+        rows: [
+          {
+            id: "new",
+            path: "new.md",
+            kind: "note",
+            title: "Newest row",
+            columns: {},
+          },
+        ],
+        total: 1,
+      },
+    });
+    const initial = draft();
+    const rendered = render(
+      <BasePreview draft={initial} selectedViewId="view-all" />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...initial, name: "Changed" }}
+        selectedViewId="view-all"
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(screen.getByText("Newest row")).toBeInTheDocument();
+    await act(async () => {
+      resolveOld({
+        diagnostics: [],
+        output: {
+          shape: "flat",
+          rows: [
+            {
+              id: "old",
+              path: "old.md",
+              kind: "note",
+              title: "Old row",
+              columns: {},
+            },
+          ],
+          total: 1,
+        },
+      });
+      await oldPromise;
+    });
+    expect(screen.queryByText("Old row")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("switches between selected-view and base-membership preview", async () => {
+    vi.useFakeTimers();
+    previewMock.mockResolvedValue({
+      diagnostics: [],
+      output: { shape: "flat", rows: [], total: 0 },
+    });
+    render(<BasePreview draft={draft()} selectedViewId="view-all" />);
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    fireEvent.click(screen.getByRole("radio", { name: "Base membership" }));
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(previewMock.mock.calls[0][0].body.view).toBe("All");
+    expect(previewMock.mock.calls[1][0].body.view).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("renders loading, empty, result caps, groups, diagnostics, evaluation, and network errors", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: BasePreviewResponse) => void;
+    const pending = new Promise<BasePreviewResponse>((accept) => {
+      resolve = accept;
+    });
+    previewMock.mockReturnValueOnce(pending);
+    const rendered = render(
+      <BasePreview draft={draft()} selectedViewId="view-all" />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(screen.getByRole("status")).toHaveTextContent(/loading preview/i);
+    await act(async () =>
+      resolve({
+        diagnostics: [],
+        output: { shape: "flat", rows: [], total: 0 },
+      }),
+    );
+    expect(screen.getByText(/no pages match/i)).toBeInTheDocument();
+
+    previewMock.mockResolvedValueOnce({
+      diagnostics: [],
+      output: {
+        shape: "flat",
+        rows: [
+          {
+            id: "one",
+            path: "one.md",
+            kind: "note",
+            title: "One",
+            columns: { rating: 5 },
+          },
+        ],
+        total: 125,
+      },
+    });
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...draft(), description: "changed" }}
+        selectedViewId="view-all"
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(
+      screen.getByText(/showing 1 of 125.*capped at 100/i),
+    ).toBeInTheDocument();
+
+    previewMock.mockResolvedValueOnce({
+      diagnostics: [],
+      output: {
+        shape: "grouped",
+        groups: [
+          {
+            key: "reading",
+            total: 12,
+            aggregates: [42],
+            rows: [
+              {
+                id: "two",
+                path: "two.md",
+                kind: "note",
+                title: "Two",
+                columns: { status: "reading" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...draft(), description: "grouped" }}
+        selectedViewId="view-all"
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(screen.getByText(/1 group.*1 preview row/i)).toBeInTheDocument();
+    expect(screen.getByText("12 rows")).toBeInTheDocument();
+
+    previewMock.mockResolvedValueOnce({
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].layout",
+          message: "layout is unsupported",
+        },
+      ],
+      evaluation_error: "rating could not be evaluated",
+      output: null,
+    });
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...draft(), description: "bad" }}
+        selectedViewId="view-all"
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /layout is unsupported.*rating could not be evaluated/i,
+    );
+
+    previewMock.mockRejectedValueOnce(new Error("preview offline"));
+    rendered.rerender(
+      <BasePreview
+        draft={{ ...draft(), description: "offline" }}
+        selectedViewId="view-all"
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(screen.getByRole("alert")).toHaveTextContent(/preview offline/i);
+    vi.useRealTimers();
+  });
+});

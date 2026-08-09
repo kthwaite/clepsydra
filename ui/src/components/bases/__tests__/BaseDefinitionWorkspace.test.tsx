@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
 
-const { updateMock, useBlockerMock } = vi.hoisted(() => ({
+const { previewMock, updateMock, useBlockerMock } = vi.hoisted(() => ({
+  previewMock: vi.fn(),
   updateMock: vi.fn(),
   useBlockerMock: vi.fn(),
 }));
@@ -30,6 +31,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("#/api/bases", () => ({
   useBase: () => baseState,
+  usePreviewBase: () => ({ mutateAsync: previewMock }),
   useUpdateBase: () => ({ mutateAsync: updateMock, isPending: false }),
 }));
 
@@ -82,6 +84,11 @@ async function renameBase(name: string) {
 
 beforeEach(() => {
   updateMock.mockReset();
+  previewMock.mockReset();
+  previewMock.mockResolvedValue({
+    diagnostics: [],
+    output: { shape: "flat", rows: [], total: 0 },
+  });
   useBlockerMock.mockReset();
   blockerState = { status: "idle" };
   baseState = {
@@ -289,14 +296,12 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(baseState.refetch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Views" }));
-    expect(
-      screen.getByText("View editing is added in Task 10."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Views" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Review my draft" }));
     expect(screen.getByLabelText("Name")).toHaveFocus();
     expect(baseState.refetch).not.toHaveBeenCalled();
     expect(
-      screen.queryByText("View editing is added in Task 10."),
+      screen.queryByRole("heading", { name: "Views" }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reload from file" }));
     expect(screen.getByRole("dialog")).toHaveTextContent(/discard your draft/i);
@@ -444,8 +449,93 @@ describe("BaseDefinitionWorkspace", () => {
       "views[0].sort[0]",
     );
     await user.click(viewDiagnostic);
-    expect(
-      screen.getByText("View editing is added in Task 10.").closest("section"),
-    ).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Select All" })).toHaveFocus();
+  });
+  it("saves the exact authored view while previewing the unsaved definition", async () => {
+    updateMock.mockResolvedValue(
+      mutationResponse({
+        views: [
+          {
+            name: "Everything",
+            layout: "table",
+            filter: {
+              all: [{ field: "kind", op: "eq", value: "book" }],
+            },
+            columns: ["title"],
+            sort: [],
+            aggregates: [],
+          },
+        ],
+        revision: "revision-2",
+      }),
+    );
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    const name = screen.getByLabelText("View name");
+    await user.clear(name);
+    await user.type(name, "Everything");
+    await user.click(
+      screen.getByRole("button", { name: "Add Match all group" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add condition to Match all" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Field for condition 1"),
+      "kind",
+    );
+    await user.type(screen.getByLabelText("Value for condition 1"), "book");
+    await waitFor(() => expect(previewMock).toHaveBeenCalled());
+
+    expect(previewMock).toHaveBeenLastCalledWith({
+      body: {
+        definition: expect.objectContaining({
+          views: [
+            expect.objectContaining({
+              name: "Everything",
+              filter: {
+                all: [{ field: "kind", op: "eq", value: "book" }],
+              },
+            }),
+          ],
+        }),
+        view: "Everything",
+        limit: 100,
+        offset: 0,
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(updateMock).toHaveBeenCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({
+          views: [
+            expect.objectContaining({
+              name: "Everything",
+              filter: {
+                all: [{ field: "kind", op: "eq", value: "book" }],
+              },
+            }),
+          ],
+        }),
+      },
+    });
+  });
+
+  it("keeps Save available when preview networking fails", async () => {
+    previewMock.mockRejectedValue(new Error("preview offline"));
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    const name = screen.getByLabelText("View name");
+    await user.clear(name);
+    await user.type(name, "Changed");
+    await waitFor(() => expect(previewMock).toHaveBeenCalled());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /preview offline/i,
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 });
