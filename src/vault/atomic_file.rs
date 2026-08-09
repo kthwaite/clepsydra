@@ -103,6 +103,7 @@ pub fn atomic_replace_if_unchanged(
     let observed_identity = file_identity(&observed_metadata).map_err(|source| {
         ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
     })?;
+    let observed_permissions = observed_metadata.permissions();
     let mut observed_bytes = Vec::new();
     observed
         .read_to_end(&mut observed_bytes)
@@ -121,18 +122,54 @@ pub fn atomic_replace_if_unchanged(
             ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
         }
     })?;
-    let claimed_identity = file_identity(&fs::metadata(&claim).map_err(|source| {
-        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
-    })?)
-    .map_err(|source| {
-        ConditionalPublicationError::Publication(AtomicPublicationError::NotPublished(source))
-    })?;
+    let claimed_metadata = match fs::metadata(&claim) {
+        Ok(metadata) => metadata,
+        Err(source) => {
+            let _ = restore_claim(path, &claim);
+            return Err(ConditionalPublicationError::Publication(
+                AtomicPublicationError::NotPublished(source),
+            ));
+        }
+    };
+    let claimed_identity = match file_identity(&claimed_metadata) {
+        Ok(identity) => identity,
+        Err(source) => {
+            let _ = restore_claim(path, &claim);
+            return Err(ConditionalPublicationError::Publication(
+                AtomicPublicationError::NotPublished(source),
+            ));
+        }
+    };
     if claimed_identity != observed_identity {
         restore_claim(path, &claim)?;
         return Err(ConditionalPublicationError::Stale);
     }
+    let claimed_bytes = match fs::read(&claim) {
+        Ok(bytes) => bytes,
+        Err(source) => {
+            let _ = restore_claim(path, &claim);
+            return Err(ConditionalPublicationError::Publication(
+                AtomicPublicationError::NotPublished(source),
+            ));
+        }
+    };
+    if claimed_bytes != expected {
+        restore_claim(path, &claim)?;
+        return Err(ConditionalPublicationError::Stale);
+    }
 
-    match atomic_create(path, content) {
+    match atomic_write_with(
+        path,
+        content,
+        Some(observed_permissions),
+        |file, content| {
+            file.write_all(content)?;
+            file.sync_all()
+        },
+        install_noreplace,
+        sync_parent,
+        remove_temporary,
+    ) {
         Ok(()) => {
             fs::remove_file(&claim).map_err(|source| {
                 ConditionalPublicationError::Publication(

@@ -879,6 +879,14 @@ fn parse_opml(source: &str) -> Result<Vec<ImportedFeed>, ApiError> {
     Ok(feeds)
 }
 
+#[cfg(test)]
+pub(crate) fn set_before_opml_parse_hook(
+    state: &AppState,
+    hook: Option<Arc<dyn Fn() + Send + Sync>>,
+) {
+    *state.feed_before_opml_parse_hook.lock() = hook;
+}
+
 #[utoipa::path(
     post,
     path = "/import",
@@ -896,10 +904,26 @@ pub async fn import_opml(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ImportOpmlRequest>,
 ) -> Result<Json<ImportOpmlResponse>, ApiError> {
+    {
+        let _preflight_guard = state.feed_manifest_lock.lock().await;
+        let (_, _, current_revision) = read_manifest_raw(&state).await?;
+        if current_revision != request.expected_revision {
+            return Err(ApiError::revision_conflict(current_revision));
+        }
+    }
+
+    #[cfg(test)]
+    let before_parse_hook = state.feed_before_opml_parse_hook.lock().clone();
     let opml = request.opml;
-    let imported = tokio::task::spawn_blocking(move || parse_opml(&opml))
-        .await
-        .map_err(|error| ApiError::internal(format!("OPML parser task failed: {error}")))??;
+    let imported = tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        if let Some(hook) = before_parse_hook {
+            hook();
+        }
+        parse_opml(&opml)
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("OPML parser task failed: {error}")))??;
 
     let _manifest_guard = state.feed_manifest_lock.lock().await;
     let snapshot = read_manifest_for_mutation(&state, &request.expected_revision).await?;
@@ -1028,7 +1052,7 @@ mod tests {
 
     use super::{
         MAX_OPML_ATTRIBUTES_PER_OUTLINE, MAX_OPML_BYTES, MAX_OPML_DEPTH, MAX_OPML_OUTLINES,
-        parse_opml, set_after_list_snapshot_hook,
+        parse_opml, set_after_list_snapshot_hook, set_before_opml_parse_hook,
     };
 
     use crate::api::AppState;
@@ -2066,6 +2090,126 @@ mod tests {
         let due = fixture.state.feeds.due_feeds(Utc::now()).await.unwrap();
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, feed_id);
+    }
+
+    #[tokio::test]
+    async fn stale_import_revision_precedes_every_opml_parse_rejection() {
+        let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
+        let fixture = feed_test_app(manifest).await;
+        set_before_opml_parse_hook(
+            &fixture.state,
+            Some(Arc::new(|| {
+                panic!("stale OPML import must not invoke the parser")
+            })),
+        );
+        let oversized = " ".repeat(MAX_OPML_BYTES + 1);
+        let documents = [
+            "<opml><body><outline".to_owned(),
+            oversized,
+            "<!DOCTYPE opml><opml><body></body></opml>".to_owned(),
+        ];
+
+        for opml in documents {
+            let (status, body) = request_json(
+                &fixture.app,
+                Method::POST,
+                "/api/vault/feeds/import",
+                Some(json!({
+                    "expected_revision": "stale",
+                    "opml": opml
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(body["status"], 409);
+            assert_eq!(body["detail"]["code"], "revision_conflict");
+            assert_eq!(body["detail"]["current_revision"], page_revision(manifest));
+            assert_eq!(
+                std::fs::read(fixture.state.vault.root().join("feeds.md")).unwrap(),
+                manifest.as_bytes()
+            );
+        }
+        set_before_opml_parse_hook(&fixture.state, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn opml_parse_releases_manifest_lock_and_rechecks_revision_before_publish() {
+        let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
+        let fixture = feed_test_app(manifest).await;
+        let feed_id = fixture.state.feeds.list_feeds().await.unwrap()[0].id;
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
+        set_before_opml_parse_hook(
+            &fixture.state,
+            Some(Arc::new({
+                let release_rx = Arc::clone(&release_rx);
+                move || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.lock().recv().unwrap();
+                }
+            })),
+        );
+        let import = tokio::spawn({
+            let app = fixture.app.clone();
+            async move {
+                request_json(
+                    &app,
+                    Method::POST,
+                    "/api/vault/feeds/import",
+                    Some(json!({
+                        "expected_revision": page_revision(manifest),
+                        "opml": "<opml><body><outline text=\"Imported\" xmlUrl=\"https://imported.example/rss\"/></body></opml>"
+                    })),
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::task::spawn_blocking(move || entered_rx.recv().unwrap()),
+        )
+        .await
+        .expect("OPML parser did not reach the deterministic blocking seam")
+        .unwrap();
+
+        let (patch_status, patch_body) = tokio::time::timeout(
+            Duration::from_secs(1),
+            request_json(
+                &fixture.app,
+                Method::PATCH,
+                &format!("/api/vault/feeds/{feed_id}"),
+                Some(json!({
+                    "group": "Changed",
+                    "expected_revision": page_revision(manifest)
+                })),
+            ),
+        )
+        .await
+        .expect("OPML parsing held the manifest mutation lock");
+        assert_eq!(patch_status, StatusCode::OK);
+        let patched_revision = patch_body["manifest_revision"].as_str().unwrap().to_owned();
+        release_tx.send(()).unwrap();
+        let (import_status, import_body) = tokio::time::timeout(Duration::from_secs(1), import)
+            .await
+            .unwrap()
+            .unwrap();
+        set_before_opml_parse_hook(&fixture.state, None);
+
+        assert_eq!(import_status, StatusCode::CONFLICT);
+        assert_eq!(import_body["status"], 409);
+        assert_eq!(import_body["detail"]["code"], "revision_conflict");
+        assert_eq!(import_body["detail"]["current_revision"], patched_revision);
+        let parsed = manifest::parse(
+            &std::fs::read_to_string(fixture.state.vault.root().join("feeds.md")).unwrap(),
+        );
+        assert_eq!(parsed.feeds[0].group, "Changed");
+        assert!(
+            parsed
+                .feeds
+                .iter()
+                .all(|feed| feed.url != "https://imported.example/rss")
+        );
     }
 
     fn assert_opml_bad_request(source: &str, contract: &str) {

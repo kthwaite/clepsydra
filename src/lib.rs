@@ -577,6 +577,8 @@ pub async fn build_app_state_with_feeds(
         feed_before_reconcile_commit_hook: parking_lot::Mutex::new(None),
         #[cfg(test)]
         feed_after_list_snapshot_hook: parking_lot::Mutex::new(None),
+        #[cfg(test)]
+        feed_before_opml_parse_hook: parking_lot::Mutex::new(None),
         feed_settings: feed_settings.clone(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         bcl,

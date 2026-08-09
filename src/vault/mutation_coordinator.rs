@@ -1132,4 +1132,128 @@ mod tests {
             "failed reserved publication must leave the page index untouched"
         );
     }
+    #[tokio::test]
+    async fn reserved_manifest_rejects_completed_same_inode_write_before_claim_verification() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut raw_index =
+            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        raw_index.build(&vault).unwrap();
+        let index = IndexHandle::spawn(raw_index, vault.clone());
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("feeds.md").unwrap();
+        let original = b"## Original\n- https://one.example/rss\n".to_vec();
+        let external = b"## External\n- https://external.example/rss\n".to_vec();
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: None,
+                    content: original.clone(),
+                },
+                &|_: MutationNotification| {},
+            )
+            .await
+            .unwrap();
+        let destination = root.join("feeds.md");
+        #[cfg(unix)]
+        let original_identity = std::fs::metadata(&destination).unwrap();
+        coordinator.set_before_update_publish_hook(Some(Arc::new({
+            let destination = destination.clone();
+            let external = external.clone();
+            move |observed| {
+                assert_eq!(observed.as_str(), "feeds.md");
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&destination)
+                    .unwrap();
+                std::io::Write::write_all(&mut file, &external).unwrap();
+                file.sync_all().unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    assert_eq!(
+                        std::fs::metadata(&destination).unwrap().ino(),
+                        original_identity.ino(),
+                        "fixture must mutate the already-observed inode"
+                    );
+                }
+            }
+        })));
+        let notifications = parking_lot::Mutex::new(Vec::new());
+
+        let error = coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: Some(original),
+                    content: b"## Candidate\n- https://candidate.example/rss\n".to_vec(),
+                },
+                &|notification: MutationNotification| notifications.lock().push(notification),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::Stale(stale) if stale == path));
+        assert_eq!(std::fs::read(destination).unwrap(), external);
+        assert!(notifications.lock().is_empty());
+        assert_eq!(
+            indexed_page_count(&index).await,
+            0,
+            "failed reserved publication must leave the page index untouched"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reserved_manifest_replacement_preserves_destination_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("feeds.md").unwrap();
+        let original = b"## Original\n- https://one.example/rss\n".to_vec();
+        let replacement = b"## Replacement\n- https://two.example/rss\n".to_vec();
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path: path.clone(),
+                    expected_content: None,
+                    content: original.clone(),
+                },
+                &|_: MutationNotification| {},
+            )
+            .await
+            .unwrap();
+        let destination = root.join("feeds.md");
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        coordinator
+            .write_reserved_manifest(
+                &vault,
+                ReservedManifestCommand {
+                    path,
+                    expected_content: Some(original),
+                    content: replacement.clone(),
+                },
+                &|_: MutationNotification| {},
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&destination).unwrap(), replacement);
+        assert_eq!(
+            std::fs::metadata(destination).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 }
