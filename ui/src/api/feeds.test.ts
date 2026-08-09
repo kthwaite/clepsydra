@@ -605,6 +605,165 @@ describe("usePatchFeedEntry", () => {
     ).toMatchObject({ read: false, bookmarked: false });
     expect(client.getQueryData(key)).not.toBe(baseline);
   });
+
+  it.each([
+    "older response first",
+    "newer response first",
+  ] as const)("merges normalized successful fields without stale overwrite when the %s", async (responseOrder) => {
+    const entry = makeEntry({
+      read: false,
+      bookmarked: true,
+      tags: ["rust"],
+    });
+    const baseline = makePages([entry], ["baseline"]);
+    const key = entriesKey({ view: "all" });
+    const client = freshClient();
+    client.setQueryData(key, baseline);
+    expect(
+      client
+        .getQueryCache()
+        .find({ queryKey: key, exact: true })
+        ?.getObserversCount(),
+    ).toBe(0);
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = result.current.mutateAsync({
+      id: entry.id,
+      tags: [" rust ", "rust", "ai"],
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    if (responseOrder === "older response first") {
+      olderResponse.resolve(
+        jsonResponse({ ...entry, read: true, tags: ["rust"] }),
+      );
+      await olderMutation;
+      expect(
+        client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+      ).toMatchObject({
+        read: true,
+        tags: [" rust ", "rust", "ai"],
+      });
+      newerResponse.resolve(
+        jsonResponse({
+          ...entry,
+          read: false,
+          tags: ["rust", "ai"],
+        }),
+      );
+      await newerMutation;
+    } else {
+      newerResponse.resolve(
+        jsonResponse({
+          ...entry,
+          read: false,
+          tags: ["rust", "ai"],
+        }),
+      );
+      await newerMutation;
+      expect(
+        client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+      ).toMatchObject({ read: true, tags: ["rust", "ai"] });
+      olderResponse.resolve(
+        jsonResponse({ ...entry, read: true, tags: ["rust"] }),
+      );
+      await olderMutation;
+    }
+
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+    ).toMatchObject({
+      read: true,
+      bookmarked: true,
+      tags: ["rust", "ai"],
+    });
+    expect(
+      client
+        .getQueryCache()
+        .find({ queryKey: key, exact: true })
+        ?.getObserversCount(),
+    ).toBe(0);
+  });
+
+  it("recreates a removed inactive query and rebases its captured mutation layers", async () => {
+    const entry = makeEntry({ read: false, bookmarked: true });
+    const baseline = makePages([entry], ["captured-page"]);
+    const key = entriesKey({ view: "all" });
+    const client = freshClient();
+    client.setQueryData(key, baseline);
+    const originalQuery = client
+      .getQueryCache()
+      .find({ queryKey: key, exact: true });
+    expect(originalQuery).toBeDefined();
+    expect(originalQuery?.getObserversCount()).toBe(0);
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = result.current
+      .mutateAsync({ id: entry.id, read: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = result.current
+      .mutateAsync({ id: entry.id, bookmarked: false })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    client.removeQueries({ queryKey: key, exact: true });
+    expect(
+      client.getQueryCache().find({ queryKey: key, exact: true }),
+    ).toBeUndefined();
+
+    olderResponse.resolve(
+      jsonResponse({ error: "older failed after removal" }, 500),
+    );
+    await expect(olderMutation).resolves.toEqual({
+      error: "older failed after removal",
+    });
+    const recreatedQuery = client
+      .getQueryCache()
+      .find({ queryKey: key, exact: true });
+    expect(recreatedQuery).toBeDefined();
+    expect(recreatedQuery).not.toBe(originalQuery);
+    expect(recreatedQuery?.queryKey).toEqual(key);
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+    ).toMatchObject({ read: false, bookmarked: false });
+
+    newerResponse.resolve(
+      jsonResponse({ error: "newer failed after removal" }, 500),
+    );
+    await expect(newerMutation).resolves.toEqual({
+      error: "newer failed after removal",
+    });
+    expect(client.getQueryCache().find({ queryKey: key, exact: true })).toBe(
+      recreatedQuery,
+    );
+    expect(client.getQueryData(key)).toBe(baseline);
+  });
 });
 
 describe("feed membership mutations", () => {
