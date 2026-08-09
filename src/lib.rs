@@ -3,6 +3,7 @@ pub mod app_config;
 pub mod config_command;
 pub mod deeplink;
 pub mod doctor;
+pub mod feeds;
 pub mod lsp;
 pub mod macos_url_handler;
 pub mod mcp;
