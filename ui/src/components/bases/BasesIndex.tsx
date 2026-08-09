@@ -1,6 +1,6 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, Copy, Eye, Plus, Settings, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type BaseListResponse,
   type BaseSummary,
@@ -310,11 +310,25 @@ export function BasesIndexView({
 
 export function BasesIndex() {
   const navigate = useNavigate();
+  const location = useLocation();
   const basesQuery = useBases();
   const createBase = useCreateBase();
   const deleteBase = useDeleteBase();
-  const [createOpen, setCreateOpen] = useState(false);
+  const createRequested =
+    new URLSearchParams(location.search).get("create") === "true";
+  const [createOpen, setCreateOpen] = useState(createRequested);
   const [operationError, setOperationError] = useState<string>();
+
+  useEffect(() => {
+    if (createRequested) setCreateOpen(true);
+  }, [createRequested]);
+
+  function closeCreate() {
+    setCreateOpen(false);
+    if (createRequested) {
+      void navigate({ to: "/bases", search: {}, replace: true });
+    }
+  }
   let queryError: unknown;
   if ("error" in basesQuery) queryError = basesQuery.error;
 
@@ -400,7 +414,7 @@ export function BasesIndex() {
       />
       <CreateBaseDialog
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreate}
         onCreate={(request) => createBase.mutateAsync({ body: request })}
         isPending={createBase.isPending}
       />

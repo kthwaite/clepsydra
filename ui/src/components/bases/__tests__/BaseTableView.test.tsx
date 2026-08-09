@@ -42,6 +42,7 @@ function renderView(overrides: Partial<Parameters<typeof BaseTableView>[0]>) {
     onSortChange: vi.fn(),
     onOpenPage: vi.fn(),
     onCommitCell: vi.fn(),
+    onConfigure: vi.fn(),
   };
   render(
     <BaseTableView
@@ -63,6 +64,18 @@ describe("BaseTableView", () => {
     expect(screen.getByRole("button", { name: "Continues" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Shelf" }));
     expect(props.onViewChange).toHaveBeenCalledWith("Shelf");
+  });
+
+  it("opens the definition workspace from a saved base", async () => {
+    const user = userEvent.setup();
+    const props = renderView({});
+    const configure = screen.getByRole("button", {
+      name: "Configure Reading Log",
+    });
+    configure.focus();
+    await user.keyboard("{Enter}");
+    expect(configure).toHaveFocus();
+    expect(props.onConfigure).toHaveBeenCalledOnce();
   });
 
   it("renders group header rows with aggregate chips", () => {
@@ -163,6 +176,9 @@ describe("BaseTableView", () => {
     expect(screen.queryByRole("button", { name: "Continues" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Shelf" })).toBeNull();
     expect(
+      screen.queryByRole("button", { name: "Configure Reading Log" }),
+    ).toBeNull();
+    expect(
       screen.queryByRole("button", { name: "The Book of the New Sun" }),
     ).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -174,5 +190,6 @@ describe("BaseTableView", () => {
     expect(props.onSortChange).not.toHaveBeenCalled();
     expect(props.onOpenPage).not.toHaveBeenCalled();
     expect(props.onCommitCell).not.toHaveBeenCalled();
+    expect(props.onConfigure).not.toHaveBeenCalled();
   });
 });

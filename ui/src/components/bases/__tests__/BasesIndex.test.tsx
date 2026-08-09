@@ -5,6 +5,7 @@ import type { BaseListResponse } from "#/api/bases";
 import { BasesIndex, BasesIndexView } from "#/components/bases/BasesIndex";
 
 const navigateMock = vi.fn();
+const locationState = { search: "" };
 const deleteMock = vi.fn();
 const { detailGetMock } = vi.hoisted(() => ({ detailGetMock: vi.fn() }));
 let basesState: {
@@ -17,6 +18,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
+  useLocation: () => locationState,
 }));
 
 vi.mock("#/api/bases", () => ({
@@ -228,6 +230,7 @@ describe("BasesIndexView", () => {
 describe("BasesIndex", () => {
   beforeEach(() => {
     navigateMock.mockReset();
+    locationState.search = "";
     deleteMock.mockReset();
     basesState = { data: undefined, isPending: false, error: null };
     detailGetMock.mockReset();
@@ -249,6 +252,18 @@ describe("BasesIndex", () => {
     basesState.error = { status: 500, error: "registry offline" };
     render(<BasesIndex />);
     expect(screen.getByRole("alert")).toHaveTextContent("registry offline");
+  });
+
+  it("opens guided creation from the command deep link", () => {
+    locationState.search = "?create=true";
+    basesState.data = { bases: [], diagnostics: [] };
+
+    render(<BasesIndex />);
+
+    expect(
+      screen.getByRole("heading", { name: "Create base" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveFocus();
   });
 
   it("fetches the current revision before confirming and deleting", async () => {

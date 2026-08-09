@@ -1,3 +1,4 @@
+import { Settings } from "lucide-react";
 import {
   Cell,
   Column,
@@ -14,6 +15,7 @@ import type {
   QueryRow,
   ViewOverrides,
 } from "#/api/bases";
+import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { EditableCell } from "./EditableCell";
@@ -29,6 +31,7 @@ export interface BaseTableViewProps {
   sortOverride: ViewOverrides;
   onSortChange: (override: ViewOverrides) => void;
   onOpenPage: (path: string) => void;
+  onConfigure?: () => void;
   onCommitCell: (
     row: QueryRow,
     key: string,
@@ -86,6 +89,7 @@ export function BaseTableView({
   sortOverride,
   onSortChange,
   onOpenPage,
+  onConfigure,
   onCommitCell,
   readOnly = false,
 }: BaseTableViewProps) {
@@ -200,11 +204,11 @@ export function BaseTableView({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3 border-b border-rule pb-2">
+      <div className="flex flex-wrap items-center gap-3 border-b border-rule pb-2">
         <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
           {definition.name}
         </h1>
-        <nav aria-label="Views" className="flex gap-1">
+        <nav aria-label="Views" className="flex flex-wrap gap-1">
           {(definition.views ?? []).map((v) =>
             readOnly ? (
               <span
@@ -223,11 +227,12 @@ export function BaseTableView({
                 key={v.name}
                 type="button"
                 className={cn(
-                  "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em]",
+                  "cl-mono border px-2 py-0.5 text-[11px] uppercase tracking-[0.08em] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   v.name === activeView
                     ? "border-accent text-accent"
                     : "border-rule text-ink-mute hover:text-ink",
                 )}
+                aria-current={v.name === activeView ? "page" : undefined}
                 onClick={() => onViewChange(v.name)}
               >
                 {v.name}
@@ -235,6 +240,18 @@ export function BaseTableView({
             ),
           )}
         </nav>
+        {!readOnly && onConfigure && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto"
+            onPress={onConfigure}
+            aria-label={`Configure ${definition.name}`}
+          >
+            <Settings aria-hidden="true" className="h-3.5 w-3.5" />
+            Configure
+          </Button>
+        )}
       </div>
 
       {viewError ? (

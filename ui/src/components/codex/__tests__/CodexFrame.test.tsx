@@ -98,11 +98,11 @@ describe("CodexFrame Docs integration", () => {
   it("renders a nested Docs guide as the active shell view", () => {
     renderFrame();
 
-    expect(screen.getByRole("button", { name: /05.*DOCS/i })).toHaveClass(
+    expect(screen.getByRole("button", { name: /06.*DOCS/i })).toHaveClass(
       "shadow-[inset_0_-2px_0_0_var(--accent)]",
     );
     expect(
-      screen.getByRole("button", { name: /06.*STATUS/i }),
+      screen.getByRole("button", { name: /07.*STATUS/i }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
@@ -114,35 +114,35 @@ describe("CodexFrame Docs integration", () => {
     locationState.pathname = "/docs";
     renderFrame();
 
-    expect(screen.getByRole("button", { name: /05.*DOCS/i })).toHaveClass(
+    expect(screen.getByRole("button", { name: /06.*DOCS/i })).toHaveClass(
       "shadow-[inset_0_-2px_0_0_var(--accent)]",
     );
     expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
   });
 
-  it.each(["/docs-old", "/docsfoo"])(
-    "keeps near-prefix path %s in the Atrium fallback view",
-    (pathname) => {
-      locationState.pathname = pathname;
-      renderFrame();
+  it.each([
+    "/docs-old",
+    "/docsfoo",
+  ])("keeps near-prefix path %s in the Atrium fallback view", (pathname) => {
+    locationState.pathname = pathname;
+    renderFrame();
 
-      expect(screen.getByRole("button", { name: /00.*ATRIUM/i })).toHaveClass(
-        "shadow-[inset_0_-2px_0_0_var(--accent)]",
-      );
-      expect(
-        screen.getByRole("button", { name: /05.*DOCS/i }),
-      ).not.toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
-      expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeInTheDocument();
-      expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-    },
-  );
+    expect(screen.getByRole("button", { name: /00.*ATRIUM/i })).toHaveClass(
+      "shadow-[inset_0_-2px_0_0_var(--accent)]",
+    );
+    expect(screen.getByRole("button", { name: /06.*DOCS/i })).not.toHaveClass(
+      "shadow-[inset_0_-2px_0_0_var(--accent)]",
+    );
+    expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeInTheDocument();
+    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+  });
 
   it("navigates an inactive Docs item to the typed default guide route", async () => {
     const user = userEvent.setup();
     locationState.pathname = "/";
     renderFrame();
 
-    const docsButton = screen.getByRole("button", { name: /05.*DOCS/i });
+    const docsButton = screen.getByRole("button", { name: /06.*DOCS/i });
     expect(docsButton).not.toHaveClass(
       "shadow-[inset_0_-2px_0_0_var(--accent)]",
     );
@@ -153,6 +153,51 @@ describe("CodexFrame Docs integration", () => {
       to: "/docs/$slug",
       params: { slug: DEFAULT_DOC_SLUG },
     });
+  });
+
+  it.each([
+    "/bases",
+    "/bases/",
+    "/bases/reading-log",
+    "/bases/reading-log/edit",
+  ])("keeps Bases active for deep link %s", (pathname) => {
+    locationState.pathname = pathname;
+    renderFrame();
+
+    const basesButton = screen.getByRole("button", { name: /05.*BASES/i });
+    expect(basesButton).toHaveClass("shadow-[inset_0_-2px_0_0_var(--accent)]");
+    expect(basesButton).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText(/FILE BASES.*VIEW BASES/)).toBeInTheDocument();
+  });
+
+  it.each([
+    "/bases-old",
+    "/basesfoo",
+  ])("does not treat near-prefix path %s as Bases", (pathname) => {
+    locationState.pathname = pathname;
+    renderFrame();
+
+    expect(
+      screen.getByRole("button", { name: /05.*BASES/i }),
+    ).not.toHaveAttribute("aria-current");
+    expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeInTheDocument();
+  });
+
+  it("navigates to the Bases index and exposes one main landmark", async () => {
+    const user = userEvent.setup();
+    locationState.pathname = "/";
+    renderFrame();
+
+    const basesButton = screen.getByRole("button", { name: /05.*BASES/i });
+    basesButton.focus();
+    await user.keyboard("{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
+    expect(basesButton).toHaveFocus();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getByRole("navigation")).toHaveAccessibleName(
+      "Primary navigation",
+    );
   });
 
   it("retains the reading percentage for Folio", () => {

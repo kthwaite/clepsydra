@@ -6,6 +6,21 @@ export const meta = {
 
 A base is a saved, non-owning view over pages in a vault. It declares which pages belong to the base, gives their frontmatter properties advisory types, and defines table views over the matching pages. The pages remain ordinary Markdown files: a base does not move, copy, or own them.
 
+## Create and configure a base
+
+Open `/bases` from the **Bases** header item or run **Open Bases** in the command palette. The index lists saved bases and files that need repair. Choose **Create base**, or run **Create Base** in the command palette, to open guided creation. Enter a name and slug, optionally define the first membership rule, and create the base. Clepsydra opens `/bases/<slug>/edit` with an `All` table view and `title` column ready to configure.
+
+The Configure workspace has four sections:
+
+- **General** changes the displayed name and description.
+- **Filter** builds base membership from comparison, all, any, and not rules.
+- **Properties** declares ordered advisory property schemas and their options.
+- **Views** configures ordered table views, their extra filters, columns, sorts, grouping, and aggregates.
+
+Changes remain a local draft until you choose **Save**. **Discard** restores the last loaded revision. Leaving with unsaved changes opens a confirmation, and closing the browser is guarded by the browser's unsaved-change prompt. Every Save includes the revision that was loaded: if the file changed in another editor or Clepsydra session, Save preserves the draft and reports a conflict instead of overwriting the newer file. Review the draft, or deliberately reload the file and discard it.
+
+The live preview evaluates the unsaved membership or selected view after a 250 ms pause. It is read-only, returns at most 100 preview rows, retains real totals in group headings, and does not move keyboard focus when results refresh. Structural, evaluation, and network failures are shown beside the preview; a preview network failure alone does not disable Save.
+
 ## Minimal working example
 
 Place a page under `<vault>/books/` (for example, `<vault>/books/the-book-of-the-new-sun.md`) with this TOML frontmatter:
@@ -23,7 +38,7 @@ started = 2026-07-30
 
 The `books/` folder makes the page's resolved system `kind` equal to `BOOK`. In page frontmatter, `kind` itself is an ordinary property; the explicit system key is `type = "BOOK"`. A page elsewhere in the vault therefore needs `type = "BOOK"` to match the system-field filter below. See [System fields and field names](#system-fields-and-field-names) for the distinction.
 
-Create the base file:
+The guided editor writes this base file. For reference—and as an advanced manual escape hatch—the equivalent TOML is:
 
 ```toml
 # <vault>/bases/reading.base.toml
@@ -186,13 +201,15 @@ sort = [{ field = "started", dir = "desc" }]
 columns = ["title", "author", "rating", "started"]
 ```
 
-## Web UI and inline editing
+## Web UI, saved tables, and inline editing
 
-Open `/bases/<slug>` to use the base. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. Clicking a title opens that page.
+Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
 
 System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. For a page that already uses TOML `+++` frontmatter, a successful edit surgically patches the frontmatter and updates `updated_at`, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision.
 
-The UI does not author base definitions. Edit the `.base.toml` file to change membership, schemas, or saved views.
+Renaming or removing a property declaration changes only the base schema. It does not rename or remove that key in existing page frontmatter. Deleting a base removes only its `.base.toml` definition: all matching Markdown pages and all of their properties remain.
+
+The structured editor is the normal authoring path, but the TOML format remains public and editable. Manual TOML is useful for advanced changes or recovery. If a definition cannot be parsed, `/bases` reports it under **Base files needing repair** and provides its path. Repair that file in a text editor, then reload; Clepsydra never fabricates a replacement draft over an unparseable file.
 
 ## Neovim/LSP completions and warnings
 
@@ -206,11 +223,11 @@ See [LSP setup and troubleshooting](/docs/lsp) for client configuration and the 
 
 Base files are parsed independently so one broken file does not poison the registry:
 
-- Invalid TOML prevents that base from being evaluated; the Bases API still reports a diagnostic for its slug.
+- Invalid TOML prevents that base from being evaluated. `/bases` still reports a diagnostic and the file path so you can repair it manually and reload.
 - An invalid property declaration is dropped, while valid declarations and the rest of the base remain available with a diagnostic.
 - Other validation findings are advisory. Examples include a property shadowing a system field, an undeclared filter property, a non-orderable comparison, duplicate view names, an unsupported layout, or an aggregate missing its field.
-- Some semantic errors are detected only when a view is evaluated. The web UI replaces the grid with the resulting view error.
+- Some semantic errors are detected only when a view is evaluated. The saved table replaces its grid with the view error; the unsaved preview shows the error without discarding the draft.
 
 If a base does not appear, check that it is directly under `<vault>/bases/`, ends in `.base.toml`, contains `name`, and has valid TOML. If `/bases/<slug>` says the base has no views, add at least one `[[views]]` entry. If date or number comparisons behave unexpectedly, verify the page uses native TOML values rather than quoted strings and that the property has the corresponding declaration.
 
-V1 supports table layout only, does not provide base-definition authoring in the web UI, and caps displayed rows in each group at 50 while retaining the true group total. These limits do not change the non-owning model: pages can match any number of bases, and removing a base never removes pages.
+V1 supports table layout only. Unsaved preview requests are capped at 100 rows; saved grouped views cap displayed rows in each group at 50 while retaining the true group total. These limits do not change the non-owning model: pages can match any number of bases, and removing a base never removes pages or page properties.

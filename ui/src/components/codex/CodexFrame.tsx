@@ -20,6 +20,7 @@ type View =
   | "gazetteer"
   | "constellation"
   | "tasking"
+  | "bases"
   | "docs";
 
 /** Nav order + diegetic index numbers. */
@@ -29,6 +30,7 @@ const NAV: ReadonlyArray<readonly [View, string]> = [
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
   ["tasking", "TASKING"],
+  ["bases", "BASES"],
   ["docs", "DOCS"],
 ];
 
@@ -56,6 +58,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
     const p = location.pathname;
     if (p === "/" || p === "") return "atrium";
     if (p === "/docs" || p.startsWith("/docs/")) return "docs";
+    if (p === "/bases" || p.startsWith("/bases/")) return "bases";
     if (p.startsWith("/gazetteer")) return "gazetteer";
     if (p.startsWith("/tasking")) return "tasking";
     if (p.startsWith("/workspace")) {
@@ -67,6 +70,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 
   const onNav = (target: View) => {
     if (target === "atrium") navigate({ to: "/" });
+    else if (target === "bases") navigate({ to: "/bases" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
     else if (target === "docs") {
       navigate({
@@ -109,13 +113,17 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
         <button
           type="button"
           onClick={() => navigate({ to: "/" })}
-          className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-3 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink"
+          className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-2 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink sm:px-3"
           aria-label="CLEPSYDRA — return to Atrium"
         >
-          <span className="text-accent">C</span>LEPSYDRA
+          <span className="text-accent">C</span>
+          <span className="hidden sm:inline">LEPSYDRA</span>
         </button>
 
-        <nav className="flex items-stretch">
+        <nav
+          aria-label="Primary navigation"
+          className="cl-noscroll flex min-w-0 flex-1 items-stretch overflow-x-auto"
+        >
           {NAV.map(([key, label], i) => {
             const active = view === key;
             return (
@@ -123,6 +131,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
                 key={key}
                 type="button"
                 onClick={() => onNav(key)}
+                aria-current={active ? "page" : undefined}
                 className={cn(
                   "cl-mono flex cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
                   active
@@ -137,10 +146,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
           })}
         </nav>
 
-        <div className="flex-1" />
-
         {/* HEADER META — minimal status that survives diegetic-off */}
-        <div className="cl-mono flex items-stretch text-[10px]">
+        <div className="cl-mono flex flex-shrink-0 items-stretch text-[10px]">
           <span className="hidden items-center gap-1.5 border-l border-rule-soft px-3 sm:flex">
             <span
               className="inline-block h-[6px] w-[6px]"
@@ -171,8 +178,8 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
                 : "text-ink-mute hover:text-ink",
             )}
           >
-            <span className="text-[9px] text-ink-mute">06</span>
-            <span className="text-[10px]">STATUS</span>
+            <span className="text-[9px] text-ink-mute">07</span>
+            <span className="hidden text-[10px] md:inline">STATUS</span>
           </button>
           <button
             type="button"
@@ -188,6 +195,7 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
 
       {/* ── SHEAF — hidden on ATRIUM, CONSTELLATION, and DOCS ──────── */}
       {view !== "atrium" &&
+        view !== "bases" &&
         view !== "constellation" &&
         view !== "docs" && <Sheaf activeTabId={activeTabId} />}
 
@@ -254,6 +262,7 @@ function useFolioCode(view: View): string {
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
   if (view === "tasking") return "TASKING";
+  if (view === "bases") return "BASES";
   if (view === "docs") return "DOC-001";
   const active = tabs.find((t) => t.id === activeTabId);
   if (!active?.path) return "—";

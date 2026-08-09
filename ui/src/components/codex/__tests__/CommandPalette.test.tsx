@@ -74,4 +74,29 @@ describe("CommandPalette keyboard navigation", () => {
     expect(screen.getByText("Today's journal")).toBeInTheDocument();
     expect(screen.queryByText("Open Diurnal")).not.toBeInTheDocument();
   });
+
+  it("opens the Bases index with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Open Bases{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("opens guided Base creation with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Create Base{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/bases",
+      search: { create: true },
+    });
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
 });
