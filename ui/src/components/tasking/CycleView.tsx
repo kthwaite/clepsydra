@@ -9,7 +9,7 @@
  * - board-stats: pure helpers compute committed/sealed/field/hold/
  *   check counts and sealed percentage.
  * - CycleView: renders the header (window·state, h2 label, goal, actions),
- *   right-side metrics + synthetic burndown Spark, progress bar, and
+ *   right-side metrics + historical burndown Spark, progress bar, and
  *   disposition lanes.
  */
 
@@ -96,6 +96,10 @@ export interface CycleViewProps {
   activeProject?: string;
   /** Optional: called when a task row is clicked. Defaults to store action. */
   onEditTask?: (id: string) => void;
+  burndown?: number[];
+  burndownPending?: boolean;
+  burndownError?: boolean;
+  burndownApplicable?: boolean;
 }
 
 export function CycleView({
@@ -103,6 +107,10 @@ export function CycleView({
   tasks,
   activeProject,
   onEditTask,
+  burndown = [],
+  burndownPending = false,
+  burndownError = false,
+  burndownApplicable = true,
 }: CycleViewProps) {
   // Store actions — field-selector pattern (no ephemeral re-renders)
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -121,20 +129,6 @@ export function CycleView({
   );
 
   const stats = useMemo(() => cycleStats(items), [items]);
-
-  // Synthetic burndown (7 points, prototype formula exactly)
-  const burn = useMemo(() => {
-    const open = stats.committed - stats.sealed;
-    const days = 7;
-    return Array.from({ length: days }, (_, i) =>
-      Math.max(
-        open,
-        Math.round(
-          stats.committed - (stats.committed - open) * (i / (days - 1)),
-        ),
-      ),
-    );
-  }, [stats.committed, stats.sealed]);
 
   // Disposition lanes — only non-empty, in COL_ORDER
   const byCol = useMemo(
@@ -302,7 +296,21 @@ export function CycleView({
             <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
               BURNDOWN
             </span>
-            <Spark data={burn} width={150} height={30} accent="var(--hot)" />
+            {!burndownApplicable ? (
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                NOT APPLICABLE
+              </span>
+            ) : burndownPending ? (
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">LOADING</span>
+            ) : burndownError ? (
+              <span className="text-[var(--fs-xs)] text-[var(--hot)]">UNAVAILABLE</span>
+            ) : burndown.length === 0 ? (
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">NO HISTORY</span>
+            ) : (
+              <div aria-label={`Cycle burndown: ${burndown.join(", ")}`}>
+                <Spark data={burndown} width={150} height={30} accent="var(--hot)" />
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -132,6 +132,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/agenda/cycle-burndown": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_cycle_burndown"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/agenda/overdue": {
     parameters: {
       query?: never;
@@ -1162,6 +1178,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/vault/tasks/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_task_completion_history"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/vault/tasks/status": {
     parameters: {
       query?: never;
@@ -1612,6 +1644,15 @@ export interface components {
       work_type: components["schemas"]["WorkType"];
       /** Format: int32 */
       year?: number | null;
+    };
+    CycleBurndownPoint: {
+      date: string;
+      /** Format: int32 */
+      remaining: number;
+    };
+    CycleBurndownResponse: {
+      cycle: string;
+      points: components["schemas"]["CycleBurndownPoint"][];
     };
     DeleteBaseRequest: {
       expected_revision: string;
@@ -2094,6 +2135,14 @@ export interface components {
       /** Format: int64 */
       count: number;
       tag: string;
+    };
+    TaskCompletionDay: {
+      /** Format: int32 */
+      count: number;
+      date: string;
+    };
+    TaskCompletionHistoryResponse: {
+      days: components["schemas"]["TaskCompletionDay"][];
     };
     TaskItem: {
       block_id?: string | null;
@@ -2768,6 +2817,59 @@ export interface operations {
         };
       };
       /** @description Work not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  get_cycle_burndown: {
+    parameters: {
+      query: {
+        cycle: string;
+        /** @description Optional project slug used by the tasking board's operation filter. */
+        project?: string;
+        /** @description Restrict telemetry to tasks without a known board project. */
+        unfiled?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Historical cycle burndown */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CycleBurndownResponse"];
+        };
+      };
+      /** @description Invalid cycle dates or telemetry scope */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+      /** @description Cycle not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -6004,6 +6106,51 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TaskListResponse"];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
+        };
+      };
+    };
+  };
+  get_task_completion_history: {
+    parameters: {
+      query?: {
+        /** @description Number of calendar days to return. Defaults to 14 and is capped at 90. */
+        days?: number;
+        /** @description Optional project slug used by the tasking board's operation filter. */
+        project?: string;
+        /** @description Restrict telemetry to tasks without a known board project. */
+        unfiled?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Daily sealed task counts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskCompletionHistoryResponse"];
+        };
+      };
+      /** @description Invalid telemetry scope */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiError"];
         };
       };
       /** @description Internal server error */

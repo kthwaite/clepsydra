@@ -17,6 +17,7 @@ use super::index_policy::{IndexMutation, IndexPolicyError};
 use super::page::{Page, PageMeta, write_page_content};
 use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
+use super::task_history::{heal_task_replacement, heal_task_update, initialize_task_history};
 
 type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
 type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
@@ -73,6 +74,12 @@ pub struct UpdatePageCommand {
 pub struct ReplacePageContentCommand {
     pub path: VaultPath,
     pub expected_content: String,
+    pub content: String,
+}
+
+#[derive(Debug)]
+pub struct ReplacePageContentResult {
+    pub path: VaultPath,
     pub content: String,
 }
 
@@ -268,9 +275,12 @@ impl MutationCoordinator {
         &self,
         vault: &Vault,
         index: &IndexHandle,
-        command: CreatePageCommand,
+        mut command: CreatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
     ) -> Result<Page, MutationError> {
+        if command.meta.kind == Some(super::kind::Kind::Task) {
+            initialize_task_history(&mut command.meta);
+        }
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
@@ -349,69 +359,81 @@ impl MutationCoordinator {
         &self,
         vault: &Vault,
         index: &IndexHandle,
-        command: ReplacePageContentCommand,
+        mut command: ReplacePageContentCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
-    ) -> Result<VaultPath, MutationError> {
+    ) -> Result<ReplacePageContentResult, MutationError> {
+        command.content =
+            heal_task_replacement(&command.path, &command.expected_content, &command.content)
+                .map_err(MutationError::InvalidInput)?;
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
-        let path = run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
-            let blocking_path = absolute.clone();
-            let page_path = command.path.clone();
-            let (guard, durability_error) = run_blocking_fs(absolute.clone(), guard, move || {
-                let current = match fs::read_to_string(&blocking_path) {
-                    Ok(current) => current,
-                    Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                        return Err(MutationError::NotFound(page_path));
-                    }
-                    Err(source) => {
-                        return Err(MutationError::Filesystem {
-                            filesystem_applied: false,
-                            path: blocking_path,
-                            source,
-                        });
-                    }
-                };
-                if current != command.expected_content {
-                    return Err(MutationError::Stale(page_path));
+        let result =
+            run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
+                let blocking_path = absolute.clone();
+                let page_path = command.path.clone();
+                let expected_content = command.expected_content.clone();
+                let published_content = command.content.clone();
+                let (guard, durability_error) =
+                    run_blocking_fs(absolute.clone(), guard, move || {
+                        let current = match fs::read_to_string(&blocking_path) {
+                            Ok(current) => current,
+                            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                                return Err(MutationError::NotFound(page_path));
+                            }
+                            Err(source) => {
+                                return Err(MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path,
+                                    source,
+                                });
+                            }
+                        };
+                        if current != expected_content {
+                            return Err(MutationError::Stale(page_path));
+                        }
+                        match atomic_replace(&blocking_path, published_content.as_bytes()) {
+                            Ok(()) => Ok(None),
+                            Err(AtomicPublicationError::NotPublished(source)) => {
+                                Err(MutationError::Filesystem {
+                                    filesystem_applied: false,
+                                    path: blocking_path,
+                                    source,
+                                })
+                            }
+                            Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
+                                Ok(Some(source))
+                            }
+                        }
+                    })
+                    .await?;
+                filesystem_applied.store(true, Ordering::Release);
+                let _guard = guard;
+                index
+                    .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
+                    .await
+                    .map_err(|source| MutationError::Index {
+                        filesystem_applied: true,
+                        source,
+                    })?;
+                if let Some(source) = durability_error {
+                    return Err(MutationError::Filesystem {
+                        filesystem_applied: true,
+                        path: absolute,
+                        source,
+                    });
                 }
-                match atomic_replace(&blocking_path, command.content.as_bytes()) {
-                    Ok(()) => Ok(None),
-                    Err(AtomicPublicationError::NotPublished(source)) => {
-                        Err(MutationError::Filesystem {
-                            filesystem_applied: false,
-                            path: blocking_path,
-                            source,
-                        })
-                    }
-                    Err(AtomicPublicationError::PublishedButNotDurable(source)) => Ok(Some(source)),
-                }
+                Ok(ReplacePageContentResult {
+                    path: command.path,
+                    content: command.content,
+                })
             })
             .await?;
-            filesystem_applied.store(true, Ordering::Release);
-            let _guard = guard;
-            index
-                .apply_mutation(command.path.clone(), IndexMutation::ContentChanged)
-                .await
-                .map_err(|source| MutationError::Index {
-                    filesystem_applied: true,
-                    source,
-                })?;
-            if let Some(source) = durability_error {
-                return Err(MutationError::Filesystem {
-                    filesystem_applied: true,
-                    path: absolute,
-                    source,
-                });
-            }
-            Ok(command.path)
-        })
-        .await?;
         notify(MutationNotification {
-            upserted: vec![path.as_str().to_string()],
+            upserted: vec![result.path.as_str().to_string()],
             removed: Vec::new(),
         });
-        Ok(path)
+        Ok(result)
     }
 
     pub async fn update_page(
@@ -419,9 +441,11 @@ impl MutationCoordinator {
         vault: &Vault,
         index: &IndexHandle,
         hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
-        command: UpdatePageCommand,
+        mut command: UpdatePageCommand,
         notify: &(dyn Fn(MutationNotification) + Send + Sync),
     ) -> Result<Page, MutationError> {
+        heal_task_update(&command.path, &command.expected_content, &mut command.meta)
+            .map_err(MutationError::InvalidInput)?;
         match &command.project {
             ProjectAssignment::Set(project)
                 if command.meta.project.as_deref() != Some(project.as_str()) =>

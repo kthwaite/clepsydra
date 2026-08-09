@@ -147,10 +147,12 @@ impl Modify for FilterSchema {
         crate::api::journal::get_by_date,
         // Tasks and agenda
         crate::api::tasks::list_tasks,
+        crate::api::tasks::get_task_completion_history,
         crate::api::tasks::update_task_status,
         crate::api::agenda::agenda_today,
         crate::api::agenda::agenda_week,
         crate::api::agenda::agenda_overdue,
+        crate::api::agenda::get_cycle_burndown,
         // Blocks
         crate::api::blocks::search_blocks,
         crate::api::blocks::assign_block_id,

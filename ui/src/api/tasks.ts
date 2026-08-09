@@ -9,6 +9,10 @@ export type AgendaWeekResponse = components["schemas"]["AgendaWeekResponse"];
 export type AgendaOverdueResponse =
   components["schemas"]["AgendaOverdueResponse"];
 export type TaskListResponse = components["schemas"]["TaskListResponse"];
+type TaskCompletionHistoryResponse =
+  components["schemas"]["TaskCompletionHistoryResponse"];
+type CycleBurndownResponse =
+  components["schemas"]["CycleBurndownResponse"];
 export type TaskFilters = NonNullable<
   operations["list_tasks"]["parameters"]["query"]
 >;
@@ -64,6 +68,58 @@ export function useTasks(params: TaskFilters) {
       });
       if (error) throw apiError(error, "Failed to fetch tasks");
       if (!data) throw new Error("Task list response was empty");
+      return data;
+    },
+  });
+}
+
+export function useTaskCompletionHistory(
+  project?: string,
+  unfiled = false,
+  enabled = true,
+) {
+  return useQuery<TaskCompletionHistoryResponse>({
+    queryKey: queryKeys.tasks.history(project, unfiled),
+    enabled,
+    throwOnError: false,
+    queryFn: async () => {
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/tasks/history",
+        {
+          params: {
+            query: { days: 14, project, unfiled: unfiled || undefined },
+          },
+        },
+      );
+      if (error) throw apiError(error, "Failed to fetch task history");
+      if (!data) throw new Error("Task history response was empty");
+      return data;
+    },
+  });
+}
+
+export function useCycleBurndown(
+  cycle: string | null,
+  project?: string,
+  unfiled = false,
+  enabled = true,
+) {
+  return useQuery<CycleBurndownResponse>({
+    queryKey: queryKeys.agenda.cycleBurndown(cycle, project, unfiled),
+    enabled: enabled && cycle !== null,
+    throwOnError: false,
+    queryFn: async () => {
+      if (cycle === null) throw new Error("Cycle is required");
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/agenda/cycle-burndown",
+        {
+          params: {
+            query: { cycle, project, unfiled: unfiled || undefined },
+          },
+        },
+      );
+      if (error) throw apiError(error, "Failed to fetch cycle burndown");
+      if (!data) throw new Error("Cycle burndown response was empty");
       return data;
     },
   });

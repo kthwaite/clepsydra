@@ -19,10 +19,11 @@ fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
     Arc::new(vec![Box::new(AcademicMoveHook)])
 }
 
-fn setup_server() -> (TestServer, TempDir) {
+fn setup_server_with_seed(seed: impl FnOnce(&std::path::Path)) -> (TestServer, TempDir) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
+    seed(&root);
 
     let vault = Vault::open(&root).unwrap();
     let db_path = vault.root().join(".clepsydra/cache.db");
@@ -58,6 +59,184 @@ fn setup_server() -> (TestServer, TempDir) {
 
     let server = TestServer::new(app).unwrap();
     (server, tmp)
+}
+
+fn setup_server() -> (TestServer, TempDir) {
+    setup_server_with_seed(|_| {})
+}
+
+#[tokio::test]
+async fn cycle_burndown_uses_cycle_dates_and_sealed_task_timestamps() {
+    let today = Utc::now().date_naive();
+    let start = today - Duration::days(3);
+    let first_seal = today - Duration::days(2);
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/alpha")).unwrap();
+        std::fs::write(
+            root.join("cycles/C-01.md"),
+            format!(
+                "---\nid: 01951234-0000-7000-8000-aaa000000001\ntitle: Cycle 01\ntype: CYCLE\nstate: ACTIVE\nstart: {start}\nend: {}\n---\n",
+                today + Duration::days(3)
+            ),
+        )
+        .unwrap();
+
+        for (path, id, status, updated_at) in [
+            (
+                "tasks/alpha/first.md",
+                "01951234-0000-7000-8000-bbb000000001",
+                "SEALED",
+                first_seal,
+            ),
+            (
+                "tasks/alpha/second.md",
+                "01951234-0000-7000-8000-bbb000000002",
+                "SEALED",
+                today,
+            ),
+            (
+                "tasks/alpha/open.md",
+                "01951234-0000-7000-8000-bbb000000003",
+                "FIELD",
+                today,
+            ),
+        ] {
+            std::fs::write(
+                root.join(path),
+                format!(
+                    "---\nid: {id}\ntitle: Cycle task\ntype: TASK\nproject: alpha\nstatus: {status}\npriority: P2\ncycle: C-01\ncreated_at: {start}T09:00:00Z\nupdated_at: {updated_at}T12:00:00Z\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+
+    let response = server
+        .get("/api/vault/agenda/cycle-burndown?cycle=C-01&project=alpha")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["cycle"], "C-01");
+    assert_eq!(
+        body["points"],
+        serde_json::json!([
+            { "date": start.format("%Y-%m-%d").to_string(), "remaining": 3 },
+            { "date": (start + Duration::days(1)).format("%Y-%m-%d").to_string(), "remaining": 2 },
+            { "date": (start + Duration::days(2)).format("%Y-%m-%d").to_string(), "remaining": 2 },
+            { "date": today.format("%Y-%m-%d").to_string(), "remaining": 1 }
+        ])
+    );
+}
+
+#[tokio::test]
+async fn cycle_burndown_uses_event_time_membership_and_status() {
+    let today = Utc::now().date_naive();
+    let start = today - Duration::days(3);
+    let day_one = start + Duration::days(1);
+    let day_two = start + Duration::days(2);
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/alpha")).unwrap();
+        std::fs::write(
+            root.join("cycles/C-01.md"),
+            format!(
+                "+++\nid = \"01951234-0000-7000-8000-aaa000000011\"\ntitle = \"Cycle 01\"\ntype = \"CYCLE\"\nstate = \"ACTIVE\"\nstart = \"{start}\"\nend = \"{today}\"\n+++\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/alpha/first.md"),
+            format!(
+                "+++\nid = \"01951234-0000-7000-8000-bbb000000011\"\ntitle = \"First task\"\ntype = \"TASK\"\nproject = \"alpha\"\nstatus = \"SEALED\"\npriority = \"P2\"\ncycle = \"C-01\"\ncreated_at = {start}T09:00:00Z\nupdated_at = {day_one}T12:00:00Z\ntask_history = [{{ at = \"{start}T09:00:00Z\", status = \"FIELD\", cycle = \"C-01\", project = \"alpha\" }}, {{ at = \"{day_one}T12:00:00Z\", status = \"SEALED\", cycle = \"C-01\", project = \"alpha\" }}]\n+++\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/alpha/carried.md"),
+            format!(
+                "+++\nid = \"01951234-0000-7000-8000-bbb000000012\"\ntitle = \"Late carried task\"\ntype = \"TASK\"\nproject = \"alpha\"\nstatus = \"FIELD\"\npriority = \"P2\"\ncycle = \"C-02\"\ncreated_at = {day_two}T09:00:00Z\nupdated_at = {today}T12:00:00Z\ntask_history = [{{ at = \"{day_two}T09:00:00Z\", status = \"FIELD\", cycle = \"C-01\", project = \"alpha\" }}, {{ at = \"{today}T12:00:00Z\", status = \"FIELD\", cycle = \"C-02\", project = \"alpha\" }}]\n+++\n"
+            ),
+        )
+        .unwrap();
+    });
+
+    let response = server
+        .get("/api/vault/agenda/cycle-burndown?cycle=C-01&project=alpha")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["points"],
+        serde_json::json!([
+            { "date": start.format("%Y-%m-%d").to_string(), "remaining": 1 },
+            { "date": day_one.format("%Y-%m-%d").to_string(), "remaining": 0 },
+            { "date": day_two.format("%Y-%m-%d").to_string(), "remaining": 1 },
+            { "date": today.format("%Y-%m-%d").to_string(), "remaining": 0 }
+        ])
+    );
+}
+
+#[tokio::test]
+async fn cycle_burndown_rejects_unbounded_date_ranges() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::write(
+            root.join("cycles/C-LONG.md"),
+            "+++\nid = \"01951234-0000-7000-8000-aaa000000012\"\ntitle = \"Long cycle\"\ntype = \"CYCLE\"\nstate = \"ACTIVE\"\nstart = \"2020-01-01\"\nend = \"2026-01-01\"\n+++\n",
+        )
+        .unwrap();
+    });
+
+    server
+        .get("/api/vault/agenda/cycle-burndown?cycle=C-LONG")
+        .await
+        .assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn cycle_burndown_preserves_membership_after_api_carryover() {
+    let today = Utc::now().date_naive();
+    let start = today - Duration::days(1);
+    let cycle_id = "01951234-0000-7000-8000-aaa000000013";
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("cycles")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/alpha")).unwrap();
+        std::fs::write(
+            root.join("cycles/C-01.md"),
+            format!(
+                "---\nid: {cycle_id}\ntitle: Cycle 01\ntype: CYCLE\nstate: ACTIVE\nstart: {start}\nend: {today}\n---\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/alpha/open.md"),
+            format!(
+                "---\nid: 01951234-0000-7000-8000-bbb000000013\ntitle: Open task\ntype: TASK\nproject: alpha\nstatus: FIELD\npriority: P2\ncycle: C-01\ncreated_at: {start}T09:00:00Z\nupdated_at: {start}T09:00:00Z\n---\n"
+            ),
+        )
+        .unwrap();
+    });
+
+    server
+        .patch(&format!("/api/vault/board/cycles/{cycle_id}"))
+        .json(&serde_json::json!({ "state": "CLOSED", "carry_to": "BACKLOG" }))
+        .await
+        .assert_status_ok();
+
+    let response = server
+        .get("/api/vault/agenda/cycle-burndown?cycle=C-01&project=alpha")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["points"],
+        serde_json::json!([
+            { "date": start.format("%Y-%m-%d").to_string(), "remaining": 1 },
+            { "date": today.format("%Y-%m-%d").to_string(), "remaining": 0 }
+        ])
+    );
 }
 
 fn today_str() -> String {

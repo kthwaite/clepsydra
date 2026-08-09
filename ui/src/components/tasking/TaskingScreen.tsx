@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
+import { useCycleBurndown, useTaskCompletionHistory } from "#/api/tasks";
 import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
@@ -110,6 +111,26 @@ export function TaskingScreen({
       };
     }, [data, opFilter, editTaskId]);
 
+  const telemetryProject = activeOp?.project ?? undefined;
+  const telemetryUnfiled = opFilter === "UNFILED";
+  const telemetryApplicable =
+    opFilter === "ALL" || telemetryUnfiled || Boolean(telemetryProject);
+  const telemetryEnabled = Boolean(data) && telemetryApplicable;
+  const completionHistory = useTaskCompletionHistory(
+    telemetryProject,
+    telemetryUnfiled,
+    telemetryEnabled,
+  );
+  const selectedCycle = data ? resolveCycle(cycleSel, cycles) : null;
+  const cycleBurndown = useCycleBurndown(
+    mode === "cycle" && selectedCycle?.code !== "BACKLOG"
+      ? (selectedCycle?.code ?? null)
+      : null,
+    telemetryProject,
+    telemetryUnfiled,
+    telemetryEnabled,
+  );
+
   if (isLoading) {
     return (
       <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-[var(--ink-mute)]">
@@ -166,6 +187,14 @@ export function TaskingScreen({
             tasks={visibleTasks}
             activeOp={activeOp}
             onOpenDossier={onOpenDossier}
+            sealHistory={
+              telemetryApplicable
+                ? completionHistory.data?.days.map((day) => day.count)
+                : undefined
+            }
+            sealHistoryPending={completionHistory.isPending && telemetryEnabled}
+            sealHistoryError={completionHistory.isError}
+            sealHistoryApplicable={telemetryApplicable}
           />
 
           {/* Body router — Tasks 9-12 replace each placeholder */}
@@ -186,6 +215,14 @@ export function TaskingScreen({
                 cycle={resolveCycle(cycleSel, cycles)}
                 tasks={visibleTasks}
                 activeProject={activeOp?.project ?? undefined}
+                burndown={
+                  telemetryApplicable
+                    ? cycleBurndown.data?.points.map((point) => point.remaining)
+                    : undefined
+                }
+                burndownPending={cycleBurndown.isPending && telemetryEnabled}
+                burndownError={cycleBurndown.isError}
+                burndownApplicable={telemetryApplicable}
               />
             )}
             {mode === "timeline" && (

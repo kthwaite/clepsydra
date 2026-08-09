@@ -144,6 +144,7 @@ describe("BoardHeader", () => {
         cycles={cycles}
         tasks={tasks}
         activeOp={null}
+        sealHistory={[0, 1, 2]}
       />,
     );
     expect(screen.getByText("SEAL RATE 14d")).toBeInTheDocument();

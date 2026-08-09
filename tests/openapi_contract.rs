@@ -12,10 +12,12 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/journal/recent", "get"),
     ("/api/vault/journal/{date}", "get"),
     ("/api/vault/tasks", "get"),
+    ("/api/vault/tasks/history", "get"),
     ("/api/vault/tasks/status", "put"),
     ("/api/vault/agenda/today", "get"),
     ("/api/vault/agenda/week", "get"),
     ("/api/vault/agenda/overdue", "get"),
+    ("/api/vault/agenda/cycle-burndown", "get"),
     ("/api/vault/blocks/search", "get"),
     ("/api/vault/blocks/assign-id", "post"),
     ("/api/vault/blocks/{block_id}", "get"),
@@ -55,7 +57,7 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 88,
-        "OpenAPI should document all 88 registered /api/vault operations"
+        operation_count, 90,
+        "OpenAPI should document all 90 registered /api/vault operations"
     );
 }

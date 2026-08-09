@@ -334,7 +334,8 @@ pub(crate) async fn patch_cycle(
                     .extra
                     .insert("cycle".to_string(), toml::Value::String(carry.clone()));
             }
-            task_meta.updated_at = Some(Utc::now());
+            let now = Utc::now();
+            task_meta.updated_at = Some(now);
 
             state
                 .mutation_coordinator
