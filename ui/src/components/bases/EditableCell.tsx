@@ -56,11 +56,11 @@ export function EditableCell({
   const Editor = CELL_EDITORS[definition.type];
 
   useEffect(() => {
-    if (!controlled && !editing && restoreFocusRef.current) {
+    if (!editing && restoreFocusRef.current) {
       restoreFocusRef.current = false;
       displayButtonRef.current?.focus();
     }
-  }, [controlled, editing]);
+  }, [editing]);
 
   if (editing) {
     const editor = (
@@ -89,7 +89,6 @@ export function EditableCell({
       />
     );
 
-    if (controlled) return editor;
     return (
       <div
         onKeyDown={(event) => {

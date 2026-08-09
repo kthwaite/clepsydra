@@ -135,7 +135,20 @@ mod tests {
             .derive(&page, "page-id", &transaction)
             .unwrap_err();
 
-        assert!(matches!(error, IndexError::Other(message)
-                if message == "duplicate block span_start 7 while indexing duplicate.md"));
+        let IndexError::Other(message) = error else {
+            panic!("expected duplicate-span domain error");
+        };
+        assert!(message.contains("duplicate block span_start 7"));
+        assert!(message.contains("duplicate.md"));
+        let block_count: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM blocks", [], |row| row.get(0))
+            .unwrap();
+        let property_count: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM block_properties", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(block_count, 0);
+        assert_eq!(property_count, 0);
     }
 }

@@ -380,6 +380,50 @@ describe("BaseTableView", () => {
     expect(key).toBe("author");
     expect(value).toBe("G-Wolfe");
   });
+  it("restores the controlled display button after Escape", async () => {
+    const user = userEvent.setup();
+    const props = renderView({});
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    const input = screen.getByRole("textbox", { name: "Edit text" });
+    expect(input).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("button", { name: "Gene Wolfe" })).toHaveFocus();
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
+  it("closes a controlled editor when the active saved view changes", async () => {
+    const user = userEvent.setup();
+    const sharedColumnDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        { name: "First", layout: "table", columns: ["title", "author"] },
+        { name: "Second", layout: "table", columns: ["title", "author"] },
+      ],
+    };
+    const props = {
+      definition: sharedColumnDefinition,
+      activeView: "First",
+      output: flat,
+      sortOverride: {},
+      onViewChange: vi.fn(),
+      onSortChange: vi.fn(),
+      onOpenPage: vi.fn(),
+      onCommitCell: vi.fn(),
+    };
+    const { rerender } = render(<BaseTableView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    expect(screen.getByRole("textbox", { name: "Edit text" })).toHaveFocus();
+
+    rerender(<BaseTableView {...props} activeView="Second" />);
+
+    expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Gene Wolfe" })).toBeInTheDocument();
+  });
+
 
   it("commits with Tab and opens the next editable property in the row", async () => {
     const user = userEvent.setup();
@@ -488,6 +532,9 @@ describe("BaseTableView", () => {
       undefined,
     );
     expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "A Wizard of Earthsea" }),
+    ).toHaveFocus();
   });
 
   it("keeps an invalid number open when Tab cannot accept it", async () => {

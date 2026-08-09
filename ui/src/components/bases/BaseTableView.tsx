@@ -69,6 +69,7 @@ interface BaseTableViewProps {
 interface ActiveCell {
   rowId: string;
   column: string;
+  view: string;
 }
 
 /**
@@ -159,6 +160,7 @@ export function BaseTableView({
   const activeRowId = activeCell?.rowId;
   const activeCellIsRendered =
     activeCell !== null &&
+    asciiCaseFold(activeCell.view) === equivalentActiveView &&
     !readOnly &&
     !memberDraftOpen &&
     !viewError &&
@@ -180,6 +182,7 @@ export function BaseTableView({
   const createdTitleRef = useRef<HTMLButtonElement | null>(null);
   const focusedCreatedId = useRef<string | undefined>(undefined);
   const createdFocusTimer = useRef<number | undefined>(undefined);
+  const pendingForwardFocusRowId = useRef<string | undefined>(undefined);
   const setCreatedTitleRef = useCallback(
     (node: HTMLButtonElement | null) => {
       createdTitleRef.current = node;
@@ -219,6 +222,16 @@ export function BaseTableView({
       }, 0);
     },
     [focusCreatedId, onCreatedRowFocused],
+  );
+  const setForwardTitleRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      if (!node) return;
+      pendingForwardFocusRowId.current = undefined;
+      queueMicrotask(() => {
+        if (node.isConnected) node.focus();
+      });
+    },
+    [],
   );
   const memberBlocker =
     memberCapability?.enabled === true
@@ -325,7 +338,10 @@ export function BaseTableView({
                       ref={
                         row.id === focusCreatedId
                           ? setCreatedTitleRef
-                          : undefined
+                          : String(row.id) ===
+                              pendingForwardFocusRowId.current
+                            ? setForwardTitleRef
+                            : undefined
                       }
                       type="button"
                       className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
@@ -345,10 +361,15 @@ export function BaseTableView({
                     definition={properties[column]}
                     isEditing={
                       activeCell?.rowId === String(row.id) &&
-                      activeCell.column === column
+                      activeCell.column === column &&
+                      asciiCaseFold(activeCell.view) === equivalentActiveView
                     }
                     onEdit={() =>
-                      setActiveCell({ rowId: String(row.id), column })
+                      setActiveCell({
+                        rowId: String(row.id),
+                        column,
+                        view: activeView,
+                      })
                     }
                     onCancel={() => setActiveCell(null)}
                     onCommit={(value, hint) => {
@@ -358,11 +379,21 @@ export function BaseTableView({
                     onCommitNext={(value, hint) => {
                       onCommitCell(row, column, value, hint);
                       const nextColumn = nextEditableColumn(column);
-                      setActiveCell(
-                        nextColumn
-                          ? { rowId: String(row.id), column: nextColumn }
-                          : null,
+                      if (nextColumn) {
+                        setActiveCell({
+                          rowId: String(row.id),
+                          column: nextColumn,
+                          view: activeView,
+                        });
+                        return;
+                      }
+                      const rowIndex = rows.findIndex(
+                        (candidate) => String(candidate.id) === String(row.id),
                       );
+                      pendingForwardFocusRowId.current = String(
+                        rows[rowIndex + 1]?.id ?? row.id,
+                      );
+                      setActiveCell(null);
                     }}
                   />
                 ) : (
