@@ -54,4 +54,69 @@ describe("MarkdownRenderer", () => {
       "data-link-resource",
     );
   });
+
+  it("renders both delimiter families as inline and display math", () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={String.raw`Dollar inline $x^2$ and backslash inline \(y + 1\).
+
+$$
+z = x + y
+$$
+
+\[
+w = z^2
+\]`}
+      />,
+    );
+
+    expect(container.querySelectorAll(".katex")).toHaveLength(4);
+    expect(
+      container.querySelectorAll(
+        "span.folio-math:not(.folio-math--display)",
+      ),
+    ).toHaveLength(2);
+    expect(
+      container.querySelectorAll("div.folio-math--display"),
+    ).toHaveLength(2);
+  });
+
+  it("preserves the exact authored source when TeX is invalid", () => {
+    const source = String.raw`\(\notACommand{\)`;
+    const { container } = render(<MarkdownRenderer content={source} />);
+
+    const fallback = container.querySelector(".folio-math--invalid");
+    expect(fallback).toHaveTextContent(source);
+    expect(fallback).toHaveAttribute("aria-invalid", "true");
+    expect(fallback).not.toHaveTextContent("KaTeX parse error");
+  });
+
+  it("excludes inline and fenced code from math rendering", () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={"Inline code: `$x$`.\n\n```tex\n$$\nx^2\n$$\n```"}
+      />,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(screen.getByText("$x$")).toBeTruthy();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "CODE" &&
+          element.textContent?.trim() === "$$\nx^2\n$$",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps raw HTML escaped", () => {
+    const source =
+      '<button type="button">activate</button><img src="https://example.test/math.png">';
+    const { container } = render(<MarkdownRenderer content={source} />);
+
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container).toHaveTextContent(source);
+  });
+
 });

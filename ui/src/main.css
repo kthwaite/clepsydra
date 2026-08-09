@@ -721,6 +721,19 @@ ul {
     font-size: 1.06em;
 }
 
+/* Hover-card math follows the compact preview type scale and prose rhythm. */
+.folio-markdown-preview .folio-math {
+    font-size: 0.875em;
+}
+
+.folio-markdown-preview .folio-math--display {
+    padding-block: 0.25em;
+}
+
+.folio-markdown-preview .folio-math--display .katex {
+    font-size: 1em;
+}
+
 .folio-math--invalid {
     font-family: var(--font-mono);
     color: var(--hot);

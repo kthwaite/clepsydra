@@ -49,6 +49,9 @@ bun run openapi          # regenerate src/api/schema.d.ts from backend
   - title/tags/aliases editing
   - wikilink suggestions after typing `[[`
   - autosave with status indicator
+  - inline and display TeX math using `$...$`, `\(...\)`, `$$...$$`, or `\[...\]`
+  - click rendered math, or focus it and press `Enter`, to edit the exact source; invalid source remains visible unchanged
+  - Folio supports KaTeX-compatible TeX, not complete LaTeX documents or every MathJax extension.
 - Backlinks panel on page tabs
 - Graph view (`/graph` → graph tab)
 - Search palette

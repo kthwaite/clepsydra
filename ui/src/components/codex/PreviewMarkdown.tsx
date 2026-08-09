@@ -2,12 +2,22 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
+import { MathExpression } from "#/components/MathExpression";
 import { classifyLinkResource } from "#/lib/linkResource";
+import {
+  remarkFolioMath,
+  type MathDelimiter,
+} from "#/lib/markdown/folioMath";
+
+function isMathDelimiter(value: unknown): value is MathDelimiter {
+  return value === "$" || value === "$$" || value === "\\(" || value === "\\[";
+}
 
 // Shared remark config with the full-page MarkdownRenderer, minus the
 // interactive link handling — preview cards are pointer-events:none, so links
 // render as plain styled spans and we avoid pulling in router hooks.
 const remarkPlugins: PluggableList = [
+  remarkFolioMath,
   remarkGfm,
   [
     wikiLinkPlugin,
@@ -22,6 +32,30 @@ const remarkPlugins: PluggableList = [
 // no top margin on the first block, small mono code. Images are dropped to a
 // label — a hover preview should not trigger network loads.
 const components: Components = {
+  span: ({ children, node, ...props }) => {
+    const tex = node?.properties["data-tex"];
+    const delimiter = node?.properties["data-delimiter"];
+    if (
+      node?.properties["data-folio-math"] === true &&
+      typeof tex === "string" &&
+      isMathDelimiter(delimiter)
+    ) {
+      return <MathExpression tex={tex} delimiter={delimiter} display={false} />;
+    }
+    return <span {...props}>{children}</span>;
+  },
+  div: ({ children, node, ...props }) => {
+    const tex = node?.properties["data-tex"];
+    const delimiter = node?.properties["data-delimiter"];
+    if (
+      node?.properties["data-folio-math"] === true &&
+      typeof tex === "string" &&
+      isMathDelimiter(delimiter)
+    ) {
+      return <MathExpression tex={tex} delimiter={delimiter} display />;
+    }
+    return <div {...props}>{children}</div>;
+  },
   p: ({ children }) => (
     <p className="my-1 font-sans text-[11.5px] leading-[1.5] text-ink-mute first:mt-0">
       {children}
@@ -103,8 +137,10 @@ const components: Components = {
  */
 export function PreviewMarkdown({ content }: { content: string }) {
   return (
-    <Markdown remarkPlugins={remarkPlugins} components={components}>
-      {content}
-    </Markdown>
+    <div className="folio-markdown-preview">
+      <Markdown remarkPlugins={remarkPlugins} components={components}>
+        {content}
+      </Markdown>
+    </div>
   );
 }
