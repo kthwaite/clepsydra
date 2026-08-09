@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use clepsydra::vault::block::{BlockType, CheckboxState, parse_blocks};
 
 #[test]
@@ -190,6 +192,36 @@ fn parses_blockquote() {
             .iter()
             .any(|b| b.block_type == BlockType::Blockquote && b.content == "Some quoted text")
     );
+}
+
+#[test]
+fn blockquote_paragraphs_have_distinct_source_spans() {
+    let md = "> First paragraph.\n>\n> Second paragraph.\n";
+    let blocks = parse_blocks(md);
+
+    assert_eq!(blocks.len(), 2);
+    assert!(
+        blocks
+            .iter()
+            .all(|block| block.block_type == BlockType::Blockquote)
+    );
+    assert_ne!(blocks[0].span.start, blocks[1].span.start);
+    assert_eq!(&md[blocks[0].span.clone()], "First paragraph.\n");
+    assert_eq!(&md[blocks[1].span.clone()], "Second paragraph.\n");
+}
+
+#[test]
+fn blockquote_paragraphs_and_list_items_have_unique_source_spans() {
+    let md = "> Summary\n>\n> - Option A\n> - Option B\n>\n> Outcome\n";
+    let blocks = parse_blocks(md);
+    let span_starts: HashSet<_> = blocks.iter().map(|block| block.span.start).collect();
+
+    assert_eq!(blocks.len(), 4);
+    assert_eq!(span_starts.len(), blocks.len());
+    assert_eq!(blocks[0].content, "Summary");
+    assert_eq!(blocks[1].content, "Option A");
+    assert_eq!(blocks[2].content, "Option B");
+    assert_eq!(blocks[3].content, "Outcome");
 }
 
 #[test]
