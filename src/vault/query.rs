@@ -17,6 +17,7 @@ use super::base::{
     Aggregate, AggregateFn, BaseDefinition, Filter, Op, PropertyType, SortDir, SortKey,
 };
 use super::canonical::CanonicalName;
+use super::link::normalize_links_to_target;
 
 // ---------------------------------------------------------------------------
 // Field resolution
@@ -462,11 +463,10 @@ fn compile_prop(
                 field: field.to_string(),
                 reason: "`links_to` expects a string target".into(),
             })?;
+            let target = normalize_links_to_target(target);
             params.push(SqlValue::Text(key.to_string()));
-            params.push(SqlValue::Text(target.to_string()));
-            params.push(SqlValue::Text(
-                CanonicalName::from_title(target).as_str().to_string(),
-            ));
+            params.push(SqlValue::Text(target.target_id));
+            params.push(SqlValue::Text(target.target_canonical));
             Ok(
                 "EXISTS (SELECT 1 FROM links l WHERE l.source_id = p.id AND l.source_field = ? AND (l.target_id = ? OR l.target_canonical = ?))"
                     .to_string(),
@@ -1383,6 +1383,13 @@ moment  = { type = "datetime" }
             &index,
             &base,
             serde_json::json!({ "field": "series", "op": "links_to", "value": "0190f8a0-0000-7000-8000-0000000000aa" }),
+        );
+        assert_eq!(flat_paths(&out), vec!["a.md"]);
+
+        let out = run(
+            &index,
+            &base,
+            serde_json::json!({ "field": "series", "op": "links_to", "value": "0190F8A0-0000-7000-8000-0000000000AA" }),
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
     }

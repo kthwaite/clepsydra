@@ -165,6 +165,8 @@ fn seed(root: &Path) {
 }
 
 const LINK_TARGET_ID: &str = "0190f8a0-0000-7000-8000-0000000000d1";
+const LINK_TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000D1";
+const MISSING_LINK_TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000E1";
 
 fn seed_relation_member_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
@@ -189,6 +191,14 @@ filter = {{ field = "series", op = "links_to", value = "Science Fiction" }}
 name = "Uuid"
 layout = "table"
 filter = {{ field = "series", op = "links_to", value = "{LINK_TARGET_ID}" }}
+[[views]]
+name = "MixedUuid"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "{LINK_TARGET_MIXED_ID}" }}
+[[views]]
+name = "MissingUuid"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "{MISSING_LINK_TARGET_MIXED_ID}" }}
 "#
         ),
     )
@@ -1829,6 +1839,7 @@ async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and
         ("Canonical", "Canonical relation", "[[Solar Cycle]]"),
         ("Alias", "Alias relation", "[[Science Fiction]]"),
         ("Uuid", "UUID relation", "[[Science Fiction]]"),
+        ("MixedUuid", "Mixed UUID relation", "[[Science Fiction]]"),
     ] {
         let response = fixture
             .server
@@ -1865,8 +1876,8 @@ async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and
         .post("/api/vault/bases/relations/members")
         .json(&serde_json::json!({
             "base_revision": revision,
-            "view": "Canonical",
-            "title": "Mismatched relation",
+            "view": "MissingUuid",
+            "title": "Mismatched UUID relation",
             "fields": { "kind": "BOOK", "series": "[[Science Fiction]]" }
         }))
         .await;

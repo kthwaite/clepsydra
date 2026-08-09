@@ -644,12 +644,11 @@ fn property_matches(
         let Some(expected) = value.as_str() else {
             return false;
         };
-        let expected_canonical =
-            crate::vault::canonical::CanonicalName::from_title(expected);
+        let expected = crate::vault::link::normalize_links_to_target(expected);
         return link_targets.is_some_and(|targets| {
             targets.iter().any(|target| {
-                target.target_id.as_deref() == Some(expected)
-                    || target.target_canonical == expected_canonical.as_str()
+                target.target_id.as_deref() == Some(expected.target_id.as_str())
+                    || target.target_canonical == expected.target_canonical
             })
         });
     }
