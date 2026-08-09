@@ -100,3 +100,31 @@ export function formatAbsoluteDate(iso: string | null | undefined): string {
     year: "numeric",
   });
 }
+
+/** Long local calendar day for a feed entry, or “Unknown date”. */
+export function formatFeedDay(iso: string | null | undefined): string {
+  if (!iso) return "Unknown date";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/** Compact local publication time for chronological feed rows. */
+export function formatFeedTime(iso: string | null | undefined): string {
+  if (!iso) return "Time unknown";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Time unknown";
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Stable timestamp/id boundary accepted by the bounded mark-read endpoint. */
+export function feedEntryBoundary(iso: string, id: number): string {
+  return `${iso}|${id}`;
+}

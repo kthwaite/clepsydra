@@ -1,0 +1,211 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { Button } from "react-aria-components";
+import { useFeeds } from "#/api/feeds";
+import { Card } from "#/components/codex/Card";
+import { FeedManagement } from "#/components/codex/FeedManagement";
+import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
+
+type FeedsSearch = FeedRiverFilters & {
+  manage: boolean;
+};
+
+export const Route = createFileRoute("/feeds")({
+  validateSearch: (search: Record<string, unknown>): FeedsSearch => {
+    const parsedFeed =
+      typeof search.feed === "number"
+        ? search.feed
+        : typeof search.feed === "string"
+          ? Number(search.feed)
+          : undefined;
+    return {
+      view:
+        search.view === "all" || search.view === "saved"
+          ? search.view
+          : "unread",
+      group:
+        typeof search.group === "string" && search.group
+          ? search.group
+          : undefined,
+      feed:
+        parsedFeed !== undefined && Number.isFinite(parsedFeed)
+          ? parsedFeed
+          : undefined,
+      tag:
+        typeof search.tag === "string" && search.tag ? search.tag : undefined,
+      manage: search.manage === true || search.manage === "true",
+    };
+  },
+  component: FeedsPage,
+});
+
+function FeedsPage() {
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: "/feeds" });
+  const feedsQuery = useFeeds();
+  const filters: FeedRiverFilters = {
+    view: search.view,
+    group: search.group,
+    feed: search.feed,
+    tag: search.tag,
+  };
+  const groups = feedsQuery.data?.groups ?? [];
+  const feeds = groups.flatMap((group) => group.feeds);
+
+  const updateSearch = (patch: Partial<FeedsSearch>) => {
+    void navigate({ search: (current) => ({ ...current, ...patch }) });
+  };
+
+  return (
+    <main className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:px-4 md:py-4">
+      <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
+        <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
+          <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
+          <span>Codex / incoming ledger</span>
+        </div>
+        <div className="mt-3 flex min-w-0 flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div className="min-w-0">
+            <h1 className="font-sans text-[clamp(32px,5vw,52px)] font-black leading-none tracking-[-0.02em] text-ink">
+              Feeds
+            </h1>
+            <p className="cl-marg mt-2 max-w-2xl">
+              A chronological river from the subscriptions maintained in
+              feeds.md.
+            </p>
+          </div>
+          <Button
+            className={`cl-btn justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent ${search.manage ? "cl-btn-hot" : ""}`}
+            onPress={() => updateSearch({ manage: !search.manage })}
+          >
+            {search.manage ? "Return to river" : "Manage subscriptions"}
+          </Button>
+        </div>
+      </section>
+
+      {search.manage ? (
+        <FeedManagement />
+      ) : (
+        <>
+          <Card label="River controls" caption="UNREAD · ALL · SAVED" pip="dim">
+            <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:grid-cols-[auto_minmax(9rem,1fr)_minmax(11rem,1.5fr)_minmax(9rem,1fr)_auto] lg:items-end">
+              <fieldset className="min-w-0 sm:col-span-3 lg:col-span-1">
+                <legend className="cl-mono mb-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+                  View
+                </legend>
+                <div className="grid grid-cols-3">
+                  {(["unread", "all", "saved"] as const).map((view) => (
+                    <Button
+                      key={view}
+                      className={`cl-btn justify-center border-r-0 px-2 last:border-r outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === view ? "cl-btn-hot bg-highlight" : ""}`}
+                      onPress={() => updateSearch({ view })}
+                    >
+                      {view}
+                    </Button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <FilterSelect
+                label="Group"
+                value={search.group ?? ""}
+                onChange={(value) =>
+                  updateSearch({ group: value || undefined, feed: undefined })
+                }
+              >
+                <option value="">All groups</option>
+                {groups.map((group) => (
+                  <option key={group.name} value={group.name}>
+                    {group.name || "Ungrouped"}
+                  </option>
+                ))}
+              </FilterSelect>
+
+              <FilterSelect
+                label="Feed"
+                value={search.feed === undefined ? "" : String(search.feed)}
+                onChange={(value) =>
+                  updateSearch({ feed: value ? Number(value) : undefined })
+                }
+              >
+                <option value="">All feeds</option>
+                {feeds
+                  .filter(
+                    (feed) => !search.group || feed.group === search.group,
+                  )
+                  .map((feed) => (
+                    <option key={feed.id} value={feed.id}>
+                      {feed.title_override || feed.title}
+                    </option>
+                  ))}
+              </FilterSelect>
+
+              <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+                Tag
+                <input
+                  value={search.tag ?? ""}
+                  onChange={(event) =>
+                    updateSearch({
+                      tag: event.target.value.trim() || undefined,
+                    })
+                  }
+                  placeholder="Any tag"
+                  className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[11px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+                />
+              </label>
+
+              {search.group || search.feed !== undefined || search.tag ? (
+                <Button
+                  className="cl-btn justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  onPress={() =>
+                    updateSearch({
+                      group: undefined,
+                      feed: undefined,
+                      tag: undefined,
+                    })
+                  }
+                >
+                  Clear filters
+                </Button>
+              ) : (
+                <span />
+              )}
+            </div>
+          </Card>
+
+          <Card
+            label="Feed river"
+            caption={search.view.toUpperCase()}
+            pip="cool"
+          >
+            <FeedRiver filters={filters} />
+          </Card>
+        </>
+      )}
+    </main>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[11px] normal-case tracking-normal text-ink outline-none focus:border-accent"
+      >
+        {children}
+      </select>
+    </label>
+  );
+}

@@ -706,6 +706,120 @@ ul {
     padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Sanitized feed prose. Every descendant rule is intentionally scoped to the
+   river body so syndicated markup cannot alter the surrounding Vessel shell. */
+.feed-entry-content {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ink-2);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.65;
+}
+
+.feed-entry-content > * + * {
+    margin-top: 1em;
+}
+
+.feed-entry-content :is(h1, h2, h3, h4, h5, h6) {
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.feed-entry-content :is(h1, h2) {
+    font-size: 1.35em;
+}
+
+.feed-entry-content :is(h3, h4, h5, h6) {
+    font-size: 1.1em;
+}
+
+.feed-entry-content a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: var(--accent-deep);
+    text-underline-offset: 0.18em;
+}
+
+.feed-entry-content a:is(:hover, :focus-visible) {
+    background: var(--highlight);
+    outline: none;
+}
+
+.feed-entry-content :is(img, video, iframe, svg) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+.feed-entry-content :is(ul, ol) {
+    max-width: 100%;
+    padding-inline-start: 1.5em;
+}
+
+.feed-entry-content ul {
+    list-style: square;
+}
+
+.feed-entry-content ol {
+    list-style: decimal;
+}
+
+.feed-entry-content li + li {
+    margin-top: 0.35em;
+}
+
+.feed-entry-content blockquote {
+    margin-inline: 0;
+    border-inline-start: 2px solid var(--accent);
+    padding-inline-start: 1em;
+    color: var(--ink-mute);
+    font-style: italic;
+}
+
+.feed-entry-content :is(pre, code) {
+    max-width: 100%;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+}
+
+.feed-entry-content code {
+    background: var(--paper-edge);
+    padding: 0.1em 0.3em;
+}
+
+.feed-entry-content pre {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 1em;
+}
+
+.feed-entry-content pre code {
+    background: transparent;
+    padding: 0;
+}
+
+.feed-entry-content table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+}
+
+.feed-entry-content :is(th, td) {
+    border: 1px solid var(--rule);
+    padding: 0.4em 0.6em;
+    text-align: start;
+}
+
+.feed-entry-content hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+}
+
 /* Respect reduced motion across the app. */
 @media (prefers-reduced-motion: reduce) {
 
