@@ -12,6 +12,8 @@ import { cn } from "#/lib/cn";
 export interface ProjectComboProps {
   value: string | null;
   options: string[];
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
   onAssign: (slug: string) => void;
   onClear: () => void;
 }
@@ -19,6 +21,8 @@ export interface ProjectComboProps {
 export function ProjectCombo({
   value,
   options,
+  ariaLabel,
+  ariaDescribedBy,
   onAssign,
   onClear,
 }: ProjectComboProps) {
@@ -49,7 +53,8 @@ export function ProjectCombo({
   return (
     <div className="flex items-center gap-1">
       <ComboBox
-        aria-label="Project"
+        aria-label={ariaLabel ?? "Project"}
+        aria-describedby={ariaDescribedBy}
         allowsCustomValue
         defaultInputValue={value ?? ""}
         onInputChange={setDraft}
@@ -96,7 +101,8 @@ export function ProjectCombo({
       </ComboBox>
       {value !== null && (
         <Button
-          aria-label="Clear project"
+          aria-label={ariaLabel ? `Clear ${ariaLabel}` : "Clear project"}
+          aria-describedby={ariaDescribedBy}
           onPress={onClear}
           className={cn(
             "cl-mono flex-shrink-0 cursor-pointer px-1 text-[11px] text-ink-mute outline-none transition-colors",

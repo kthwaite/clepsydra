@@ -19,6 +19,8 @@ export function MultiSelectCell({
   definition,
   onCommit,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
 }: CellEditorProps) {
   const initial = currentValues(value);
   const [selected, setSelected] = useState<string[]>(initial);
@@ -33,7 +35,8 @@ export function MultiSelectCell({
     <select
       autoFocus
       multiple
-      aria-label="Edit multi-select"
+      aria-label={ariaLabel ?? "Edit multi-select"}
+      aria-describedby={ariaDescribedBy}
       size={Math.min(6, Math.max(2, options.length))}
       className={CELL_INPUT_CLASS}
       value={selected}
@@ -44,11 +47,14 @@ export function MultiSelectCell({
       }
       onBlur={onCancel}
       onKeyDown={(e) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();
           onCommit(selected.length === 0 ? null : selected);
         }
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     >
       {options.map((option) => (

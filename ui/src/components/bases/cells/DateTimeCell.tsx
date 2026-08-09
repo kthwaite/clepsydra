@@ -20,6 +20,8 @@ export function DateTimeCell({
   definition,
   onCommit,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
 }: CellEditorProps) {
   const initial = typeof value === "string" ? splitIso(value) : null;
   const [draft, setDraft] = useState(initial?.local ?? "");
@@ -37,7 +39,8 @@ export function DateTimeCell({
   return (
     <input
       autoFocus
-      aria-label="Edit datetime"
+      aria-label={ariaLabel ?? "Edit datetime"}
+      aria-describedby={ariaDescribedBy}
       type="datetime-local"
       step={1}
       className={CELL_INPUT_CLASS}
@@ -45,8 +48,14 @@ export function DateTimeCell({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={onCancel}
       onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     />
   );

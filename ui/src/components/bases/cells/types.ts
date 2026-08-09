@@ -14,6 +14,10 @@ export interface CellEditorProps {
   value: CellValue;
   /** Declared definition from the base schema (options, many, …). */
   definition: PropertyDefinition;
+  /** Optional accessible name override for contextual editing surfaces. */
+  ariaLabel?: string;
+  /** IDs of contextual descriptions or validation messages. */
+  ariaDescribedBy?: string;
   /**
    * Commit the edited value. `null` clears the key. `hint` carries the
    * declared type when the wire value needs disambiguation (dates).

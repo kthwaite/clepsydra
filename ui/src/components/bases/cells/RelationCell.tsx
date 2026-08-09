@@ -23,7 +23,13 @@ function targetsOf(value: CellValue): string[] {
  * committing each target back in wikilink syntax. Canonical-name
  * suggestions from the search index apply while a single target is typed.
  */
-export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
+export function RelationCell({
+  value,
+  onCommit,
+  onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+}: CellEditorProps) {
   const [draft, setDraft] = useState(targetsOf(value).join(", "));
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const listId = useId();
@@ -57,14 +63,16 @@ export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
     <>
       <input
         autoFocus
-        aria-label="Edit relation"
+        aria-label={ariaLabel ?? "Edit relation"}
+        aria-describedby={ariaDescribedBy}
         className={CELL_INPUT_CLASS}
         list={singleTarget ? listId : undefined}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={onCancel}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
             const targets = draft
               .split(",")
               .map((t) => t.trim())
@@ -73,7 +81,10 @@ export function RelationCell({ value, onCommit, onCancel }: CellEditorProps) {
               targets.length === 0 ? null : targets.map((t) => `[[${t}]]`),
             );
           }
-          if (e.key === "Escape") onCancel();
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
         }}
       />
       <datalist id={listId}>

@@ -13,6 +13,8 @@ export interface TagInputProps {
   label: string;
   values: string[];
   readOnlyValues?: string[];
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
   onChange: (values: string[]) => void;
   placeholder?: string;
   className?: string;
@@ -24,6 +26,8 @@ export function TagInput({
   label,
   values,
   readOnlyValues = [],
+  ariaLabel,
+  ariaDescribedBy,
   onChange,
   placeholder,
   className,
@@ -103,7 +107,8 @@ export function TagInput({
       {values.length > 0 && (
         <TagGroup
           onRemove={handleRemove}
-          aria-label={label}
+          aria-label={ariaLabel ?? label}
+          aria-describedby={ariaDescribedBy}
           className="contents"
         >
           <TagList
@@ -137,6 +142,8 @@ export function TagInput({
       <input
         ref={inputRef}
         type="text"
+        aria-label={ariaLabel ?? `Add ${label.toLowerCase()}`}
+        aria-describedby={ariaDescribedBy}
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -144,7 +151,6 @@ export function TagInput({
           if (inputValue.trim()) addValue(inputValue);
           onBlur?.();
         }}
-        aria-label={`Add ${label.toLowerCase()}`}
         placeholder={
           values.length === 0 && readOnlyValues.length === 0
             ? placeholder

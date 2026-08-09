@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { cn } from "#/lib/cn";
 import { CELL_EDITORS } from "./cells/registry";
 import { type CellValue, formatCellValue } from "./cells/types";
 
-interface EditableCellProps {
+export interface EditableCellProps {
   value: CellValue;
   definition: PropertyDefinition;
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
   onCommit: (value: CellValue, hint?: PropertyType) => void;
 }
 
@@ -18,29 +20,53 @@ interface EditableCellProps {
 export function EditableCell({
   value,
   definition,
+  ariaLabel,
+  ariaDescribedBy,
   onCommit,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
+  const displayButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef(false);
   const Editor = CELL_EDITORS[definition.type];
+
+  useEffect(() => {
+    if (!editing && restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      displayButtonRef.current?.focus();
+    }
+  }, [editing]);
 
   if (editing) {
     return (
-      <Editor
-        value={value}
-        definition={definition}
-        onCommit={(next, hint) => {
-          setEditing(false);
-          onCommit(next, hint);
+      <div
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && event.defaultPrevented) {
+            restoreFocusRef.current = true;
+          }
         }}
-        onCancel={() => setEditing(false)}
-      />
+      >
+        <Editor
+          value={value}
+          definition={definition}
+          ariaLabel={ariaLabel}
+          ariaDescribedBy={ariaDescribedBy}
+          onCommit={(next, hint) => {
+            setEditing(false);
+            onCommit(next, hint);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      </div>
     );
   }
 
   const text = formatCellValue(value);
   return (
     <button
+      ref={displayButtonRef}
       type="button"
+      aria-label={ariaLabel ? `Edit ${ariaLabel}` : undefined}
+      aria-describedby={ariaDescribedBy}
       className={cn(
         "cl-mono block w-full cursor-text truncate border border-transparent px-1 py-0.5 text-left text-[12px]",
         text === "" ? "text-ink-mute" : "text-ink-2",
