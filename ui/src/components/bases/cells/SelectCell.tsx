@@ -6,13 +6,17 @@ export function SelectCell({
   onCommit,
   onCommitNext,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const current = typeof value === "string" ? value : "";
   const options = definition.options ?? [];
   return (
     <select
       autoFocus
-      aria-label="Edit select"
+      aria-label={ariaLabel ?? "Edit select"}
+      aria-describedby={ariaDescribedBy}
       className={CELL_INPUT_CLASS}
       value={current}
       onChange={(e) => {
@@ -21,13 +25,16 @@ export function SelectCell({
       }}
       onBlur={onCancel}
       onKeyDown={(e) => {
-        if (e.key === "Tab" && !e.shiftKey) {
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           onCommitNext(current === "" ? null : current);
           return;
         }
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     >
       <option value="">—</option>

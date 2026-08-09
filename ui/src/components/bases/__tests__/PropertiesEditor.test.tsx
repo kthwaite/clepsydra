@@ -87,6 +87,7 @@ const emptyDetail: BaseDetailResponse = {
     },
   ],
   diagnostics: [],
+  member_creation: [],
   revision: "revision-1",
 };
 

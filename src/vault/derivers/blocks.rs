@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::block::BlockType;
 use crate::vault::derivation::{Deriver, IndexedPage};
@@ -14,12 +14,7 @@ impl Deriver for BlockDeriver {
         "blocks"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Transaction,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         let mut span_starts = HashSet::with_capacity(page.blocks.len());
         for block in &page.blocks {
             if !span_starts.insert(block.span.start) {
@@ -30,7 +25,6 @@ impl Deriver for BlockDeriver {
                 )));
             }
         }
-
         for block in &page.blocks {
             let parent_id = block
                 .parent_index

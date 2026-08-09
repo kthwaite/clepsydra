@@ -17,6 +17,8 @@ export interface TagInputProps {
   values: string[];
   readOnlyValues?: string[];
   suggestions?: string[];
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
   onChange: (values: string[]) => void;
   placeholder?: string;
   className?: string;
@@ -29,6 +31,8 @@ export function TagInput({
   values,
   readOnlyValues = [],
   suggestions,
+  ariaLabel,
+  ariaDescribedBy,
   onChange,
   placeholder,
   className,
@@ -101,7 +105,7 @@ export function TagInput({
           e.preventDefault();
           addValue(query);
         }
-      } else if (e.key === "Enter") {
+      } else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         addValue(navigated && open ? matches[selected] : query);
       } else if (e.key === ",") {
@@ -159,7 +163,8 @@ export function TagInput({
       {values.length > 0 && (
         <TagGroup
           onRemove={handleRemove}
-          aria-label={label}
+          aria-label={ariaLabel ?? label}
+          aria-describedby={ariaDescribedBy}
           className="contents"
         >
           <TagList
@@ -193,6 +198,8 @@ export function TagInput({
       <input
         ref={inputRef}
         type="text"
+        aria-label={ariaLabel ?? `Add ${label.toLowerCase()}`}
+        aria-describedby={ariaDescribedBy}
         value={inputValue}
         role={hasSuggestions ? "combobox" : undefined}
         aria-expanded={hasSuggestions ? open : undefined}
@@ -212,7 +219,6 @@ export function TagInput({
           if (inputValue.trim()) addValue(inputValue);
           onBlur?.();
         }}
-        aria-label={`Add ${label.toLowerCase()}`}
         placeholder={
           values.length === 0 && readOnlyValues.length === 0
             ? placeholder

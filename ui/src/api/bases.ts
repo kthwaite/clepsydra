@@ -1,11 +1,20 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
+import { isApiError } from "./error";
 import { invalidateByPath, queryKeys } from "./keys";
 
 export type BaseDetailResponse = components["schemas"]["BaseDetailResponse"];
+export type BaseMemberCreateRequest =
+  components["schemas"]["BaseMemberCreateRequest"];
+export type BaseMemberCreateResponse =
+  components["schemas"]["BaseMemberCreateResponse"];
+export type BaseMemberCapability =
+  components["schemas"]["BaseMemberCapability"];
+export type BaseMemberDiagnostic =
+  components["schemas"]["BaseMemberDiagnostic"];
 export type BaseFile = components["schemas"]["BaseFile"];
 export type BaseListResponse = components["schemas"]["BaseListResponse"];
 export type BaseSummary = components["schemas"]["BaseSummary"];
@@ -23,6 +32,62 @@ export type QueryOutput = components["schemas"]["QueryOutput"];
 export type QueryRow = components["schemas"]["QueryRow"];
 export type GroupResult = components["schemas"]["GroupResult"];
 
+const BASE_MEMBER_SCOPES: ReadonlySet<string> = new Set([
+  "membership",
+  "view",
+  "field",
+]);
+
+function isBaseMemberDiagnostic(
+  value: unknown,
+): value is BaseMemberDiagnostic {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  if (
+    !("scope" in value) ||
+    typeof value.scope !== "string" ||
+    !BASE_MEMBER_SCOPES.has(value.scope) ||
+    !("message" in value) ||
+    typeof value.message !== "string"
+  ) {
+    return false;
+  }
+  if (
+    "field" in value &&
+    value.field !== null &&
+    typeof value.field !== "string"
+  ) {
+    return false;
+  }
+  return (
+    !("filter_path" in value) ||
+    value.filter_path === null ||
+    typeof value.filter_path === "string"
+  );
+}
+
+export function decodeBaseMemberDiagnostics(
+  error: unknown,
+): BaseMemberDiagnostic[] {
+  if (
+    !isApiError(error) ||
+    typeof error.detail !== "object" ||
+    !error.detail ||
+    !("diagnostics" in error.detail)
+  ) {
+    return [];
+  }
+  const diagnostics = error.detail.diagnostics;
+  if (
+    !Array.isArray(diagnostics) ||
+    !diagnostics.every(isBaseMemberDiagnostic)
+  ) {
+    return [];
+  }
+  return diagnostics;
+}
+
 function useInvalidateBaseQueries() {
   const qc = useQueryClient();
   return useCallback(() => {
@@ -31,11 +96,24 @@ function useInvalidateBaseQueries() {
   }, [qc]);
 }
 
+export function invalidateBaseMemberQueries(queryClient: QueryClient): void {
+  invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
+  invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+  invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
+}
+
 export const useBases = () => $api.useQuery("get", "/api/vault/bases", {});
 
 export function useCreateBase() {
   const onSuccess = useInvalidateBaseQueries();
   return $api.useMutation("post", "/api/vault/bases", { onSuccess });
+}
+
+export function useCreateBaseMember() {
+  const queryClient = useQueryClient();
+  return $api.useMutation("post", "/api/vault/bases/{slug}/members", {
+    onSuccess: () => invalidateBaseMemberQueries(queryClient),
+  });
 }
 
 export function useUpdateBase() {

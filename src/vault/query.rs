@@ -17,6 +17,7 @@ use super::base::{
     Aggregate, AggregateFn, BaseDefinition, Filter, Op, PropertyType, SortDir, SortKey,
 };
 use super::canonical::CanonicalName;
+use super::link::normalize_links_to_target;
 
 // ---------------------------------------------------------------------------
 // Field resolution
@@ -54,6 +55,22 @@ impl SysField {
             "word_count" => SysField::WordCount,
             _ => return None,
         })
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            SysField::Id => "id",
+            SysField::Path => "path",
+            SysField::Title => "title",
+            SysField::Kind => "kind",
+            SysField::Project => "project",
+            SysField::Tags => "tags",
+            SysField::Aliases => "aliases",
+            SysField::CreatedAt => "created_at",
+            SysField::UpdatedAt => "updated_at",
+            SysField::JournalDate => "journal_date",
+            SysField::WordCount => "word_count",
+        }
     }
 
     /// The `pages` column for scalar system fields; `None` for the
@@ -201,6 +218,27 @@ fn bind_value(
     }
 }
 
+fn bind_literal_contains_value(
+    field: &str,
+    ty: PropertyType,
+    value: &serde_json::Value,
+) -> Result<SqlValue, QueryError> {
+    let SqlValue::Text(value) = bind_value(field, ty, value)? else {
+        return Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op: Op::Contains,
+        });
+    };
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    Ok(SqlValue::Text(escaped))
+}
+
 fn sql_op(op: Op) -> Option<&'static str> {
     Some(match op {
         Op::Eq => "=",
@@ -295,9 +333,17 @@ fn compile_cmp(
                     }
                     Ok(format!("{column} IN ({})", holes.join(", ")))
                 }
+                Op::Contains if sys == SysField::WordCount => Err(QueryError::InvalidOp {
+                    field: field.to_string(),
+                    op,
+                }),
                 Op::Contains => {
-                    params.push(bind_sys_value(field, sys, value)?);
-                    Ok(format!("{column} LIKE '%' || ? || '%'"))
+                    params.push(bind_literal_contains_value(
+                        field,
+                        PropertyType::Text,
+                        value,
+                    )?);
+                    Ok(format!("{column} LIKE '%' || ? || '%' ESCAPE '\\'"))
                 }
                 Op::LinksTo => Err(QueryError::InvalidOp {
                     field: field.to_string(),
@@ -408,16 +454,19 @@ fn compile_prop(
                     .to_string(),
             )
         }
+        Op::LinksTo if !ty.supports_links_to() => Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op,
+        }),
         Op::LinksTo => {
             let target = value.as_str().ok_or_else(|| QueryError::InvalidValue {
                 field: field.to_string(),
                 reason: "`links_to` expects a string target".into(),
             })?;
+            let target = normalize_links_to_target(target);
             params.push(SqlValue::Text(key.to_string()));
-            params.push(SqlValue::Text(target.to_string()));
-            params.push(SqlValue::Text(
-                CanonicalName::from_title(target).as_str().to_string(),
-            ));
+            params.push(SqlValue::Text(target.target_id));
+            params.push(SqlValue::Text(target.target_canonical));
             Ok(
                 "EXISTS (SELECT 1 FROM links l WHERE l.source_id = p.id AND l.source_field = ? AND (l.target_id = ? OR l.target_canonical = ?))"
                     .to_string(),
@@ -436,17 +485,24 @@ fn compile_prop(
             }
             Ok(exists(&format!("pp.{column} IN ({})", holes.join(", "))))
         }
+        Op::Contains if !ty.supports_contains() => Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op,
+        }),
         Op::Contains => {
             params.push(SqlValue::Text(key.to_string()));
-            params.push(bind_value(field, ty, value)?);
             if matches!(
                 ty,
                 PropertyType::MultiSelect | PropertyType::Select | PropertyType::Relation
             ) {
+                params.push(bind_value(field, ty, value)?);
                 // Membership on multi-valued: any element matches exactly.
                 Ok(exists(&format!("pp.{column} = ?")))
             } else {
-                Ok(exists(&format!("pp.{column} LIKE '%' || ? || '%'")))
+                params.push(bind_literal_contains_value(field, ty, value)?);
+                Ok(exists(&format!(
+                    "pp.{column} LIKE '%' || ? || '%' ESCAPE '\\'"
+                )))
             }
         }
         Op::Ne => {
@@ -1017,6 +1073,9 @@ rating  = { type = "number" }
 started = { type = "date" }
 series  = { type = "relation" }
 themes  = { type = "multi_select", options = [] }
+pattern = { type = "text" }
+done    = { type = "bool" }
+moment  = { type = "datetime" }
 "#;
 
     fn page(id: &str, kind: &str, title: &str, extras: &str) -> String {
@@ -1036,7 +1095,7 @@ themes  = { type = "multi_select", options = [] }
                 "0190f8a0-0000-7000-8000-00000000000a",
                 "BOOK",
                 "Book A",
-                "tags = [\"sf\"]\nauthor = \"Wolfe\"\nstatus = \"reading\"\nrating = 9\nstarted = 2026-07-01\nthemes = [\"memory\"]\nseries = [\"[[Solar Cycle]]\"]\n",
+                "tags = [\"sf\"]\naliases = [\"Science Fiction\"]\nauthor = \"Wolfe\"\nstatus = \"reading\"\nrating = 9\nstarted = 2026-07-01\nthemes = [\"memory\"]\nseries = [\"[[Solar Cycle]]\"]\npattern = \"100%_done\"\ndone = true\nmoment = 2026-08-09T12:34:56Z\n",
             ),
         );
         write(
@@ -1108,6 +1167,132 @@ themes  = { type = "multi_select", options = [] }
             ..Default::default()
         };
         evaluate(index.connection(), &spec, &QueryContext::for_base(base)).unwrap()
+    }
+
+    #[test]
+    fn in_memory_matching_has_sql_parity_for_contains_and_aliases() {
+        let (_tmp, index, mut base) = fixture();
+        let mut meta = crate::vault::page::PageMeta::new();
+        meta.kind = Some(crate::vault::kind::Kind::Book);
+        meta.title = Some("Book A".into());
+        meta.tags.push("sf".into());
+        meta.aliases.push("Science Fiction".into());
+        meta.extra
+            .insert("author".into(), toml::Value::String("Wolfe".into()));
+        meta.extra
+            .insert("status".into(), toml::Value::String("reading".into()));
+        meta.extra.insert(
+            "themes".into(),
+            toml::Value::Array(vec![toml::Value::String("memory".into())]),
+        );
+        meta.extra.insert(
+            "series".into(),
+            toml::Value::Array(vec![toml::Value::String("[[Solar Cycle]]".into())]),
+        );
+        meta.extra
+            .insert("pattern".into(), toml::Value::String("100%_done".into()));
+        meta.extra.insert(
+            "started".into(),
+            toml::Value::Datetime("2026-07-01".parse().unwrap()),
+        );
+        meta.extra.insert(
+            "moment".into(),
+            toml::Value::Datetime("2026-08-09T12:34:56Z".parse().unwrap()),
+        );
+        let cases = [
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "OLF" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "%" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "_" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "contains", "value": "%" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "contains", "value": "_" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "started", "op": "contains", "value": "2026-07" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "contains", "value": "12:34" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "contains", "value": "read" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "contains", "value": "reading" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "contains", "value": "mem" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "contains", "value": "memory" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "contains", "value": "Solar" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "contains", "value": "[[Solar Cycle]]" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "aliases", "op": "eq", "value": "science fiction" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "aliases", "op": "contains", "value": "SCIENCE FICTION" }),
+                true,
+            ),
+        ];
+
+        for (filter_json, expected) in cases {
+            let filter: Filter = serde_json::from_value(filter_json.clone()).unwrap();
+            base.file.filter = Some(filter);
+            let in_memory = crate::vault::base::base_matches_meta(&base, &meta, "a.md");
+            let sql = flat_paths(&run(&index, &base, filter_json))
+                .iter()
+                .any(|path| path == "a.md");
+
+            assert_eq!(sql, expected, "unexpected SQL fixture result");
+            assert_eq!(in_memory, sql, "in-memory matcher diverged from SQL");
+        }
+    }
+
+    #[test]
+    fn query_rejects_contains_for_non_text_scalar_types() {
+        let (_tmp, _index, base) = fixture();
+        for filter in [
+            serde_json::json!({ "field": "rating", "op": "contains", "value": 9 }),
+            serde_json::json!({ "field": "rating", "op": "contains", "value": 9.5 }),
+            serde_json::json!({ "field": "done", "op": "contains", "value": true }),
+            serde_json::json!({ "field": "word_count", "op": "contains", "value": 0 }),
+        ] {
+            let filter: Filter = serde_json::from_value(filter).unwrap();
+            assert!(matches!(
+                compile_filter(&filter, &QueryContext::for_base(&base)),
+                Err(QueryError::InvalidOp {
+                    op: Op::Contains,
+                    ..
+                })
+            ));
+        }
     }
 
     // -- Task 3.2: filter compilation -------------------------------------
@@ -1200,6 +1385,30 @@ themes  = { type = "multi_select", options = [] }
             serde_json::json!({ "field": "series", "op": "links_to", "value": "0190f8a0-0000-7000-8000-0000000000aa" }),
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
+
+        let out = run(
+            &index,
+            &base,
+            serde_json::json!({ "field": "series", "op": "links_to", "value": "0190F8A0-0000-7000-8000-0000000000AA" }),
+        );
+        assert_eq!(flat_paths(&out), vec!["a.md"]);
+    }
+
+    #[test]
+    fn links_to_rejects_non_relation_properties() {
+        let (_tmp, _index, base) = fixture();
+        let filter: Filter = serde_json::from_value(
+            serde_json::json!({ "field": "author", "op": "links_to", "value": "Wolfe" }),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            compile_filter(&filter, &QueryContext::for_base(&base)),
+            Err(QueryError::InvalidOp {
+                op: Op::LinksTo,
+                ..
+            })
+        ));
     }
 
     #[test]

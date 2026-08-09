@@ -6,6 +6,9 @@ export function TextCell({
   onCommit,
   onCommitNext,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(typeof value === "string" ? value : "");
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
@@ -14,20 +17,30 @@ export function TextCell({
   return (
     <input
       autoFocus
-      aria-label="Edit text"
+      aria-label={ariaLabel ?? "Edit text"}
+      aria-describedby={ariaDescribedBy}
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={() => {
+        if (commitOnBlur) onCommit(draft === "" ? null : draft);
+        else onCancel();
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Tab" && !e.shiftKey) {
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           commit(onCommitNext);
           return;
         }
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     />
   );

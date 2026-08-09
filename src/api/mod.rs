@@ -2,6 +2,7 @@ pub mod academic;
 pub mod agenda;
 pub mod archive;
 pub mod attachments;
+pub mod base_members;
 pub mod bases;
 pub mod bcl;
 pub mod blocks;
@@ -87,6 +88,18 @@ pub struct AppState {
     pub location: parking_lot::RwLock<Option<crate::vault::location::Location>>,
 }
 
+pub(crate) fn mutation_notifier(
+    state: &AppState,
+) -> Arc<dyn Fn(crate::vault::mutation_coordinator::MutationNotification) + Send + Sync> {
+    let change_tx = state.change_tx.clone();
+    Arc::new(move |notification| {
+        let _ = change_tx.send(SyncNotification::IndexChanged {
+            upserted: notification.upserted,
+            removed: notification.removed,
+        });
+    })
+}
+
 pub(crate) fn mutation_error(
     error: crate::vault::mutation_coordinator::MutationError,
 ) -> error::ApiError {
@@ -102,7 +115,10 @@ pub(crate) fn mutation_error(
             error::ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
         }
         MutationError::Filesystem { .. }
+        | MutationError::FilesystemRollback { .. }
         | MutationError::Index { .. }
+        | MutationError::IndexRollback { .. }
+        | MutationError::IndexCompensation { .. }
         | MutationError::Reconcile { .. }
         | MutationError::Hook { .. } => error::ApiError::internal(error.to_string()),
     }

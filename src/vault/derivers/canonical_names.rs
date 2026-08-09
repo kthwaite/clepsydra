@@ -1,4 +1,4 @@
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 
 use crate::vault::canonical::CanonicalName;
 use crate::vault::derivation::{Deriver, IndexedPage};
@@ -12,12 +12,7 @@ impl Deriver for CanonicalNameDeriver {
         "canonical_names"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Transaction,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         // 1. Title-derived canonical name
         if let Some(ref title) = page.meta.title {
             let cn = CanonicalName::from_title(title);

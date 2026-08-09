@@ -133,12 +133,7 @@ pub(crate) async fn create_task(
         String::new()
     };
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = crate::api::mutation_notifier(state.as_ref());
     state
         .mutation_coordinator
         .create_page(
@@ -149,7 +144,7 @@ pub(crate) async fn create_task(
                 meta,
                 body: page_body,
             },
-            &notify,
+            notify,
         )
         .await
         .map_err(crate::api::mutation_error)?;

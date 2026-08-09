@@ -7,6 +7,9 @@ export function DateCell({
   onCommit,
   onCommitNext,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(typeof value === "string" ? value : "");
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
@@ -21,21 +24,31 @@ export function DateCell({
   return (
     <input
       autoFocus
-      aria-label="Edit date"
+      aria-label={ariaLabel ?? "Edit date"}
+      aria-describedby={ariaDescribedBy}
       type="date"
       className={CELL_INPUT_CLASS}
       value={draft.slice(0, 10)}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={() => {
+        if (commitOnBlur) commit();
+        else onCancel();
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Tab" && !e.shiftKey) {
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           commit(onCommitNext);
           return;
         }
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     />
   );

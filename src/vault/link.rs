@@ -30,6 +30,28 @@ pub enum LinkKind {
     BlockRef,
 }
 
+/// The two values used by the indexed `links_to` predicate.
+pub(crate) struct NormalizedLinksToTarget {
+    pub target_id: String,
+    pub target_canonical: String,
+}
+
+/// Normalize UUID-shaped targets to the canonical lowercase/hyphenated form
+/// stored in `links.target_id`; ordinary text still uses canonical-name
+/// matching.
+pub(crate) fn normalize_links_to_target(value: &str) -> NormalizedLinksToTarget {
+    let target_id = uuid::Uuid::parse_str(value)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| value.to_owned());
+    let target_canonical = crate::vault::canonical::CanonicalName::from_title(value)
+        .as_str()
+        .to_owned();
+    NormalizedLinksToTarget {
+        target_id,
+        target_canonical,
+    }
+}
+
 /// Return a lazily compiled regex for wikilinks: `[[target]]` or `[[target|display]]`.
 fn wikilink_regex() -> &'static Regex {
     use std::sync::OnceLock;

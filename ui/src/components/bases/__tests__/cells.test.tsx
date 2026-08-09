@@ -3,20 +3,30 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { PropertyDefinition } from "#/api/bases";
+import type { CellValue } from "#/components/bases/cells/types";
 import { EditableCell } from "#/components/bases/EditableCell";
+import { KindSelect } from "#/components/codex/KindSelect";
+import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { TagInput } from "#/components/ui/tag-input";
 
 type EditableProps = Parameters<typeof EditableCell>[0];
+type AccessibilityProps = Pick<
+  EditableProps,
+  "ariaLabel" | "ariaDescribedBy"
+>;
 
 interface CellHarnessProps {
   value: EditableProps["value"];
   definition: PropertyDefinition;
+  accessibility?: AccessibilityProps;
   onCommit: EditableProps["onCommit"];
-  onCommitNext: EditableProps["onCommitNext"];
+  onCommitNext: NonNullable<EditableProps["onCommitNext"]>;
 }
 
 function CellHarness({
   value,
   definition,
+  accessibility,
   onCommit,
   onCommitNext,
 }: CellHarnessProps) {
@@ -36,17 +46,23 @@ function CellHarness({
         onCommitNext(next, hint);
         setIsEditing(false);
       }}
+      {...accessibility}
     />
   );
 }
 
-function renderCell(value: EditableProps["value"], definition: PropertyDefinition) {
+function renderCell(
+  value: EditableProps["value"],
+  definition: PropertyDefinition,
+  accessibility: AccessibilityProps = {},
+) {
   const onCommit = vi.fn();
   const onCommitNext = vi.fn();
   render(
     <CellHarness
       value={value}
       definition={definition}
+      accessibility={accessibility}
       onCommit={onCommit}
       onCommitNext={onCommitNext}
     />,
@@ -55,19 +71,37 @@ function renderCell(value: EditableProps["value"], definition: PropertyDefinitio
 }
 
 describe("cell editors", () => {
-  it("number cell rejects a non-numeric commit and accepts a numeric one", async () => {
+  it("number cell uses a native number input and commits a numeric value", async () => {
     const user = userEvent.setup();
     const { onCommit } = renderCell(9, { type: "number" });
     await user.click(screen.getByRole("button", { name: "9" }));
-    const input = screen.getByRole("textbox", { name: "Edit number" });
-
-    await user.clear(input);
-    await user.type(input, "not-a-number{Enter}");
-    expect(onCommit).not.toHaveBeenCalled();
+    const input = screen.getByRole("spinbutton", { name: "Edit number" });
 
     await user.clear(input);
     await user.type(input, "42{Enter}");
     expect(onCommit).toHaveBeenCalledWith(42, undefined);
+  });
+
+  it("does not coerce an invalid draft number on blur", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <EditableCell
+        value={9}
+        definition={{ type: "number" }}
+        commitOnBlur
+        onCommit={onCommit}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "9" }));
+    const input = screen.getByRole<HTMLInputElement>("spinbutton", {
+      name: "Edit number",
+    });
+    input.setCustomValidity("Enter a valid number");
+    await user.tab();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "9" })).toBeInTheDocument();
   });
 
   it("select cell offers the declared options", async () => {
@@ -290,5 +324,117 @@ describe("cell editors", () => {
       undefined,
     );
     vi.unstubAllGlobals();
+  });
+  const accessibleEditorCases: Array<
+    [name: string, value: CellValue, definition: PropertyDefinition]
+  > = [
+    ["text", "", { type: "text" }],
+    ["url", "", { type: "url" }],
+    ["number", null, { type: "number" }],
+    ["boolean", null, { type: "bool" }],
+    ["date", "", { type: "date" }],
+    ["datetime", "", { type: "datetime" }],
+    ["select", null, { type: "select", options: ["one"] }],
+    ["multi-select", [], { type: "multi_select", options: ["one"] }],
+    ["relation", [], { type: "relation" }],
+  ];
+
+  it.each(accessibleEditorCases)(
+    "propagates an accessible override to the %s editor",
+    async (_name, value, definition) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+      );
+      const user = userEvent.setup();
+      render(
+        <>
+          <p id="custom-description">A helpful description</p>
+          <EditableCell
+            value={value}
+            definition={definition}
+            ariaLabel="Custom field"
+            ariaDescribedBy="custom-description"
+            onCommit={vi.fn()}
+          />
+        </>,
+      );
+
+      const display = screen.getByRole("button", {
+        name: "Edit Custom field",
+      });
+      expect(display).toHaveAccessibleDescription("A helpful description");
+      await user.click(display);
+      const editor = screen.getByLabelText("Custom field");
+      expect(editor).toHaveAccessibleDescription("A helpful description");
+      vi.unstubAllGlobals();
+    },
+  );
+});
+
+describe("metadata control accessibility", () => {
+  it("preserves default labels", () => {
+    render(
+      <>
+        <KindSelect value="NOTE" inferred={false} onAssign={vi.fn()} />
+        <ProjectCombo
+          value={null}
+          options={["clepsydra"]}
+          onAssign={vi.fn()}
+          onClear={vi.fn()}
+        />
+        <TagInput label="Tags" values={[]} onChange={vi.fn()} />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Kind" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Project" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Add tags" }),
+    ).toBeInTheDocument();
+  });
+
+  it("propagates custom labels and descriptions", () => {
+    render(
+      <>
+        <p id="kind-description">Kind help</p>
+        <p id="project-description">Project help</p>
+        <p id="tags-description">Tags help</p>
+        <KindSelect
+          value="NOTE"
+          inferred={false}
+          ariaLabel="Draft kind"
+          ariaDescribedBy="kind-description"
+          onAssign={vi.fn()}
+        />
+        <ProjectCombo
+          value={null}
+          options={["clepsydra"]}
+          ariaLabel="Draft project"
+          ariaDescribedBy="project-description"
+          onAssign={vi.fn()}
+          onClear={vi.fn()}
+        />
+        <TagInput
+          label="Tags"
+          values={[]}
+          ariaLabel="Draft tags"
+          ariaDescribedBy="tags-description"
+          onChange={vi.fn()}
+        />
+      </>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Draft kind" }),
+    ).toHaveAccessibleDescription("Kind help");
+    expect(
+      screen.getByRole("combobox", { name: "Draft project" }),
+    ).toHaveAccessibleDescription("Project help");
+    expect(
+      screen.getByRole("textbox", { name: "Draft tags" }),
+    ).toHaveAccessibleDescription("Tags help");
   });
 });

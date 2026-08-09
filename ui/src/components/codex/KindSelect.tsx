@@ -11,13 +11,22 @@ import { KINDS, type Kind, kindLabel } from "#/lib/kind";
 export interface KindSelectProps {
   value: Kind;
   inferred: boolean;
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
   onAssign: (kind: Kind) => void;
 }
 
-export function KindSelect({ value, inferred, onAssign }: KindSelectProps) {
+export function KindSelect({
+  value,
+  inferred,
+  ariaLabel,
+  ariaDescribedBy,
+  onAssign,
+}: KindSelectProps) {
   return (
     <Select
-      aria-label="Kind"
+      aria-label={ariaLabel ?? "Kind"}
+      aria-describedby={ariaDescribedBy}
       selectedKey={value}
       onSelectionChange={(k) => onAssign(k as Kind)}
     >

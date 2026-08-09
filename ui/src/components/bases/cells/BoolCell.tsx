@@ -5,12 +5,16 @@ export function BoolCell({
   onCommit,
   onCommitNext,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const current = value === true ? "true" : value === false ? "false" : "";
   return (
     <select
       autoFocus
-      aria-label="Edit boolean"
+      aria-label={ariaLabel ?? "Edit boolean"}
+      aria-describedby={ariaDescribedBy}
       className={CELL_INPUT_CLASS}
       value={current}
       onChange={(e) => {
@@ -19,13 +23,16 @@ export function BoolCell({
       }}
       onBlur={onCancel}
       onKeyDown={(e) => {
-        if (e.key === "Tab" && !e.shiftKey) {
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           onCommitNext(current === "" ? null : current === "true");
           return;
         }
-        if (e.key === "Escape") onCancel();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     >
       <option value="">—</option>

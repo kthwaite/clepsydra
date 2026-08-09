@@ -28,6 +28,9 @@ export function RelationCell({
   onCommit,
   onCommitNext,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(targetsOf(value).join(", "));
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -65,25 +68,36 @@ export function RelationCell({
     };
   }, [draft]);
 
+
   return (
     <>
       <input
         autoFocus
-        aria-label="Edit relation"
+        aria-label={ariaLabel ?? "Edit relation"}
+        aria-describedby={ariaDescribedBy}
         className={CELL_INPUT_CLASS}
         list={singleTarget ? listId : undefined}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={onCancel}
+        onBlur={() => {
+          if (commitOnBlur) commit();
+          else onCancel();
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Tab" && !e.shiftKey) {
+          if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
             e.preventDefault();
             e.stopPropagation();
             commit(onCommitNext);
             return;
           }
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") onCancel();
+          if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            commit();
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
         }}
       />
       <datalist id={listId}>

@@ -51,13 +51,15 @@ const detail: BaseDetailResponse = {
     },
   ],
   diagnostics: [],
+  member_creation: [],
   revision: "revision-1",
 };
 
 function mutationResponse(
   overrides: Partial<BaseMutationResponse> = {},
 ): BaseMutationResponse {
-  return { ...detail, ...overrides };
+  const { member_creation: _memberCreation, ...nativeMutation } = detail;
+  return { ...nativeMutation, ...overrides };
 }
 
 function deferred<T>() {
