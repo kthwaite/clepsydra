@@ -267,7 +267,10 @@ youtube:https://youtu.be/dQw4w9WgXcQ
 ```
 
 Clepsydra uses deterministic labels such as `arXiv: 2401.00001` and
-`YouTube: dQw4w9WgXcQ`. Wikipedia targets English Wikipedia. YouTube accepts
+`YouTube: dQw4w9WgXcQ`. Wikipedia targets English Wikipedia. arXiv accepts
+identifiers, not full arXiv URLs: use modern `NNNN.NNNN` or `NNNN.NNNNN`
+form and legacy `archive/NNNNNNN` form.
+Either form may have an optional positive `vN` version suffix. YouTube accepts
 video IDs and `watch`, `youtu.be`, `shorts`, and `embed` URLs. Invalid input
 stays as typed. Saved pages contain standard `[label](https://…)` Markdown,
 not Clepsydra-specific link schemes.

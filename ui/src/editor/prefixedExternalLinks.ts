@@ -10,7 +10,22 @@ type ProviderRule = (
   rawValue: string,
 ) => Omit<ExpandedPrefixedLink, "provider"> | null;
 
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+const ASCII_PREFIX = /^[A-Za-z]+$/;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+function isWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index++;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
 
 function expandWiki(rawValue: string) {
   if (CONTROL_CHARACTER.test(rawValue)) return null;
@@ -81,6 +96,7 @@ export function expandPrefixedLink(
   prefix: string,
   rawValue: string,
 ): ExpandedPrefixedLink | null {
+  if (!ASCII_PREFIX.test(prefix) || !isWellFormedUtf16(rawValue)) return null;
   const provider = prefix.toLowerCase() as PrefixedLinkProvider;
   if (!Object.hasOwn(RULES, provider)) return null;
   const expanded = RULES[provider](rawValue);

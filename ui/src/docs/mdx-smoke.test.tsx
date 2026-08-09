@@ -24,6 +24,13 @@ it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   );
 });
 
+it("documents every accepted arXiv identifier form and rejects URL input", () => {
+  expect(source).toContain("modern `NNNN.NNNN` or `NNNN.NNNNN`");
+  expect(source).toContain("legacy `archive/NNNNNNN` form");
+  expect(source).toContain("optional positive `vN` version suffix");
+  expect(source).toContain("identifiers, not full arXiv URLs");
+});
+
 it.each(DOC_PAGES)(
   "renders the registered $slug guide component",
   async ({ Component }) => {

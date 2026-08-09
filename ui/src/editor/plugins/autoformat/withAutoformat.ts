@@ -86,15 +86,25 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
     if (tryCodeBlockNewline(editor)) return;
-    if (tryListContinuation(editor)) return;
-    if (tryBlockquoteContinuation(editor)) return;
-    if (tryHeadingExit(editor)) return;
-    if (tryCodeFence(editor)) return;
-    if (tryPrefixedLinkBreakTransform(editor, insertBreak)) return;
+    if (
+      tryPrefixedLinkBreakTransform(editor, () => {
+        if (!trySemanticBreak(editor, false)) insertBreak();
+      })
+    )
+      return;
+    if (trySemanticBreak(editor)) return;
     insertBreak();
   };
 
   return editor;
+}
+
+function trySemanticBreak(editor: Editor, historyBatch = true): boolean {
+  if (tryListContinuation(editor, { historyBatch })) return true;
+  if (tryBlockquoteContinuation(editor)) return true;
+  if (tryHeadingExit(editor, historyBatch)) return true;
+  if (tryCodeFence(editor)) return true;
+  return false;
 }
 
 /**
@@ -173,7 +183,7 @@ function resolveComposedInline(editor: Editor): void {
  * of carrying the heading style onto the next line. A mid-heading Enter is left
  * to Slate's default split (which keeps both halves as headings).
  */
-function tryHeadingExit(editor: Editor): boolean {
+function tryHeadingExit(editor: Editor, historyBatch = true): boolean {
   const { selection } = editor;
   if (!selection || !Range.isCollapsed(selection)) return false;
 
@@ -186,21 +196,27 @@ function tryHeadingExit(editor: Editor): boolean {
   const [, headingPath] = headingEntry;
   if (!Editor.isEnd(editor, selection.anchor, headingPath)) return false;
 
-  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+  const exitHeading = () => {
     const afterPath = Path.next(headingPath);
     Transforms.insertNodes(
       editor,
       {
         type: "paragraph",
         children: [{ text: "" }],
-      } as any,
+      } as CustomElement,
       { at: afterPath },
     );
     Transforms.select(editor, {
       anchor: { path: [...afterPath, 0], offset: 0 },
       focus: { path: [...afterPath, 0], offset: 0 },
     });
-  });
+  };
+
+  if (historyBatch) {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, exitHeading);
+  } else {
+    exitHeading();
+  }
   return true;
 }
 function tryBlockquoteContinuation(editor: Editor): boolean {

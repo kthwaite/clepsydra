@@ -553,6 +553,126 @@ describe("withAutoformat integration", () => {
       expect(Node.string(editor.children[0])).toBe(
         "YouTube: dQw4w9WgXcQ",
       );
+      expect(editor.selection).toEqual({
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: 0 },
+      });
+    });
+
+    it("expands at the end of a heading, exits to a paragraph, and undoes once", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ text: "arxiv:2401.00001" }],
+        },
+      ]);
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(2);
+      expect(editor.children[0]).toMatchObject({
+        type: "heading",
+        level: 2,
+        children: expect.arrayContaining([
+          expect.objectContaining({
+            type: "link",
+            url: "https://arxiv.org/abs/2401.00001",
+          }),
+        ]),
+      });
+      expect(editor.children[1]).toEqual({
+        type: "paragraph",
+        children: [{ text: "" }],
+      });
+      expect(editor.selection).toEqual({
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: 0 },
+      });
+
+      editor.undo();
+
+      expect(editor.children).toEqual([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ text: "arxiv:2401.00001" }],
+        },
+      ]);
+    });
+
+    it("expands at the end of a list item, continues the list, and undoes once", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [{ text: "youtube:dQw4w9WgXcQ" }],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(1);
+      expect(editor.children[0]).toMatchObject({
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              {
+                type: "paragraph",
+                children: expect.arrayContaining([
+                  expect.objectContaining({
+                    type: "link",
+                    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                  }),
+                ]),
+              },
+            ],
+          },
+          {
+            type: "list-item",
+            children: [
+              {
+                type: "paragraph",
+                children: [{ text: "" }],
+              },
+            ],
+          },
+        ],
+      });
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 1, 0, 0], offset: 0 },
+        focus: { path: [0, 1, 0, 0], offset: 0 },
+      });
+
+      editor.undo();
+
+      expect(editor.children).toEqual([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [{ text: "youtube:dQw4w9WgXcQ" }],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
     });
 
     it("restores the pre-trigger quoted shorthand with one undo", () => {
@@ -591,6 +711,23 @@ describe("withAutoformat integration", () => {
         ),
       ).toBe(false);
     });
+
+    it.each(["\ud800", "\udc00"])(
+      "keeps ill-formed UTF-16 Wikipedia shorthand literal on Space",
+      (surrogate) => {
+        const shorthand = `wiki:${surrogate}`;
+        const editor = makeSchemaEditor();
+
+        type(editor, `${shorthand} `);
+
+        expect(Node.string(editor.children[0])).toBe(`${shorthand} `);
+        expect(
+          elementChildren(editor.children[0]).some(
+            (child) => SlateElement.isElement(child) && child.type === "link",
+          ),
+        ).toBe(false);
+      },
+    );
 
     it("places punctuation after a quoted shorthand in plain text", () => {
       const editor = makeSchemaEditor();
