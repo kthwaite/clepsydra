@@ -22,3 +22,6 @@ lcov.info
 
 # macOS Finder metadata (unanchored: these appear at any depth)
 .DS_Store
+
+# local (testing) config
+config.toml
