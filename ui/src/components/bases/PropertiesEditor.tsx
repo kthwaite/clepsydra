@@ -79,7 +79,7 @@ function keyError(
 ) {
   const normalized = key.trim();
   if (!normalized) return "Property key is required.";
-  if (normalized in RESERVED_PROPERTY_FIELDS)
+  if (Object.hasOwn(RESERVED_PROPERTY_FIELDS, normalized))
     return `“${normalized}” is a reserved system field.`;
   if (
     properties.some(
@@ -100,25 +100,36 @@ export function PropertiesEditor({
 }: PropertiesEditorProps) {
   const [newKey, setNewKey] = useState("");
   const [newType, setNewType] = useState<PropertyType>("text");
-  const [validationMessage, setValidationMessage] = useState<string>();
+  const [addValidationMessage, setAddValidationMessage] = useState<string>();
+  const [renameDiagnostic, setRenameDiagnostic] = useState<{
+    propertyId: string;
+    propertyKey: string;
+    message: string;
+  }>();
   const [pendingRemoval, setPendingRemoval] = useState<DraftProperty>();
   const [pendingRename, setPendingRename] = useState<PendingRename>();
   const newKeyInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    onDiagnosticsChange(
-      validationMessage
-        ? [
-            {
-              slug,
-              severity: "error",
-              path: "properties",
-              message: validationMessage,
-            },
-          ]
-        : [],
-    );
-  }, [onDiagnosticsChange, slug, validationMessage]);
+    const nextDiagnostics: BaseDiagnostic[] = [];
+    if (addValidationMessage) {
+      nextDiagnostics.push({
+        slug,
+        severity: "error",
+        path: "properties",
+        message: addValidationMessage,
+      });
+    }
+    if (renameDiagnostic) {
+      nextDiagnostics.push({
+        slug,
+        severity: "error",
+        path: `properties.${renameDiagnostic.propertyKey}`,
+        message: renameDiagnostic.message,
+      });
+    }
+    onDiagnosticsChange(nextDiagnostics);
+  }, [addValidationMessage, onDiagnosticsChange, renameDiagnostic, slug]);
 
   useEffect(
     () => () => {
@@ -129,7 +140,7 @@ export function PropertiesEditor({
 
   function addProperty() {
     const error = keyError(newKey, properties);
-    setValidationMessage(error);
+    setAddValidationMessage(error);
     if (error) {
       newKeyInput.current?.focus();
       return;
@@ -150,18 +161,25 @@ export function PropertiesEditor({
       },
     ]);
     setNewKey("");
-    setValidationMessage(undefined);
+    setAddValidationMessage(undefined);
   }
 
   function requestRename(property: DraftProperty, requestedKey: string) {
-    const error = keyError(requestedKey, properties, property.id);
-    setValidationMessage(error);
-    if (error) return;
-    const key = requestedKey.trim();
-    if (key === property.key) {
-      setValidationMessage("Choose a different key for the new declaration.");
+    const error =
+      keyError(requestedKey, properties, property.id) ??
+      (requestedKey.trim() === property.key
+        ? "Choose a different key for the new declaration."
+        : undefined);
+    if (error) {
+      setRenameDiagnostic({
+        propertyId: property.id,
+        propertyKey: property.key,
+        message: error,
+      });
       return;
     }
+    setRenameDiagnostic(undefined);
+    const key = requestedKey.trim();
     if (persistedPropertyIds.has(property.id)) {
       setPendingRename({ property, key });
       return;
@@ -217,17 +235,18 @@ export function PropertiesEditor({
                 registerFocus("properties", element);
               }}
               value={newKey}
-              aria-invalid={validationMessage ? true : undefined}
+              aria-invalid={addValidationMessage ? true : undefined}
               aria-describedby={
-                validationMessage ? "property-key-error" : undefined
+                addValidationMessage ? "property-key-error" : undefined
               }
               onBlur={() => {
-                if (newKey) setValidationMessage(keyError(newKey, properties));
+                if (newKey)
+                  setAddValidationMessage(keyError(newKey, properties));
               }}
               onChange={(event) => {
                 setNewKey(event.target.value);
-                if (validationMessage)
-                  setValidationMessage(
+                if (addValidationMessage)
+                  setAddValidationMessage(
                     keyError(event.target.value, properties),
                   );
               }}
@@ -254,13 +273,13 @@ export function PropertiesEditor({
             Add property
           </Button>
         </div>
-        {validationMessage && (
+        {addValidationMessage && (
           <p
             id="property-key-error"
             role="alert"
             className="mt-2 text-sm text-destructive"
           >
-            {validationMessage}
+            {addValidationMessage}
           </p>
         )}
       </div>
@@ -287,10 +306,21 @@ export function PropertiesEditor({
               index={index}
               count={properties.length}
               persisted={persistedPropertyIds.has(property.id)}
+              renameError={
+                renameDiagnostic?.propertyId === property.id
+                  ? renameDiagnostic.message
+                  : undefined
+              }
               onChange={replaceProperty}
               onMove={(from, to) => onChange(moveItem(properties, from, to))}
               onRemove={removeProperty}
               onRename={requestRename}
+              onStartRename={() => setRenameDiagnostic(undefined)}
+              onCancelRename={() =>
+                setRenameDiagnostic((current) =>
+                  current?.propertyId === property.id ? undefined : current,
+                )
+              }
               registerFocus={registerFocus}
             />
           ))}

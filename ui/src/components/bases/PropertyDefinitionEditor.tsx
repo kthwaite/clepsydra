@@ -47,10 +47,13 @@ export interface PropertyDefinitionEditorProps {
   index: number;
   count: number;
   persisted: boolean;
+  renameError?: string;
   onChange(property: DraftProperty): void;
   onMove(from: number, to: number): void;
   onRemove(property: DraftProperty): void;
   onRename(property: DraftProperty, key: string): void;
+  onStartRename(property: DraftProperty): void;
+  onCancelRename(property: DraftProperty): void;
   registerFocus(path: string, element: HTMLElement | null): void;
 }
 
@@ -234,16 +237,20 @@ export function PropertyDefinitionEditor({
   index,
   count,
   persisted,
+  renameError,
   onChange,
   onMove,
   onRemove,
   onRename,
+  onStartRename,
+  onCancelRename,
   registerFocus,
 }: PropertyDefinitionEditorProps) {
   const [renaming, setRenaming] = useState(false);
   const [renameKey, setRenameKey] = useState("");
 
   function handleKeyboardMove(event: KeyboardEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget) return;
     if (!event.altKey) return;
     if (event.key === "ArrowUp" && index > 0) {
       event.preventDefault();
@@ -261,9 +268,12 @@ export function PropertyDefinitionEditor({
 
   return (
     <li
-      ref={(element) => registerFocus(`properties.${property.key}`, element)}
+      ref={(element) => {
+        if (!renaming) registerFocus(`properties.${property.key}`, element);
+      }}
       tabIndex={0}
       aria-label={`Property ${property.key}`}
+      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
       onKeyDown={handleKeyboardMove}
       className="border border-border bg-card p-4 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
     >
@@ -303,6 +313,7 @@ export function PropertyDefinitionEditor({
             size="sm"
             variant="ghost"
             onPress={() => {
+              onStartRename(property);
               setRenameKey("");
               setRenaming(true);
             }}
@@ -320,11 +331,27 @@ export function PropertyDefinitionEditor({
           <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground">
             New key for {property.key}
             <input
+              ref={(element) =>
+                registerFocus(`properties.${property.key}`, element)
+              }
               value={renameKey}
+              aria-invalid={renameError ? true : undefined}
+              aria-describedby={
+                renameError ? `${property.id}-rename-error` : undefined
+              }
               onChange={(event) => setRenameKey(event.target.value)}
               className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
             />
           </label>
+          {renameError && (
+            <p
+              id={`${property.id}-rename-error`}
+              role="alert"
+              className="mt-2 text-xs normal-case tracking-normal text-destructive"
+            >
+              {renameError}
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -336,7 +363,10 @@ export function PropertyDefinitionEditor({
             <Button
               size="sm"
               variant="ghost"
-              onPress={() => setRenaming(false)}
+              onPress={() => {
+                onCancelRename(property);
+                setRenaming(false);
+              }}
             >
               Cancel rename
             </Button>

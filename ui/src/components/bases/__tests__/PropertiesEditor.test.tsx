@@ -117,6 +117,16 @@ describe("PropertiesEditor", () => {
     await addProperty("field", type);
     expect(latest(onChange).at(-1)?.definition.type).toBe(type);
   });
+  it.each([
+    "constructor",
+    "__proto__",
+  ])("allows the valid prototype-like key %s", async (key) => {
+    const onChange = vi.fn();
+    renderProperties({ onChange });
+    await addProperty(key, "text");
+    expect(latest(onChange).at(-1)?.key).toBe(key);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 
   it("keeps declaration ids stable while changing type and order", async () => {
     const user = userEvent.setup();
@@ -156,6 +166,31 @@ describe("PropertiesEditor", () => {
     ).toBeDisabled();
 
     screen.getByLabelText("Property beta").focus();
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    expect(latest(onChange).map(({ key }) => key)).toEqual([
+      "beta",
+      "alpha",
+      "gamma",
+    ]);
+  });
+  it("does not reorder when Alt+Arrow bubbles from a nested control", async () => {
+    const properties = [
+      property("alpha", "text"),
+      property("beta", "text"),
+      property("gamma", "text"),
+    ];
+    const { onChange } = renderProperties({ properties });
+    const row = screen.getByLabelText("Property beta");
+    expect(row).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowUp Alt+ArrowDown",
+    );
+
+    screen.getByLabelText("Type for beta").focus();
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    expect(onChange).not.toHaveBeenCalled();
+
+    row.focus();
     await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
     expect(latest(onChange).map(({ key }) => key)).toEqual([
       "beta",
@@ -308,6 +343,66 @@ describe("PropertiesEditor", () => {
     expect(renamed.map(({ key }) => key)).toEqual(["state", "rating"]);
     expect(renamed[0].id).not.toBe(status.id);
   });
+  it.each([
+    ["", /key is required/i],
+    ["rating", /already declared/i],
+    ["title", /reserved system field/i],
+  ])("reports invalid rename key %j beside the exact rename target", async (key, message) => {
+    const user = userEvent.setup();
+    const onDiagnosticsChange = vi.fn();
+    const status = property("status", "select");
+    renderProperties({
+      properties: [status, property("rating", "number")],
+      persistedPropertyIds: new Set([status.id]),
+      onDiagnosticsChange,
+    });
+    await user.click(screen.getByRole("button", { name: "Rename status" }));
+    if (key) await user.type(screen.getByLabelText("New key for status"), key);
+    await user.click(
+      screen.getByRole("button", { name: "Review rename status" }),
+    );
+
+    const renameInput = screen.getByLabelText("New key for status");
+    expect(renameInput).toHaveAccessibleDescription(message);
+    expect(renameInput).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(message)).toHaveAttribute("role", "alert");
+    expect(screen.getByLabelText("New property key")).not.toHaveAttribute(
+      "aria-invalid",
+    );
+    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        path: "properties.status",
+        message: expect.stringMatching(message),
+      }),
+    ]);
+  });
+
+  it("keeps add and rename diagnostics independent", async () => {
+    const user = userEvent.setup();
+    const onDiagnosticsChange = vi.fn();
+    const status = property("status", "select");
+    renderProperties({
+      properties: [status, property("rating", "number")],
+      persistedPropertyIds: new Set([status.id]),
+      onDiagnosticsChange,
+    });
+
+    await addProperty("title", "text");
+    await user.click(screen.getByRole("button", { name: "Rename status" }));
+    await user.type(screen.getByLabelText("New key for status"), "rating");
+    await user.click(
+      screen.getByRole("button", { name: "Review rename status" }),
+    );
+
+    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: "properties" }),
+      expect.objectContaining({ path: "properties.status" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "Cancel rename" }));
+    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ path: "properties" }),
+    ]);
+  });
 
   it("lists system fields as read-only reference", () => {
     renderProperties();
@@ -369,5 +464,36 @@ describe("properties workspace integration", () => {
     expect(
       screen.getByRole("button", { name: /reserved system field/i }),
     ).toBeInTheDocument();
+  });
+  it("focuses an invalid rename from Validation and cancel restores Save", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...emptyDetail,
+      properties: { status: { type: "text" } },
+    };
+    render(<BaseDefinitionWorkspace slug="reading-log" />);
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.selectOptions(
+      screen.getByLabelText("Type for status"),
+      "number",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Rename status" }));
+    await user.type(screen.getByLabelText("New key for status"), "title");
+    await user.click(
+      screen.getByRole("button", { name: "Review rename status" }),
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", { name: /reserved system field/i }),
+    );
+    expect(screen.getByLabelText("New key for status")).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Cancel rename" }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: /reserved system field/i }),
+    ).toBeNull();
   });
 });
