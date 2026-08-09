@@ -1,6 +1,6 @@
 import type { components } from "#/api/schema";
 
-export type ApiError = components["schemas"]["ApiError"] & {
+type ApiError = components["schemas"]["ApiError"] & {
   status?: number;
 };
 
