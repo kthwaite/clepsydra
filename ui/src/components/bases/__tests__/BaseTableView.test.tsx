@@ -536,6 +536,103 @@ describe("BaseTableView", () => {
       screen.getByRole("button", { name: "A Wizard of Earthsea" }),
     ).toHaveFocus();
   });
+  it("does not focus a terminal Tab target after the committed row disappears", async () => {
+    const user = userEvent.setup();
+    const terminalDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "rating"],
+        },
+      ],
+    };
+    const props = renderView({ definition: terminalDefinition });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    fireEvent.keyDown(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+      { key: "Tab" },
+    );
+    props.rerender({
+      definition: terminalDefinition,
+      output: { shape: "flat", rows: [], total: 0 },
+    });
+    const add = screen.getByRole("button", { name: "Add member" });
+    add.focus();
+    await Promise.resolve();
+
+    expect(add).toHaveFocus();
+  });
+
+  it("does not carry terminal Tab focus into another saved view", async () => {
+    const user = userEvent.setup();
+    const terminalDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        { name: "First", layout: "table", columns: ["title", "rating"] },
+        { name: "Second", layout: "table", columns: ["title", "rating"] },
+      ],
+    };
+    const props = renderView({
+      definition: terminalDefinition,
+      activeView: "First",
+    });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    fireEvent.keyDown(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+      { key: "Tab" },
+    );
+    props.rerender({
+      definition: terminalDefinition,
+      activeView: "Second",
+    });
+    const add = screen.getByRole("button", { name: "Add member" });
+    add.focus();
+    await Promise.resolve();
+
+    expect(add).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "The Book of the New Sun" }),
+    ).not.toHaveFocus();
+  });
+
+  it("does not revive terminal Tab focus when the same row ID reappears", async () => {
+    const user = userEvent.setup();
+    const terminalDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "rating"],
+        },
+      ],
+    };
+    const props = renderView({ definition: terminalDefinition });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    fireEvent.keyDown(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+      { key: "Tab" },
+    );
+    props.rerender({
+      definition: terminalDefinition,
+      output: { shape: "flat", rows: [], total: 0 },
+    });
+    const add = screen.getByRole("button", { name: "Add member" });
+    add.focus();
+    props.rerender({ definition: terminalDefinition, output: flat });
+    await Promise.resolve();
+
+    expect(add).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "The Book of the New Sun" }),
+    ).not.toHaveFocus();
+  });
+
 
   it("keeps an invalid number open when Tab cannot accept it", async () => {
     const user = userEvent.setup();

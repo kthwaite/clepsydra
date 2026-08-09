@@ -71,6 +71,14 @@ interface ActiveCell {
   column: string;
   view: string;
 }
+interface ForwardFocusRequest {
+  token: number;
+  view: string;
+  rowId: string;
+  node: HTMLButtonElement | null;
+  ref: (node: HTMLButtonElement | null) => void;
+}
+
 
 /**
  * System fields render read-only — the complete contract, mirroring
@@ -149,6 +157,12 @@ export function BaseTableView({
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
   const properties = definition.properties ?? EMPTY_PROPERTIES;
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
+  const activeViewIdentityRef = useRef(equivalentActiveView);
+  activeViewIdentityRef.current = equivalentActiveView;
+  const nextForwardFocusToken = useRef(0);
+  const pendingForwardFocus = useRef<ForwardFocusRequest | undefined>(
+    undefined,
+  );
   const editableColumns = columns.filter(
     (column) =>
       SYSTEM_COLUMNS[column] === undefined && properties[column] !== undefined,
@@ -172,6 +186,27 @@ export function BaseTableView({
         output.groups.some((group) =>
           group.rows.some((row) => String(row.id) === activeRowId),
         ));
+  const pendingForwardFocusRequest = pendingForwardFocus.current;
+  const pendingForwardFocusRowIsRendered =
+    pendingForwardFocusRequest !== undefined &&
+    (output?.shape === "flat"
+      ? output.rows.some(
+          (row) => String(row.id) === pendingForwardFocusRequest.rowId,
+        )
+      : output?.shape === "grouped" &&
+        output.groups.some((group) =>
+          group.rows.some(
+            (row) => String(row.id) === pendingForwardFocusRequest.rowId,
+          ),
+        ));
+  if (
+    pendingForwardFocusRequest &&
+    (pendingForwardFocusRequest.view !== equivalentActiveView ||
+      !pendingForwardFocusRowIsRendered)
+  ) {
+    pendingForwardFocus.current = undefined;
+  }
+
 
   useEffect(() => {
     if (activeCell && !activeCellIsRendered) {
@@ -182,7 +217,6 @@ export function BaseTableView({
   const createdTitleRef = useRef<HTMLButtonElement | null>(null);
   const focusedCreatedId = useRef<string | undefined>(undefined);
   const createdFocusTimer = useRef<number | undefined>(undefined);
-  const pendingForwardFocusRowId = useRef<string | undefined>(undefined);
   const setCreatedTitleRef = useCallback(
     (node: HTMLButtonElement | null) => {
       createdTitleRef.current = node;
@@ -224,11 +258,30 @@ export function BaseTableView({
     [focusCreatedId, onCreatedRowFocused],
   );
   const setForwardTitleRef = useCallback(
-    (node: HTMLButtonElement | null) => {
-      if (!node) return;
-      pendingForwardFocusRowId.current = undefined;
+    (token: number, node: HTMLButtonElement | null) => {
+      const request = pendingForwardFocus.current;
+      if (!request || request.token !== token) return;
+      if (!node) {
+        pendingForwardFocus.current = undefined;
+        return;
+      }
+      request.node = node;
+      const { rowId, view: requestView } = request;
       queueMicrotask(() => {
-        if (node.isConnected) node.focus();
+        const current = pendingForwardFocus.current;
+        if (
+          !current ||
+          current.token !== token ||
+          current.rowId !== rowId ||
+          current.view !== requestView ||
+          current.node !== node ||
+          activeViewIdentityRef.current !== requestView ||
+          !node.isConnected
+        ) {
+          return;
+        }
+        pendingForwardFocus.current = undefined;
+        node.focus();
       });
     },
     [],
@@ -338,9 +391,11 @@ export function BaseTableView({
                       ref={
                         row.id === focusCreatedId
                           ? setCreatedTitleRef
-                          : String(row.id) ===
-                              pendingForwardFocusRowId.current
-                            ? setForwardTitleRef
+                          : pendingForwardFocus.current?.view ===
+                                equivalentActiveView &&
+                              String(row.id) ===
+                                pendingForwardFocus.current.rowId
+                            ? pendingForwardFocus.current.ref
                             : undefined
                       }
                       type="button"
@@ -364,19 +419,25 @@ export function BaseTableView({
                       activeCell.column === column &&
                       asciiCaseFold(activeCell.view) === equivalentActiveView
                     }
-                    onEdit={() =>
+                    onEdit={() => {
+                      pendingForwardFocus.current = undefined;
                       setActiveCell({
                         rowId: String(row.id),
                         column,
                         view: activeView,
-                      })
-                    }
-                    onCancel={() => setActiveCell(null)}
+                      });
+                    }}
+                    onCancel={() => {
+                      pendingForwardFocus.current = undefined;
+                      setActiveCell(null);
+                    }}
                     onCommit={(value, hint) => {
+                      pendingForwardFocus.current = undefined;
                       setActiveCell(null);
                       onCommitCell(row, column, value, hint);
                     }}
                     onCommitNext={(value, hint) => {
+                      pendingForwardFocus.current = undefined;
                       onCommitCell(row, column, value, hint);
                       const nextColumn = nextEditableColumn(column);
                       if (nextColumn) {
@@ -390,9 +451,18 @@ export function BaseTableView({
                       const rowIndex = rows.findIndex(
                         (candidate) => String(candidate.id) === String(row.id),
                       );
-                      pendingForwardFocusRowId.current = String(
+                      const token = nextForwardFocusToken.current + 1;
+                      nextForwardFocusToken.current = token;
+                      const targetRowId = String(
                         rows[rowIndex + 1]?.id ?? row.id,
                       );
+                      pendingForwardFocus.current = {
+                        token,
+                        view: equivalentActiveView,
+                        rowId: targetRowId,
+                        node: null,
+                        ref: (node) => setForwardTitleRef(token, node),
+                      };
                       setActiveCell(null);
                     }}
                   />
