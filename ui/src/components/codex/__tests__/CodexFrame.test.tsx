@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { useEffect, useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-
 const {
   locationState,
   locationHookMock,
@@ -162,10 +161,10 @@ describe("CodexFrame destination integration", () => {
 
     const docsButton = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /06.*DOCS/i });
+    ).getByRole("button", { name: /07.*DOCS/i });
     expect(docsButton).toHaveAttribute("aria-current", "page");
     expect(
-      screen.getByRole("button", { name: /07.*STATUS/i }),
+      screen.getByRole("button", { name: /08.*STATUS/i }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
@@ -185,7 +184,7 @@ describe("CodexFrame destination integration", () => {
       "aria-current",
       "page",
     );
-    expect(nav.getByRole("button", { name: /06.*DOCS/i })).not.toHaveAttribute(
+    expect(nav.getByRole("button", { name: /07.*DOCS/i })).not.toHaveAttribute(
       "aria-current",
     );
   });
@@ -198,13 +197,49 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /06.*DOCS/i }),
+      ).getByRole("button", { name: /07.*DOCS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({
       to: "/docs/$slug",
       params: { slug: DEFAULT_DOC_SLUG },
     });
+  });
+
+  it("renders Feeds as a full-surface desktop destination before Docs", () => {
+    locationState.pathname = "/feeds";
+    renderFrame();
+
+    const nav = within(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    );
+    const feedsButton = nav.getByRole("button", { name: /06.*FEEDS/i });
+    const docsButton = nav.getByRole("button", { name: /07.*DOCS/i });
+
+    expect(feedsButton).toHaveAttribute("aria-current", "page");
+    expect(
+      feedsButton.compareDocumentPosition(docsButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /08.*STATUS/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+    expect(screen.getByText(/FILE FEEDS.*VIEW FEEDS/)).toBeInTheDocument();
+  });
+
+  it("navigates to the Feeds index from the desktop rail", async () => {
+    const user = userEvent.setup();
+    locationState.pathname = "/";
+    renderFrame();
+
+    await user.click(
+      within(
+        screen.getByRole("navigation", { name: "Primary navigation" }),
+      ).getByRole("button", { name: /06.*FEEDS/i }),
+    );
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
   });
 
   it.each([
@@ -300,12 +335,12 @@ describe("CodexFrame responsive shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the four roots and global actions in the mobile chrome", () => {
+  it("shows the five roots and global actions in the mobile chrome", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
     const roots = screen.getByRole("navigation", { name: "Mobile roots" });
-    expect(within(roots).getAllByRole("button")).toHaveLength(4);
+    expect(within(roots).getAllByRole("button")).toHaveLength(5);
     expect(
       within(roots).getByRole("button", { name: "Atrium" }),
     ).toHaveAttribute("aria-current", "page");
@@ -313,6 +348,7 @@ describe("CodexFrame responsive shell", () => {
       within(roots).getByRole("button", { name: "Gazetteer" }),
     ).toBeVisible();
     expect(within(roots).getByRole("button", { name: "Bases" })).toBeVisible();
+    expect(within(roots).getByRole("button", { name: "Feeds" })).toBeVisible();
     expect(
       within(roots).getByRole("button", { name: "Constellation" }),
     ).toBeVisible();
@@ -375,6 +411,23 @@ describe("CodexFrame responsive shell", () => {
     await user.click(bases);
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
+  });
+
+  it("marks Feeds active on mobile and navigates to its index", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/feeds";
+    renderFrame();
+
+    const feeds = within(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).getByRole("button", { name: "Feeds" });
+    expect(feeds).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+
+    await user.click(feeds);
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
   });
 
   it("preserves the routed child instance and local state across desktop/mobile breakpoint changes", async () => {

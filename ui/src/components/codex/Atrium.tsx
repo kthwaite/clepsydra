@@ -9,13 +9,10 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
-import {
-  formatClock,
-  formatRelativeTime,
-  pad2,
-} from "#/lib/time";
+import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
+import { ActivityHeatmap } from "./ActivityHeatmap";
 import {
   buildHeatmap,
   deriveInventory,
@@ -25,8 +22,8 @@ import {
   sortRecents,
 } from "./atrium-data";
 import { useAtriumCalendar } from "./atrium-time";
-import { ActivityHeatmap } from "./ActivityHeatmap";
 import { Card } from "./Card";
+import { FeedRiverPanel } from "./FeedRiverPanel";
 import { shortFolio } from "./folio-utils";
 import { ReadingContinuesPanel } from "./ReadingContinues";
 import { SkyCard } from "./SkyCard";
@@ -113,7 +110,8 @@ export function Atrium() {
           <div className="cl-mono mb-3 flex flex-wrap items-center gap-4 text-[9px] uppercase tracking-[0.28em] text-ink-mute">
             <span className="text-accent">●</span>
             <span>
-              DAYSTART / <b className="font-medium text-ink">{calendar.todayLabel}</b>
+              DAYSTART /{" "}
+              <b className="font-medium text-ink">{calendar.todayLabel}</b>
             </span>
             <span>WEEK {calendar.week}</span>
             <span>
@@ -305,6 +303,8 @@ export function Atrium() {
           </div>
         )}
       </Card>
+
+      <FeedRiverPanel />
 
       {/* RECENTS (col-7) */}
       <section className="col-span-12 flex h-[340px] flex-col border border-rule bg-paper-2 lg:col-span-7">

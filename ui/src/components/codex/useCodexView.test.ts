@@ -20,10 +20,18 @@ describe("resolveCodexView", () => {
     ["/gazetteer", "gazetteer"],
     ["/docs/getting-started", "docs"],
     ["/bases", "bases"],
+    ["/feeds", "feeds"],
     ["/bases/reading-log/edit", "bases"],
     ["/tasking", "tasking"],
   ] as const)("resolves %s to %s", (pathname, expected) => {
     expect(resolveCodexView(pathname, [], null)).toBe(expected);
+  });
+
+  it.each([
+    "/feeds-old",
+    "/feedsfoo",
+  ])("does not treat the near-prefix path %s as Feeds", (pathname) => {
+    expect(resolveCodexView(pathname, [], null)).toBe("atrium");
   });
 
   it("resolves a page workspace to Folio", () => {

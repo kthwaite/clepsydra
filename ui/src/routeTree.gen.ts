@@ -14,6 +14,7 @@ import { Route as TaskingRouteImport } from './routes/tasking'
 import { Route as LinkMissRouteImport } from './routes/link-miss'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as GazetteerRouteImport } from './routes/gazetteer'
+import { Route as FeedsRouteImport } from './routes/feeds'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as AgendaRouteImport } from './routes/agenda'
 import { Route as IndexRouteImport } from './routes/index'
@@ -46,6 +47,11 @@ const GraphRoute = GraphRouteImport.update({
 const GazetteerRoute = GazetteerRouteImport.update({
   id: '/gazetteer',
   path: '/gazetteer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeedsRoute = FeedsRouteImport.update({
+  id: '/feeds',
+  path: '/feeds',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsRoute = DocsRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
+  '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/link-miss': typeof LinkMissRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
+  '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/link-miss': typeof LinkMissRoute
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
+  '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/link-miss': typeof LinkMissRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agenda'
     | '/docs'
+    | '/feeds'
     | '/gazetteer'
     | '/graph'
     | '/link-miss'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agenda'
     | '/docs'
+    | '/feeds'
     | '/gazetteer'
     | '/graph'
     | '/link-miss'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agenda'
     | '/docs'
+    | '/feeds'
     | '/gazetteer'
     | '/graph'
     | '/link-miss'
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgendaRoute: typeof AgendaRoute
   DocsRoute: typeof DocsRouteWithChildren
+  FeedsRoute: typeof FeedsRoute
   GazetteerRoute: typeof GazetteerRoute
   GraphRoute: typeof GraphRoute
   LinkMissRoute: typeof LinkMissRoute
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       path: '/gazetteer'
       fullPath: '/gazetteer'
       preLoaderRoute: typeof GazetteerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feeds': {
+      id: '/feeds'
+      path: '/feeds'
+      fullPath: '/feeds'
+      preLoaderRoute: typeof FeedsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs': {
@@ -319,6 +339,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgendaRoute: AgendaRoute,
   DocsRoute: DocsRouteWithChildren,
+  FeedsRoute: FeedsRoute,
   GazetteerRoute: GazetteerRoute,
   GraphRoute: GraphRoute,
   LinkMissRoute: LinkMissRoute,
