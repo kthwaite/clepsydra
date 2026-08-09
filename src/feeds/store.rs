@@ -1,4 +1,7 @@
-use std::collections::BTreeSet;
+#[cfg(test)]
+use std::cell::Cell;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
@@ -13,10 +16,14 @@ use super::types::{
     FetchOutcome, FetchedEntry, ManifestFeed, MarkReadScope,
 };
 
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+
 #[derive(Debug, thiserror::Error)]
 pub enum FeedStoreError {
     #[error("feed database error: {0}")]
     Database(#[from] rusqlite::Error),
+    #[error("feed database schema version {found} is newer than supported version {current}")]
+    UnsupportedSchemaVersion { found: i64, current: i64 },
     #[error("{operation} `{path}`: {source}")]
     Io {
         operation: &'static str,
@@ -91,6 +98,14 @@ enum Command {
     SnapshotTo {
         destination: PathBuf,
         reply: oneshot::Sender<Result<(), FeedStoreError>>,
+    },
+    #[cfg(test)]
+    ResetObservedQueries {
+        reply: oneshot::Sender<Result<(), FeedStoreError>>,
+    },
+    #[cfg(test)]
+    ObservedQueries {
+        reply: oneshot::Sender<Result<usize, FeedStoreError>>,
     },
 }
 
@@ -193,6 +208,18 @@ impl FeedStoreHandle {
             .await
     }
 
+    #[cfg(test)]
+    async fn reset_observed_queries(&self) -> Result<(), FeedStoreError> {
+        self.request(|reply| Command::ResetObservedQueries { reply })
+            .await
+    }
+
+    #[cfg(test)]
+    async fn observed_queries(&self) -> Result<usize, FeedStoreError> {
+        self.request(|reply| Command::ObservedQueries { reply })
+            .await
+    }
+
     async fn request<T>(
         &self,
         make_command: impl FnOnce(oneshot::Sender<Result<T, FeedStoreError>>) -> Command,
@@ -203,6 +230,26 @@ impl FeedStoreHandle {
             .map_err(|_| FeedStoreError::WorkerStopped)?;
         reply_rx.await.map_err(|_| FeedStoreError::WorkerStopped)?
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static OBSERVED_LIST_ENTRY_QUERIES: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_observed_query_count() {
+    OBSERVED_LIST_ENTRY_QUERIES.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn increment_observed_query_count() {
+    OBSERVED_LIST_ENTRY_QUERIES.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+fn observed_query_count() -> usize {
+    OBSERVED_LIST_ENTRY_QUERIES.with(Cell::get)
 }
 
 fn worker_loop(connection: &mut Connection, source: &Path, rx: mpsc::Receiver<Command>) {
@@ -256,6 +303,15 @@ fn worker_loop(connection: &mut Connection, source: &Path, rx: mpsc::Receiver<Co
             Command::SnapshotTo { destination, reply } => {
                 let _ = reply.send(snapshot_database(source, &destination));
             }
+            #[cfg(test)]
+            Command::ResetObservedQueries { reply } => {
+                reset_observed_query_count();
+                let _ = reply.send(Ok(()));
+            }
+            #[cfg(test)]
+            Command::ObservedQueries { reply } => {
+                let _ = reply.send(Ok(observed_query_count()));
+            }
         }
     }
 }
@@ -271,21 +327,31 @@ fn open_connection(path: &Path) -> Result<Connection, FeedStoreError> {
             source,
         })?;
     }
-    let connection = Connection::open(path)?;
+    let mut connection = Connection::open(path)?;
+    let schema_version: i64 =
+        connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version > CURRENT_SCHEMA_VERSION {
+        return Err(FeedStoreError::UnsupportedSchemaVersion {
+            found: schema_version,
+            current: CURRENT_SCHEMA_VERSION,
+        });
+    }
     connection.execute_batch(
         "
-        PRAGMA foreign_keys = ON;
+        PRAGMA foreign_keys = OFF;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
         ",
     )?;
-    initialize_schema(&connection)?;
+    initialize_schema(&mut connection, schema_version)?;
+    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
     Ok(connection)
 }
 
-fn initialize_schema(connection: &Connection) -> Result<(), FeedStoreError> {
-    let schema_version: i64 =
-        connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+fn initialize_schema(
+    connection: &mut Connection,
+    schema_version: i64,
+) -> Result<(), FeedStoreError> {
     connection.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS feed (
@@ -379,6 +445,13 @@ fn initialize_schema(connection: &Connection) -> Result<(), FeedStoreError> {
             ",
             [&migration_now],
         )?;
+        connection.execute(
+            "UPDATE feed SET group_name = '' WHERE group_name IS NULL",
+            [],
+        )?;
+        if !column_is_not_null(connection, "feed", "group_name")? {
+            rebuild_feed_table(connection)?;
+        }
         for (table, column) in [
             ("feed", "added_at"),
             ("feed", "last_fetch_at"),
@@ -422,6 +495,65 @@ fn ensure_column(
             "ALTER TABLE {table} ADD COLUMN {column} {declaration}"
         ))?;
     }
+    Ok(())
+}
+
+fn column_is_not_null(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, FeedStoreError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, bool>(3)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(columns
+        .into_iter()
+        .find_map(|(name, not_null)| (name == column).then_some(not_null))
+        .unwrap_or(false))
+}
+
+fn rebuild_feed_table(connection: &mut Connection) -> Result<(), FeedStoreError> {
+    let transaction = connection.transaction()?;
+    transaction.execute_batch(
+        "
+        DROP TABLE IF EXISTS feed__migration_v2;
+        CREATE TABLE feed__migration_v2 (
+            id INTEGER PRIMARY KEY,
+            url TEXT NOT NULL UNIQUE,
+            site_url TEXT,
+            title TEXT NOT NULL DEFAULT '',
+            title_override TEXT,
+            group_name TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '[]',
+            subscribed INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            added_at TEXT NOT NULL,
+            etag TEXT,
+            last_modified TEXT,
+            last_fetch_at TEXT,
+            next_fetch_at TEXT NOT NULL,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT
+        );
+        INSERT INTO feed__migration_v2 (
+            id, url, site_url, title, title_override, group_name, tags, subscribed,
+            sort_order, added_at, etag, last_modified, last_fetch_at, next_fetch_at,
+            error_count, last_error
+        )
+        SELECT
+            id, url, site_url, COALESCE(title, ''), title_override,
+            COALESCE(group_name, ''), COALESCE(tags, '[]'), COALESCE(subscribed, 1),
+            COALESCE(sort_order, 0), added_at, etag, last_modified, last_fetch_at,
+            next_fetch_at, COALESCE(error_count, 0), last_error
+        FROM feed;
+        DROP TABLE feed;
+        ALTER TABLE feed__migration_v2 RENAME TO feed;
+        ",
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -713,6 +845,8 @@ fn list_entries(
     let limit = filters.limit.clamp(1, 500);
     push_placeholder(&mut sql, &mut values, ((limit + 1) as i64).into());
 
+    #[cfg(test)]
+    increment_observed_query_count();
     let mut statement = connection.prepare(&sql)?;
     let mut entries = statement
         .query_map(params_from_iter(values), entry_from_row)?
@@ -721,9 +855,7 @@ fn list_entries(
     if has_more {
         entries.truncate(limit);
     }
-    for entry in &mut entries {
-        entry.tags = entry_tags(connection, entry.id)?;
-    }
+    load_entry_tags(connection, &mut entries)?;
     let next_cursor = has_more
         .then(|| entries.last())
         .flatten()
@@ -759,7 +891,40 @@ fn entry_from_row(row: &rusqlite::Row<'_>) -> Result<Entry, rusqlite::Error> {
     })
 }
 
+fn load_entry_tags(connection: &Connection, entries: &mut [Entry]) -> Result<(), FeedStoreError> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let mut sql = String::from("SELECT entry_id, tag FROM entry_tag WHERE entry_id IN (");
+    let mut values = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        if index != 0 {
+            sql.push_str(", ");
+        }
+        push_placeholder(&mut sql, &mut values, entry.id.into());
+    }
+    sql.push_str(") ORDER BY entry_id, tag");
+
+    #[cfg(test)]
+    increment_observed_query_count();
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut tags_by_entry = BTreeMap::<i64, Vec<String>>::new();
+    for row in rows {
+        let (entry_id, tag) = row?;
+        tags_by_entry.entry(entry_id).or_default().push(tag);
+    }
+    for entry in entries {
+        entry.tags = tags_by_entry.remove(&entry.id).unwrap_or_default();
+    }
+    Ok(())
+}
+
 fn entry_tags(connection: &Connection, entry_id: i64) -> Result<Vec<String>, FeedStoreError> {
+    #[cfg(test)]
+    increment_observed_query_count();
     let mut statement =
         connection.prepare("SELECT tag FROM entry_tag WHERE entry_id = ?1 ORDER BY tag")?;
     Ok(statement
@@ -974,10 +1139,10 @@ mod tests {
     use std::path::Path;
 
     use chrono::{DateTime, Duration, SecondsFormat, Utc};
-    use rusqlite::Connection;
+    use rusqlite::{Connection, OptionalExtension};
     use tempfile::TempDir;
 
-    use super::FeedStoreHandle;
+    use super::{FeedStoreError, FeedStoreHandle};
     use crate::feeds::types::{
         Entry, EntryCursor, EntryFilters, EntryPatch, EntryView, FetchOutcome, FetchedEntry,
         ManifestFeed, MarkReadScope,
@@ -1082,6 +1247,126 @@ mod tests {
                 ",
             )
             .unwrap();
+    }
+
+    #[test]
+    fn opening_a_future_schema_version_is_rejected_without_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("feeds.db");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "
+                PRAGMA user_version = 99;
+                CREATE TABLE future_sentinel (
+                    id INTEGER PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                INSERT INTO future_sentinel (id, value) VALUES (7, 'preserve-me');
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let error = match FeedStoreHandle::open(&path) {
+            Ok(store) => {
+                drop(store);
+                panic!("future schema version was accepted")
+            }
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            FeedStoreError::UnsupportedSchemaVersion {
+                found: 99,
+                current: 2
+            }
+        ));
+
+        let reopened = Connection::open(&path).unwrap();
+        let version: i64 = reopened
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let sentinel: String = reopened
+            .query_row(
+                "SELECT value FROM future_sentinel WHERE id = 7",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let feed_table: Option<String> = reopened
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'feed'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(version, 99);
+        assert_eq!(sentinel, "preserve-me");
+        assert!(feed_table.is_none());
+    }
+
+    #[tokio::test]
+    async fn version_one_migration_repairs_nullable_group_and_enforces_v2_invariant() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("feeds.db");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "
+                PRAGMA user_version = 1;
+                CREATE TABLE feed (
+                    id INTEGER PRIMARY KEY,
+                    url TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL DEFAULT '',
+                    group_name TEXT,
+                    subscribed INTEGER NOT NULL DEFAULT 1,
+                    added_at TEXT NOT NULL,
+                    next_fetch_at TEXT NOT NULL
+                );
+                INSERT INTO feed (
+                    id, url, title, group_name, subscribed, added_at, next_fetch_at
+                ) VALUES (
+                    73, 'https://nullable-group.example/feed', 'Preserved title', NULL, 1,
+                    '2026-08-01T00:00:00Z', '2026-08-09T00:00:00Z'
+                );
+                ",
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = FeedStoreHandle::open(&path).unwrap();
+        let migrated = store.list_feeds().await.unwrap().remove(0);
+        assert_eq!(migrated.id, 73);
+        assert_eq!(migrated.url, "https://nullable-group.example/feed");
+        assert_eq!(migrated.title, "Preserved title");
+        assert_eq!(migrated.group, "");
+        drop(store);
+
+        let reopened = Connection::open(&path).unwrap();
+        let version: i64 = reopened
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let stored_group: String = reopened
+            .query_row("SELECT group_name FROM feed WHERE id = 73", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let group_not_null: i64 = reopened
+            .query_row(
+                "
+                SELECT \"notnull\"
+                FROM pragma_table_info('feed')
+                WHERE name = 'group_name'
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 2);
+        assert_eq!(stored_group, "");
+        assert_eq!(group_not_null, 1);
     }
 
     #[tokio::test]
@@ -1480,6 +1765,65 @@ mod tests {
             .await
             .unwrap();
         assert!(impossible_intersection.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn listing_many_entries_loads_all_tags_in_one_batched_query() {
+        let (store, _temp) = open_test_store().await;
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://one.example/feed", "News", &[]),
+        )
+        .await;
+        let fetched = (0..40)
+            .map(|index| fetched_entry(&format!("entry-{index}"), Some(ts("2026-08-09T10:00:00Z"))))
+            .collect();
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    fetched,
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+        let seeded = entries_by_guid(&store).await;
+        for (guid, entry) in &seeded {
+            let index = guid.strip_prefix("entry-").unwrap();
+            store
+                .patch_entry(
+                    entry.id,
+                    EntryPatch {
+                        tags: Some(vec![
+                            format!("topic-{index}"),
+                            format!("topic-{index},child"),
+                            format!("topic-{index}\u{1f}child"),
+                        ]),
+                        ..EntryPatch::default()
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        store.reset_observed_queries().await.unwrap();
+        let page = store.list_entries(filters(EntryView::All)).await.unwrap();
+        let observed_queries = store.observed_queries().await.unwrap();
+
+        assert_eq!(page.entries.len(), 40);
+        for entry in page.entries {
+            let index = entry.guid.strip_prefix("entry-").unwrap();
+            assert_eq!(entry.tags.len(), 3);
+            assert!(entry.tags.contains(&format!("topic-{index}")));
+            assert!(entry.tags.contains(&format!("topic-{index},child")));
+            assert!(entry.tags.contains(&format!("topic-{index}\u{1f}child")));
+        }
+        assert!(
+            observed_queries <= 2,
+            "list_entries executed {observed_queries} queries for 40 entries"
+        );
     }
 
     #[tokio::test]
