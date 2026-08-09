@@ -23,7 +23,7 @@ Committed implementation paths:
 - Each view authors table layout, ordered visible columns, ordered sort keys with direction, grouping, ordered aggregates, and an optional nested filter.
 - System fields and typed declarations share one field vocabulary. Group choices are capability-gated through `canGroup`; aggregate function/field combinations are capability-gated through `aggregateFunctions`; `count` emits no field.
 - The per-view filter embeds the existing `MembershipEditor` and is explicitly labelled **Additional filter; always ANDed with base membership.** Its exact nested AST flows unchanged through the draft and `toWire`.
-- Unsupported layouts are retained visibly and produce a focusable alert explaining that the guided editor supports table layout. Server diagnostic paths register against view controls and remain navigable from Validation Summary.
+- Unsupported layouts are retained visibly and produce an alert explaining that the guided editor supports table layout. The associated Layout select is focusable and registered to the exact diagnostic path.
 
 ### Debounced unsaved preview
 
@@ -33,7 +33,7 @@ Committed implementation paths:
 - Loading is announced through a polite live region. Empty results provide corrective guidance without moving focus.
 - Flat output states the returned count and real total, including the 100-row cap. Grouped output states group/returned-row metadata; the reused `BaseTableView` group headers show each group’s real total and aggregate values.
 - Structural diagnostics, evaluation errors, and network failures render in an accessible alert. Preview diagnostics can route focus through the workspace diagnostic mechanism.
-- Preview presentation reuses `BaseTableView`. Passing an empty property declaration map keeps preview cells read-only while preserving the existing flat/grouped query-output formatting.
+- Preview presentation reuses `BaseTableView` in its explicit read-only mode, preserving the existing typed flat/grouped query-output formatting without edit, sort, navigation, or tab-switch actions.
 - Preview state is independent of workspace save diagnostics. Network or evaluation failures never disable Save.
 
 ### Workspace integration and accessibility
@@ -86,7 +86,7 @@ A real Vite session at 1280 × 900 confirmed the application mounts with the cur
 ## Concerns
 
 - Preview reuses the explicit `BaseTableView` read-only mode. It retains the shared typed value formatter while removing editing, sort, tab-switch, and navigation affordances.
-- The backend-generated TypeScript schema currently exposes only `layout: "table"`. The unsupported-layout UI is defensive for manually authored/future definitions and complements server/preview diagnostics.
+- The generated TypeScript schema correctly represents layout as `string`; the draft model mirrors it so manually authored unsupported values survive guided-editor round trips.
 - Grouped `QueryOutput` has per-group true totals but no overall total in the API contract. The UI therefore reports returned group/row counts globally and true totals at each group heading.
 - No broad test suite or broad lint run was performed, per the assignment. Final verification covers the four focused related test files, UI typecheck, and exact-path Biome check.
 
@@ -94,8 +94,8 @@ A real Vite session at 1280 × 900 confirmed the application mounts with the cur
 
 The fix round resolves the Critical finding and all Important/Minor findings:
 
-- `DraftView.layout` now preserves arbitrary persisted strings. `fromWire` defaults only omitted layouts to `table`; `toWire` deliberately preserves unsupported values despite the currently over-narrow generated schema. An unrelated workspace edit round-trips `board` unchanged through both preview and Save until the user explicitly selects Table.
-- Workspace selection now records logical identity (ID, name, and ordered index). When a successful Save rehydrates fresh draft IDs, an unambiguous name match wins and the ordered index is the deterministic fallback. A selected second view remains selected and preview-scoped after the response.
+- `DraftView.layout` now preserves arbitrary persisted strings, matching the generated schema. `fromWire` defaults only omitted layouts to `table`; `toWire` preserves unsupported values. An unrelated workspace edit round-trips `board` unchanged through both preview and Save until the user explicitly selects Table.
+- Workspace selection records ID, name, and ordered index for rendering, then snapshots the selected view’s current name and current index from the submitted draft at Save time. Successful response rehydration maps from that submission snapshot, so rename plus reorder cannot make stale selection-time metadata switch views.
 - `BaseTableView` has an explicit `readOnly` presentation contract. Preview view labels, column headers, titles, and declared cells have no fake buttons, sorting, navigation, or commit path. Existing interactive callers retain their prior behavior.
 - Diagnostic registration uses exact nested paths: view filters prefix the existing `filter...` path once, aggregate function/entry and `.field` controls register separately, and unsupported layout uses the focusable layout select. The view-list button is retained only as a fallback when the selected view has no matching rendered control.
 - View field capabilities exclude `encryption`, matching the query engine’s exposed system-field contract while retaining the complete supported system vocabulary.
@@ -124,3 +124,33 @@ OK
 ```
 
 A second real-browser attempt used a unique routed base and run-scoped detail/preview interception. The route query again remained pending until the interception run ended. This is recorded as an environmental smoke limitation; no browser-only result is claimed and the attempt was not looped further.
+
+## Review fix round 2
+
+Save reconciliation now derives logical selection from the submitted draft, not the older selection-time snapshot. It locates the selected stable draft ID after all local rename/reorder operations, captures that view’s submitted name and submitted index, and maps fresh response IDs by unique submitted name with submitted index as the deterministic fallback. Reconciliation is applied only when the submitted generation wins, so edits made during Save retain their current draft and selection.
+
+The failing-first regression selected the second view, renamed it, moved it to the first position, and returned fresh response IDs in submitted order. Before the fix, stale name/index metadata selected **All**. Final focused verification keeps **Later saved** selected and sends it as preview scope.
+
+The report now reflects the actual generated contract (`layout?: string`) and distinguishes the unsupported-layout alert from its exact registered focus target, the native Layout select.
+
+Final round-two verification:
+
+```text
+bun run --cwd ui test \
+  src/components/bases/__tests__/definition-model.test.ts \
+  src/components/bases/__tests__/BaseTableView.test.tsx \
+  src/components/bases/__tests__/ViewsEditor.test.tsx \
+  src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
+
+Test Files  4 passed (4)
+Tests       54 passed (54)
+
+bun run --cwd ui typecheck
+exit 0
+
+bunx biome check --write \
+  src/components/bases/BaseDefinitionWorkspace.tsx \
+  src/components/bases/definition-model.ts \
+  src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
+OK
+```

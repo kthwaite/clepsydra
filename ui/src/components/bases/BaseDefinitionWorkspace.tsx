@@ -203,6 +203,24 @@ export function BaseDefinitionWorkspace({
     const submittedGeneration = editGeneration.current;
     const submittedRevision = revision;
     const submittedDraft = structuredClone(draft);
+    let submittedSelectedIndex = submittedDraft.views.findIndex(
+      (view) => view.id === selectedView.id,
+    );
+    if (submittedSelectedIndex < 0 && selectedView.name) {
+      const matchingIndexes = submittedDraft.views.flatMap((view, index) =>
+        view.name === selectedView.name ? [index] : [],
+      );
+      if (matchingIndexes.length === 1) {
+        submittedSelectedIndex = matchingIndexes[0];
+      }
+    }
+    if (submittedSelectedIndex < 0) {
+      submittedSelectedIndex = Math.min(
+        selectedView.index,
+        Math.max(0, submittedDraft.views.length - 1),
+      );
+    }
+    const submittedSelectedView = submittedDraft.views[submittedSelectedIndex];
     setSaving(true);
     setSaveError(undefined);
     try {
@@ -219,8 +237,27 @@ export function BaseDefinitionWorkspace({
       setDiagnostics(response.diagnostics);
       savedGeneration.current = submittedGeneration;
       obsoleteQueryRevisions.current.add(submittedRevision);
-      if (editGeneration.current === submittedGeneration)
+      if (editGeneration.current === submittedGeneration) {
         setDraftState(serverDraft);
+        if (submittedSelectedView) {
+          const matchingIndexes = serverDraft.views.flatMap((view, index) =>
+            view.name === submittedSelectedView.name ? [index] : [],
+          );
+          const nextIndex =
+            matchingIndexes.length === 1
+              ? matchingIndexes[0]
+              : Math.min(
+                  submittedSelectedIndex,
+                  Math.max(0, serverDraft.views.length - 1),
+                );
+          const nextView = serverDraft.views[nextIndex];
+          setSelectedView({
+            id: nextView?.id,
+            name: nextView?.name,
+            index: nextIndex,
+          });
+        }
+      }
     } catch (error) {
       const nextDiagnostics = diagnosticsFromError(error);
       if (nextDiagnostics.length > 0) setDiagnostics(nextDiagnostics);

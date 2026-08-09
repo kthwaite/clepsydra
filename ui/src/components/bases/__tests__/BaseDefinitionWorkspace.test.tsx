@@ -589,7 +589,7 @@ describe("BaseDefinitionWorkspace", () => {
     });
   });
 
-  it("keeps the same logical second view selected after save rehydrates IDs", async () => {
+  it("keeps the selected logical view after rename, reorder, and fresh response IDs", async () => {
     const twoViews: BaseDetailResponse = {
       ...detail,
       views: [
@@ -601,8 +601,8 @@ describe("BaseDefinitionWorkspace", () => {
     updateMock.mockResolvedValue({
       ...twoViews,
       views: [
-        { name: "All", layout: "table", columns: ["title"] },
         { name: "Later saved", layout: "table", columns: ["title"] },
+        { name: "All", layout: "table", columns: ["title"] },
       ],
       revision: "revision-2",
     });
@@ -613,6 +613,9 @@ describe("BaseDefinitionWorkspace", () => {
     const viewName = screen.getByLabelText("View name");
     await user.clear(viewName);
     await user.type(viewName, "Later saved");
+    await user.click(
+      screen.getByRole("button", { name: "Move Later saved up" }),
+    );
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("revision-2")).toBeInTheDocument();

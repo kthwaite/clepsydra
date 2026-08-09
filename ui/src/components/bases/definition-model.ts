@@ -191,9 +191,7 @@ export function toWire(draft: BaseDraft): BaseFile {
       columns: [...view.columns],
     })),
   };
-  // The generated schema currently narrows layout to `table`, while persisted
-  // files may contain unsupported strings that the editor must preserve.
-  return wire as unknown as BaseFile;
+  return wire;
 }
 
 export function createMinimalDraft(
