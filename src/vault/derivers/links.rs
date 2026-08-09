@@ -13,12 +13,7 @@ impl Deriver for LinkDeriver {
         "links"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Connection,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         // Body links (non-negative span_start)
         for link in &page.body_links {
             let (kind_str, source_field, target_canonical, target_block_id) = match &link.kind {

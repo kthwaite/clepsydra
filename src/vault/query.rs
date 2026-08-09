@@ -1185,10 +1185,8 @@ moment  = { type = "datetime" }
             "series".into(),
             toml::Value::Array(vec![toml::Value::String("[[Solar Cycle]]".into())]),
         );
-        meta.extra.insert(
-            "pattern".into(),
-            toml::Value::String("100%_done".into()),
-        );
+        meta.extra
+            .insert("pattern".into(), toml::Value::String("100%_done".into()));
         meta.extra.insert(
             "started".into(),
             toml::Value::Datetime("2026-07-01".parse().unwrap()),

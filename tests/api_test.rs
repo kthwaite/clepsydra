@@ -2681,7 +2681,6 @@ async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing
     assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn page_create_notifies_once_after_caller_cancellation() {
     use clepsydra::vault::mutation_coordinator::{
@@ -2750,10 +2749,7 @@ async fn page_create_notifies_once_after_caller_cancellation() {
         .unwrap();
     assert_eq!(event.upserted, vec!["cancelled-create.md"]);
     assert!(event.removed.is_empty());
-    assert_eq!(
-        event_count.load(std::sync::atomic::Ordering::SeqCst),
-        1
-    );
+    assert_eq!(event_count.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(event_rx.try_recv().is_err());
     assert!(tmp.path().join("cancelled-create.md").exists());
     let indexed: i64 = handle

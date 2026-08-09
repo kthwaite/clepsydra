@@ -271,9 +271,9 @@ async fn create_base_member_with_ids(
     let notify = super::mutation_notifier(&state);
 
     for _ in 0..MAX_PATH_ATTEMPTS {
-        let short_id = short_ids.next().ok_or_else(|| {
-            internal_creation_error("Base member path ID source was exhausted")
-        })?;
+        let short_id = short_ids
+            .next()
+            .ok_or_else(|| internal_creation_error("Base member path ID source was exhausted"))?;
         let path = build_projected_note_path(
             title,
             created,

@@ -94,12 +94,7 @@ impl Deriver for PropertyDeriver {
         "properties"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Connection,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         for (key, value) in &page.meta.extra {
             for p in project(value) {
                 tx.execute(

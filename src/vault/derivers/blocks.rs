@@ -12,12 +12,7 @@ impl Deriver for BlockDeriver {
         "blocks"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Connection,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         for block in &page.blocks {
             let parent_id = block
                 .parent_index

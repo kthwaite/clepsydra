@@ -1,6 +1,6 @@
 use crate::vault::base::{
-    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition,
-    filter_matches_meta, fixed_candidate_comparison_matches,
+    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition, filter_matches_meta,
+    fixed_candidate_comparison_matches,
 };
 use crate::vault::page::PageMeta;
 use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
@@ -226,16 +226,10 @@ fn collect_fields(
     }
 }
 
-fn resolved_requirement(
-    base: &BaseDefinition,
-    field: &str,
-) -> Option<(FieldIdentity, String)> {
+fn resolved_requirement(base: &BaseDefinition, field: &str) -> Option<(FieldIdentity, String)> {
     let context = QueryContext::for_base(base);
     match resolve_field(field, &context).ok()? {
-        ResolvedField::Sys(sys) => Some((
-            FieldIdentity::System(sys),
-            sys.as_str().to_owned(),
-        )),
+        ResolvedField::Sys(sys) => Some((FieldIdentity::System(sys), sys.as_str().to_owned())),
         ResolvedField::Prop { key, .. } => {
             let bare_context = QueryContext::for_base(base);
             let shadows_system = matches!(
@@ -284,24 +278,14 @@ fn candidate_diagnostic(
 
 fn filter_possibility(base: &BaseDefinition, filter: &Filter) -> Possibility {
     match filter {
-        Filter::All(children) => all(
-            children
-                .iter()
-                .map(|child| filter_possibility(base, child)),
-        ),
-        Filter::Any(children) => any(
-            children
-                .iter()
-                .map(|child| filter_possibility(base, child)),
-        ),
+        Filter::All(children) => all(children.iter().map(|child| filter_possibility(base, child))),
+        Filter::Any(children) => any(children.iter().map(|child| filter_possibility(base, child))),
         Filter::Not(child) => match filter_possibility(base, child) {
             Possibility::AlwaysTrue => Possibility::AlwaysFalse,
             Possibility::Maybe => Possibility::Maybe,
             Possibility::AlwaysFalse => Possibility::AlwaysTrue,
         },
-        Filter::Cmp { field, op, value } => {
-            comparison_possibility(base, field, *op, value)
-        }
+        Filter::Cmp { field, op, value } => comparison_possibility(base, field, *op, value),
     }
 }
 
@@ -713,10 +697,7 @@ layout = "table"
                 assert!(capability.blockers.is_empty());
             } else {
                 assert_eq!(capability.blockers.len(), 1);
-                assert_eq!(
-                    capability.blockers[0].field.as_deref(),
-                    Some("missing")
-                );
+                assert_eq!(capability.blockers[0].field.as_deref(), Some("missing"));
                 assert_eq!(
                     capability.blockers[0].filter_path.as_deref(),
                     Some("filter")
@@ -728,12 +709,7 @@ layout = "table"
     #[test]
     fn candidate_property_contains_matches_query_type_semantics() {
         let cases = [
-            (
-                "text",
-                toml::Value::String("Alphabet".into()),
-                "PHA",
-                true,
-            ),
+            ("text", toml::Value::String("Alphabet".into()), "PHA", true),
             (
                 "select",
                 toml::Value::String("reading".into()),
@@ -837,35 +813,16 @@ layout = "table"
                 },
             );
 
-            assert_eq!(
-                result.is_ok(),
-                expected,
-                "unexpected alias result for {op}"
-            );
+            assert_eq!(result.is_ok(), expected, "unexpected alias result for {op}");
         }
     }
 
     #[test]
     fn candidate_contains_rejects_non_text_scalars_and_supports_dates() {
         let cases = [
-            (
-                "number",
-                ", value = 7",
-                toml::Value::Integer(7),
-                false,
-            ),
-            (
-                "number",
-                ", value = 1.5",
-                toml::Value::Float(1.5),
-                false,
-            ),
-            (
-                "bool",
-                ", value = true",
-                toml::Value::Boolean(true),
-                false,
-            ),
+            ("number", ", value = 7", toml::Value::Integer(7), false),
+            ("number", ", value = 1.5", toml::Value::Float(1.5), false),
+            ("bool", ", value = true", toml::Value::Boolean(true), false),
             (
                 "date",
                 ", value = \"2026-08\"",

@@ -11,12 +11,7 @@ impl Deriver for TagDeriver {
         "tags"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Connection,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         for tag in &page.meta.tags {
             tx.execute(
                 "INSERT OR IGNORE INTO tags (page_id, tag) VALUES (?1, ?2)",

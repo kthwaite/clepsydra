@@ -23,7 +23,6 @@ use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 
-
 // ---------------------------------------------------------------------------
 // IndexError
 // ---------------------------------------------------------------------------
@@ -390,10 +389,8 @@ impl VaultIndex {
         &mut self.conn
     }
 
-
     pub(crate) fn begin_created_mutation(&mut self) -> Result<(), IndexError> {
-        self.conn
-            .execute_batch("SAVEPOINT created_page_mutation")?;
+        self.conn.execute_batch("SAVEPOINT created_page_mutation")?;
         Ok(())
     }
 
@@ -410,7 +407,6 @@ impl VaultIndex {
         )?;
         Ok(())
     }
-
 
     /// Remove deleted content from SQLite pages and truncate the WAL.
     ///

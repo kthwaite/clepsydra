@@ -1572,8 +1572,7 @@ async fn cancelled_member_request_still_emits_one_event_after_commit() {
     let fixture = member_fixture(seed);
     let revision = current_base_revision(&fixture, "reading").await;
     let (publication_entered_tx, publication_entered_rx) = tokio::sync::oneshot::channel();
-    let publication_entered_tx =
-        Arc::new(parking_lot::Mutex::new(Some(publication_entered_tx)));
+    let publication_entered_tx = Arc::new(parking_lot::Mutex::new(Some(publication_entered_tx)));
     let (publication_release_tx, publication_release_rx) = std::sync::mpsc::channel();
     let publication_release_rx = Arc::new(parking_lot::Mutex::new(publication_release_rx));
     fixture
@@ -1646,11 +1645,7 @@ async fn member_base_load_io_failure_is_generic_and_writes_nothing() {
     let fixture = member_fixture(seed);
     let before_paths = page_paths(fixture.state.vault.root());
     let root = fixture.state.vault.root().to_string_lossy().into_owned();
-    let base_path = fixture
-        .state
-        .vault
-        .root()
-        .join("bases/reading.base.toml");
+    let base_path = fixture.state.vault.root().join("bases/reading.base.toml");
     fs::remove_file(&base_path).unwrap();
     fs::create_dir(&base_path).unwrap();
     let mut notifications = fixture.state.change_tx.subscribe();

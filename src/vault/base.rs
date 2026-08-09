@@ -417,16 +417,10 @@ pub(crate) fn fixed_candidate_comparison_matches(
             value,
             false,
         )),
-        ResolvedField::Sys(SysField::JournalDate) => Some(scalar_matches(
-            None,
-            PropertyType::Date,
-            op,
-            value,
-            false,
-        )),
-        ResolvedField::Prop { ty, .. }
-            if op == Op::Contains && !ty.supports_contains() =>
-        {
+        ResolvedField::Sys(SysField::JournalDate) => {
+            Some(scalar_matches(None, PropertyType::Date, op, value, false))
+        }
+        ResolvedField::Prop { ty, .. } if op == Op::Contains && !ty.supports_contains() => {
             Some(false)
         }
         ResolvedField::Prop { key, ty } if base.property(&key).is_none() => {
@@ -483,9 +477,7 @@ fn system_scalar<'a>(
     use crate::vault::query::SysField;
 
     match sys {
-        SysField::Id => Some(Comparable::Text(Cow::Owned(
-            context.meta.id.to_string(),
-        ))),
+        SysField::Id => Some(Comparable::Text(Cow::Owned(context.meta.id.to_string()))),
         SysField::Path => Some(Comparable::Text(Cow::Borrowed(context.path))),
         SysField::Title => context
             .meta
@@ -633,10 +625,7 @@ fn toml_value_is_empty(value: &toml::Value) -> bool {
     }
 }
 
-fn current_scalar(
-    current: &toml::Value,
-    property_type: PropertyType,
-) -> Option<Comparable<'_>> {
+fn current_scalar(current: &toml::Value, property_type: PropertyType) -> Option<Comparable<'_>> {
     match property_type {
         PropertyType::Number => match current {
             toml::Value::Integer(value) => Some(Comparable::Number(*value as f64)),
@@ -645,9 +634,7 @@ fn current_scalar(
         },
         PropertyType::Bool => current.as_bool().map(Comparable::Bool),
         PropertyType::Date | PropertyType::Datetime => match current {
-            toml::Value::Datetime(value) => {
-                Some(Comparable::Text(Cow::Owned(value.to_string())))
-            }
+            toml::Value::Datetime(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
             _ => None,
         },
         _ => current
@@ -664,15 +651,11 @@ fn expected_scalar(
         PropertyType::Number => value.as_f64().map(Comparable::Number),
         PropertyType::Bool => value.as_bool().map(Comparable::Bool),
         _ => match value {
-            serde_json::Value::String(value) => {
-                Some(Comparable::Text(Cow::Borrowed(value)))
-            }
+            serde_json::Value::String(value) => Some(Comparable::Text(Cow::Borrowed(value))),
             serde_json::Value::Number(value) => {
                 Some(Comparable::Text(Cow::Owned(value.to_string())))
             }
-            serde_json::Value::Bool(value) => {
-                Some(Comparable::Text(Cow::Owned(value.to_string())))
-            }
+            serde_json::Value::Bool(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
             _ => None,
         },
     }
@@ -732,10 +715,7 @@ fn scalar_equal(left: &Comparable<'_>, right: &Comparable<'_>) -> bool {
     scalar_ordering(left, right) == Some(std::cmp::Ordering::Equal)
 }
 
-fn scalar_ordering(
-    left: &Comparable<'_>,
-    right: &Comparable<'_>,
-) -> Option<std::cmp::Ordering> {
+fn scalar_ordering(left: &Comparable<'_>, right: &Comparable<'_>) -> Option<std::cmp::Ordering> {
     match (left, right) {
         (Comparable::Text(left), Comparable::Text(right)) => Some(left.cmp(right)),
         (Comparable::Number(left), Comparable::Number(right)) => left.partial_cmp(right),
@@ -949,7 +929,6 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         );
     }
 
-
     // Filter fields referencing undeclared properties are a warning (the
     // vault may legitimately carry keys the base doesn't declare); op/type
     // mismatches are hard facts.
@@ -1123,9 +1102,7 @@ fn validate_filter(
         }
         Filter::Cmp { field, op, .. } => {
             if *op == Op::Contains {
-                use crate::vault::query::{
-                    QueryContext, ResolvedField, SysField, resolve_field,
-                };
+                use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
                 let query_context = QueryContext::for_base(base);
                 let supported = match resolve_field(field, &query_context) {

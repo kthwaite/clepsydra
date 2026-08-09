@@ -12,12 +12,7 @@ impl Deriver for CanonicalNameDeriver {
         "canonical_names"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Connection,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         // 1. Title-derived canonical name
         if let Some(ref title) = page.meta.title {
             let cn = CanonicalName::from_title(title);

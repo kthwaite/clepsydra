@@ -13,12 +13,7 @@ impl Deriver for CiteKeyDeriver {
         "cite_key"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Connection,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
         let cite_key = match page.meta.extra.get("cite_key") {
             Some(v) => match v.as_str() {
                 Some(s) if !s.is_empty() => s,

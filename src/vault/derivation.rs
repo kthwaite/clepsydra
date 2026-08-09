@@ -57,6 +57,10 @@ pub trait Deriver: Send + Sync {
     /// `page_id` is the stringified UUID of the page (already inserted into
     /// the `pages` table). The deriver should INSERT rows into its target
     /// table(s) within `tx`.
-    fn derive(&self, page: &IndexedPage, page_id: &str, conn: &Connection)
-        -> Result<(), IndexError>;
+    fn derive(
+        &self,
+        page: &IndexedPage,
+        page_id: &str,
+        conn: &Connection,
+    ) -> Result<(), IndexError>;
 }
