@@ -8,10 +8,17 @@ import type {
   BlockRefElement,
   CustomElement,
   CustomText,
+  InlineMathElement,
   LinkElement,
   ListItemElement,
+  MathBlockElement,
   WikilinkElement,
 } from "#/editor/types";
+import { remarkFolioMath } from "#/lib/markdown/folioMath";
+import type {
+  FolioInlineMathMdast,
+  FolioMathMdast,
+} from "./mdastTypes";
 
 // Re-export for the barrel
 export type { Descendant };
@@ -49,7 +56,8 @@ interface WikiLinkMdastNode {
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
-  .use(wikiLinkPlugin, { aliasDivider: "|" });
+  .use(wikiLinkPlugin, { aliasDivider: "|" })
+  .use(remarkFolioMath);
 
 /**
  * Convert a markdown string to a Slate Descendant[] tree.
@@ -57,8 +65,9 @@ const processor = unified()
  * Pure function: no side effects, no React dependencies.
  */
 export function mdastToSlate(markdown: string): Descendant[] {
-  const mdast = processor.parse(markdown);
-  const tree = processor.runSync(mdast) as Root;
+  const tree = processor.runSync(processor.parse(markdown), {
+    value: markdown,
+  }) as Root;
 
   const result = convertChildren(tree.children, true, true);
 
@@ -152,6 +161,16 @@ function convertBlockNode(
         type: node.ordered ? "numbered-list" : "bulleted-list",
         children: node.children.map((item) => convertListItem(item)),
       };
+
+    case "math": {
+      const math = node as FolioMathMdast;
+      return {
+        type: "math-block",
+        tex: math.data.folioSourceBody,
+        delimiter: math.data.folioDelimiter,
+        children: [{ text: "" }],
+      } satisfies MathBlockElement;
+    }
 
     case "thematicBreak":
       return {
@@ -365,6 +384,18 @@ function convertPhrasingNode(
         children: [{ text: "" }],
       };
       return [element as unknown as Descendant];
+    }
+
+    case "inlineMath": {
+      const math = node as FolioInlineMathMdast;
+      return [
+        {
+          type: "inline-math",
+          tex: math.data.folioSourceBody,
+          delimiter: math.data.folioDelimiter,
+          children: [{ text: "" }],
+        } satisfies InlineMathElement as unknown as Descendant,
+      ];
     }
 
     case "break":
