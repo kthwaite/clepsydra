@@ -1189,6 +1189,70 @@ async fn member_creation_coerces_every_custom_property_type_and_compound_filters
     ));
 }
 
+fn seed_shadowed_title_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/shadow.base.toml"),
+        r#"
+name = "Shadow"
+
+[properties]
+title = { type = "text" }
+
+[[views]]
+name = "All"
+filter = { field = "prop.title", op = "eq", value = "shadow value" }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn forbidden_fields_are_rejected_through_prop_aliases_before_candidate_validation() {
+    let fixture = member_fixture(seed_shadowed_title_base);
+    let revision = current_base_revision(&fixture, "shadow").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    fixture
+        .server
+        .post("/api/vault/bases/shadow/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "All",
+            "title": "Visible title",
+            "fields": { "prop.title": "shadow value" }
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn duplicate_bare_and_prop_field_aliases_are_bad_request_without_artifacts() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Duplicate status",
+            "fields": {
+                "kind": "BOOK",
+                "status": "reading",
+                "prop.status": "reading"
+            }
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
 #[tokio::test]
 async fn member_index_failure_rolls_back_generated_page_without_notification() {
     let fixture = member_fixture(seed);

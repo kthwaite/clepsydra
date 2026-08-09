@@ -103,6 +103,7 @@ pub(crate) fn mutation_error(
             error::ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
         }
         MutationError::Filesystem { .. }
+        | MutationError::FilesystemRollback { .. }
         | MutationError::Index { .. }
         | MutationError::IndexRollback { .. }
         | MutationError::IndexCompensation { .. }

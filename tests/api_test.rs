@@ -2539,6 +2539,70 @@ async fn page_create_rolls_back_file_when_index_publication_fails() {
 }
 
 #[tokio::test]
+async fn page_create_rolls_back_published_file_before_indexing_when_directory_sync_fails() {
+    use clepsydra::vault::atomic_file::AtomicPublicationError;
+    use clepsydra::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_create_publication_hook(Some(Arc::new(|path, content| {
+        fs::write(path, content).unwrap();
+        Err(AtomicPublicationError::PublishedButNotDurable(
+            std::io::Error::other("injected parent directory sync failure"),
+        ))
+    })));
+
+    let notified = std::sync::atomic::AtomicBool::new(false);
+    let notify = |_: MutationNotification| {
+        notified.store(true, std::sync::atomic::Ordering::SeqCst);
+    };
+    let error = coordinator
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("not-durable.md").unwrap(),
+                meta: PageMeta::new(),
+                body: "not durable".to_owned(),
+            },
+            &notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        MutationError::Filesystem {
+            filesystem_applied: false,
+            source,
+            ..
+        } if source.to_string().contains("injected parent directory sync failure")
+    ));
+    assert!(!tmp.path().join("not-durable.md").exists());
+    let page_count: i64 = handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page_count, 0);
+    assert!(
+        !notified.load(std::sync::atomic::Ordering::SeqCst),
+        "notification must follow a durable filesystem and index publication"
+    );
+}
+
+#[tokio::test]
 async fn page_mutation_projected_move_invokes_hook_before_notification() {
     use clepsydra::vault::hooks::PostMoveHook;
     use clepsydra::vault::mutation_coordinator::{

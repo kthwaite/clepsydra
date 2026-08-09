@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
@@ -176,8 +176,20 @@ async fn create_base_member_with_ids(
     meta.created_at = Some(created);
     meta.updated_at = Some(created);
 
-    let mut diagnostics = Vec::new();
+    let mut normalized_fields = Vec::with_capacity(request.fields.len());
+    let mut logical_keys = HashSet::with_capacity(request.fields.len());
     for (key, value) in &request.fields {
+        let logical = key.strip_prefix("prop.").unwrap_or(key);
+        if !logical_keys.insert(logical) {
+            return Err(ApiError::bad_request(format!(
+                "field `{logical}` was provided more than once"
+            )));
+        }
+        normalized_fields.push((logical, value));
+    }
+
+    let mut diagnostics = Vec::new();
+    for (key, value) in normalized_fields {
         if is_reserved_field(key) {
             return Err(ApiError::bad_request(format!(
                 "field `{key}` cannot be set when creating a Base member"
@@ -186,10 +198,9 @@ async fn create_base_member_with_ids(
         match apply_system_field(&mut meta, key, value) {
             Ok(true) => {}
             Ok(false) => {
-                let bare = key.strip_prefix("prop.").unwrap_or(key);
-                if stored.definition.property(bare).is_none() {
+                if stored.definition.property(key).is_none() {
                     return Err(ApiError::bad_request(format!(
-                        "base `{slug}` has no declared property `{bare}`"
+                        "base `{slug}` has no declared property `{key}`"
                     )));
                 }
                 if let Err(diagnostic) =

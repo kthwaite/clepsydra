@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -20,12 +20,15 @@ use super::projection::{project_path, project_path_cleared};
 
 type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
 type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
+type CreatePublicationHook =
+    dyn Fn(&Path, &[u8]) -> Result<(), AtomicPublicationError> + Send + Sync;
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
     locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
+    create_publication_hook: parking_lot::Mutex<Option<Arc<CreatePublicationHook>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -101,6 +104,15 @@ pub enum MutationError {
         #[source]
         source: io::Error,
     },
+    #[error(
+        "filesystem mutation failed and filesystem rollback failed for {path}: primary error: {source}; rollback error: {rollback}"
+    )]
+    FilesystemRollback {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+        rollback: io::Error,
+    },
     #[error("index mutation failed after filesystem_applied={filesystem_applied}: {source}")]
     Index {
         filesystem_applied: bool,
@@ -153,7 +165,7 @@ impl MutationError {
             | Self::Hook {
                 filesystem_applied, ..
             } => *filesystem_applied,
-            Self::IndexRollback { .. } => true,
+            Self::FilesystemRollback { .. } | Self::IndexRollback { .. } => true,
             Self::IndexCompensation { .. }
             | Self::InvalidInput(_)
             | Self::NotFound(_)
@@ -206,6 +218,7 @@ impl MutationCoordinator {
             locks: parking_lot::Mutex::new(HashMap::new()),
             before_update_publish_hook: parking_lot::Mutex::new(None),
             after_page_id_lookup_hook: parking_lot::Mutex::new(None),
+            create_publication_hook: parking_lot::Mutex::new(None),
         }
     }
 
@@ -221,6 +234,12 @@ impl MutationCoordinator {
     #[doc(hidden)]
     pub fn set_after_page_id_lookup_hook(&self, hook: Option<Arc<AfterPageIdLookupHook>>) {
         *self.after_page_id_lookup_hook.lock() = hook;
+    }
+
+    /// Replace create-page publication for deterministic failure testing.
+    #[doc(hidden)]
+    pub fn set_create_publication_hook(&self, hook: Option<Arc<CreatePublicationHook>>) {
+        *self.create_publication_hook.lock() = hook;
     }
 
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
@@ -297,12 +316,13 @@ impl MutationCoordinator {
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
+        let create_publication_hook = self.create_publication_hook.lock().clone();
         let result =
             run_shielded_mutation(absolute.clone(), move |filesystem_applied| async move {
                 let blocking_path = absolute.clone();
                 let page_path = command.path.clone();
                 let content = write_page_content(&command.meta, &command.body);
-                let (guard, (durability_error, content)) =
+                let (guard, content) =
                     run_blocking_fs(absolute.clone(), guard, move || {
                         if let Some(parent) = blocking_path.parent() {
                             fs::create_dir_all(parent).map_err(|source| {
@@ -313,8 +333,12 @@ impl MutationCoordinator {
                                 }
                             })?;
                         }
-                        match atomic_create(&blocking_path, content.as_bytes()) {
-                            Ok(()) => Ok((None, content)),
+                        let publication = match &create_publication_hook {
+                            Some(hook) => hook(&blocking_path, content.as_bytes()),
+                            None => atomic_create(&blocking_path, content.as_bytes()),
+                        };
+                        match publication {
+                            Ok(()) => Ok(content),
                             Err(AtomicPublicationError::NotPublished(source))
                                 if source.kind() == io::ErrorKind::AlreadyExists =>
                             {
@@ -331,7 +355,18 @@ impl MutationCoordinator {
                                 })
                             }
                             Err(AtomicPublicationError::PublishedButNotDurable(source)) => {
-                                Ok((Some(source), content))
+                                match fs::remove_file(&blocking_path) {
+                                    Ok(()) => Err(MutationError::Filesystem {
+                                        filesystem_applied: false,
+                                        path: blocking_path,
+                                        source,
+                                    }),
+                                    Err(rollback) => Err(MutationError::FilesystemRollback {
+                                        path: blocking_path,
+                                        source,
+                                        rollback,
+                                    }),
+                                }
                             }
                         }
                     })
@@ -392,13 +427,6 @@ impl MutationCoordinator {
                     }
                 }
                 let _guard = guard;
-                if let Some(source) = durability_error {
-                    return Err(MutationError::Filesystem {
-                        filesystem_applied: true,
-                        path: absolute,
-                        source,
-                    });
-                }
                 Ok(Page {
                     path: command.path,
                     meta: command.meta,
