@@ -21,6 +21,7 @@ vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
   useOutlinks: () => ({ data: undefined }),
   useSimilar: () => ({ data: undefined }),
+  useTags: () => ({ data: [] }),
   useGraph: () => ({
     data: {
       nodes: [

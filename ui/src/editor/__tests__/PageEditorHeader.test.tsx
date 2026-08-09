@@ -8,6 +8,7 @@ const baseProps = {
   title: "2026-08-07",
   onTitleChange: vi.fn(),
   tags: [] as string[],
+  tagSuggestions: [] as string[],
   onTagsChange: vi.fn(),
   aliases: [] as string[],
   onAliasesChange: vi.fn(),
@@ -51,6 +52,29 @@ describe("PageEditorHeader read-only title", () => {
     await user.click(screen.getByRole("button"));
 
     expect(onTagsChange).toHaveBeenCalledWith([]);
+  });
+
+  it("offers vault suggestions only for tags", async () => {
+    const user = userEvent.setup();
+    render(
+      <PageEditorHeader
+        {...baseProps}
+        aliases={["existing alias"]}
+        tagSuggestions={["research"]}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "res");
+    expect(
+      screen.getByRole("option", { name: "research" }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await user.type(
+      screen.getByRole("textbox", { name: "Add aliases" }),
+      "res",
+    );
+    expect(screen.queryByRole("option", { name: "research" })).toBeNull();
   });
 
   it("awaits coordinated manual locking and reports a refused lock", async () => {

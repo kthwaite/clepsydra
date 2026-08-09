@@ -1,6 +1,6 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
+import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
 import { CLink } from "#/components/codex/CLink";
@@ -58,6 +58,11 @@ export function Folio({ tabId, path }: FolioProps) {
   const { data: backlinks } = useBacklinks(path);
   const { data: outlinks } = useOutlinks(path);
   const { data: similar } = useSimilar(path);
+  const { data: tagIndex } = useTags();
+  const tagSuggestions = useMemo(
+    () => (tagIndex ?? []).map(({ tag }) => tag),
+    [tagIndex],
+  );
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
@@ -281,6 +286,7 @@ export function Folio({ tabId, path }: FolioProps) {
           readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
           tags={editableTags}
           derivedTags={isJournal ? ["journal"] : []}
+          tagSuggestions={tagSuggestions}
           onTagsChange={editor.setTags}
           aliases={editor.aliases}
           onAliasesChange={editor.setAliases}

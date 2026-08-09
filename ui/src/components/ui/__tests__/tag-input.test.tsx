@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TagInput } from "#/components/ui/tag-input";
@@ -221,5 +221,282 @@ describe("TagInput", () => {
   it("has accessible tag group", () => {
     render(<TagInput label="Tags" values={["alpha"]} onChange={() => {}} />);
     expect(screen.getByRole("grid")).toBeDefined();
+  });
+
+  it("matches case-insensitively and excludes attached and derived tags", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={["rust"]}
+        readOnlyValues={["brunch"]}
+        suggestions={["rust", "brunch", "RUMination", "slate"]}
+        onChange={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "rU");
+
+    expect(
+      screen.getByRole("option", { name: "RUMination" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "rust" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "brunch" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "slate" })).toBeNull();
+  });
+
+  it("does not show suggestions for empty input", () => {
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust"]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+  });
+
+  it("preserves textbox semantics when suggestions are omitted", () => {
+    render(<TagInput label="Tags" values={[]} onChange={() => {}} />);
+
+    expect(
+      screen.getByRole("textbox", { name: "Add tags" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+  });
+
+  it("does not show suggestions when suggestions are omitted", async () => {
+    const user = userEvent.setup();
+    render(<TagInput label="Tags" values={[]} onChange={() => {}} />);
+
+    await user.type(screen.getByRole("textbox", { name: "Add tags" }), "ru");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+  });
+
+  it("commits the raw draft on Enter while suggestions are open", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research", "react"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "re");
+    expect(
+      screen.getByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["re"]);
+  });
+
+  it("commits only the mouse-selected suggestion before blur", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research", "react"]}
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "re");
+    fireEvent.mouseDown(screen.getByRole("option", { name: "research" }));
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["research"]);
+  });
+
+  it("renders at most five matching suggestions", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["alpha", "beta", "gamma", "delta", "zeta", "eta"]}
+        onChange={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "a");
+
+    expect(screen.getAllByRole("option")).toHaveLength(5);
+    expect(screen.queryByRole("option", { name: "eta" })).toBeNull();
+  });
+
+  it("links the combobox to its listbox and active option across navigation", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react"]}
+        onChange={() => {}}
+      />,
+    );
+
+    const combobox = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(combobox, "r");
+    const listbox = screen.getByRole("listbox", { name: "Tag suggestions" });
+    const initialOption = screen.getByRole("option", { selected: true });
+
+    expect(combobox).toHaveAttribute("aria-controls", listbox.id);
+    expect(combobox).toHaveAttribute(
+      "aria-activedescendant",
+      initialOption.id,
+    );
+
+    await user.keyboard("{ArrowDown}");
+    const navigatedOption = screen.getByRole("option", { selected: true });
+
+    expect(navigatedOption.id).not.toBe(initialOption.id);
+    expect(combobox).toHaveAttribute("aria-controls", listbox.id);
+    expect(combobox).toHaveAttribute(
+      "aria-activedescendant",
+      navigatedOption.id,
+    );
+  });
+
+  it("tab-completes the initially highlighted suggestion", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "ritual"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Tab}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["rust"]);
+  });
+
+  it("commits the arrow-highlighted suggestion on Enter", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react", "ritual"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["react"]);
+  });
+
+  it("keeps the first suggestion highlighted on ArrowUp", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react", "ritual"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{ArrowUp}{Enter}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["rust"]);
+  });
+
+  it("keeps the last suggestion highlighted on repeated ArrowDown", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react", "ritual"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["ritual"]);
+  });
+
+  it("reopens dismissed suggestions on ArrowDown", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust", "react"]}
+        onChange={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "r");
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+
+    await user.keyboard("{ArrowDown}");
+
+    expect(
+      screen.getByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "react" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("dismisses suggestions with Escape without committing the draft", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["rust"]}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "ru");
+    await user.keyboard("{Escape}");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

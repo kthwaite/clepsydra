@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TagCount } from "#/api/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
@@ -12,6 +13,7 @@ const {
   routerHistory,
   useCollapsibleRailMock,
   usePageEditorMock,
+  useTagsMock,
   useScrollSpyMock,
 } = vi.hoisted(() => ({
   mobileLayoutState: { matches: false },
@@ -26,6 +28,14 @@ const {
     width: 240,
     toggle: vi.fn(),
     onResizeStart: vi.fn(),
+  })),
+  useTagsMock: vi.fn<
+    () => { data: TagCount[] | undefined; error?: Error }
+  >(() => ({
+    data: [
+      { tag: "research", count: 4 },
+      { tag: "ritual", count: 1 },
+    ],
   })),
   usePageEditorMock: vi.fn(),
   useScrollSpyMock: vi.fn(() => ({
@@ -53,6 +63,7 @@ vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
   useOutlinks: () => ({ data: undefined }),
   useSimilar: () => ({ data: undefined }),
+  useTags: useTagsMock,
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
@@ -105,6 +116,15 @@ vi.mock("#/lib/useProjects", () => ({
 
 import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
+
+beforeEach(() => {
+  useTagsMock.mockReturnValue({
+    data: [
+      { tag: "research", count: 4 },
+      { tag: "ritual", count: 1 },
+    ],
+  });
+});
 
 function errorEditor() {
   return {
@@ -186,6 +206,44 @@ describe("Folio invalid-tab recovery", () => {
     render(<Folio tabId="t1" path="notes/gone.md" />);
     await user.click(screen.getByRole("button", { name: /close tab/i }));
     expect(useWorkspaceStore.getState().tabs).toHaveLength(0);
+  });
+
+  it("suggests indexed tags while editing folio tags", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.type(
+      screen.getByRole("combobox", { name: "Add tags" }),
+      "res",
+    );
+
+    expect(
+      screen.getByRole("option", { name: "research" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps raw tag editing and blur-save operational without a tag index", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    useTagsMock.mockReturnValue({
+      data: undefined,
+      error: new Error("tag index unavailable"),
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "ad-hoc");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+    fireEvent.blur(input);
+
+    expect(editor.setTags).toHaveBeenCalledOnce();
+    expect(editor.setTags).toHaveBeenCalledWith(["mobile", "ad-hoc"]);
+    expect(editor.saveNow).toHaveBeenCalledOnce();
   });
 
   it("renders a locked folio without mounting Slate or exposing armor", () => {
