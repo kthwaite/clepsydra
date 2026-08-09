@@ -4,6 +4,7 @@ import {
   Editor,
   Node,
   Element as SlateElement,
+  Text,
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
@@ -212,6 +213,84 @@ describe("withAutoformat integration", () => {
       ).toBe(false);
     });
 
+    it.each([
+      ["$[x]$", "inline-math", "$", "[x]"],
+      [String.raw`\([x]\)`, "inline-math", "\\(", "[x]"],
+      ["$$[x]$$", "math-block", "$$", "[x]"],
+      [String.raw`\[[x]\]`, "math-block", "\\[", "[x]"],
+    ])(
+      "keeps bracket groups literal inside typed math source: %s",
+      (source, elementType, delimiter, tex) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        const math = editor.children
+          .flatMap((node) =>
+            SlateElement.isElement(node) ? node.children : [],
+          )
+          .find(
+            (child) =>
+              SlateElement.isElement(child) && child.type === elementType,
+          );
+        const block =
+          SlateElement.isElement(editor.children[0]) &&
+          editor.children[0].type === elementType
+            ? editor.children[0]
+            : math;
+        expect(block).toMatchObject({ type: elementType, delimiter, tex });
+      },
+    );
+
+    it.each([
+      ["$*x*$", "*x*"],
+      ["$_x_$", "_x_"],
+      ["$ *x$", " *x"],
+    ])("keeps mark syntax literal inside typed math source: %s", (source, tex) => {
+      const editor = makeSchemaEditor();
+
+      type(editor, source);
+
+      expect(elementChildren(editor.children[0])).toContainEqual(
+        expect.objectContaining({
+          type: "inline-math",
+          delimiter: "$",
+          tex,
+        }),
+      );
+    });
+
+    it("overtypes a bracket inside an unmatched math candidate literally", () => {
+      const editor = makeSchemaEditor([
+        { type: "paragraph", children: [{ text: "$[x]" }] },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: 3 });
+
+      editor.insertText("]");
+
+      expect(Node.string(editor.children[0])).toBe("$[x]");
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 0], offset: 4 },
+        focus: { path: [0, 0], offset: 4 },
+      });
+    });
+
+    it.each(["$[x]", "$*x*"])(
+      "keeps generic Markdown syntax literal in an unmatched composed math candidate: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        editor.insertText(source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+        expect(
+          elementChildren(editor.children[0]).some((child) =>
+            SlateElement.isElement(child),
+          ),
+        ).toBe(false);
+      },
+    );
+
     it.each(["$x", String.raw`\(x`, "$$x", String.raw`\[x`])(
       "leaves unmatched math syntax as text: %s",
       (source) => {
@@ -292,6 +371,34 @@ describe("withAutoformat integration", () => {
       expect(editor.selection).toEqual({
         anchor: { path: [0, 4], offset: 0 },
         focus: { path: [0, 4], offset: 0 },
+      });
+    });
+
+    it("resolves math before a later link scaffold in one composed insertion", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText("$x$ and [label]");
+
+      const children = elementChildren(editor.children[0]);
+      expect(children).toEqual([
+        { text: "" },
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "x",
+          delimiter: "$",
+        }),
+        { text: " and [label]()" },
+      ]);
+      const selection = editor.selection;
+      expect(selection).not.toBeNull();
+      if (!selection) throw new Error("Expected a composed endpoint selection");
+      const [selected] = Editor.node(editor, selection.anchor.path);
+      expect(Text.isText(selected) ? selected.text : null).toBe(
+        " and [label]()",
+      );
+      expect(selection).toEqual({
+        anchor: { path: [0, 2], offset: " and [label](".length },
+        focus: { path: [0, 2], offset: " and [label](".length },
       });
     });
 

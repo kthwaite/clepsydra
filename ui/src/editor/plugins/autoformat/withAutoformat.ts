@@ -16,7 +16,10 @@ import {
   tryThematicBreak,
 } from "./blockTransforms";
 import { tryInlineTransform } from "./inlineTransforms";
-import { tryMathTransform } from "./mathTransforms";
+import {
+  isInMathCandidate,
+  tryMathTransform,
+} from "./mathTransforms";
 import { tryListContinuation } from "./listContinuation";
 import {
   tryPrefixedLinkBreakTransform,
@@ -57,12 +60,20 @@ export function withAutoformat(editor: Editor): Editor {
     // After overtype the closer is already in the text, so pass closerConsumed.
     if (tryOvertype(editor, ch)) {
       if (tryMathTransform(editor, ch, /* closerConsumed */ true)) return;
+      if (isInMathCandidate(editor)) return;
       if (
         ch === '"' &&
         tryPrefixedLinkTextTransform(editor, ch, /* closerConsumed */ true)
       )
         return;
       tryInlineTransform(editor, ch, /* closerConsumed */ true);
+      return;
+    }
+    // A complete closer converts first. Otherwise, an unmatched supported
+    // opener owns every body character and bypasses Markdown autoformat.
+    if (tryMathTransform(editor, ch)) return;
+    if (isInMathCandidate(editor)) {
+      insertText(ch);
       return;
     }
     // Step 2: thematic break
@@ -72,8 +83,7 @@ export function withAutoformat(editor: Editor): Editor {
     // Step 4: block transforms
     if (ch === " " && Range.isCollapsed(selection) && tryBlockTransform(editor))
       return;
-    // Step 5: math before generic mark/link transforms
-    if (tryMathTransform(editor, ch)) return;
+    // Step 5: generic mark/link transforms
     if (tryInlineTransform(editor, ch)) return;
     if (ch === '"' && tryPrefixedLinkTextTransform(editor, ch)) return;
     // Step 7: auto-pair
@@ -171,8 +181,11 @@ function resolveComposedInline(editor: Editor): void {
     Transforms.delete(editor);
 
     const mathApplied = tryMathTransform(editor, ch);
-    const inlineApplied =
-      mathApplied || tryInlineTransform(editor, ch);
+    if (!mathApplied && isInMathCandidate(editor)) {
+      Transforms.insertText(editor, ch);
+      continue;
+    }
+    const inlineApplied = mathApplied || tryInlineTransform(editor, ch);
     if (inlineApplied) {
       // If the transformed closer ended the composed run, preserve the exact
       // post-void selection while earlier closers are resolved.
@@ -181,11 +194,6 @@ function resolveComposedInline(editor: Editor): void {
         endpointRef = Editor.pointRef(editor, editor.selection.anchor, {
           affinity: "forward",
         });
-      }
-      if (ch === "]" && !mathApplied) {
-        const mappedEndpoint = endpointRef.unref();
-        if (mappedEndpoint) Transforms.select(editor, mappedEndpoint);
-        return;
       }
       continue;
     }

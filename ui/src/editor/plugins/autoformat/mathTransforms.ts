@@ -76,6 +76,122 @@ export function tryMathTransform(
   return true;
 }
 
+/**
+ * Whether the collapsed selection is inside an unmatched, supported math
+ * opener in the current leaf. Autoformat callers use this to keep TeX body
+ * punctuation literal until the matching math closer is typed.
+ */
+export function isInMathCandidate(editor: Editor): boolean {
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+
+  const { anchor } = selection;
+  const [leaf] = Editor.node(editor, anchor.path);
+  if (!Text.isText(leaf) || leaf.code === true) return false;
+  if (Editor.marks(editor)?.code === true) return false;
+
+  const blockEntry = Editor.above(editor, {
+    at: anchor,
+    match: (node) =>
+      SlateElement.isElement(node) &&
+      !Editor.isEditor(node) &&
+      Editor.isBlock(editor, node),
+    mode: "lowest",
+  });
+  if (!blockEntry) return false;
+
+  const [block, blockPath] = blockEntry;
+  if (!SlateElement.isElement(block) || block.type === "code-block") {
+    return false;
+  }
+
+  const textBefore = leaf.text.slice(0, anchor.offset);
+  if (
+    blockPath.length === 1 &&
+    block.type === "paragraph" &&
+    block.children.length === 1 &&
+    block.children[0] === leaf
+  ) {
+    if (
+      textBefore.startsWith("$$") &&
+      !textBefore.startsWith("$$$") &&
+      !hasDisplayDollarCloser(textBefore)
+    ) {
+      return true;
+    }
+    if (
+      textBefore.startsWith("\\[") &&
+      !hasUnescapedSequence(textBefore, "\\]", 2)
+    ) {
+      return true;
+    }
+  }
+
+  return (
+    hasUnclosedBackslashParen(textBefore) ||
+    hasUnclosedInlineDollar(textBefore)
+  );
+}
+
+function hasDisplayDollarCloser(text: string): boolean {
+  for (let index = 2; index < text.length - 1; index++) {
+    if (
+      text[index] === "$" &&
+      text[index + 1] === "$" &&
+      text[index - 1] !== "$" &&
+      text[index + 2] !== "$" &&
+      !isEscaped(text, index)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasUnescapedSequence(
+  text: string,
+  sequence: string,
+  from: number,
+): boolean {
+  let index = text.indexOf(sequence, from);
+  while (index >= 0) {
+    if (!isEscaped(text, index)) return true;
+    index = text.indexOf(sequence, index + 1);
+  }
+  return false;
+}
+
+function hasUnclosedBackslashParen(text: string): boolean {
+  let open = false;
+  for (let index = 0; index < text.length - 1; index++) {
+    if (text[index] !== "\\" || isEscaped(text, index)) continue;
+    if (text[index + 1] === "(") {
+      open = true;
+      index++;
+    } else if (text[index + 1] === ")" && open) {
+      open = false;
+      index++;
+    }
+  }
+  return open;
+}
+
+function hasUnclosedInlineDollar(text: string): boolean {
+  let open = false;
+  for (let index = 0; index < text.length; ) {
+    if (text[index] !== "$") {
+      index++;
+      continue;
+    }
+
+    let end = index + 1;
+    while (text[end] === "$") end++;
+    if (end - index === 1 && !isEscaped(text, index)) open = !open;
+    index = end;
+  }
+  return open;
+}
+
 function matchInline(typed: string, sourceBefore: string): MathMatch | null {
   if (typed === "$") {
     const close = sourceBefore.length - 1;
