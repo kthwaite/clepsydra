@@ -61,6 +61,18 @@ const AttachmentManager = lazy(() =>
   })),
 );
 
+const PageActionsMenu = lazy(() =>
+  import("#/components/page-tree/PageActionsMenu").then((module) => ({
+    default: module.PageActionsMenu,
+  })),
+);
+
+const FolderActionsMenu = lazy(() =>
+  import("#/components/page-tree/FolderActionsMenu").then((module) => ({
+    default: module.FolderActionsMenu,
+  })),
+);
+
 export function Folio({ tabId, path }: FolioProps) {
   const mobile = useMobileLayout();
   const navigate = useNavigate();
@@ -115,6 +127,7 @@ export function Folio({ tabId, path }: FolioProps) {
     "protect" | "unprotect" | null
   >(null);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [organizationOpen, setOrganizationOpen] = useState(false);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
     id: number;
@@ -450,6 +463,58 @@ export function Folio({ tabId, path }: FolioProps) {
               <AttachmentManager
                 protectedPage={encrypted}
                 onInsertMarkdown={requestAttachmentInsertion}
+              />
+            </div>
+          </Suspense>
+        ) : null}
+      </Block>
+
+      <Block label="Organization">
+        <button
+          type="button"
+          aria-expanded={organizationOpen}
+          className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+          onClick={() => setOrganizationOpen((open) => !open)}
+        >
+          <span>Manage paths</span>
+          <span aria-hidden>{organizationOpen ? "⌄" : "›"}</span>
+        </button>
+        {organizationOpen ? (
+          <Suspense
+            fallback={<p className="cl-marg mt-2 mb-0">Loading path tools…</p>}
+          >
+            <div className="mt-2 grid gap-2">
+              {editor.isDraft ? (
+                <p className="cl-marg mb-0">
+                  Save this page before moving or deleting it.
+                </p>
+              ) : (
+                <PageActionsMenu
+                  path={path}
+                  beforeMutation={editor.saveNow}
+                  onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
+                  onDeleted={() => {
+                    closeTab(tabId);
+                    if (mobile) void navigate({ to: "/" });
+                  }}
+                />
+              )}
+              <FolderActionsMenu
+                beforeMutation={editor.saveNow}
+                onMoved={(source, destination) => {
+                  if (path === source || path.startsWith(`${source}/`)) {
+                    updateTabPath(
+                      tabId,
+                      `${destination}${path.slice(source.length)}`,
+                    );
+                  }
+                }}
+                onDeleted={(source) => {
+                  if (path === source || path.startsWith(`${source}/`)) {
+                    closeTab(tabId);
+                    if (mobile) void navigate({ to: "/" });
+                  }
+                }}
               />
             </div>
           </Suspense>

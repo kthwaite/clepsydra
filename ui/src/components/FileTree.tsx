@@ -1,7 +1,8 @@
 import { ChevronRight, File, Folder } from "lucide-react";
 import { useMemo } from "react";
 import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
-import { useFolderTreePaths, usePages } from "#/api/pages";
+import { useFolderTreePaths } from "#/api/folders";
+import { usePages } from "#/api/pages";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   buildPageTree,
