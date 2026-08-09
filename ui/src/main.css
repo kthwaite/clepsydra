@@ -1,2 +1,65 @@
 @import "tailwindcss";
 
+/* Sanitized feed HTML rendered inside expanded entries. */
+.entry-content {
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+.entry-content p,
+.entry-content ul,
+.entry-content ol,
+.entry-content blockquote,
+.entry-content pre,
+.entry-content figure {
+  margin-block: 0.6em;
+}
+.entry-content h1,
+.entry-content h2,
+.entry-content h3,
+.entry-content h4 {
+  font-weight: 600;
+  margin-block: 0.8em 0.4em;
+}
+.entry-content a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--color-zinc-400);
+}
+.entry-content img,
+.entry-content video {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.entry-content pre {
+  overflow-x: auto;
+  background: var(--color-zinc-100);
+  padding: 0.6em 0.8em;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+.entry-content code {
+  font-size: 0.9em;
+}
+.entry-content blockquote {
+  border-left: 2px solid var(--color-zinc-300);
+  padding-left: 0.8em;
+  color: var(--color-zinc-500);
+}
+.entry-content ul {
+  list-style: disc;
+  padding-left: 1.2em;
+}
+.entry-content ol {
+  list-style: decimal;
+  padding-left: 1.2em;
+}
+@media (prefers-color-scheme: dark) {
+  .entry-content pre {
+    background: var(--color-zinc-900);
+  }
+  .entry-content blockquote {
+    border-left-color: var(--color-zinc-700);
+    color: var(--color-zinc-400);
+  }
+}
