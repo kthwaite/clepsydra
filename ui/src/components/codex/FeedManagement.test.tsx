@@ -14,10 +14,38 @@ const managementMocks = vi.hoisted(() => ({
     error: null as Error | null,
   },
   subscribeFeed: vi.fn(),
+  subscribeFeedAsync: vi.fn(),
+  subscribeState: {
+    isPending: false,
+    error: null as Error | null,
+    reset: vi.fn(),
+  },
   updateFeed: vi.fn(),
+  updateFeedAsync: vi.fn(),
+  updateState: {
+    isPending: false,
+    error: null as Error | null,
+    reset: vi.fn(),
+  },
   deleteFeed: vi.fn(),
+  deleteFeedAsync: vi.fn(),
+  deleteState: {
+    isPending: false,
+    error: null as Error | null,
+    reset: vi.fn(),
+  },
   refreshFeeds: vi.fn(),
+  refreshState: {
+    isPending: false,
+    error: null as Error | null,
+    reset: vi.fn(),
+  },
   importOpml: vi.fn(),
+  importState: {
+    isPending: false,
+    error: null as Error | null,
+    reset: vi.fn(),
+  },
   exportOpml: vi.fn(),
 }));
 
@@ -25,28 +53,28 @@ vi.mock("#/api/feeds", () => ({
   useFeeds: () => managementMocks.feedsQuery,
   useSubscribeFeed: () => ({
     mutate: managementMocks.subscribeFeed,
-    mutateAsync: managementMocks.subscribeFeed,
-    isPending: false,
+    mutateAsync: managementMocks.subscribeFeedAsync,
+    ...managementMocks.subscribeState,
   }),
   useUpdateFeed: () => ({
     mutate: managementMocks.updateFeed,
-    mutateAsync: managementMocks.updateFeed,
-    isPending: false,
+    mutateAsync: managementMocks.updateFeedAsync,
+    ...managementMocks.updateState,
   }),
   useDeleteFeed: () => ({
     mutate: managementMocks.deleteFeed,
-    mutateAsync: managementMocks.deleteFeed,
-    isPending: false,
+    mutateAsync: managementMocks.deleteFeedAsync,
+    ...managementMocks.deleteState,
   }),
   useRefreshFeeds: () => ({
     mutate: managementMocks.refreshFeeds,
     mutateAsync: managementMocks.refreshFeeds,
-    isPending: false,
+    ...managementMocks.refreshState,
   }),
   useImportOpml: () => ({
     mutate: managementMocks.importOpml,
     mutateAsync: managementMocks.importOpml,
-    isPending: false,
+    ...managementMocks.importState,
   }),
   exportOpml: managementMocks.exportOpml,
 }));
@@ -90,6 +118,28 @@ function renderManagement() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  managementMocks.subscribeState.isPending = false;
+  managementMocks.subscribeState.error = null;
+  managementMocks.updateState.isPending = false;
+  managementMocks.updateState.error = null;
+  managementMocks.deleteState.isPending = false;
+  managementMocks.deleteState.error = null;
+  managementMocks.refreshState.isPending = false;
+  managementMocks.refreshState.error = null;
+  managementMocks.importState.isPending = false;
+  managementMocks.importState.error = null;
+  managementMocks.subscribeFeedAsync.mockImplementation((variables) => {
+    managementMocks.subscribeFeed(variables);
+    return Promise.resolve();
+  });
+  managementMocks.updateFeedAsync.mockImplementation((variables) => {
+    managementMocks.updateFeed(variables);
+    return Promise.resolve();
+  });
+  managementMocks.deleteFeedAsync.mockImplementation((variables) => {
+    managementMocks.deleteFeed(variables);
+    return Promise.resolve();
+  });
   managementMocks.feedsQuery.data = feedList;
   managementMocks.feedsQuery.isPending = false;
   managementMocks.feedsQuery.isLoading = false;
@@ -280,5 +330,239 @@ describe("FeedManagement", () => {
     expect(
       controls.getByRole("button", { name: /unsubscribe one example/i }),
     ).toBeVisible();
+  });
+  it("keeps the subscribe draft in its form while pending and after failure", async () => {
+    let rejectSubscribe!: (error: Error) => void;
+    let mutationOptions:
+      | { onError?: (error: Error) => void; onSuccess?: () => void }
+      | undefined;
+    const pendingSubscribe = new Promise<void>((_resolve, reject) => {
+      rejectSubscribe = reject;
+    });
+    void pendingSubscribe.catch(() => undefined);
+    managementMocks.subscribeFeed.mockImplementation((_variables, options) => {
+      mutationOptions = options;
+    });
+    managementMocks.subscribeFeedAsync.mockImplementation((variables) => {
+      managementMocks.subscribeFeed(variables);
+      return pendingSubscribe;
+    });
+    const user = userEvent.setup();
+    const view = renderManagement();
+    const url = screen.getByRole("textbox", { name: /feed or site url/i });
+    const group = screen.getByRole("textbox", { name: /^group$/i });
+    await user.type(url, "https://pending.example/feed");
+    await user.type(group, "Research");
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+
+    managementMocks.subscribeState.isPending = true;
+    view.rerender(<FeedManagement />);
+    expect(
+      screen.getByRole("textbox", { name: /feed or site url/i }),
+    ).toHaveValue("https://pending.example/feed");
+    expect(screen.getByRole("textbox", { name: /^group$/i })).toHaveValue(
+      "Research",
+    );
+    expect(
+      screen.getByRole("textbox", { name: /feed or site url/i }),
+    ).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: /^group$/i })).toBeDisabled();
+    const pendingForm = screen
+      .getByRole("textbox", { name: /feed or site url/i })
+      .closest("form");
+    expect(pendingForm).not.toBeNull();
+    expect(
+      within(pendingForm as HTMLElement).getByRole("button", {
+        name: /^subscribing…?$/i,
+      }),
+    ).toBeDisabled();
+
+    const failure = new Error("Subscription could not be saved");
+    managementMocks.subscribeState.isPending = false;
+    managementMocks.subscribeState.error = failure;
+    mutationOptions?.onError?.(failure);
+    rejectSubscribe(failure);
+    view.rerender(<FeedManagement />);
+    const form = screen
+      .getByRole("textbox", { name: /feed or site url/i })
+      .closest("form");
+    expect(form).not.toBeNull();
+    expect(within(form as HTMLElement).getByRole("alert")).toHaveTextContent(
+      "Subscription could not be saved",
+    );
+    expect(
+      screen.getByRole("textbox", { name: /feed or site url/i }),
+    ).toHaveValue("https://pending.example/feed");
+    expect(screen.getByRole("textbox", { name: /^group$/i })).toHaveValue(
+      "Research",
+    );
+  });
+
+  it("clears the subscribe draft only after mutation success", async () => {
+    managementMocks.subscribeFeed.mockImplementation((_variables, options) => {
+      options?.onSuccess?.();
+    });
+    managementMocks.subscribeFeedAsync.mockImplementation((variables) => {
+      managementMocks.subscribeFeed(variables);
+      return Promise.resolve();
+    });
+    const user = userEvent.setup();
+    renderManagement();
+    await user.type(
+      screen.getByRole("textbox", { name: /feed or site url/i }),
+      "https://success.example/feed",
+    );
+    await user.type(screen.getByRole("textbox", { name: /^group$/i }), "Tech");
+
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("textbox", { name: /feed or site url/i }),
+      ).toHaveValue("");
+      expect(screen.getByRole("textbox", { name: /^group$/i })).toHaveValue("");
+    });
+  });
+
+  it("keeps the edit dialog, pending controls, draft, and local error until success", async () => {
+    let rejectUpdate!: (error: Error) => void;
+    let mutationOptions:
+      | { onError?: (error: Error) => void; onSuccess?: () => void }
+      | undefined;
+    const pendingUpdate = new Promise<void>((_resolve, reject) => {
+      rejectUpdate = reject;
+    });
+    void pendingUpdate.catch(() => undefined);
+    managementMocks.updateFeed.mockImplementation((_variables, options) => {
+      mutationOptions = options;
+    });
+    managementMocks.updateFeedAsync.mockImplementation((variables) => {
+      managementMocks.updateFeed(variables);
+      return pendingUpdate;
+    });
+    const user = userEvent.setup();
+    const view = renderManagement();
+    await user.click(screen.getByRole("button", { name: /edit one example/i }));
+    let dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    const title = within(dialog).getByRole("textbox", { name: /^title$/i });
+    await user.clear(title);
+    await user.type(title, "Pending title");
+    await user.click(
+      within(dialog).getByRole("button", { name: /save changes/i }),
+    );
+
+    managementMocks.updateState.isPending = true;
+    view.rerender(<FeedManagement />);
+    dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    expect(
+      within(dialog).getByRole("textbox", { name: /^title$/i }),
+    ).toHaveValue("Pending title");
+    expect(
+      within(dialog).getByRole("textbox", { name: /^title$/i }),
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: /save changes|saving/i }),
+    ).toBeDisabled();
+
+    const failure = new Error("Edit could not be saved");
+    managementMocks.updateState.isPending = false;
+    managementMocks.updateState.error = failure;
+    mutationOptions?.onError?.(failure);
+    rejectUpdate(failure);
+    view.rerender(<FeedManagement />);
+    dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Edit could not be saved",
+    );
+    expect(
+      within(dialog).getByRole("textbox", { name: /^title$/i }),
+    ).toHaveValue("Pending title");
+  });
+
+  it("keeps unsubscribe confirmation open and local while pending or failed", async () => {
+    let rejectDelete!: (error: Error) => void;
+    let mutationOptions:
+      | { onError?: (error: Error) => void; onSuccess?: () => void }
+      | undefined;
+    const pendingDelete = new Promise<void>((_resolve, reject) => {
+      rejectDelete = reject;
+    });
+    void pendingDelete.catch(() => undefined);
+    managementMocks.deleteFeed.mockImplementation((_variables, options) => {
+      mutationOptions = options;
+    });
+    managementMocks.deleteFeedAsync.mockImplementation((variables) => {
+      managementMocks.deleteFeed(variables);
+      return pendingDelete;
+    });
+    const user = userEvent.setup();
+    const view = renderManagement();
+    await user.click(
+      screen.getByRole("button", { name: /unsubscribe one example/i }),
+    );
+    let dialog = screen.getByRole("dialog", {
+      name: /unsubscribe one example/i,
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: /confirm unsubscribe/i }),
+    );
+
+    managementMocks.deleteState.isPending = true;
+    view.rerender(<FeedManagement />);
+    dialog = screen.getByRole("dialog", { name: /unsubscribe one example/i });
+    expect(
+      within(dialog).getByRole("button", {
+        name: /confirm unsubscribe|unsubscribing/i,
+      }),
+    ).toBeDisabled();
+
+    const failure = new Error("Unsubscribe failed");
+    managementMocks.deleteState.isPending = false;
+    managementMocks.deleteState.error = failure;
+    mutationOptions?.onError?.(failure);
+    rejectDelete(failure);
+    view.rerender(<FeedManagement />);
+    dialog = screen.getByRole("dialog", { name: /unsubscribe one example/i });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Unsubscribe failed",
+    );
+  });
+
+  it("closes edit and unsubscribe dialogs after their mutations succeed", async () => {
+    managementMocks.updateFeed.mockImplementation((_variables, options) => {
+      options?.onSuccess?.();
+    });
+    managementMocks.deleteFeed.mockImplementation((_variables, options) => {
+      options?.onSuccess?.();
+    });
+    managementMocks.updateFeedAsync.mockImplementation((variables) => {
+      managementMocks.updateFeed(variables);
+      return Promise.resolve();
+    });
+    managementMocks.deleteFeedAsync.mockImplementation((variables) => {
+      managementMocks.deleteFeed(variables);
+      return Promise.resolve();
+    });
+    const user = userEvent.setup();
+    renderManagement();
+    await user.click(screen.getByRole("button", { name: /edit one example/i }));
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: /edit one example/i }),
+      ).toBeNull();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /unsubscribe one example/i }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /confirm unsubscribe/i }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: /unsubscribe one example/i }),
+      ).toBeNull();
+    });
   });
 });

@@ -1,12 +1,36 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import type * as ReactQuery from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import {
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from "vitest";
+import type * as FeedApi from "#/api/feeds";
 import type { components } from "#/api/schema";
 
 type FeedEntry = components["schemas"]["FeedEntryDto"];
 type FeedList = components["schemas"]["FeedListResponse"];
 
 const riverMocks = vi.hoisted(() => {
+  const NativeRequest = globalThis.Request;
+  class BrowserLikeRequest extends NativeRequest {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(
+        typeof input === "string" ? new URL(input, "https://ui.test") : input,
+        init,
+      );
+    }
+  }
+  const fetchMock = vi.fn<typeof globalThis.fetch>();
+  vi.stubGlobal("Request", BrowserLikeRequest);
+  vi.stubGlobal("fetch", fetchMock);
+
   type Page = {
     entries: FeedEntry[];
     next_cursor: string | null;
@@ -33,6 +57,9 @@ const riverMocks = vi.hoisted(() => {
   };
 
   return {
+    NativeRequest,
+    fetchMock,
+    useRealHooks: false,
     entriesQuery,
     feedsQuery: {
       data: undefined as FeedList | undefined,
@@ -43,28 +70,56 @@ const riverMocks = vi.hoisted(() => {
     },
     feedEntriesInfiniteOptions: vi.fn(),
     patchEntry: vi.fn(),
+    patchEntryAsync: vi.fn(),
+    patchState: {
+      isPending: false,
+      error: null as Error | null,
+      reset: vi.fn(),
+    },
     markEntriesRead: vi.fn(),
+    markState: {
+      isPending: false,
+      error: null as Error | null,
+      reset: vi.fn(),
+    },
   };
 });
 
-vi.mock("@tanstack/react-query", () => ({
-  useInfiniteQuery: () => riverMocks.entriesQuery,
-}));
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof ReactQuery>();
+  return {
+    ...actual,
+    useInfiniteQuery: (options: never) =>
+      riverMocks.useRealHooks
+        ? actual.useInfiniteQuery(options)
+        : riverMocks.entriesQuery,
+  };
+});
 
-vi.mock("#/api/feeds", () => ({
-  feedEntriesInfiniteOptions: riverMocks.feedEntriesInfiniteOptions,
-  useFeeds: () => riverMocks.feedsQuery,
-  usePatchFeedEntry: () => ({
-    mutate: riverMocks.patchEntry,
-    mutateAsync: riverMocks.patchEntry,
-    isPending: false,
-  }),
-  useMarkFeedEntriesRead: () => ({
-    mutate: riverMocks.markEntriesRead,
-    mutateAsync: riverMocks.markEntriesRead,
-    isPending: false,
-  }),
-}));
+vi.mock("#/api/feeds", async (importOriginal) => {
+  const actual = await importOriginal<typeof FeedApi>();
+  return {
+    ...actual,
+    feedEntriesInfiniteOptions: (filters: never) =>
+      riverMocks.useRealHooks
+        ? actual.feedEntriesInfiniteOptions(filters)
+        : riverMocks.feedEntriesInfiniteOptions(filters),
+    useFeeds: () => riverMocks.feedsQuery,
+    usePatchFeedEntry: () =>
+      riverMocks.useRealHooks
+        ? actual.usePatchFeedEntry()
+        : {
+            mutate: riverMocks.patchEntry,
+            mutateAsync: riverMocks.patchEntryAsync,
+            ...riverMocks.patchState,
+          },
+    useMarkFeedEntriesRead: () => ({
+      mutate: riverMocks.markEntriesRead,
+      mutateAsync: riverMocks.markEntriesRead,
+      ...riverMocks.markState,
+    }),
+  };
+});
 
 import { FeedRiver } from "#/components/codex/FeedRiver";
 
@@ -135,6 +190,16 @@ function renderRiver(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  riverMocks.fetchMock.mockReset();
+  riverMocks.useRealHooks = false;
+  riverMocks.patchState.isPending = false;
+  riverMocks.patchState.error = null;
+  riverMocks.markState.isPending = false;
+  riverMocks.markState.error = null;
+  riverMocks.patchEntryAsync.mockImplementation((variables) => {
+    riverMocks.patchEntry(variables);
+    return Promise.resolve();
+  });
   riverMocks.feedEntriesInfiniteOptions.mockImplementation((filters) => ({
     queryKey: [
       "get",
@@ -155,6 +220,10 @@ beforeEach(() => {
   riverMocks.entriesQuery.hasNextPage = false;
   riverMocks.entriesQuery.isFetchingNextPage = false;
   setEntries([entry()]);
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("FeedRiver", () => {
@@ -379,5 +448,244 @@ describe("FeedRiver", () => {
       within(first).getByRole("link", { name: /open original/i }),
     ).toBeVisible();
     await waitFor(() => expect(riverMocks.patchEntry).toHaveBeenCalled());
+  });
+  it("keeps an expanded unread entry pinned through optimistic removal and refetch", async () => {
+    riverMocks.useRealHooks = true;
+    const initialPages = {
+      pages: [{ entries: [entry()], next_cursor: null }],
+      pageParams: [undefined],
+    };
+    const queryKey = [
+      "get",
+      "/api/vault/feeds/entries",
+      { params: { query: { view: "unread" } } },
+    ] as const;
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+        mutations: { retry: false },
+      },
+    });
+    client.setQueryData(queryKey, initialPages);
+    riverMocks.fetchMock.mockImplementation(async (input, init) => {
+      const request =
+        input instanceof riverMocks.NativeRequest
+          ? input
+          : new riverMocks.NativeRequest(input, init);
+      if (request.method === "PATCH") {
+        return new Response(JSON.stringify(entry({ read: true })), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (
+        request.method === "GET" &&
+        request.url.includes("/api/vault/feeds/entries")
+      ) {
+        return new Response(
+          JSON.stringify({ entries: [], next_cursor: null }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(
+        `Unexpected feed request: ${request.method} ${request.url}`,
+      );
+    });
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={client}>
+        <FeedRiver filters={{ view: "unread" }} />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    await waitFor(() => {
+      expect(
+        client.getQueryData<typeof initialPages>(queryKey)?.pages[0].entries,
+      ).toEqual([]);
+    });
+    await waitFor(() => {
+      expect(
+        riverMocks.fetchMock.mock.calls.some(([input]) => {
+          const request =
+            input instanceof riverMocks.NativeRequest
+              ? input
+              : new riverMocks.NativeRequest(input);
+          return (
+            request.method === "GET" &&
+            request.url.includes("/api/vault/feeds/entries")
+          );
+        }),
+      ).toBe(true);
+    });
+    expect(screen.getByText("The complete entry body.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { expanded: true }));
+    expect(
+      screen.queryByText("The complete entry body."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("mounts content and actions only for the single expanded entry", async () => {
+    const user = userEvent.setup();
+    setEntries([
+      entry(),
+      entry({
+        id: 102,
+        guid: "entry-102",
+        title: "Second dispatch",
+        content_html: "<p>Second private body.</p>",
+        url: "https://two.example/post",
+      }),
+    ]);
+    renderRiver({ view: "all" });
+
+    expect(
+      screen.queryByText("The complete entry body."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Second private body.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open original/i })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    expect(screen.getByText("The complete entry body.")).toBeVisible();
+    expect(screen.queryByText("Second private body.")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("link", { name: /open original/i }),
+    ).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /second dispatch/i }));
+    expect(
+      screen.queryByText("The complete entry body."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Second private body.")).toBeVisible();
+    expect(
+      screen.getAllByRole("link", { name: /open original/i }),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    "javascript:alert(document.domain)",
+    "data:text/html,<script>alert(1)</script>",
+    "file:///etc/passwd",
+    "custom-protocol://publisher/action",
+  ])("omits the original action for unsafe URL %s", async (url) => {
+    const user = userEvent.setup();
+    setEntries([entry({ read: true, url })]);
+    renderRiver({ view: "all" });
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    expect(screen.queryByRole("link", { name: /open original/i })).toBeNull();
+  });
+
+  it("surfaces a mark-all failure and disables the pending boundary action", async () => {
+    const user = userEvent.setup();
+    const view = renderRiver();
+    await user.click(screen.getByRole("button", { name: /mark all read/i }));
+
+    riverMocks.markState.isPending = true;
+    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    expect(
+      screen.getByRole("button", { name: /mark all read|marking/i }),
+    ).toBeDisabled();
+
+    riverMocks.markState.isPending = false;
+    riverMocks.markState.error = new Error("Bulk mark failed");
+    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Bulk mark failed");
+  });
+
+  it("surfaces mark-on-expand failures without collapsing the entry", async () => {
+    const user = userEvent.setup();
+    const view = renderRiver();
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    riverMocks.patchState.error = new Error("Read state could not be saved");
+    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Read state could not be saved",
+    );
+    expect(screen.getByText("The complete entry body.")).toBeVisible();
+  });
+
+  it.each([
+    [/mark unread/i, "Read state failed"],
+    [/bookmark cache semantics/i, "Bookmark failed"],
+  ] as const)("surfaces a failed expanded-entry action and disables it while pending", async (actionName, message) => {
+    const user = userEvent.setup();
+    setEntries([entry({ read: true })]);
+    const view = renderRiver({ view: "all" });
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    await user.click(screen.getByRole("button", { name: actionName }));
+
+    riverMocks.patchState.isPending = true;
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    expect(screen.getByRole("button", { name: actionName })).toBeDisabled();
+
+    riverMocks.patchState.isPending = false;
+    riverMocks.patchState.error = new Error(message);
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+  });
+
+  it("retains the tag draft and editor through pending and failure, closing only on success", async () => {
+    let resolvePatch!: () => void;
+    const pendingPatch = new Promise<void>((resolve) => {
+      resolvePatch = resolve;
+    });
+    riverMocks.patchEntryAsync.mockImplementation((variables) => {
+      riverMocks.patchEntry(variables);
+      return pendingPatch;
+    });
+    const user = userEvent.setup();
+    setEntries([entry({ read: true })]);
+    const view = renderRiver({ view: "all" });
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    await user.click(screen.getByRole("button", { name: /edit tags/i }));
+    const tags = screen.getByRole("textbox", {
+      name: /tags for cache semantics/i,
+    });
+    await user.clear(tags);
+    await user.type(tags, "systems, reading");
+    await user.click(screen.getByRole("button", { name: /save tags/i }));
+
+    riverMocks.patchState.isPending = true;
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    expect(
+      screen.getByRole("textbox", { name: /tags for cache semantics/i }),
+    ).toHaveValue("systems, reading");
+    expect(
+      screen.getByRole("textbox", { name: /tags for cache semantics/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /save tags|saving/i }),
+    ).toBeDisabled();
+
+    riverMocks.patchState.isPending = false;
+    riverMocks.patchState.error = new Error("Tags could not be saved");
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Tags could not be saved",
+    );
+    expect(
+      screen.getByRole("textbox", { name: /tags for cache semantics/i }),
+    ).toHaveValue("systems, reading");
+
+    riverMocks.patchState.error = null;
+    const callbackCall = riverMocks.patchEntry.mock.calls.find(
+      (call) => typeof call[1]?.onSuccess === "function",
+    );
+    await act(async () => {
+      callbackCall?.[1]?.onSuccess?.(entry({ tags: ["systems", "reading"] }));
+      resolvePatch();
+      await pendingPatch;
+    });
+    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("textbox", { name: /tags for cache semantics/i }),
+      ).toBeNull();
+    });
   });
 });

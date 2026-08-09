@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
@@ -43,6 +43,7 @@ function FeedsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/feeds" });
   const feedsQuery = useFeeds();
+  const [tagDraft, setTagDraft] = useState(search.tag ?? "");
   const filters: FeedRiverFilters = {
     view: search.view,
     group: search.group,
@@ -96,6 +97,7 @@ function FeedsPage() {
                   {(["unread", "all", "saved"] as const).map((view) => (
                     <Button
                       key={view}
+                      aria-pressed={search.view === view}
                       className={`cl-btn justify-center border-r-0 px-2 last:border-r outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === view ? "cl-btn-hot bg-highlight" : ""}`}
                       onPress={() => updateSearch({ view })}
                     >
@@ -139,30 +141,41 @@ function FeedsPage() {
                   ))}
               </FilterSelect>
 
-              <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                Tag
-                <input
-                  value={search.tag ?? ""}
-                  onChange={(event) =>
-                    updateSearch({
-                      tag: event.target.value.trim() || undefined,
-                    })
-                  }
-                  placeholder="Any tag"
-                  className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[11px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-                />
-              </label>
+              <form
+                className="min-w-0"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void navigate({
+                    replace: true,
+                    search: (current) => ({
+                      ...current,
+                      tag: tagDraft.trim() || undefined,
+                    }),
+                  });
+                }}
+              >
+                <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+                  Tag
+                  <input
+                    value={tagDraft}
+                    onChange={(event) => setTagDraft(event.target.value)}
+                    placeholder="Any tag · press Enter"
+                    className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[11px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+                  />
+                </label>
+              </form>
 
               {search.group || search.feed !== undefined || search.tag ? (
                 <Button
                   className="cl-btn justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  onPress={() =>
+                  onPress={() => {
+                    setTagDraft("");
                     updateSearch({
                       group: undefined,
                       feed: undefined,
                       tag: undefined,
-                    })
-                  }
+                    });
+                  }}
                 >
                   Clear filters
                 </Button>

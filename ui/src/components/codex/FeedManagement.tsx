@@ -24,32 +24,24 @@ export function FeedManagement() {
   const importOpml = useImportOpml();
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<Feed | null>(null);
-  const mutationError = [
-    subscribeFeed.error,
-    updateFeed.error,
-    deleteFeed.error,
-    refreshFeeds.error,
-    importOpml.error,
-  ].find((error) => error !== null && error !== undefined);
+  const surfaceError = refreshFeeds.error ?? importOpml.error;
 
   return (
     <div className="space-y-3.5">
-      {mutationError ? (
-        <div
-          role="alert"
-          className="border border-hot px-3 py-2 text-[12px] text-hot"
-        >
-          {mutationError instanceof Error
-            ? mutationError.message
-            : typeof mutationError === "object" && "message" in mutationError
-              ? String(mutationError.message)
-              : "The feed operation could not be completed."}
-        </div>
+      {surfaceError ? (
+        <MutationAlert
+          error={surfaceError}
+          fallback="The feed operation could not be completed."
+        />
       ) : null}
       <Card label="Subscribe" caption="MANIFEST · feeds.md" pip="cool">
         <SubscribeForm
+          error={subscribeFeed.error}
           isPending={subscribeFeed.isPending}
-          onSubmit={(values) => subscribeFeed.mutate(values)}
+          onSubmit={async (values) => {
+            subscribeFeed.reset();
+            await subscribeFeed.mutateAsync(values);
+          }}
         />
       </Card>
 
@@ -120,8 +112,14 @@ export function FeedManagement() {
                     <FeedRow
                       key={feed.id}
                       feed={feed}
-                      onEdit={() => setEditingFeed(feed)}
-                      onDelete={() => setDeletingFeed(feed)}
+                      onEdit={() => {
+                        updateFeed.reset();
+                        setEditingFeed(feed);
+                      }}
+                      onDelete={() => {
+                        deleteFeed.reset();
+                        setDeletingFeed(feed);
+                      }}
                     />
                   ))}
                 </ul>
@@ -139,11 +137,17 @@ export function FeedManagement() {
       {editingFeed ? (
         <EditFeedDialog
           feed={editingFeed}
+          error={updateFeed.error}
           isPending={updateFeed.isPending}
           onDismiss={() => setEditingFeed(null)}
-          onSave={(values) => {
-            updateFeed.mutate({ id: editingFeed.id, ...values });
-            setEditingFeed(null);
+          onSave={async (values) => {
+            updateFeed.reset();
+            try {
+              await updateFeed.mutateAsync({ id: editingFeed.id, ...values });
+              setEditingFeed(null);
+            } catch {
+              // Keep the dialog and draft mounted; its local alert uses mutation.error.
+            }
           }}
         />
       ) : null}
@@ -151,11 +155,17 @@ export function FeedManagement() {
       {deletingFeed ? (
         <DeleteFeedDialog
           feed={deletingFeed}
+          error={deleteFeed.error}
           isPending={deleteFeed.isPending}
           onDismiss={() => setDeletingFeed(null)}
-          onConfirm={() => {
-            deleteFeed.mutate({ id: deletingFeed.id });
-            setDeletingFeed(null);
+          onConfirm={async () => {
+            deleteFeed.reset();
+            try {
+              await deleteFeed.mutateAsync({ id: deletingFeed.id });
+              setDeletingFeed(null);
+            } catch {
+              // Keep confirmation open so the error and retry remain available.
+            }
           }}
         />
       ) : null}
@@ -164,29 +174,36 @@ export function FeedManagement() {
 }
 
 function SubscribeForm({
+  error,
   isPending,
   onSubmit,
 }: {
+  error: unknown;
   isPending: boolean;
-  onSubmit: (values: { url: string; group: string | null }) => void;
+  onSubmit: (values: { url: string; group: string | null }) => Promise<void>;
 }) {
   const [url, setUrl] = useState("");
   const [group, setGroup] = useState("");
   return (
     <form
       className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(9rem,1fr)_auto] md:items-end"
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
         const normalizedUrl = url.trim();
         if (!normalizedUrl) return;
-        onSubmit({ url: normalizedUrl, group: group.trim() || null });
-        setUrl("");
-        setGroup("");
+        try {
+          await onSubmit({ url: normalizedUrl, group: group.trim() || null });
+          setUrl("");
+          setGroup("");
+        } catch {
+          // Preserve both fields; the generated mutation error is rendered below.
+        }
       }}
     >
       <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
         Feed or site URL
         <input
+          disabled={isPending}
           required
           inputMode="url"
           autoComplete="url"
@@ -199,12 +216,21 @@ function SubscribeForm({
       <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
         Group
         <input
+          disabled={isPending}
           value={group}
           onChange={(event) => setGroup(event.target.value)}
           placeholder="Optional"
           className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
         />
       </label>
+      {error ? (
+        <div className="md:col-span-3">
+          <MutationAlert
+            error={error}
+            fallback="The subscription could not be saved."
+          />
+        </div>
+      ) : null}
       <Button
         type="submit"
         className="cl-btn cl-btn-hot justify-center py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -380,13 +406,18 @@ function OpmlActions({
 function EditFeedDialog({
   feed,
   isPending,
+  error,
   onDismiss,
   onSave,
 }: {
   feed: Feed;
+  error: unknown;
   isPending: boolean;
   onDismiss: () => void;
-  onSave: (values: { title: string | null; group: string | null }) => void;
+  onSave: (values: {
+    title: string | null;
+    group: string | null;
+  }) => Promise<void>;
 }) {
   const title = feed.title_override || feed.title;
   const [nextTitle, setNextTitle] = useState(title);
@@ -408,8 +439,24 @@ function EditFeedDialog({
           });
         }}
       >
-        <DialogField label="Title" value={nextTitle} onChange={setNextTitle} />
-        <DialogField label="Group" value={nextGroup} onChange={setNextGroup} />
+        <DialogField
+          label="Title"
+          value={nextTitle}
+          isDisabled={isPending}
+          onChange={setNextTitle}
+        />
+        <DialogField
+          label="Group"
+          value={nextGroup}
+          isDisabled={isPending}
+          onChange={setNextGroup}
+        />
+        {error ? (
+          <MutationAlert
+            error={error}
+            fallback="The subscription edit could not be saved."
+          />
+        ) : null}
         <div className="flex flex-wrap justify-end gap-2 border-t border-rule pt-3">
           <Button type="button" className="cl-btn" onPress={onDismiss}>
             Cancel
@@ -430,13 +477,15 @@ function EditFeedDialog({
 function DeleteFeedDialog({
   feed,
   isPending,
+  error,
   onDismiss,
   onConfirm,
 }: {
   feed: Feed;
+  error: unknown;
   isPending: boolean;
   onDismiss: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
 }) {
   const title = feed.title_override || feed.title;
   return (
@@ -454,6 +503,12 @@ function DeleteFeedDialog({
           This removes the subscription from feeds.md. Saved entries remain
           available.
         </p>
+        {error ? (
+          <MutationAlert
+            error={error}
+            fallback="The subscription could not be removed."
+          />
+        ) : null}
         <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-rule pt-3">
           <Button className="cl-btn" onPress={onDismiss}>
             Cancel
@@ -485,9 +540,11 @@ function DialogHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
 function DialogField({
   label,
   value,
+  isDisabled,
   onChange,
 }: {
   label: string;
+  isDisabled: boolean;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -495,10 +552,32 @@ function DialogField({
     <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
       {label}
       <input
+        disabled={isDisabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
       />
     </label>
+  );
+}
+
+function MutationAlert({
+  error,
+  fallback,
+}: {
+  error: unknown;
+  fallback: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className="border border-hot px-3 py-2 text-[12px] text-hot"
+    >
+      {error instanceof Error
+        ? error.message
+        : typeof error === "object" && error !== null && "message" in error
+          ? String(error.message)
+          : fallback}
+    </div>
   );
 }

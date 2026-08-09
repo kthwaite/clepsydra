@@ -29,7 +29,7 @@ export function FeedRiver({
   const feedsQuery = useFeeds();
   const patchEntry = usePatchFeedEntry();
   const markEntriesRead = useMarkFeedEntriesRead();
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedEntry, setExpandedEntry] = useState<FeedEntry | null>(null);
   const [tagEditorId, setTagEditorId] = useState<number | null>(null);
 
   const entries = useMemo(
@@ -44,6 +44,20 @@ export function FeedRiver({
       ),
     [entriesQuery.data],
   );
+  const visibleEntries = useMemo(() => {
+    if (
+      !expandedEntry ||
+      entries.some((entry) => entry.id === expandedEntry.id)
+    ) {
+      return entries;
+    }
+    return [...entries, expandedEntry].sort((left, right) => {
+      const timeDifference =
+        Date.parse(right.published_at ?? right.fetched_at) -
+        Date.parse(left.published_at ?? left.fetched_at);
+      return timeDifference || right.id - left.id;
+    });
+  }, [entries, expandedEntry]);
   const feedNames = useMemo(() => {
     const names = new Map<number, string>();
     for (const group of feedsQuery.data?.groups ?? []) {
@@ -52,7 +66,7 @@ export function FeedRiver({
     }
     return names;
   }, [feedsQuery.data]);
-  const days = useMemo(() => groupByDay(entries), [entries]);
+  const days = useMemo(() => groupByDay(visibleEntries), [visibleEntries]);
 
   if (entriesQuery.isPending || entriesQuery.isLoading) {
     return (
@@ -82,8 +96,30 @@ export function FeedRiver({
           )}
         </div>
       ) : null}
+      {patchEntry.error ? (
+        <div
+          role="alert"
+          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+        >
+          {errorMessage(
+            patchEntry.error,
+            "The entry change could not be saved.",
+          )}
+        </div>
+      ) : null}
+      {markEntriesRead.error ? (
+        <div
+          role="alert"
+          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+        >
+          {errorMessage(
+            markEntriesRead.error,
+            "The read boundary could not be saved.",
+          )}
+        </div>
+      ) : null}
 
-      {!entriesQuery.isError && entries.length === 0 ? (
+      {!entriesQuery.isError && visibleEntries.length === 0 ? (
         <div className="border border-dashed border-rule px-4 py-8 text-center">
           <p className="font-sans text-[14px] font-semibold text-ink">
             {emptyTitle(filters.view)}
@@ -92,11 +128,12 @@ export function FeedRiver({
         </div>
       ) : null}
 
-      {filters.view === "unread" && entries.length > 0 ? (
+      {filters.view === "unread" && visibleEntries.length > 0 ? (
         <div className="mb-3 flex justify-end">
           <Button
             className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
             isDisabled={markEntriesRead.isPending}
+            onPressStart={() => markEntriesRead.reset()}
             onPress={() => {
               const newest = entries[0];
               if (!newest) return;
@@ -133,7 +170,7 @@ export function FeedRiver({
             </div>
             <div className="border-t border-rule">
               {dayEntries.map((entry) => {
-                const isExpanded = expandedId === entry.id;
+                const isExpanded = expandedEntry?.id === entry.id;
                 return (
                   <EntryDisclosure
                     key={entry.id}
@@ -141,27 +178,39 @@ export function FeedRiver({
                     feedName={feedNames.get(entry.feed_id)}
                     isExpanded={isExpanded}
                     isEditingTags={tagEditorId === entry.id}
+                    isPatchPending={patchEntry.isPending}
                     onExpandedChange={(expanded) => {
-                      setExpandedId(expanded ? entry.id : null);
+                      setExpandedEntry(expanded ? entry : null);
                       setTagEditorId(null);
                       if (expanded && !entry.read) {
+                        patchEntry.reset();
                         patchEntry.mutate({ id: entry.id, read: true });
                       }
                     }}
-                    onToggleBookmark={() =>
+                    onToggleBookmark={() => {
+                      patchEntry.reset();
                       patchEntry.mutate({
                         id: entry.id,
                         bookmarked: !entry.bookmarked,
-                      })
-                    }
-                    onToggleRead={() =>
-                      patchEntry.mutate({ id: entry.id, read: !entry.read })
-                    }
-                    onEditTags={() => setTagEditorId(entry.id)}
+                      });
+                    }}
+                    onToggleRead={() => {
+                      patchEntry.reset();
+                      patchEntry.mutate({ id: entry.id, read: !entry.read });
+                    }}
+                    onEditTags={() => {
+                      patchEntry.reset();
+                      setTagEditorId(entry.id);
+                    }}
                     onCancelTags={() => setTagEditorId(null)}
-                    onSaveTags={(tags) => {
-                      patchEntry.mutate({ id: entry.id, tags });
-                      setTagEditorId(null);
+                    onSaveTags={async (tags) => {
+                      patchEntry.reset();
+                      try {
+                        await patchEntry.mutateAsync({ id: entry.id, tags });
+                        setTagEditorId(null);
+                      } catch {
+                        // The generated mutation exposes the actionable error in-surface.
+                      }
                     }}
                   />
                 );
@@ -171,7 +220,7 @@ export function FeedRiver({
         ))}
       </div>
 
-      {compact && entries.length > 0 ? (
+      {compact && visibleEntries.length > 0 ? (
         <a
           className="cl-btn cl-btn-hot mt-3 w-full justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
           href={fullReaderHref(filters)}
@@ -196,6 +245,7 @@ function EntryDisclosure({
   feedName,
   isExpanded,
   isEditingTags,
+  isPatchPending,
   onExpandedChange,
   onToggleBookmark,
   onToggleRead,
@@ -207,14 +257,16 @@ function EntryDisclosure({
   feedName?: string;
   isExpanded: boolean;
   isEditingTags: boolean;
+  isPatchPending: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onToggleBookmark: () => void;
   onToggleRead: () => void;
   onEditTags: () => void;
   onCancelTags: () => void;
-  onSaveTags: (tags: string[]) => void;
+  onSaveTags: (tags: string[]) => Promise<void>;
 }) {
   const titleId = `feed-entry-title-${entry.id}`;
+  const originalUrl = safeHostedUrl(entry.url);
   return (
     <article
       aria-labelledby={titleId}
@@ -258,61 +310,67 @@ function EntryDisclosure({
             </span>
           </Button>
         </h3>
-        <DisclosurePanel className="overflow-hidden">
-          <div className="border-t border-rule-soft px-3 py-3 md:px-6 md:py-4">
-            {entry.content_html ? (
-              <div
-                className="feed-entry-content"
-                dangerouslySetInnerHTML={{ __html: entry.content_html }}
-              />
-            ) : (
-              <p className="cl-marg">
-                This entry has no stored body. Open the original to continue
-                reading.
-              </p>
-            )}
+        {isExpanded ? (
+          <DisclosurePanel className="overflow-hidden">
+            <div className="border-t border-rule-soft px-3 py-3 md:px-6 md:py-4">
+              {entry.content_html ? (
+                <div
+                  className="feed-entry-content"
+                  dangerouslySetInnerHTML={{ __html: entry.content_html }}
+                />
+              ) : (
+                <p className="cl-marg">
+                  This entry has no stored body. Open the original to continue
+                  reading.
+                </p>
+              )}
 
-            <div className="mt-4 flex min-w-0 flex-wrap items-center gap-2 border-t border-rule-soft pt-3">
-              {entry.url ? (
-                <a
-                  href={entry.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              <div className="mt-4 flex min-w-0 flex-wrap items-center gap-2 border-t border-rule-soft pt-3">
+                {originalUrl ? (
+                  <a
+                    href={originalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    Open original ↗
+                  </a>
+                ) : null}
+                <Button
+                  className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  isDisabled={isPatchPending}
+                  onPress={onToggleRead}
                 >
-                  Open original ↗
-                </a>
-              ) : null}
-              <Button
-                className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                onPress={onToggleRead}
-              >
-                {entry.read ? "Mark unread" : "Mark read"}
-              </Button>
-              <Button
-                aria-label={`${entry.bookmarked ? "Remove bookmark from" : "Bookmark"} ${entry.title}`}
-                className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                onPress={onToggleBookmark}
-              >
-                {entry.bookmarked ? "Unsave" : "Bookmark"}
-              </Button>
-              <Button
-                className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                onPress={onEditTags}
-              >
-                Edit tags
-              </Button>
-            </div>
+                  {entry.read ? "Mark unread" : "Mark read"}
+                </Button>
+                <Button
+                  aria-label={`${entry.bookmarked ? "Remove bookmark from" : "Bookmark"} ${entry.title}`}
+                  className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  isDisabled={isPatchPending}
+                  onPress={onToggleBookmark}
+                >
+                  {entry.bookmarked ? "Unsave" : "Bookmark"}
+                </Button>
+                <Button
+                  className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  isDisabled={isPatchPending}
+                  onPress={onEditTags}
+                >
+                  Edit tags
+                </Button>
+              </div>
 
-            {isEditingTags ? (
-              <TagEditor
-                entry={entry}
-                onCancel={onCancelTags}
-                onSave={onSaveTags}
-              />
-            ) : null}
-          </div>
-        </DisclosurePanel>
+              {isEditingTags ? (
+                <TagEditor
+                  entry={entry}
+                  isPending={isPatchPending}
+                  onCancel={onCancelTags}
+                  onSave={onSaveTags}
+                />
+              ) : null}
+            </div>
+          </DisclosurePanel>
+        ) : null}
       </Disclosure>
     </article>
   );
@@ -321,11 +379,13 @@ function EntryDisclosure({
 function TagEditor({
   entry,
   onCancel,
+  isPending,
   onSave,
 }: {
   entry: FeedEntry;
+  isPending: boolean;
   onCancel: () => void;
-  onSave: (tags: string[]) => void;
+  onSave: (tags: string[]) => Promise<void>;
 }) {
   const [value, setValue] = useState(entry.tags.join(", "));
   return (
@@ -333,12 +393,13 @@ function TagEditor({
       className="mt-3 grid gap-2 border-l-2 border-accent pl-3 sm:grid-cols-[minmax(0,1fr)_auto]"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave(normalizeTags(value));
+        void onSave(normalizeTags(value));
       }}
     >
       <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
         Tags for {entry.title}
         <input
+          disabled={isPending}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
@@ -348,12 +409,14 @@ function TagEditor({
       <div className="flex items-end gap-2">
         <Button
           type="submit"
+          isDisabled={isPending}
           className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
-          Save tags
+          {isPending ? "Saving…" : "Save tags"}
         </Button>
         <Button
           type="button"
+          isDisabled={isPending}
           className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
           onPress={onCancel}
         >
@@ -383,6 +446,18 @@ function groupByDay(entries: FeedEntry[]) {
     ),
     entries: groupedEntries,
   }));
+}
+
+function safeHostedUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeTags(value: string) {
