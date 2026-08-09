@@ -21,9 +21,13 @@ export interface MobileGazetteerProps {
   rows: ContentEntry[];
   tags: TagCount[];
   totalCount: number;
+  filteredCount: number;
+  page: number;
+  pageCount: number;
   onQueryChange: (query: string) => void;
   onSelectedTagsChange: (tags: string[]) => void;
   onSortChange: (sort: GazetteerSort) => void;
+  onPageChange: (page: number) => void;
   onOpen: (path: string, title: string) => void;
 }
 
@@ -44,9 +48,13 @@ export function MobileGazetteer({
   rows,
   tags,
   totalCount,
+  filteredCount,
+  page,
+  pageCount,
   onQueryChange,
   onSelectedTagsChange,
   onSortChange,
+  onPageChange,
   onOpen,
 }: MobileGazetteerProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -67,7 +75,7 @@ export function MobileGazetteer({
             Gazetteer<span className="text-accent"> / </span>Index
           </h1>
           <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-            {rows.length} of {totalCount}
+            {filteredCount} of {totalCount}
           </span>
         </div>
         <AriaButton className={sheetButtonClass} onPress={() => setFiltersOpen(true)}>
@@ -148,6 +156,36 @@ export function MobileGazetteer({
           </div>
         )}
       </div>
+
+      <nav
+        aria-label="Gazetteer pagination"
+        className="flex min-h-12 shrink-0 items-center gap-2 border-t border-rule bg-paper-2 px-3 py-1"
+      >
+        <Button
+          aria-label="Previous page"
+          className="min-h-11 min-w-11"
+          isDisabled={page <= 1}
+          onPress={() => onPageChange(page - 1)}
+        >
+          Previous
+        </Button>
+        <span
+          role="status"
+          aria-live="polite"
+          className="cl-mono min-w-0 flex-1 text-center text-[10px] uppercase tracking-[0.1em] text-ink-mute"
+        >
+          Page {page} of {pageCount} · {filteredCount}{" "}
+          {filteredCount === 1 ? "match" : "matches"}
+        </span>
+        <Button
+          aria-label="Next page"
+          className="min-h-11 min-w-11"
+          isDisabled={page >= pageCount}
+          onPress={() => onPageChange(page + 1)}
+        >
+          Next
+        </Button>
+      </nav>
 
       <ModalOverlay
         isOpen={filtersOpen}

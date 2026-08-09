@@ -1,5 +1,5 @@
-import { useLocation, useNavigate } from "@tanstack/react-router";
-import type { CodexFrameProps } from "#/components/codex/CodexFrame";
+import { useNavigate } from "@tanstack/react-router";
+import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import {
   type CodexView,
   resolveCodexView,
@@ -19,14 +19,16 @@ const ROOTS: ReadonlyArray<readonly [MobileRoot, string]> = [
   ["constellation", "Constellation"],
 ];
 
-export function MobileCodexFrame({ children, forceView }: CodexFrameProps) {
-  const location = useLocation();
+export function MobileCodexFrame({
+  forceView,
+  pathname,
+}: CodexFrameChromeProps) {
   const navigate = useNavigate();
   const openSearch = useUiStore((state) => state.openSearch);
   const openInscribe = useUiStore((state) => state.openInscribe);
   const { tabs, activeTabId, openTab } = useWorkspaceStore();
   const view =
-    forceView ?? resolveCodexView(location.pathname, tabs, activeTabId);
+    forceView ?? resolveCodexView(pathname, tabs, activeTabId);
 
   const navigateToRoot = (root: MobileRoot) => {
     if (root === "atrium") {
@@ -40,8 +42,8 @@ export function MobileCodexFrame({ children, forceView }: CodexFrameProps) {
   };
 
   return (
-    <div className="cl-root cl-paper flex h-dvh w-screen flex-col overflow-hidden">
-      <header className="cl-mobile-top flex flex-shrink-0 items-stretch border-b border-rule bg-paper">
+    <>
+      <header className="cl-mobile-top order-0 flex flex-shrink-0 items-stretch border-b border-rule bg-paper">
         <div className="flex flex-1 items-center px-3 py-2 font-sans text-sm font-black uppercase tracking-[0.08em] text-ink">
           <span className="text-accent">C</span>LEPSYDRA
         </div>
@@ -63,15 +65,9 @@ export function MobileCodexFrame({ children, forceView }: CodexFrameProps) {
         </button>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-auto">
-        <div key={location.pathname} className="view-anim min-h-full">
-          {children}
-        </div>
-      </main>
-
       <nav
         aria-label="Mobile roots"
-        className="cl-mobile-bottom flex flex-shrink-0 border-t border-rule bg-bar-bg"
+        className="cl-mobile-bottom order-3 flex flex-shrink-0 border-t border-rule bg-bar-bg"
       >
         {ROOTS.map(([root, label]) => {
           const active = view === root;
@@ -93,6 +89,6 @@ export function MobileCodexFrame({ children, forceView }: CodexFrameProps) {
           );
         })}
       </nav>
-    </div>
+    </>
   );
 }

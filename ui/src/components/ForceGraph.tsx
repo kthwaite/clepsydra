@@ -136,12 +136,32 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("stroke-width", 1)
       .attr("stroke-opacity", 0.3);
 
-    // Nodes — kind-shaped, kind-coloured
+    // Nodes — a transparent 44×44 interaction surface owns click/drag while
+    // the visible kind glyph remains pointer-transparent.
     const nodeSel = gSel
-      .selectAll<SVGPathElement, SimNode>("path.node")
+      .selectAll<SVGGElement, SimNode>("g.node")
       .data(simNodes)
-      .join("path")
-      .attr("class", "node cursor-pointer")
+      .join("g")
+      .attr("class", "node cursor-pointer");
+
+    nodeSel
+      .append("rect")
+      .attr("class", "node-hit-target")
+      .attr("x", -22)
+      .attr("y", -22)
+      .attr("width", 44)
+      .attr("height", 44)
+      .attr("fill", "transparent")
+      .attr("pointer-events", "all")
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        onNodeClick?.(d);
+      });
+
+    nodeSel
+      .append("path")
+      .attr("class", "node-glyph")
+      .attr("pointer-events", "none")
       .attr("d", (d) => nodeShape(resolveKindFromPath(d.path)).d)
       .attr("fill", (d) => {
         const k = resolveKindFromPath(d.path);
@@ -150,11 +170,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("stroke", (d) => kindColorVar(resolveKindFromPath(d.path)))
       .attr("stroke-width", (d) =>
         nodeShape(resolveKindFromPath(d.path)).filled ? 0 : 1.5,
-      )
-      .on("click", (event, d) => {
-        event.stopPropagation();
-        onNodeClick?.(d);
-      });
+      );
 
     // Labels
     const labelSel = gSel
@@ -163,11 +179,12 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .join("text")
       .text((d) => d.title || d.path)
       .attr("class", "cl-mono fill-muted-foreground text-[9px]")
+      .attr("pointer-events", "none")
       .attr("dx", 10)
       .attr("dy", 4);
 
     // Drag
-    const dragBehavior = drag<SVGPathElement, SimNode>()
+    const dragBehavior = drag<SVGGElement, SimNode>()
       .on("start", (event, d) => {
         if (!event.active) sim.alphaTarget(0.3).restart();
         d.fx = event.x as number | null;

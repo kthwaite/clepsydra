@@ -46,9 +46,13 @@ function renderGazetteer(overrides: Partial<React.ComponentProps<typeof MobileGa
     rows,
     tags,
     totalCount: 2,
+    filteredCount: 2,
+    page: 1,
+    pageCount: 1,
     onQueryChange: vi.fn(),
     onSelectedTagsChange: vi.fn(),
     onSortChange: vi.fn(),
+    onPageChange: vi.fn(),
     onOpen: vi.fn(),
     ...overrides,
   };

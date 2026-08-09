@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useGraph } from "#/api/index";
 import type { GraphNode } from "#/api/types";
 import { ASCII_COMPASS } from "#/components/codex/ascii";
@@ -8,6 +8,7 @@ import { ForceGraph } from "#/components/ForceGraph";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { type Kind, kindColorVar } from "#/lib/kind";
+import { useConstellationStore } from "#/store/constellation";
 import { useWorkspaceStore } from "#/store/workspace";
 
 export function Constellation() {
@@ -15,10 +16,18 @@ export function Constellation() {
   const openTab = useOpenTab();
   const isMobile = useMobileLayout();
 
-  const [orphansVisible, setOrphansVisible] = useState(true);
-  const [hideDaily, setHideDaily] = useState(false);
-  const [depth, setDepth] = useState<number | null>(null);
-  const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
+  const {
+    selectedAnchorId,
+    depth,
+    hideDaily,
+    orphansVisible,
+    mode,
+    setSelectedAnchorId,
+    setDepth,
+    setHideDaily,
+    setOrphansVisible,
+    setMode,
+  } = useConstellationStore();
 
   const activeTabId2 = useWorkspaceStore((s) => s.activeTabId);
   const wsTabs = useWorkspaceStore((s) => s.tabs);
@@ -63,10 +72,12 @@ export function Constellation() {
     return (
       <MobileConstellation
         graph={graph}
+        mode={mode}
         anchorId={anchorId}
         depth={depth === 2 ? 2 : 1}
         hideDaily={hideDaily}
         orphansVisible={orphansVisible}
+        onModeChange={setMode}
         onAnchorChange={setSelectedAnchorId}
         onDepthChange={(nextDepth) => setDepth(nextDepth)}
         onHideDailyChange={setHideDaily}
@@ -191,7 +202,7 @@ export function Constellation() {
           </label>
           <div style={{ marginTop: 4 }}>
             depth ·{" "}
-            {[1, 2, null].map((d) => (
+            {([1, 2, null] as const).map((d) => (
               <button
                 key={String(d)}
                 type="button"

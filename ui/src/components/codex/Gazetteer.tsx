@@ -35,6 +35,8 @@ export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
+export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
+
 type Props = {
   initialTag?: string;
 };
@@ -44,10 +46,12 @@ export function Gazetteer({ initialTag }: Props) {
     query,
     selectedTags,
     sort,
+    page,
     enter,
     setQuery,
     setSelectedTags,
     setSort,
+    setPage,
   } = useGazetteerStore();
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [failures, setFailures] = useState<[string, string][]>([]);
@@ -74,6 +78,20 @@ export function Gazetteer({ initialTag }: Props) {
     () => filterAndSortRows(items, { tags: selectedTags, query, sort }),
     [items, selectedTags, query, sort],
   );
+
+  const pageCount = Math.max(
+    1,
+    Math.ceil(rows.length / MOBILE_GAZETTEER_PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, pageCount);
+  const mobileRows = useMemo(() => {
+    const start = (currentPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE;
+    return rows.slice(start, start + MOBILE_GAZETTEER_PAGE_SIZE);
+  }, [currentPage, rows]);
+
+  useLayoutEffect(() => {
+    if (currentPage !== page) setPage(currentPage);
+  }, [currentPage, page, setPage]);
 
   const selected = [...selectedPaths];
 
@@ -138,12 +156,16 @@ export function Gazetteer({ initialTag }: Props) {
         query={query}
         selectedTags={selectedTags}
         sort={sort}
-        rows={rows}
+        rows={mobileRows}
         tags={tags}
         totalCount={items.length}
+        filteredCount={rows.length}
+        page={currentPage}
+        pageCount={pageCount}
         onQueryChange={setQuery}
         onSelectedTagsChange={setSelectedTags}
         onSortChange={setSort}
+        onPageChange={setPage}
         onOpen={(path, title) => openTab("page", path, title)}
       />
     );

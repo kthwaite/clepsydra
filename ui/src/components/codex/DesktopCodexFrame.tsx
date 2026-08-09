@@ -1,7 +1,7 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useStats } from "#/api/index";
-import type { CodexFrameProps } from "#/components/codex/CodexFrame";
+import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { Sheaf } from "#/components/codex/Sheaf";
@@ -29,9 +29,11 @@ const NAV: ReadonlyArray<readonly [CodexView, string]> = [
   ["docs", "DOCS"],
 ];
 
-export function DesktopCodexFrame({ children, forceView }: CodexFrameProps) {
+export function DesktopCodexFrame({
+  forceView,
+  pathname,
+}: CodexFrameChromeProps) {
   const { progress } = useReadingProgress();
-  const location = useLocation();
   const navigate = useNavigate();
   const openSearch = useUiStore((s) => s.openSearch);
   const openSettings = useUiStore((s) => s.openSettings);
@@ -44,7 +46,7 @@ export function DesktopCodexFrame({ children, forceView }: CodexFrameProps) {
 
   const view =
     forceView ??
-    resolveCodexView(location.pathname, workspaceTabs, activeTabId);
+    resolveCodexView(pathname, workspaceTabs, activeTabId);
 
   const onNav = (target: CodexView) => {
     if (target === "atrium") navigate({ to: "/" });
@@ -82,9 +84,9 @@ export function DesktopCodexFrame({ children, forceView }: CodexFrameProps) {
       : "var(--hot)";
 
   return (
-    <div className="cl-root cl-paper flex h-screen w-screen flex-col overflow-hidden">
+    <>
       {/* ── HEADER RAIL ─────────────────────────────────────────────── */}
-      <header className="flex flex-shrink-0 items-stretch border-b border-rule text-[11px] h-8">
+      <header className="order-0 flex h-8 flex-shrink-0 items-stretch border-b border-rule text-[11px]">
         <button
           type="button"
           onClick={() => navigate({ to: "/" })}
@@ -168,20 +170,12 @@ export function DesktopCodexFrame({ children, forceView }: CodexFrameProps) {
       {/* ── SHEAF — hidden on ATRIUM, CONSTELLATION, and DOCS ──────── */}
       {view !== "atrium" &&
         view !== "constellation" &&
-        view !== "docs" && <Sheaf activeTabId={activeTabId} />}
-
-      {/* Reading progress now renders as a per-heading tick rail inside the
-          FOLIO prose gutter (see Folio.tsx). The footer keeps the % readout. */}
-
-      {/* ── WORKSPACE ───────────────────────────────────────────────── */}
-      <main className="cl-noscroll relative flex-1 overflow-auto">
-        <div key={location.pathname} className="view-anim h-full">
-          {children}
-        </div>
-      </main>
+        view !== "docs" && (
+          <Sheaf activeTabId={activeTabId} className="order-1" />
+        )}
 
       {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
-      <footer className="cl-mono flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
+      <footer className="cl-mono order-3 flex flex-shrink-0 items-center border-t border-rule bg-bar-bg text-[10px] text-bar-fg">
         {diegetic && (
           <span className="flex items-center gap-1.5 border-r border-bar-rule px-3 py-[2px]">
             <span
@@ -217,7 +211,7 @@ export function DesktopCodexFrame({ children, forceView }: CodexFrameProps) {
         <UptimeText />
         <UtcClockText />
       </footer>
-    </div>
+    </>
   );
 }
 

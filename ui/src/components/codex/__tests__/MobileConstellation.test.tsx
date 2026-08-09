@@ -37,6 +37,7 @@ function Harness({
   onOpen?: (node: GraphNode) => void;
 }) {
   const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [mode, setMode] = useState<"graph" | "list">("graph");
   const [depth, setDepth] = useState<1 | 2>(1);
   const [hideDaily, setHideDaily] = useState(false);
   const [orphansVisible, setOrphansVisible] = useState(true);
@@ -44,10 +45,12 @@ function Harness({
   return (
     <MobileConstellation
       graph={sourceGraph}
+      mode={mode}
       anchorId={anchorId}
       depth={depth}
       hideDaily={hideDaily}
       orphansVisible={orphansVisible}
+      onModeChange={setMode}
       onAnchorChange={setAnchorId}
       onDepthChange={setDepth}
       onHideDailyChange={setHideDaily}
@@ -139,6 +142,38 @@ describe("MobileConstellation", () => {
         screen.getByRole("list", { name: "Visible constellation pages" }),
       ).getAllByRole("listitem"),
     ).toHaveLength(MOBILE_GRAPH_DENSITY_THRESHOLD + 1);
+  });
+
+  it("bases the dense anchor prompt on filtered visible nodes", async () => {
+    const user = userEvent.setup();
+    const filteredDenseGraph: Graph = {
+      nodes: [
+        { id: "note-a", path: "notes/a.md", title: "A" },
+        { id: "note-b", path: "notes/b.md", title: "B" },
+        ...Array.from(
+          { length: MOBILE_GRAPH_DENSITY_THRESHOLD - 1 },
+          (_, index) => ({
+            id: `daily-${index}`,
+            path: `journals/2026-07-${String(index + 1).padStart(2, "0")}.md`,
+            title: `Daily ${index + 1}`,
+          }),
+        ),
+      ],
+      edges: [{ source: "note-a", target: "note-b", kind: "wikilink" }],
+    };
+    render(<Harness sourceGraph={filteredDenseGraph} />);
+
+    expect(
+      screen.getByText(/select an anchor to plot this constellation/i),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("switch", { name: "Hide journals" }));
+
+    const chart = await screen.findByRole("img", {
+      name: "Constellation graph",
+    });
+    expect(chart).toBeVisible();
+    expect(await graphTitles()).toEqual(["A", "B"]);
   });
 
   it("presents hubs and orphans in an accessible dismissable sheet", async () => {

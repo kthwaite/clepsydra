@@ -1,3 +1,4 @@
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useBacklinks, useOutlinks, useSimilar } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
@@ -48,6 +49,8 @@ const NoteProtectionDialog = lazy(() =>
 
 export function Folio({ tabId, path }: FolioProps) {
   const mobile = useMobileLayout();
+  const navigate = useNavigate();
+  const router = useRouter();
   const isTodayDraftPath = path === todayJournalPath();
   const { data: journalToday, isLoading: isJournalTodayLoading } =
     useJournalToday(isTodayDraftPath);
@@ -58,6 +61,21 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const onMobileBack = () => {
+    if (!router.history.canGoBack()) {
+      void navigate({ to: "/" });
+      return;
+    }
+
+    const originTabId = router.history.location.state.folioOriginTabId;
+    if (originTabId) {
+      const workspace = useWorkspaceStore.getState();
+      if (workspace.tabs.some((tab) => tab.id === originTabId)) {
+        workspace.activateTab(originTabId);
+      }
+    }
+    router.history.back();
+  };
   useEffect(() => {
     if (
       isTodayDraftPath &&
@@ -514,7 +532,7 @@ export function Folio({ tabId, path }: FolioProps) {
           }
           relationships={relationships}
           contents={contents}
-          onBack={() => closeTab(tabId)}
+          onBack={onMobileBack}
         />
         {protection}
       </>

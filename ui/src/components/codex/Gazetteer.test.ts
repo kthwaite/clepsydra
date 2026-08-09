@@ -5,30 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { Gazetteer, toggleInSet } from "./Gazetteer";
 
-const { openTabMock, routeBridge } = vi.hoisted(() => ({
+const { contentState, openTabMock, routeBridge } = vi.hoisted(() => ({
+  contentState: { items: [] as Array<Record<string, unknown>> },
   openTabMock: vi.fn(),
   routeBridge: { openWorkspace: undefined as (() => void) | undefined },
 }));
 
 vi.mock("#/api/index", () => ({
   useContentIndex: () => ({
-    data: {
-      items: [
-        {
-          created_at: "2026-08-01T12:00:00Z",
-          description: "First note",
-          inferred: false,
-          kind: "NOTE",
-          links: [],
-          path: "notes/alpha.md",
-          project: "Atlas",
-          tags: ["research"],
-          title: "Alpha",
-          updated_at: "2026-08-08T12:00:00Z",
-          word_count: 321,
-        },
-      ],
-    },
+    data: contentState,
   }),
   useTags: () => ({ data: [{ tag: "research", count: 1 }] }),
 }));
@@ -57,13 +42,35 @@ function GazetteerNavigationHarness() {
       );
 }
 
+function makeContentEntry(index: number) {
+  const number = index + 1;
+  const alpha = index === 0;
+  return {
+    created_at: "2026-08-01T12:00:00Z",
+    description: alpha ? "First note" : `Note ${number}`,
+    inferred: false,
+    kind: "NOTE",
+    links: [],
+    path: alpha ? "notes/alpha.md" : `notes/page-${number}.md`,
+    project: alpha ? "Atlas" : null,
+    tags: alpha ? ["research"] : [],
+    title: alpha ? "Alpha" : `Page ${number}`,
+    updated_at: "2026-08-08T12:00:00Z",
+    word_count: 300 + number,
+  };
+}
+
 beforeEach(() => {
   openTabMock.mockClear();
   routeBridge.openWorkspace = undefined;
+  contentState.items = Array.from({ length: 25 }, (_, index) =>
+    makeContentEntry(index),
+  );
   useGazetteerStore.setState({
     query: "",
     selectedTags: [],
     sort: "ts",
+    page: 1,
     routeTag: undefined,
   });
 });
@@ -130,5 +137,67 @@ describe("Gazetteer controller", () => {
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
+  });
+
+  it("paginates mobile rows accessibly, persists the page through Folio navigation, and resets when filters reduce results", async () => {
+    const user = userEvent.setup();
+    render(createElement(GazetteerNavigationHarness));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Page 1 of 2 · 25 matches",
+    );
+    expect(
+      within(screen.getByRole("list", { name: "Vault pages" })).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(20);
+    expect(
+      screen.getByRole("button", { name: "Previous page" }),
+    ).toHaveClass("min-h-11", "min-w-11");
+    expect(screen.getByRole("button", { name: "Next page" })).toHaveClass(
+      "min-h-11",
+      "min-w-11",
+    );
+    expect(
+      screen.getByRole("button", { name: "Previous page" }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Page 2 of 2 · 25 matches",
+    );
+    expect(
+      within(screen.getByRole("list", { name: "Vault pages" })).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(5);
+
+    await user.click(screen.getByRole("button", { name: "Open Page 21" }));
+    await user.click(
+      screen.getByRole("button", { name: "Return to Gazetteer" }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Page 2 of 2 · 25 matches",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.type(
+      within(
+        screen.getByRole("dialog", { name: "Gazetteer filters" }),
+      ).getByRole("searchbox", { name: "Search pages" }),
+      "Alpha",
+    );
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "Gazetteer filters" }),
+      ).getByRole("button", { name: "Close filters" }),
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Page 1 of 1 · 1 match",
+    );
+    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open Alpha" })).toBeVisible();
   });
 });

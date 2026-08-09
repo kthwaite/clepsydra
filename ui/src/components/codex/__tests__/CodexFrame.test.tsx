@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +99,47 @@ function renderFrame(forceView?: "folio") {
     <CodexFrame {...(forceView ? { forceView } : {})}>
       <section>Frame content</section>
     </CodexFrame>,
+  );
+}
+
+function StatefulRouteProbe({
+  onMount,
+  onUnmount,
+  persistDraft,
+}: {
+  onMount: () => void;
+  onUnmount: () => void;
+  persistDraft: (draft: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  useEffect(() => {
+    onMount();
+    return () => {
+      onUnmount();
+      void persistDraft(draftRef.current).catch(() => undefined);
+    };
+  }, [onMount, onUnmount, persistDraft]);
+
+  return (
+    <>
+      <label>
+        Draft
+        <input
+          aria-label="Routed draft"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        onClick={() => void persistDraft(draft).catch(() => undefined)}
+      >
+        Attempt draft save
+      </button>
+    </>
   );
 }
 
@@ -250,5 +292,57 @@ describe("CodexFrame responsive shell", () => {
     expect(workspaceState.openTab.mock.invocationCallOrder[0]).toBeLessThan(
       navigateMock.mock.invocationCallOrder[0],
     );
+  });
+
+  it("preserves the routed child instance and local state across desktop/mobile breakpoint changes", async () => {
+    const user = userEvent.setup();
+    const onMount = vi.fn();
+    const onUnmount = vi.fn();
+    const persistDraft = vi.fn().mockRejectedValue(new Error("offline"));
+    const child = (
+      <StatefulRouteProbe
+        onMount={onMount}
+        onUnmount={onUnmount}
+        persistDraft={persistDraft}
+      />
+    );
+    const { rerender } = render(<CodexFrame>{child}</CodexFrame>);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Routed draft" }),
+      "unsaved",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Attempt draft save" }),
+    );
+    expect(persistDraft).toHaveBeenCalledOnce();
+    expect(persistDraft).toHaveBeenCalledWith("unsaved");
+    expect(onMount).toHaveBeenCalledOnce();
+    expect(onUnmount).not.toHaveBeenCalled();
+
+    mobileLayoutState.matches = true;
+    rerender(<CodexFrame>{child}</CodexFrame>);
+
+    expect(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Routed draft" })).toHaveValue(
+      "unsaved",
+    );
+    expect(onMount).toHaveBeenCalledOnce();
+    expect(onUnmount).not.toHaveBeenCalled();
+    expect(persistDraft).toHaveBeenCalledOnce();
+
+    mobileLayoutState.matches = false;
+    rerender(<CodexFrame>{child}</CodexFrame>);
+
+    expect(
+      screen.getByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Routed draft" })).toHaveValue(
+      "unsaved",
+    );
+    expect(onMount).toHaveBeenCalledOnce();
+    expect(onUnmount).not.toHaveBeenCalled();
   });
 });

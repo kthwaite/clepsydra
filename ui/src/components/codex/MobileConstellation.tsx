@@ -9,19 +9,21 @@ import {
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { ForceGraph } from "#/components/ForceGraph";
 import { Button } from "#/components/ui/button";
+import type { ConstellationViewMode } from "#/store/constellation";
 import { applyFilters } from "./constellation-filters";
 
 export const MOBILE_GRAPH_DENSITY_THRESHOLD = 18;
 
 type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
-type ViewMode = "graph" | "list";
 
 export interface MobileConstellationProps {
   graph: Graph;
+  mode: ConstellationViewMode;
   anchorId: string | null;
   depth: 1 | 2;
   hideDaily: boolean;
   orphansVisible: boolean;
+  onModeChange: (mode: ConstellationViewMode) => void;
   onAnchorChange: (anchorId: string | null) => void;
   onDepthChange: (depth: 1 | 2) => void;
   onHideDailyChange: (hidden: boolean) => void;
@@ -56,17 +58,18 @@ function countDegrees(edges: GraphEdge[]): Map<string, number> {
 
 export function MobileConstellation({
   graph,
+  mode,
   anchorId,
   depth,
   hideDaily,
   orphansVisible,
+  onModeChange,
   onAnchorChange,
   onDepthChange,
   onHideDailyChange,
   onOrphansVisibleChange,
   onOpen,
 }: MobileConstellationProps) {
-  const [mode, setMode] = useState<ViewMode>("graph");
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const anchorOptions = useMemo(
@@ -105,7 +108,8 @@ export function MobileConstellation({
   }, [visibleGraph.edges, visibleGraph.nodes]);
 
   const needsAnchor =
-    anchorId === null && graph.nodes.length > MOBILE_GRAPH_DENSITY_THRESHOLD;
+    anchorId === null &&
+    visibleGraph.nodes.length > MOBILE_GRAPH_DENSITY_THRESHOLD;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-paper text-ink">
@@ -189,7 +193,7 @@ export function MobileConstellation({
             aria-pressed={mode === "graph"}
             className="min-h-11"
             variant={mode === "graph" ? "primary" : "secondary"}
-            onPress={() => setMode("graph")}
+            onPress={() => onModeChange("graph")}
           >
             Graph
           </Button>
@@ -198,7 +202,7 @@ export function MobileConstellation({
             aria-pressed={mode === "list"}
             className="min-h-11"
             variant={mode === "list" ? "primary" : "secondary"}
-            onPress={() => setMode("list")}
+            onPress={() => onModeChange("list")}
           >
             List
           </Button>

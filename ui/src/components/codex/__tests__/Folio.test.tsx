@@ -8,11 +8,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
 const {
   mobileLayoutState,
+  navigateMock,
+  routerHistory,
   useCollapsibleRailMock,
   usePageEditorMock,
   useScrollSpyMock,
 } = vi.hoisted(() => ({
   mobileLayoutState: { matches: false },
+  navigateMock: vi.fn(),
+  routerHistory: {
+    back: vi.fn(),
+    canGoBack: vi.fn(() => false),
+    location: { state: { __TSR_index: 0 } as Record<string, unknown> },
+  },
   useCollapsibleRailMock: vi.fn(() => ({
     collapsed: false,
     width: 240,
@@ -24,6 +32,10 @@ const {
     activeIndex: -1,
     scrollTo: vi.fn(),
   })),
+}));
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => navigateMock,
+  useRouter: () => ({ history: routerHistory }),
 }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
