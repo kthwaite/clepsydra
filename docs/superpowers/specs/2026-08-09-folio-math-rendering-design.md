@@ -37,7 +37,7 @@ Parsing invariants:
 - The TeX body and original delimiter style are retained independently. Saving an unchanged expression emits the delimiter style it was authored with.
 - The parser does not rewrite existing notes from backslash delimiters to dollar delimiters or vice versa.
 
-`remark-math` supplies dollar-delimited mdast math nodes. A focused micromark/mdast extension adds `\(…\)` and `\[…\]` as source-preserving forms. A regular-expression preprocessing pass is rejected because it would mis-handle code spans, escaped input, and Markdown nested inside expressions, and it could not safely preserve source positions or delimiter style.
+`micromark-extension-math-extended` supplies syntax-aware tokens for all four delimiter forms. A local remark plugin pairs that syntax extension with `mdast-util-math`, records the original delimiter family from each positioned source span, and installs matching source-preserving Markdown handlers. The same plugin is shared by Folio conversion and both read-only renderers. A regular-expression preprocessing pass is rejected because it would mis-handle code spans, escaped input, and Markdown nested inside expressions, and it could not safely preserve source positions or delimiter style.
 
 ## Slate model
 
