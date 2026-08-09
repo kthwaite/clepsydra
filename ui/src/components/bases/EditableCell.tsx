@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { cn } from "#/lib/cn";
 import { CELL_EDITORS } from "./cells/registry";
@@ -7,7 +6,11 @@ import { type CellValue, formatCellValue } from "./cells/types";
 interface EditableCellProps {
   value: CellValue;
   definition: PropertyDefinition;
+  isEditing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
   onCommit: (value: CellValue, hint?: PropertyType) => void;
+  onCommitNext: (value: CellValue, hint?: PropertyType) => void;
 }
 
 /**
@@ -18,21 +21,22 @@ interface EditableCellProps {
 export function EditableCell({
   value,
   definition,
+  isEditing,
+  onEdit,
+  onCancel,
   onCommit,
+  onCommitNext,
 }: EditableCellProps) {
-  const [editing, setEditing] = useState(false);
   const Editor = CELL_EDITORS[definition.type];
 
-  if (editing) {
+  if (isEditing) {
     return (
       <Editor
         value={value}
         definition={definition}
-        onCommit={(next, hint) => {
-          setEditing(false);
-          onCommit(next, hint);
-        }}
-        onCancel={() => setEditing(false)}
+        onCommit={onCommit}
+        onCommitNext={onCommitNext}
+        onCancel={onCancel}
       />
     );
   }
@@ -46,7 +50,7 @@ export function EditableCell({
         text === "" ? "text-ink-mute" : "text-ink-2",
         "hover:border-rule focus-visible:border-accent focus-visible:outline-none",
       )}
-      onClick={() => setEditing(true)}
+      onClick={onEdit}
     >
       {text === "" ? "—" : text}
     </button>

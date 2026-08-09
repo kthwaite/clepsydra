@@ -4,6 +4,7 @@ export function SelectCell({
   value,
   definition,
   onCommit,
+  onCommitNext,
   onCancel,
 }: CellEditorProps) {
   const current = typeof value === "string" ? value : "";
@@ -20,6 +21,12 @@ export function SelectCell({
       }}
       onBlur={onCancel}
       onKeyDown={(e) => {
+        if (e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          onCommitNext(current === "" ? null : current);
+          return;
+        }
         if (e.key === "Escape") onCancel();
       }}
     >

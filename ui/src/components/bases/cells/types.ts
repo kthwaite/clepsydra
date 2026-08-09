@@ -19,6 +19,8 @@ export interface CellEditorProps {
    * declared type when the wire value needs disambiguation (dates).
    */
   onCommit: (value: CellValue, hint?: PropertyType) => void;
+  /** Commit the edited value and advance to the next editable cell. */
+  onCommitNext: (value: CellValue, hint?: PropertyType) => void;
   /** Abandon the edit, reverting to the display state. */
   onCancel: () => void;
 }

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
   Cell,
   Column,
@@ -42,6 +43,11 @@ interface BaseTableViewProps {
     hint?: PropertyType,
   ) => void;
   readOnly?: boolean;
+}
+
+interface ActiveCell {
+  rowId: string;
+  column: string;
 }
 
 /**
@@ -106,6 +112,34 @@ export function BaseTableView({
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
   const properties = definition.properties ?? EMPTY_PROPERTIES;
+  const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
+  const editableColumns = columns.filter(
+    (column) =>
+      SYSTEM_COLUMNS[column] === undefined && properties[column] !== undefined,
+  );
+  const nextEditableColumn = (column: string): string | undefined => {
+    const index = editableColumns.indexOf(column);
+    return index < 0 ? undefined : editableColumns[index + 1];
+  };
+  const activeRowId = activeCell?.rowId;
+  const activeCellIsRendered =
+    activeCell !== null &&
+    !readOnly &&
+    !viewError &&
+    !viewLoading &&
+    editableColumns.includes(activeCell.column) &&
+    (output?.shape === "flat"
+      ? output.rows.some((row) => String(row.id) === activeRowId)
+      : output?.shape === "grouped" &&
+        output.groups.some((group) =>
+          group.rows.some((row) => String(row.id) === activeRowId),
+        ));
+
+  useEffect(() => {
+    if (activeCell && !activeCellIsRendered) {
+      setActiveCell(null);
+    }
+  }, [activeCell, activeCellIsRendered]);
 
   const sortDescriptor = sortOverride.sort
     ? {
@@ -193,9 +227,27 @@ export function BaseTableView({
                       (row.columns as Record<string, CellValue>)[column] ?? null
                     }
                     definition={properties[column]}
-                    onCommit={(value, hint) =>
-                      onCommitCell(row, column, value, hint)
+                    isEditing={
+                      activeCell?.rowId === String(row.id) &&
+                      activeCell.column === column
                     }
+                    onEdit={() =>
+                      setActiveCell({ rowId: String(row.id), column })
+                    }
+                    onCancel={() => setActiveCell(null)}
+                    onCommit={(value, hint) => {
+                      setActiveCell(null);
+                      onCommitCell(row, column, value, hint);
+                    }}
+                    onCommitNext={(value, hint) => {
+                      onCommitCell(row, column, value, hint);
+                      const nextColumn = nextEditableColumn(column);
+                      setActiveCell(
+                        nextColumn
+                          ? { rowId: String(row.id), column: nextColumn }
+                          : null,
+                      );
+                    }}
                   />
                 ) : (
                   // System fields and undeclared keys are read-only.

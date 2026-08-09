@@ -19,19 +19,20 @@ export function DateTimeCell({
   value,
   definition,
   onCommit,
+  onCommitNext,
   onCancel,
 }: CellEditorProps) {
   const initial = typeof value === "string" ? splitIso(value) : null;
   const [draft, setDraft] = useState(initial?.local ?? "");
   const suffix = initial?.suffix ?? "";
 
-  const commit = () => {
+  const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
     if (draft === "") {
-      onCommit(null);
+      submit(null);
       return;
     }
     // Reattach the value's original zone suffix (none for local date-times).
-    onCommit(`${draft}${suffix}`, definition.type);
+    submit(`${draft}${suffix}`, definition.type);
   };
 
   return (
@@ -45,6 +46,12 @@ export function DateTimeCell({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={onCancel}
       onKeyDown={(e) => {
+        if (e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          commit(onCommitNext);
+          return;
+        }
         if (e.key === "Enter") commit();
         if (e.key === "Escape") onCancel();
       }}
