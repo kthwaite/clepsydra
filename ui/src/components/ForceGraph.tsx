@@ -10,7 +10,7 @@ import {
 } from "d3-force";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity } from "d3-zoom";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
 
@@ -42,17 +42,49 @@ interface ForceGraphProps {
 }
 
 export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef({ width: 0, height: 0 });
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
   const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateViewport = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      viewportRef.current = { width, height };
+      setViewport((current) =>
+        current.width === width && current.height === height
+          ? current
+          : { width, height },
+      );
+    };
+
+    const bounds = container.getBoundingClientRect();
+    updateViewport(bounds.width, bounds.height);
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      updateViewport(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const initGraph = useCallback(() => {
     const svg = svgRef.current;
     const g = gRef.current;
     if (!svg || !g) return undefined;
 
-    const width = svg.clientWidth;
-    const height = svg.clientHeight;
+    const bounds = containerRef.current?.getBoundingClientRect();
+    const width =
+      viewportRef.current.width || bounds?.width || svg.clientWidth || 1;
+    const height =
+      viewportRef.current.height || bounds?.height || svg.clientHeight || 1;
 
     // Build simulation data (copies to avoid mutating props)
     const simNodes: SimNode[] = nodes.map((n) => ({ ...n }));
@@ -89,6 +121,13 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .scaleExtent([0.1, 4])
       .on("zoom", (event) => {
         gSel.attr("transform", event.transform);
+        const targetSize = 44 / event.transform.k;
+        gSel
+          .selectAll<SVGRectElement, SimNode>(".node-hit-target")
+          .attr("x", -targetSize / 2)
+          .attr("y", -targetSize / 2)
+          .attr("width", targetSize)
+          .attr("height", targetSize);
       });
     svgSel.call(zoomBehavior).call(zoomBehavior.transform, zoomIdentity);
 
@@ -104,12 +143,32 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("stroke-width", 1)
       .attr("stroke-opacity", 0.3);
 
-    // Nodes — kind-shaped, kind-coloured
+    // Nodes — a transparent 44×44 interaction surface owns click/drag while
+    // the visible kind glyph remains pointer-transparent.
     const nodeSel = gSel
-      .selectAll<SVGPathElement, SimNode>("path.node")
+      .selectAll<SVGGElement, SimNode>("g.node")
       .data(simNodes)
-      .join("path")
-      .attr("class", "node cursor-pointer")
+      .join("g")
+      .attr("class", "node cursor-pointer");
+
+    nodeSel
+      .append("rect")
+      .attr("class", "node-hit-target")
+      .attr("x", -22)
+      .attr("y", -22)
+      .attr("width", 44)
+      .attr("height", 44)
+      .attr("fill", "transparent")
+      .attr("pointer-events", "all")
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        onNodeClick?.(d);
+      });
+
+    nodeSel
+      .append("path")
+      .attr("class", "node-glyph")
+      .attr("pointer-events", "none")
       .attr("d", (d) => nodeShape(resolveKindFromPath(d.path)).d)
       .attr("fill", (d) => {
         const k = resolveKindFromPath(d.path);
@@ -118,8 +177,7 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("stroke", (d) => kindColorVar(resolveKindFromPath(d.path)))
       .attr("stroke-width", (d) =>
         nodeShape(resolveKindFromPath(d.path)).filled ? 0 : 1.5,
-      )
-      .on("click", (_event, d) => onNodeClick?.(d));
+      );
 
     // Labels
     const labelSel = gSel
@@ -128,11 +186,12 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .join("text")
       .text((d) => d.title || d.path)
       .attr("class", "cl-mono fill-muted-foreground text-[9px]")
+      .attr("pointer-events", "none")
       .attr("dx", 10)
       .attr("dy", 4);
 
     // Drag
-    const dragBehavior = drag<SVGPathElement, SimNode>()
+    const dragBehavior = drag<SVGGElement, SimNode>()
       .on("start", (event, d) => {
         if (!event.active) sim.alphaTarget(0.3).restart();
         d.fx = event.x as number | null;
@@ -170,9 +229,34 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
     return initGraph();
   }, [initGraph]);
 
+  useEffect(() => {
+    if (viewport.width <= 0 || viewport.height <= 0) return;
+    const simulation = simRef.current;
+    if (!simulation) return;
+    simulation.force(
+      "center",
+      forceCenter(viewport.width / 2, viewport.height / 2),
+    );
+    simulation.alpha(0.3).restart();
+  }, [viewport.height, viewport.width]);
+
+  const viewBoxWidth = Math.max(viewport.width, 1);
+  const viewBoxHeight = Math.max(viewport.height, 1);
+
   return (
-    <svg ref={svgRef} className="h-full w-full bg-background">
-      <g ref={gRef} />
-    </svg>
+    <div
+      ref={containerRef}
+      className="h-full w-full overflow-hidden bg-background"
+    >
+      <svg
+        ref={svgRef}
+        role="img"
+        aria-label="Constellation graph"
+        className="block h-full w-full touch-none bg-background"
+        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+      >
+        <g ref={gRef} />
+      </svg>
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback } from "react";
+import { DesktopOnlyRoute } from "#/components/codex/DesktopOnlyRoute";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
@@ -41,7 +42,9 @@ function TaskingRoute() {
   );
 
   return (
-    <TaskingScreen onOpenPage={onOpenPage} onOpenDossier={onOpenDossier} />
+    <DesktopOnlyRoute name="Tasking">
+      <TaskingScreen onOpenPage={onOpenPage} onOpenDossier={onOpenDossier} />
+    </DesktopOnlyRoute>
   );
 }
 

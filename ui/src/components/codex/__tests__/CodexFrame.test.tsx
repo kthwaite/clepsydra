@@ -1,11 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { useEffect, useRef, useState } from "react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   locationState,
   locationHookMock,
+  mobileLayoutState,
   navigateMock,
+  openInscribeMock,
   openSearchMock,
   openSettingsMock,
   toggleThemeMock,
@@ -13,7 +16,9 @@ const {
 } = vi.hoisted(() => ({
   locationState: { pathname: "/docs/getting-started" },
   locationHookMock: vi.fn(),
+  mobileLayoutState: { matches: false },
   navigateMock: vi.fn(),
+  openInscribeMock: vi.fn(),
   openSearchMock: vi.fn(),
   openSettingsMock: vi.fn(),
   toggleThemeMock: vi.fn(),
@@ -61,15 +66,20 @@ vi.mock("#/hooks/useUptime", () => ({
 vi.mock("#/hooks/useVaultEvents", () => ({
   useVaultEvents: () => "connected",
 }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => mobileLayoutState.matches,
+}));
 vi.mock("#/store/ui", () => ({
   useUiStore: (
     selector: (state: {
+      openInscribe: () => void;
       openSearch: () => void;
       openSettings: () => void;
       isSettingsOpen: boolean;
     }) => unknown,
   ) =>
     selector({
+      openInscribe: openInscribeMock,
       openSearch: openSearchMock,
       openSettings: openSettingsMock,
       isSettingsOpen: false,
@@ -92,9 +102,51 @@ function renderFrame(forceView?: "folio") {
   );
 }
 
+function StatefulRouteProbe({
+  onMount,
+  onUnmount,
+  persistDraft,
+}: {
+  onMount: () => void;
+  onUnmount: () => void;
+  persistDraft: (draft: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  useEffect(() => {
+    onMount();
+    return () => {
+      onUnmount();
+      void persistDraft(draftRef.current).catch(() => undefined);
+    };
+  }, [onMount, onUnmount, persistDraft]);
+
+  return (
+    <>
+      <label>
+        Draft
+        <input
+          aria-label="Routed draft"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        onClick={() => void persistDraft(draft).catch(() => undefined)}
+      >
+        Attempt draft save
+      </button>
+    </>
+  );
+}
+
 describe("CodexFrame Docs integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mobileLayoutState.matches = false;
     locationState.pathname = "/docs/getting-started";
     workspaceState.tabs = [];
     workspaceState.activeTabId = null;
@@ -171,11 +223,151 @@ describe("CodexFrame Docs integration", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-08T12:00:00Z"));
     renderFrame();
-    expect(locationHookMock).toHaveBeenCalledOnce();
+    const callsAfterRender = locationHookMock.mock.calls.length;
+    expect(callsAfterRender).toBeGreaterThan(0);
 
     act(() => vi.advanceTimersByTime(1000));
 
-    expect(locationHookMock).toHaveBeenCalledOnce();
+    expect(locationHookMock).toHaveBeenCalledTimes(callsAfterRender);
     vi.useRealTimers();
+  });
+});
+
+describe("CodexFrame responsive shell", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    locationState.pathname = "/";
+    mobileLayoutState.matches = false;
+    workspaceState.tabs = [];
+    workspaceState.activeTabId = null;
+  });
+
+  it("retains the desktop header and footer", () => {
+    renderFrame();
+
+    expect(
+      screen.getByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+    ).toBeVisible();
+    expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
+    expect(
+      screen.queryByRole("navigation", { name: "Mobile roots" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows only the three roots and global actions in the mobile chrome", () => {
+    mobileLayoutState.matches = true;
+    renderFrame();
+
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    expect(within(roots).getAllByRole("button")).toHaveLength(3);
+    expect(
+      within(roots).getByRole("button", { name: "Atrium" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      within(roots).getByRole("button", { name: "Gazetteer" }),
+    ).toBeVisible();
+    expect(
+      within(roots).getByRole("button", { name: "Constellation" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "New note" })).toBeVisible();
+    expect(screen.queryByText("TASKING")).not.toBeInTheDocument();
+    expect(screen.getByText("Frame content")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["mobile", true],
+    ["desktop", false],
+  ] as const)(
+    "keeps %s bottom chrome after the routed content in DOM order",
+    (_label, mobile) => {
+      mobileLayoutState.matches = mobile;
+      renderFrame();
+
+      const main = document.querySelector("main");
+      const bottomChrome = mobile
+        ? screen.getByRole("navigation", { name: "Mobile roots" })
+        : document.querySelector("footer");
+
+      if (!main || !bottomChrome) {
+        throw new Error("Expected main and responsive bottom chrome");
+      }
+      expect(
+        main.compareDocumentPosition(bottomChrome) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    },
+  );
+
+  it("wires the mobile global actions and Constellation root", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = true;
+    renderFrame();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "New note" }));
+    await user.click(
+      screen.getByRole("button", { name: "Constellation" }),
+    );
+
+    expect(openSearchMock).toHaveBeenCalledOnce();
+    expect(openInscribeMock).toHaveBeenCalledOnce();
+    expect(workspaceState.openTab).toHaveBeenCalledWith("graph");
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/workspace" });
+    expect(workspaceState.openTab.mock.invocationCallOrder[0]).toBeLessThan(
+      navigateMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("preserves the routed child instance and local state across desktop/mobile breakpoint changes", async () => {
+    const user = userEvent.setup();
+    const onMount = vi.fn();
+    const onUnmount = vi.fn();
+    const persistDraft = vi.fn().mockRejectedValue(new Error("offline"));
+    const child = (
+      <StatefulRouteProbe
+        onMount={onMount}
+        onUnmount={onUnmount}
+        persistDraft={persistDraft}
+      />
+    );
+    const { rerender } = render(<CodexFrame>{child}</CodexFrame>);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Routed draft" }),
+      "unsaved",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Attempt draft save" }),
+    );
+    expect(persistDraft).toHaveBeenCalledOnce();
+    expect(persistDraft).toHaveBeenCalledWith("unsaved");
+    expect(onMount).toHaveBeenCalledOnce();
+    expect(onUnmount).not.toHaveBeenCalled();
+
+    mobileLayoutState.matches = true;
+    rerender(<CodexFrame>{child}</CodexFrame>);
+
+    expect(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Routed draft" })).toHaveValue(
+      "unsaved",
+    );
+    expect(onMount).toHaveBeenCalledOnce();
+    expect(onUnmount).not.toHaveBeenCalled();
+    expect(persistDraft).toHaveBeenCalledOnce();
+
+    mobileLayoutState.matches = false;
+    rerender(<CodexFrame>{child}</CodexFrame>);
+
+    expect(
+      screen.getByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Routed draft" })).toHaveValue(
+      "unsaved",
+    );
+    expect(onMount).toHaveBeenCalledOnce();
+    expect(onUnmount).not.toHaveBeenCalled();
   });
 });

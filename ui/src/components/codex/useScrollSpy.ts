@@ -24,8 +24,8 @@ const EMPTY_MAP: TriggerMap = { headingTops: [], triggers: [], maxScroll: 0 };
 /**
  * Tracks the active heading within a scroll container for TOC scrollspy.
  * Heading DOM order matches the TOC entry order (both are document order), so
- * the returned index maps directly onto the TOC list. `recount` is a value to
- * re-run discovery on (e.g. the document revision).
+ * the returned index maps directly onto the TOC list. `recount` re-runs
+ * discovery for content changes, and `reattach` tracks container replacement.
  *
  * Activation positions come from the shared trigger map in `scrollTriggers`,
  * which uplifts otherwise-unreachable triggers near the document end onto the
@@ -35,6 +35,7 @@ const EMPTY_MAP: TriggerMap = { headingTops: [], triggers: [], maxScroll: 0 };
 export function useScrollSpy(
   containerRef: RefObject<HTMLElement | null>,
   recount: unknown,
+  reattach?: unknown,
 ): { activeIndex: number; scrollTo: (index: number) => void } {
   const [activeIndex, setActiveIndex] = useState(0);
   const mapRef = useRef<TriggerMap>(EMPTY_MAP);
@@ -89,7 +90,7 @@ export function useScrollSpy(
       window.removeEventListener("resize", refresh);
       observer?.disconnect();
     };
-  }, [containerRef, remap, recount]);
+  }, [containerRef, remap, recount, reattach]);
 
   const scrollTo = useCallback(
     (index: number) => {

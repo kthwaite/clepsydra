@@ -106,7 +106,7 @@ enum Commands {
     #[command(
         about = "Start the API server",
         long_about = "Start the Clepsydra HTTP API server.\n\nRequires a config file discovered via:\n  1) ./config.toml\n  2) $XDG_CONFIG_HOME/clepsydra/config.toml\n  3) $HOME/.config/clepsydra/config.toml\n\nVault root is read from [vault].root.\n\n--tls and --port override the config file and the CLEPSYDRA__* environment variables, so a second server (HTTPS, spare port) can be started for testing without editing shared config. --tls only ever turns HTTPS on; to serve cleartext, leave it off.",
-        after_help = "Examples:\n  clepsydra serve\n  clepsydra serve --tls                 # HTTPS on the configured port\n  clepsydra serve --tls --port 3443     # HTTPS alongside a plain server\n\nHTTPS uses certs from [server.tls], or generates localhost ones with mkcert.\nTo let the iOS Simulator trust those: scripts/trust-simulator-ca.sh"
+        after_help = "Examples:\n  clepsydra serve\n  clepsydra serve --tls                 # HTTPS on the configured port\n  clepsydra serve --tls --port 3443     # HTTPS alongside a plain server\n\nHTTPS uses certs from [server.tls], or generates localhost ones with mkcert."
     )]
     Serve {
         /// Serve over HTTPS, generating localhost certs with mkcert if needed

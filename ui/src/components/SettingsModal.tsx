@@ -42,10 +42,10 @@ export function SettingsModal() {
         if (!open) closeSettings();
       }}
       isDismissable
-      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/35 p-0 md:items-center md:p-4"
     >
-      <Modal className="flex h-[min(86vh,720px)] w-full max-w-5xl overflow-hidden border border-border bg-background shadow-lg">
-        <Dialog className="flex min-w-0 flex-1 outline-none">
+      <Modal className="flex h-dvh w-full max-w-none overflow-hidden border border-border bg-background shadow-lg md:h-[min(86vh,720px)] md:max-w-5xl">
+        <Dialog className="flex h-full min-w-0 flex-1 outline-none">
           <aside className="flex w-56 flex-col border-r border-border bg-card">
             <div className="border-b border-border px-4 py-3">
               <Heading

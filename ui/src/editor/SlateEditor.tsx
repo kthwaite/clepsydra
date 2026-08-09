@@ -553,7 +553,7 @@ export function SlateEditor({
   };
 
   return (
-    <div className="relative">
+    <div className="relative w-full min-w-0 max-md:[&>div.fixed]:max-w-[calc(100vw-24px)] max-md:[&>div.fixed_[role=option]]:flex max-md:[&>div.fixed_[role=option]]:min-h-11 max-md:[&>div.fixed_[role=option]]:items-center max-md:[&_button]:min-h-11">
       <Slate
         editor={editor}
         initialValue={initialValue}
@@ -568,7 +568,7 @@ export function SlateEditor({
             onDOMBeforeInput={vim.handleDOMBeforeInput}
             onMouseDown={vim.handleMouseDown}
             placeholder="Start writing..."
-            className="min-h-[200px] outline-none"
+            className="min-h-[200px] w-full min-w-0 outline-none"
             spellCheck
           />
           {isVimEnabled && (

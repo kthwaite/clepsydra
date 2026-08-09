@@ -21,12 +21,13 @@ import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type SheafProps = {
   activeTabId: string | null;
+  className?: string;
 };
 
 // Cold-open delay; once a card is showing, scrubbing to another tab is instant.
 const HOVER_DELAY = 220;
 
-export function Sheaf({ activeTabId }: SheafProps) {
+export function Sheaf({ activeTabId, className }: SheafProps) {
   const navigate = useNavigate();
   const tabs = useWorkspaceStore((s) => s.tabs);
   const quires = useWorkspaceStore((s) => s.quires);
@@ -94,7 +95,12 @@ export function Sheaf({ activeTabId }: SheafProps) {
     : null;
 
   return (
-    <div className="cl-mono cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2">
+    <div
+      className={cn(
+        "cl-mono cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2",
+        className,
+      )}
+    >
       <span className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-3 py-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
         § SHEAF
         <span className="text-ink-2">{pageTabs.length}</span>

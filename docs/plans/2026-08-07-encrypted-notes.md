@@ -54,7 +54,6 @@ The body contains no Markdown wrapper or commentary around the armor. One traili
 | Inbound links from plain pages | Normal | Still resolve to clear title/id |
 | Hover preview | Markdown | Locked placeholder in v1 |
 | LSP | Full behavior | Locked diagnostic; no body semantics |
-| iOS v1 | Read/edit | Locked, read-only explanation |
 
 ---
 
@@ -820,10 +819,6 @@ git add src/api src/vault src/lsp tests
 git commit -m "feat: make body consumers encryption-aware"
 ```
 
-### Task 15: Make the iOS client safe before adding native decryption
-
-**Files:**
-- Modify: `ios/Packages/ClepsydraMobileKit/Sources/ClepsydraCore/Models/PageDetail.swift`
 ### Task 15: Verify the responsive web client handles encrypted notes
 
 **Files:**
@@ -836,7 +831,6 @@ git commit -m "feat: make body consumers encryption-aware"
 - [ ] **Step 2: Verify encrypted writes.** After unlock, edits decrypt before presentation and re-encrypt before every body write; ordinary saves never send armored ciphertext as Markdown.
 
 - [ ] **Step 3: Run focused frontend encryption tests.**
-
 Run: `bun --cwd ui test src/editor/__tests__/usePageEditor.encryption.test.tsx`
 
 Expected: PASS.
@@ -869,7 +863,7 @@ git commit -m "test: verify encrypted notes in responsive web"
   - first setup, recovery export, import-key mode, password change;
   - manual/idle lock behavior;
   - loss of meaningful line diffs for encrypted bodies;
-  - no search/outlinks/blocks/LSP/iOS editing in v1;
+  - no search/outlinks/blocks/LSP body semantics in v1;
   - attachments, filenames, metadata, Git history, backups, browser memory, and malicious-client limitations;
   - cache scrub behavior and its storage-device limitations;
   - recovery is impossible if all unlock material is lost.
@@ -930,9 +924,9 @@ Run: `cd ui && bun run knip`
 
 Expected: all PASS; `age-encryption` remains a lazy chunk.
 
-- [ ] **Step 5: Run iOS gates.**
+- [ ] **Step 5: Run responsive browser gates.**
 
-Run: `cd ios/Packages/ClepsydraMobileKit && swift test`
+Run: `bun --cwd ui test src/docs/mdx-smoke.test.tsx src/docs/registry.test.ts src/docs/search.test.ts`
 
 Expected: PASS.
 
@@ -943,7 +937,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit final test adjustments.**
 
 ```bash
-git add tests/e2e_encryption_test.rs ui/src ios/Packages/ClepsydraMobileKit
+git add tests/e2e_encryption_test.rs ui/src
 git commit -m "test: verify encrypted notes end to end"
 ```
 
@@ -951,7 +945,6 @@ git commit -m "test: verify encrypted notes end to end"
 
 ## Explicit follow-ups, not part of v1
 
-- Native iOS age decryption and Keychain-backed identity storage.
 - Passkey/WebAuthn or hardware-security-key wrapping. Do not invoke an authenticator on every autosave; unwrap the vault identity once per session.
 - Multiple recipients, sharing, recipient removal, and key rotation.
 - Encrypted attachments and attachment-key lifecycle.

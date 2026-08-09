@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import {
   ListBox,
   ListBoxItem,
@@ -11,6 +11,8 @@ import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import {
@@ -22,6 +24,7 @@ import {
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
+import { useGazetteerStore } from "#/store/gazetteer";
 import { filterAndSortRows, type GazetteerSort } from "./gazetteer-filter";
 
 /** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
@@ -32,25 +35,38 @@ export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
+export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
+
 type Props = {
   initialTag?: string;
 };
 
 export function Gazetteer({ initialTag }: Props) {
-  const [selectedTags, setSelectedTags] = useState<string[]>(
-    initialTag ? [initialTag] : [],
-  );
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<GazetteerSort>("ts");
+  const {
+    query,
+    selectedTags,
+    sort,
+    page,
+    enter,
+    setQuery,
+    setSelectedTags,
+    setSort,
+    setPage,
+  } = useGazetteerStore();
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [failures, setFailures] = useState<[string, string][]>([]);
 
+  useLayoutEffect(() => enter(initialTag), [enter, initialTag]);
+
   const toggleTag = (t: string) =>
-    setSelectedTags((cur) =>
-      cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t],
+    setSelectedTags(
+      selectedTags.includes(t)
+        ? selectedTags.filter((x) => x !== t)
+        : [...selectedTags, t],
     );
   const { data: tagsData } = useTags();
   const { data: content } = useContentIndex(500);
+  const isMobile = useMobileLayout();
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
   const projects = useProjects();
@@ -62,6 +78,20 @@ export function Gazetteer({ initialTag }: Props) {
     () => filterAndSortRows(items, { tags: selectedTags, query, sort }),
     [items, selectedTags, query, sort],
   );
+
+  const pageCount = Math.max(
+    1,
+    Math.ceil(rows.length / MOBILE_GAZETTEER_PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, pageCount);
+  const mobileRows = useMemo(() => {
+    const start = (currentPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE;
+    return rows.slice(start, start + MOBILE_GAZETTEER_PAGE_SIZE);
+  }, [currentPage, rows]);
+
+  useLayoutEffect(() => {
+    if (currentPage !== page) setPage(currentPage);
+  }, [currentPage, page, setPage]);
 
   const selected = [...selectedPaths];
 
@@ -119,6 +149,27 @@ export function Gazetteer({ initialTag }: Props) {
     selectedTags.length > 0
       ? ` · ${selectedTags.map((t) => `#${t}`).join(" ")}`
       : "";
+
+  if (isMobile) {
+    return (
+      <MobileGazetteer
+        query={query}
+        selectedTags={selectedTags}
+        sort={sort}
+        rows={mobileRows}
+        tags={tags}
+        totalCount={items.length}
+        filteredCount={rows.length}
+        page={currentPage}
+        pageCount={pageCount}
+        onQueryChange={setQuery}
+        onSelectedTagsChange={setSelectedTags}
+        onSortChange={setSort}
+        onPageChange={setPage}
+        onOpen={(path, title) => openTab("page", path, title)}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">

@@ -52,6 +52,22 @@ describe("CodexModalShell", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it("contains keyboard focus within the named dialog", async () => {
+    const user = userEvent.setup();
+    render(<ModalHarness onDismiss={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Open dialog" }));
+    const input = screen.getByRole("textbox", { name: "Consumes Escape" });
+    const action = screen.getByRole("button", { name: "Dialog action" });
+
+    action.focus();
+    await user.tab();
+    expect(input).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(action).toHaveFocus();
+  });
+
   it("does not dismiss when a focused child consumes Escape", async () => {
     const user = userEvent.setup();
     const onDismiss = vi.fn();
