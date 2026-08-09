@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use thiserror::Error;
 
 use super::base::{PropertyDefinition, PropertyType};
@@ -39,9 +41,10 @@ pub fn coerce_property_value(
     definition: &PropertyDefinition,
 ) -> Result<toml::Value, PropertyValueError> {
     match definition.property_type {
-        PropertyType::Text | PropertyType::Url | PropertyType::Relation => {
+        PropertyType::Text | PropertyType::Url => {
             string_value(key, value).map(toml::Value::String)
         }
+        PropertyType::Relation => relation_value(key, value),
         PropertyType::Select => select_value(key, value, definition),
         PropertyType::MultiSelect => multi_select_value(key, value, definition),
         PropertyType::Number => number_value(key, value),
@@ -64,6 +67,29 @@ fn string_value(
         .ok_or_else(|| PropertyValueError::shape(key, "a string"))
 }
 
+fn relation_value(
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<toml::Value, PropertyValueError> {
+    match value {
+        serde_json::Value::String(value) => Ok(toml::Value::String(value.clone())),
+        serde_json::Value::Array(values) => {
+            let mut coerced = Vec::with_capacity(values.len());
+            for value in values {
+                let value = value.as_str().ok_or_else(|| {
+                    PropertyValueError::shape(key, "a string or an array of strings")
+                })?;
+                coerced.push(toml::Value::String(value.to_owned()));
+            }
+            Ok(toml::Value::Array(coerced))
+        }
+        _ => Err(PropertyValueError::shape(
+            key,
+            "a string or an array of strings",
+        )),
+    }
+}
+
 fn select_value(
     key: &str,
     value: &serde_json::Value,
@@ -84,22 +110,20 @@ fn multi_select_value(
     let values = value
         .as_array()
         .ok_or_else(|| PropertyValueError::shape(key, "an array of strings"))?;
+    let mut seen = HashSet::with_capacity(values.len());
     let mut coerced = Vec::with_capacity(values.len());
 
-    for (index, value) in values.iter().enumerate() {
+    for value in values {
         let value = value
             .as_str()
             .ok_or_else(|| PropertyValueError::shape(key, "an array of strings"))?;
-        if values[..index]
-            .iter()
-            .any(|earlier| earlier.as_str() == Some(value))
-        {
+        if !seen.insert(value) {
             return Err(PropertyValueError::DuplicateValue {
                 key: key.to_string(),
             });
         }
         validate_option(key, value, definition)?;
-        coerced.push(toml::Value::String(value.to_string()));
+        coerced.push(toml::Value::String(value.to_owned()));
     }
 
     Ok(toml::Value::Array(coerced))
@@ -201,6 +225,14 @@ mod tests {
         }
     }
 
+    fn relation(many: Option<bool>) -> PropertyDefinition {
+        PropertyDefinition {
+            property_type: PropertyType::Relation,
+            options: Vec::new(),
+            many,
+        }
+    }
+
     fn coerce(
         key: &str,
         value: Value,
@@ -256,11 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn coercion_accepts_string_shaped_property_types() {
+    fn coercion_accepts_scalar_string_property_types() {
         for (key, property_type) in [
             ("summary", PropertyType::Text),
             ("source", PropertyType::Url),
-            ("series", PropertyType::Relation),
         ] {
             assert_eq!(
                 coerce(key, json!("value"), property(property_type)).unwrap(),
@@ -279,6 +310,58 @@ mod tests {
             )
             .unwrap(),
             toml::Value::String("finished".into())
+        );
+    }
+
+    #[test]
+    fn relation_preserves_scalar_and_array_shapes() {
+        assert_eq!(
+            coerce("series", json!("Solar Cycle"), relation(None)).unwrap(),
+            toml::Value::String("Solar Cycle".into())
+        );
+        assert_eq!(
+            coerce(
+                "influences",
+                json!(["Earthsea", "Hainish Cycle"]),
+                relation(Some(true))
+            )
+            .unwrap(),
+            toml::Value::Array(vec![
+                toml::Value::String("Earthsea".into()),
+                toml::Value::String("Hainish Cycle".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn relation_many_false_is_advisory_for_array_input() {
+        assert_eq!(
+            coerce(
+                "series",
+                json!(["Solar Cycle", "Long Sun"]),
+                relation(Some(false))
+            )
+            .unwrap(),
+            toml::Value::Array(vec![
+                toml::Value::String("Solar Cycle".into()),
+                toml::Value::String("Long Sun".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn relation_rejects_malformed_shapes_and_non_string_array_entries() {
+        let error = coerce("series", json!({ "page": "Solar Cycle" }), relation(None))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "series must be a string or an array of strings"
+        );
+
+        let error = coerce("series", json!(["Solar Cycle", 4]), relation(None)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "series must be a string or an array of strings"
         );
     }
 
