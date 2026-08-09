@@ -444,7 +444,7 @@ export function BaseDefinitionWorkspace({
   };
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4">
+    <div className="mx-auto w-full p-4">
       <DefinitionHeader
         name={draft.name || slug}
         slug={slug}
