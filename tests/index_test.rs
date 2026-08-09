@@ -9,7 +9,7 @@ use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::tree::load_note_meta;
-use rusqlite::Transaction;
+use rusqlite::Connection;
 use tempfile::TempDir;
 
 /// Helper: initialize a vault in a temp directory, write markdown files, and
@@ -668,7 +668,7 @@ impl Deriver for CountingDeriver {
         &self,
         _page: &IndexedPage,
         _page_id: &str,
-        _tx: &Transaction,
+        _tx: &Connection,
     ) -> Result<(), IndexError> {
         self.count.fetch_add(1, Ordering::Relaxed);
         Ok(())
