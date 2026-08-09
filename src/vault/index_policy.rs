@@ -57,8 +57,8 @@ pub enum IndexPolicyError {
     )]
     TransactionRollback {
         path: VaultPath,
-        primary: Box<IndexPolicyError>,
         #[source]
+        primary: Box<IndexPolicyError>,
         rollback: IndexError,
     },
 }

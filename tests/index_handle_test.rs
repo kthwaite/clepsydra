@@ -950,6 +950,24 @@ title = "Transactional create"
     assert_eq!(indexed_artifacts, 0);
 }
 
+#[test]
+fn created_transaction_rollback_preserves_primary_error_as_source() {
+    let path = VaultPath::new("transactional.md").unwrap();
+    let error = IndexPolicyError::TransactionRollback {
+        path: path.clone(),
+        primary: Box::new(IndexPolicyError::Operation {
+            operation: IndexPolicyOperation::ResolvePageLinks,
+            path,
+            source: IndexError::Other("primary resolve failure".to_owned()),
+        }),
+        rollback: IndexError::Other("secondary rollback failure".to_owned()),
+    };
+
+    let source = std::error::Error::source(&error).unwrap();
+    assert!(source.to_string().contains("primary resolve failure"));
+    assert!(error.to_string().contains("secondary rollback failure"));
+}
+
 #[tokio::test]
 async fn scrub_runs_on_index_thread_after_protection_reindex() {
     const MARKER: &str = "HANDLE_SCRUB_SECRET_019FDD0F15DB72A2";

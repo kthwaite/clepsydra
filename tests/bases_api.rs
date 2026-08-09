@@ -1491,6 +1491,41 @@ async fn cancelled_member_request_still_emits_one_event_after_commit() {
 }
 
 #[tokio::test]
+async fn member_base_load_io_failure_is_generic_and_writes_nothing() {
+    let fixture = member_fixture(seed);
+    let before_paths = page_paths(fixture.state.vault.root());
+    let root = fixture.state.vault.root().to_string_lossy().into_owned();
+    let base_path = fixture
+        .state
+        .vault
+        .root()
+        .join("bases/reading.base.toml");
+    fs::remove_file(&base_path).unwrap();
+    fs::create_dir(&base_path).unwrap();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": "unreachable",
+            "view": "Continues",
+            "title": "Unreadable Base",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let response_text = response.text();
+    let error: serde_json::Value = serde_json::from_str(&response_text).unwrap();
+    assert_eq!(error["error"], "Base member creation failed");
+    assert_eq!(error["detail"]["code"], "base_member_creation_failed");
+    assert!(!response_text.contains(&root), "{response_text}");
+    assert!(!response_text.contains("directory"), "{response_text}");
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
 async fn member_internal_failure_is_generic_and_leaves_no_artifact_or_event() {
     let fixture = member_fixture(seed);
     let revision = current_base_revision(&fixture, "reading").await;

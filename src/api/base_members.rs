@@ -142,6 +142,15 @@ fn internal_creation_error(error: impl std::fmt::Debug + std::fmt::Display) -> A
     }
 }
 
+fn base_load_error(error: base_document::BaseDocumentError) -> ApiError {
+    let response = super::bases::document_error(error);
+    if response.status == 500 {
+        internal_creation_error(response.error)
+    } else {
+        response
+    }
+}
+
 fn is_reserved_field(key: &str) -> bool {
     matches!(
         key,
@@ -175,8 +184,7 @@ async fn create_base_member_with_ids(
     request: BaseMemberCreateRequest,
     mut short_ids: impl Iterator<Item = String>,
 ) -> Result<BaseMemberCreateResponse, ApiError> {
-    let stored =
-        base_document::load(state.vault.root(), &slug).map_err(super::bases::document_error)?;
+    let stored = base_document::load(state.vault.root(), &slug).map_err(base_load_error)?;
     if stored.revision != request.base_revision {
         return Err(ApiError::conflict_with_detail(
             "base changed since the draft was opened",
