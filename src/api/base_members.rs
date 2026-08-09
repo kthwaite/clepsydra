@@ -10,10 +10,11 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::base::{BaseDefinition, SYSTEM_FIELDS};
+use crate::vault::base::{BaseDefinition, SYSTEM_FIELDS, candidate_link_targets};
 use crate::vault::base_document;
 use crate::vault::base_member::{
-    BaseMemberDiagnostic, BaseMemberScope, CandidateDerived, candidate_matches,
+    BaseMemberDiagnostic, BaseMemberScope, CandidateDerived,
+    candidate_matches_with_link_targets,
 };
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError};
@@ -117,7 +118,7 @@ fn apply_custom_field(
         .property(bare)
         .ok_or_else(|| field_diagnostic(key, format!("base has no declared property `{bare}`")))?;
     let value = coerce_property_value(bare, value, definition)
-        .map_err(|error| field_diagnostic(bare, error.to_string()))?;
+        .map_err(|error| field_diagnostic(key, error.to_string()))?;
     meta.extra.insert(bare.to_owned(), value);
     Ok(())
 }
@@ -267,6 +268,19 @@ async fn create_base_member_with_ids(
     if meta.kind.is_none() {
         meta.kind = Some(Kind::Note);
     }
+    let link_base = stored.definition.clone();
+    let link_meta = meta.clone();
+    let link_targets = state
+        .index
+        .with_index(move |index, _| {
+            candidate_link_targets(&link_base, &link_meta, |target_canonical| {
+                index.resolve_link_target_id(target_canonical)
+            })
+        })
+        .await
+        .map_err(internal_creation_error)?
+        .map_err(internal_creation_error)?;
+
 
     let notify = super::mutation_notifier(&state);
 
@@ -283,7 +297,7 @@ async fn create_base_member_with_ids(
         )
         .map_err(internal_creation_error)?;
 
-        candidate_matches(
+        candidate_matches_with_link_targets(
             &stored.definition,
             &view,
             &meta,
@@ -292,6 +306,7 @@ async fn create_base_member_with_ids(
                 word_count: 0,
                 journal_date: None,
             },
+            &link_targets,
         )
         .map_err(validation_error)?;
 

@@ -453,6 +453,10 @@ fn compile_prop(
                     .to_string(),
             )
         }
+        Op::LinksTo if !ty.supports_links_to() => Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op,
+        }),
         Op::LinksTo => {
             let target = value.as_str().ok_or_else(|| QueryError::InvalidValue {
                 field: field.to_string(),
@@ -1381,6 +1385,23 @@ moment  = { type = "datetime" }
             serde_json::json!({ "field": "series", "op": "links_to", "value": "0190f8a0-0000-7000-8000-0000000000aa" }),
         );
         assert_eq!(flat_paths(&out), vec!["a.md"]);
+    }
+
+    #[test]
+    fn links_to_rejects_non_relation_properties() {
+        let (_tmp, _index, base) = fixture();
+        let filter: Filter = serde_json::from_value(
+            serde_json::json!({ "field": "author", "op": "links_to", "value": "Wolfe" }),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            compile_filter(&filter, &QueryContext::for_base(&base)),
+            Err(QueryError::InvalidOp {
+                op: Op::LinksTo,
+                ..
+            })
+        ));
     }
 
     #[test]

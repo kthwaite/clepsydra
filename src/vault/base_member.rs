@@ -1,6 +1,6 @@
 use crate::vault::base::{
-    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition, filter_matches_meta,
-    fixed_candidate_comparison_matches,
+    BaseDefinition, CandidateLinkTargets, Filter, MetaFilterContext, Op, ViewDefinition,
+    candidate_link_targets, filter_matches_meta, fixed_candidate_comparison_matches,
 };
 use crate::vault::page::PageMeta;
 use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
@@ -74,12 +74,28 @@ pub fn candidate_matches(
     path: &str,
     derived: &CandidateDerived,
 ) -> Result<(), Vec<BaseMemberDiagnostic>> {
+    let link_targets = candidate_link_targets(base, meta, |_| {
+        Ok::<Option<String>, std::convert::Infallible>(None)
+    })
+    .expect("infallible unresolved link collection");
+    candidate_matches_with_link_targets(base, view, meta, path, derived, &link_targets)
+}
+
+pub(crate) fn candidate_matches_with_link_targets(
+    base: &BaseDefinition,
+    view: &ViewDefinition,
+    meta: &PageMeta,
+    path: &str,
+    derived: &CandidateDerived,
+    link_targets: &CandidateLinkTargets,
+) -> Result<(), Vec<BaseMemberDiagnostic>> {
     let context = MetaFilterContext {
         base,
         meta,
         path,
         word_count: Some(derived.word_count),
         journal_date: derived.journal_date,
+        link_targets: Some(link_targets),
     };
     let mut diagnostics = Vec::new();
 
@@ -1000,5 +1016,55 @@ layout = "table"
                 (Some("prop.word_count"), Some("filter.all[1]")),
             ]
         );
+    }
+
+    #[test]
+    fn text_properties_cannot_satisfy_links_to_or_enable_creation() {
+        let base = base(
+            r#"
+name = "Text links"
+filter = { field = "author", op = "links_to", value = "Wolfe" }
+[properties]
+author = { type = "text" }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        let mut meta = PageMeta::new();
+        meta.extra
+            .insert("author".into(), toml::Value::String("Wolfe".into()));
+
+        assert!(!creation_capabilities(&base).remove(0).enabled);
+        assert!(
+            candidate_matches(
+                &base,
+                &base.file.views[0],
+                &meta,
+                "notes/20260809.text-link.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn relation_links_to_requires_a_string_target_for_creation() {
+        let base = base(
+            r#"
+name = "Invalid relation target"
+filter = { field = "series", op = "links_to", value = 42 }
+[properties]
+series = { type = "relation" }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        assert!(!creation_capabilities(&base).remove(0).enabled);
     }
 }

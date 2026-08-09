@@ -164,6 +164,44 @@ fn seed(root: &Path) {
     .unwrap();
 }
 
+const LINK_TARGET_ID: &str = "0190f8a0-0000-7000-8000-0000000000d1";
+
+fn seed_relation_member_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/relations.base.toml"),
+        format!(
+            r#"
+name = "Relations"
+filter = {{ field = "kind", op = "eq", value = "BOOK" }}
+[properties]
+series = {{ type = "relation" }}
+author = {{ type = "text" }}
+[[views]]
+name = "Canonical"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "Solar Cycle" }}
+[[views]]
+name = "Alias"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "Science Fiction" }}
+[[views]]
+name = "Uuid"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "{LINK_TARGET_ID}" }}
+"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("solar-cycle.md"),
+        format!(
+            "+++\nid = \"{LINK_TARGET_ID}\"\ntitle = \"Solar Cycle\"\naliases = [\"Science Fiction\"]\ntype = \"NOTE\"\n+++\n"
+        ),
+    )
+    .unwrap();
+}
+
 fn preview_definition() -> serde_json::Value {
     serde_json::json!({
         "name": "Reading Preview",
@@ -1513,6 +1551,38 @@ async fn bare_system_and_persistable_prop_shadow_fields_coexist() {
     assert_eq!(page.meta.extra["word_count"], toml::Value::Integer(7));
 }
 
+
+#[tokio::test]
+async fn invalid_shadow_property_value_reports_canonical_request_key() {
+    let fixture = member_fixture(seed_persistable_shadow_base);
+    let revision = current_base_revision(&fixture, "persistable-shadow").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/persistable-shadow/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Escaped",
+            "title": "Invalid shadow",
+            "fields": {
+                "kind": "BOOK",
+                "prop.kind": 42,
+                "prop.word_count": 7
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let error: serde_json::Value = response.json();
+    assert_eq!(
+        error["detail"]["diagnostics"][0]["field"],
+        "prop.kind",
+        "{error}"
+    );
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
 #[tokio::test]
 async fn unpersistable_prop_system_shadows_are_bad_request_without_artifacts() {
     for field in ["project", "tags", "aliases"] {
@@ -1748,4 +1818,59 @@ async fn openapi_registers_base_member_contract() {
             "missing {schema}"
         );
     }
+}
+
+#[tokio::test]
+async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and_uuid() {
+    let fixture = member_fixture(seed_relation_member_base);
+    let revision = current_base_revision(&fixture, "relations").await;
+
+    for (view, title, target) in [
+        ("Canonical", "Canonical relation", "[[Solar Cycle]]"),
+        ("Alias", "Alias relation", "[[Science Fiction]]"),
+        ("Uuid", "UUID relation", "[[Science Fiction]]"),
+    ] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/relations/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": view,
+                "title": title,
+                "fields": { "kind": "BOOK", "series": target }
+            }))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let created: serde_json::Value = response.json();
+
+        let queried: serde_json::Value = fixture
+            .server
+            .get(&format!("/api/vault/bases/relations/views/{view}?limit=25&offset=0"))
+            .await
+            .json();
+        assert!(
+            queried["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == created["id"]),
+            "created candidate and indexed SQL disagreed for {view}: {queried}"
+        );
+    }
+
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let response = fixture
+        .server
+        .post("/api/vault/bases/relations/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Canonical",
+            "title": "Mismatched relation",
+            "fields": { "kind": "BOOK", "series": "[[Science Fiction]]" }
+        }))
+        .await;
+    response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_eq!(indexed_page_count(&fixture).await, before_rows);
 }

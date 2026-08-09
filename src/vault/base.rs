@@ -6,7 +6,7 @@
 //! the registry — a broken base is listed with its diagnostics and excluded
 //! from evaluation.
 
-use std::{borrow::Cow, path::Path};
+use std::{borrow::Cow, collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -72,6 +72,11 @@ impl PropertyType {
     /// literal substring matching; categorical values use exact membership.
     pub fn supports_contains(self) -> bool {
         !matches!(self, PropertyType::Number | PropertyType::Bool)
+    }
+
+    /// Whether `links_to` can be evaluated through the links index.
+    pub fn supports_links_to(self) -> bool {
+        self == PropertyType::Relation
     }
 
     /// Whether saved-view evaluation can order this property as one scalar
@@ -357,12 +362,62 @@ pub fn validate_definition(slug: &str, file: BaseFile) -> ValidationResult {
 // In-memory filter matching (LSP path: cheap, no SQL)
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CandidateLinkTarget {
+    target_canonical: String,
+    target_id: Option<String>,
+}
+
+pub(crate) type CandidateLinkTargets = HashMap<String, Vec<CandidateLinkTarget>>;
+
+pub(crate) fn candidate_link_targets<E>(
+    base: &BaseDefinition,
+    meta: &crate::vault::page::PageMeta,
+    mut resolve_target_id: impl FnMut(&str) -> Result<Option<String>, E>,
+) -> Result<CandidateLinkTargets, E> {
+    let mut targets = CandidateLinkTargets::new();
+    for (field, definition) in &base.file.properties {
+        if !definition.property_type.supports_links_to() {
+            continue;
+        }
+        let Some(value) = meta.extra.get(field) else {
+            continue;
+        };
+        let values = match value {
+            toml::Value::String(value) => vec![value.clone()],
+            toml::Value::Array(values) => values
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let links = crate::vault::link::extract_property_refs(field, &values)
+            .into_iter()
+            .map(|link| {
+                let target_canonical =
+                    crate::vault::canonical::CanonicalName::new(&link.target_raw)
+                        .as_str()
+                        .to_owned();
+                let target_id = resolve_target_id(&target_canonical)?;
+                Ok(CandidateLinkTarget {
+                    target_canonical,
+                    target_id,
+                })
+            })
+            .collect::<Result<Vec<_>, E>>()?;
+        targets.insert(field.clone(), links);
+    }
+    Ok(targets)
+}
+
 pub(crate) struct MetaFilterContext<'a> {
     pub base: &'a BaseDefinition,
     pub meta: &'a crate::vault::page::PageMeta,
     pub path: &'a str,
     pub word_count: Option<u32>,
     pub journal_date: Option<chrono::NaiveDate>,
+    pub link_targets: Option<&'a CandidateLinkTargets>,
 }
 
 /// Evaluate a base's membership filter against a parsed page's metadata —
@@ -380,6 +435,7 @@ pub fn base_matches_meta(
         path,
         word_count: None,
         journal_date: None,
+        link_targets: None,
     };
     match &base.file.filter {
         Some(filter) => filter_matches_meta(filter, &context),
@@ -409,7 +465,16 @@ pub(crate) fn fixed_candidate_comparison_matches(
     use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
     let context = QueryContext::for_base(base);
-    match resolve_field(field, &context).ok()? {
+    let resolved = resolve_field(field, &context).ok()?;
+    if op == Op::LinksTo
+        && (!matches!(
+            &resolved,
+            ResolvedField::Prop { ty, .. } if ty.supports_links_to()
+        ) || !value.is_string())
+    {
+        return Some(false);
+    }
+    match resolved {
         ResolvedField::Sys(SysField::WordCount) => Some(scalar_matches(
             Some(Comparable::Number(0.0)),
             PropertyType::Number,
@@ -424,7 +489,7 @@ pub(crate) fn fixed_candidate_comparison_matches(
             Some(false)
         }
         ResolvedField::Prop { key, ty } if base.property(&key).is_none() => {
-            Some(property_matches(None, ty, op, value))
+            Some(property_matches(None, ty, op, value, None))
         }
         _ => None,
     }
@@ -456,9 +521,15 @@ fn cmp_matches_meta(
             value,
             false,
         ),
-        ResolvedField::Prop { key, ty } => {
-            property_matches(context.meta.extra.get(&key), ty, op, value)
-        }
+        ResolvedField::Prop { key, ty } => property_matches(
+            context.meta.extra.get(&key),
+            ty,
+            op,
+            value,
+            context
+                .link_targets
+                .and_then(|targets| targets.get(&key).map(Vec::as_slice)),
+        ),
     }
 }
 
@@ -558,12 +629,29 @@ fn property_matches(
     property_type: PropertyType,
     op: Op,
     value: &serde_json::Value,
+    link_targets: Option<&[CandidateLinkTarget]>,
 ) -> bool {
     let present = current.is_some_and(|current| !toml_value_is_empty(current));
     match op {
         Op::IsEmpty => return !present,
         Op::NotEmpty => return present,
         _ => {}
+    }
+    if op == Op::LinksTo {
+        if !property_type.supports_links_to() {
+            return false;
+        }
+        let Some(expected) = value.as_str() else {
+            return false;
+        };
+        let expected_canonical =
+            crate::vault::canonical::CanonicalName::from_title(expected);
+        return link_targets.is_some_and(|targets| {
+            targets.iter().any(|target| {
+                target.target_id.as_deref() == Some(expected)
+                    || target.target_canonical == expected_canonical.as_str()
+            })
+        });
     }
     let Some(current) = current.filter(|current| !toml_value_is_empty(current)) else {
         return op == Op::Ne && expected_scalar(property_type, value).is_some();
@@ -588,10 +676,7 @@ fn property_scalar_matches(
     value: &serde_json::Value,
 ) -> bool {
     if op == Op::LinksTo {
-        return match (current.as_str(), value.as_str()) {
-            (Some(current), Some(target)) => relation_links_to(current, target),
-            _ => false,
-        };
+        return false;
     }
     scalar_matches(
         current_scalar(current, property_type),
@@ -605,17 +690,7 @@ fn property_scalar_matches(
     )
 }
 
-fn relation_links_to(current: &str, target: &str) -> bool {
-    let bare = current
-        .trim()
-        .strip_prefix("[[")
-        .and_then(|value| value.strip_suffix("]]"))
-        .map(|inner| inner.split_once('|').map_or(inner, |(target, _)| target))
-        .unwrap_or(current.trim());
-    bare == target
-        || crate::vault::canonical::CanonicalName::from_title(bare).as_str()
-            == crate::vault::canonical::CanonicalName::from_title(target).as_str()
-}
+
 
 fn toml_value_is_empty(value: &toml::Value) -> bool {
     match value {
@@ -1100,7 +1175,7 @@ fn validate_filter(
         Filter::Not(child) => {
             validate_filter(base, child, &format!("{path}.not"), context, push);
         }
-        Filter::Cmp { field, op, .. } => {
+        Filter::Cmp { field, op, value } => {
             if *op == Op::Contains {
                 use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
@@ -1126,6 +1201,33 @@ fn validate_filter(
                 .strip_prefix("prop.")
                 .or_else(|| field.strip_prefix("sys."))
                 .unwrap_or(field);
+            if *op == Op::LinksTo {
+                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+
+                let query_context = QueryContext::for_base(base);
+                let supported = matches!(
+                    resolve_field(field, &query_context),
+                    Ok(ResolvedField::Prop { ty, .. }) if ty.supports_links_to()
+                );
+                if !supported {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.op")),
+                        format!(
+                            "{context}: op `links_to` is only valid for relation field `{field}`"
+                        ),
+                    );
+                    return;
+                }
+                if !value.is_string() {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.value")),
+                        format!("{context}: op `links_to` expects a string target"),
+                    );
+                    return;
+                }
+            }
             let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
             if !is_system {
                 match base.property(bare) {
@@ -1448,6 +1550,42 @@ done = { type = "bool" }
     }
 
     #[test]
+    fn links_to_validation_rejects_unsupported_field_and_value_pairs() {
+        let content = r#"
+name = "Invalid links"
+[filter]
+all = [
+  { field = "author", op = "links_to", value = "Target" },
+  { field = "rating", op = "links_to", value = "Target" },
+  { field = "series", op = "links_to", value = 42 }
+]
+[properties]
+author = { type = "text" }
+rating = { type = "number" }
+series = { type = "relation" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("filter.all[0].op"),
+                Some("filter.all[1].op"),
+                Some("filter.all[2].value"),
+            ]
+        );
+    }
+
+    #[test]
     fn contains_validation_accepts_text_like_and_membership_fields() {
         let content = r#"
 name = "Valid contains"
@@ -1477,6 +1615,36 @@ relation = { type = "relation" }
             diagnostics
                 .iter()
                 .all(|diagnostic| diagnostic.severity != BaseDiagnosticSeverity::Error)
+        );
+    }
+
+    #[test]
+    fn links_to_validation_rejects_non_relation_properties() {
+        let content = r#"
+name = "Invalid links"
+[filter]
+all = [
+  { field = "author", op = "links_to", value = "Target" },
+  { field = "rating", op = "links_to", value = "Target" }
+]
+[properties]
+author = { type = "text" }
+rating = { type = "number" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("filter.all[0].op"), Some("filter.all[1].op")]
         );
     }
 
