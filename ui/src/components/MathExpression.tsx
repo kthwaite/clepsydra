@@ -53,17 +53,18 @@ export function MathExpression({
     [display, tex],
   );
   const Wrapper = display ? "div" : "span";
+  const canActivate = interactive && onActivate != null;
   const className = [
     "folio-math",
     display && "folio-math--display",
     !rendered.ok && "folio-math--invalid",
-    interactive && "folio-math--interactive",
+    canActivate && "folio-math--interactive",
   ]
     .filter(Boolean)
     .join(" ");
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (!interactive || !onActivate) return;
+    if (!canActivate) return;
     if (event.key !== "Enter" && event.key !== " ") return;
 
     event.preventDefault();
@@ -73,10 +74,10 @@ export function MathExpression({
   return (
     <Wrapper
       className={className}
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onClick={interactive ? onActivate : undefined}
-      onKeyDown={interactive ? handleKeyDown : undefined}
+      role={canActivate ? "button" : undefined}
+      tabIndex={canActivate ? 0 : undefined}
+      onClick={canActivate ? onActivate : undefined}
+      onKeyDown={canActivate ? handleKeyDown : undefined}
       aria-invalid={rendered.ok ? undefined : true}
       aria-label={rendered.ok ? undefined : "Invalid mathematical expression"}
     >

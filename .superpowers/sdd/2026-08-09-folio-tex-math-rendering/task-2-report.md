@@ -48,3 +48,17 @@ Formatter, lint, build, and project-wide/full test suites were not run.
 ## Concerns
 
 None blocking. The inert MathML annotation behavior noted above is intrinsic to combined HTML+MathML output and does not initiate navigation or resource loading.
+
+
+## Review fix round 1: actionable interaction semantics
+
+The review found that `interactive` without `onActivate` exposed a focusable `role=\"button\"` that could not perform an action.
+
+1. Added a regression test requiring `interactive` alone to omit the interactive class, button role, and tab stop.
+2. RED: `bun x vitest run src/components/MathExpression.test.tsx`
+   - 1 file; 8 passed, 1 failed because the wrapper still had `folio-math--interactive`.
+3. Derived `canActivate = interactive && onActivate != null` and used it consistently for the class, role, tab index, click handler, and keyboard handler.
+4. GREEN: `bun x vitest run src/components/MathExpression.test.tsx`
+   - 1 file, 9/9 tests passed with no warning/error output.
+5. GREEN: `bun run typecheck`
+   - `tsc --noEmit --project tsconfig.app.json` exited 0.

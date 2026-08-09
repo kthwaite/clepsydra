@@ -91,6 +91,22 @@ describe("MathExpression", () => {
     expect(onActivate).toHaveBeenCalledOnce();
   });
 
+  it("does not expose no-op button semantics without an activation handler", () => {
+    const { container } = render(
+      <MathExpression
+        tex="x^2"
+        delimiter="$"
+        display={false}
+        interactive
+      />,
+    );
+
+    const wrapper = container.querySelector(".folio-math");
+    expect(wrapper).not.toHaveClass("folio-math--interactive");
+    expect(wrapper).not.toHaveAttribute("role");
+    expect(wrapper).not.toHaveAttribute("tabindex");
+  });
+
   it.each([
     String.raw`\href{javascript:alert(1)}{x}`,
     String.raw`\includegraphics{https://example.test/x}`,
