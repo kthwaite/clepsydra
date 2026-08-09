@@ -29,6 +29,7 @@ export function RelationCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(targetsOf(value).join(", "));
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -59,6 +60,16 @@ export function RelationCell({
     };
   }, [draft]);
 
+  const commit = () => {
+    const targets = draft
+      .split(",")
+      .map((target) => target.trim())
+      .filter((target) => target !== "");
+    onCommit(
+      targets.length === 0 ? null : targets.map((target) => `[[${target}]]`),
+    );
+  };
+
   return (
     <>
       <input
@@ -69,17 +80,11 @@ export function RelationCell({
         list={singleTarget ? listId : undefined}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={onCancel}
+        onBlur={commitOnBlur ? commit : onCancel}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
             e.preventDefault();
-            const targets = draft
-              .split(",")
-              .map((t) => t.trim())
-              .filter((t) => t !== "");
-            onCommit(
-              targets.length === 0 ? null : targets.map((t) => `[[${t}]]`),
-            );
+            commit();
           }
           if (e.key === "Escape") {
             e.preventDefault();

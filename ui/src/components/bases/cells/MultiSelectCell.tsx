@@ -21,6 +21,7 @@ export function MultiSelectCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const initial = currentValues(value);
   const [selected, setSelected] = useState<string[]>(initial);
@@ -45,7 +46,13 @@ export function MultiSelectCell({
           Array.from(e.target.selectedOptions).map((option) => option.value),
         )
       }
-      onBlur={onCancel}
+      onBlur={() => {
+        if (commitOnBlur) {
+          onCommit(selected.length === 0 ? null : selected);
+        } else {
+          onCancel();
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();

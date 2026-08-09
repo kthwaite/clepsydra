@@ -22,6 +22,7 @@ export function DateTimeCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const initial = typeof value === "string" ? splitIso(value) : null;
   const [draft, setDraft] = useState(initial?.local ?? "");
@@ -46,7 +47,7 @@ export function DateTimeCell({
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={commitOnBlur ? commit : onCancel}
       onKeyDown={(e) => {
         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();

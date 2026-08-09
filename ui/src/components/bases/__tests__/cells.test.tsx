@@ -39,6 +39,26 @@ describe("cell editors", () => {
     expect(onCommit).toHaveBeenCalledWith(42, undefined);
   });
 
+  it("does not coerce an invalid draft number on blur", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <EditableCell
+        value={9}
+        definition={{ type: "number" }}
+        commitOnBlur
+        onCommit={onCommit}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "9" }));
+    const input = screen.getByRole("spinbutton", { name: "Edit number" });
+    input.setCustomValidity("Enter a valid number");
+    await user.tab();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "9" })).toBeInTheDocument();
+  });
+
   it("select cell offers the declared options", async () => {
     const user = userEvent.setup();
     const onCommit = renderCell("queued", {

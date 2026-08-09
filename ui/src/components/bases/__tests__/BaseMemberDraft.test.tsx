@@ -270,4 +270,132 @@ describe("BaseMemberDraft", () => {
       "Could not create member",
     );
   });
+
+  it("commits an active property on blur before keyboard Save activation", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const keyboardFields: BaseMemberDraftField[] = [
+      {
+        key: "title",
+        kind: "title",
+        membership: false,
+        viewOnly: false,
+      },
+      {
+        key: "rating",
+        kind: "property",
+        definition: { type: "number" },
+        membership: false,
+        viewOnly: false,
+      },
+    ];
+    render(draftElement({ fields: keyboardFields, onSave }));
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+      "Keyboard Draft",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Rating" }),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", { name: "New member — Rating" }),
+      "8",
+    );
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Save new member" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(onSave).toHaveBeenCalledWith({
+      title: "Keyboard Draft",
+      fields: { rating: 8 },
+    });
+  });
+
+  it("uses safe ID references for spaced property keys", async () => {
+    const user = userEvent.setup();
+    const spacedFields: BaseMemberDraftField[] = [
+      {
+        key: "title",
+        kind: "title",
+        membership: false,
+        viewOnly: false,
+      },
+      {
+        key: "reading status",
+        kind: "property",
+        definition: { type: "select", options: ["unread", "read"] },
+        membership: false,
+        viewOnly: true,
+      },
+    ];
+    render(
+      draftElement({
+        fields: spacedFields,
+        diagnostics: [
+          {
+            scope: "field",
+            field: "reading status",
+            message: "Choose a reading status.",
+          },
+        ],
+      }),
+    );
+
+    const display = screen.getByRole("button", {
+      name: "Edit New member — Reading Status",
+    });
+    expect(display).toHaveAccessibleDescription(
+      "Required for the active view. Choose a reading status.",
+    );
+    expect(display.getAttribute("aria-describedby")).not.toContain(
+      "reading status",
+    );
+    await user.click(display);
+    expect(
+      screen.getByRole("combobox", { name: "New member — Reading Status" }),
+    ).toHaveAccessibleDescription(
+      "Required for the active view. Choose a reading status.",
+    );
+  });
+
+  it("keeps Project controlled after assign and clear", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const projectFields: BaseMemberDraftField[] = [
+      {
+        key: "title",
+        kind: "title",
+        membership: false,
+        viewOnly: false,
+      },
+      {
+        key: "project",
+        kind: "project",
+        membership: false,
+        viewOnly: false,
+      },
+    ];
+    render(draftElement({ fields: projectFields, onSave }));
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Title" }),
+      "No Project",
+    );
+    const project = screen.getByRole("combobox", {
+      name: "New member — Project",
+    });
+    await user.type(project, "clepsydra{Enter}");
+    await user.click(
+      screen.getByRole("button", { name: "Clear New member — Project" }),
+    );
+    expect(project).toHaveValue("");
+    await user.click(project);
+    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      title: "No Project",
+      fields: { project: null },
+    });
+  });
 });

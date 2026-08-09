@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   ComboBox,
@@ -32,6 +32,10 @@ export function ProjectCombo({
   // Enter/blur.
   const [draft, setDraft] = useState(value ?? "");
 
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
   // A listbox pick fires onSelectionChange (→ onAssign) and then a blur, whose
   // commit() would call onAssign a second time (the slug !== value guard still
   // passes because `value` hasn't propagated yet) — a redundant mutate racing
@@ -56,7 +60,7 @@ export function ProjectCombo({
         aria-label={ariaLabel ?? "Project"}
         aria-describedby={ariaDescribedBy}
         allowsCustomValue
-        defaultInputValue={value ?? ""}
+        inputValue={draft}
         onInputChange={setDraft}
         onSelectionChange={(k) => {
           if (k) {

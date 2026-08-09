@@ -7,18 +7,21 @@ export function NumberCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(
     typeof value === "number" ? String(value) : "",
   );
-  const commit = () => {
+  const commit = (): boolean => {
     if (draft === "") {
       onCommit(null);
-      return;
+      return true;
     }
     const parsed = Number(draft);
-    // Reject a non-numeric commit: stay in the editor.
-    if (Number.isFinite(parsed)) onCommit(parsed);
+    // Reject a non-numeric commit without coercing it to a clear.
+    if (!Number.isFinite(parsed)) return false;
+    onCommit(parsed);
+    return true;
   };
   return (
     <input
@@ -26,11 +29,18 @@ export function NumberCell({
       aria-label={ariaLabel ?? "Edit number"}
       aria-describedby={ariaDescribedBy}
       type="number"
+      step="any"
       inputMode="decimal"
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={(event) => {
+        if (commitOnBlur) {
+          if (!event.currentTarget.validity.valid || !commit()) onCancel();
+        } else {
+          onCancel();
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();

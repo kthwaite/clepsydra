@@ -7,6 +7,7 @@ export function TextCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(typeof value === "string" ? value : "");
   return (
@@ -17,7 +18,10 @@ export function TextCell({
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={() => {
+        if (commitOnBlur) onCommit(draft === "" ? null : draft);
+        else onCancel();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
           e.preventDefault();

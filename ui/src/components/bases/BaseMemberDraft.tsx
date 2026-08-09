@@ -120,6 +120,7 @@ function DraftFieldControl({
           value={value ?? null}
           definition={field.definition}
           ariaLabel={label}
+          commitOnBlur
           ariaDescribedBy={describedBy}
           onCommit={(next) => onChange(field.key, next)}
         />
@@ -245,15 +246,16 @@ export function BaseMemberDraft({
             );
             const requirement = requirementText(field);
             const localError = field.kind === "title" ? titleError : undefined;
+            const idKey = encodeURIComponent(key).replaceAll("%", "_");
             const requirementId = requirement
-              ? `${descriptionPrefix}-${key}-requirement`
+              ? `${descriptionPrefix}-${idKey}-requirement`
               : undefined;
             const diagnosticId =
               fieldDiagnostics.length > 0
-                ? `${descriptionPrefix}-${key}-diagnostic`
+                ? `${descriptionPrefix}-${idKey}-diagnostic`
                 : undefined;
             const localErrorId = localError
-              ? `${descriptionPrefix}-${key}-local-error`
+              ? `${descriptionPrefix}-${idKey}-local-error`
               : undefined;
             const describedBy =
               [requirementId, diagnosticId, localErrorId]

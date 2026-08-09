@@ -9,6 +9,7 @@ export interface EditableCellProps {
   definition: PropertyDefinition;
   ariaLabel?: string;
   ariaDescribedBy?: string;
+  commitOnBlur?: boolean;
   onCommit: (value: CellValue, hint?: PropertyType) => void;
 }
 
@@ -22,6 +23,7 @@ export function EditableCell({
   definition,
   ariaLabel,
   ariaDescribedBy,
+  commitOnBlur = false,
   onCommit,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
@@ -50,6 +52,7 @@ export function EditableCell({
           definition={definition}
           ariaLabel={ariaLabel}
           ariaDescribedBy={ariaDescribedBy}
+          commitOnBlur={commitOnBlur}
           onCommit={(next, hint) => {
             setEditing(false);
             onCommit(next, hint);
