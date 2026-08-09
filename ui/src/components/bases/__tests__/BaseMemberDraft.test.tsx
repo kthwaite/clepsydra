@@ -144,8 +144,23 @@ describe("BaseMemberDraft", () => {
     render(
       draftElement({
         fields: composeMemberDraftFields(definition, "All", capability),
+        diagnostics: [
+          {
+            scope: "view",
+            field: "prop.kind",
+            filter_path: "views.PropKind.filter",
+            message: "candidate does not match the selected view filter",
+          },
+        ],
         onSave,
       }),
+    );
+    const customKind = screen.getByRole("button", {
+      name: "Edit New member — Kind",
+    });
+    expect(customKind).toHaveFocus();
+    expect(customKind).toHaveAccessibleDescription(
+      "Required for the active view. candidate does not match the selected view filter",
     );
 
     await user.type(

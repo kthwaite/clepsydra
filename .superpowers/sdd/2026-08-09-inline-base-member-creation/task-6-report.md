@@ -147,6 +147,19 @@ bun run --cwd ui typecheck
 PASS
 ```
 
+### Canonical Diagnostic Integration
+
+After server commit `3ebecdd`, the namespaced draft integration fixture now feeds the native 422 diagnostic key `prop.kind` alongside simultaneous system `kind`. It asserts that the custom property control—not the system-kind control—receives focus and the exact accessible diagnostic description. No UI fallback or namespace inference was added.
+
+```text
+bun run --cwd ui test src/components/bases/__tests__/BaseMemberDraft.test.tsx
+Test Files  1 passed (1)
+Tests       18 passed (18)
+
+bun run --cwd ui typecheck
+PASS
+```
+
 ## Concerns
 
 None known within focused coverage, UI typecheck/build, or Task 7 browser smoke. Formatter, lint, and the broad UI suite were intentionally skipped per controller instruction.
