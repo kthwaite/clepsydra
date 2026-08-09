@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Descendant } from "slate";
@@ -289,6 +290,38 @@ describe("CodexFrame real breakpoint transitions", () => {
     expect(
       screen.getByRole("button", { name: "Switch to dark mode" }),
     ).toBeVisible();
+  });
+
+  it("keeps every global action reachable in the compact phone header", () => {
+    matchMediaController.setWidth(390);
+    render(
+      <CodexFrame forceView="atrium">
+        <div>Phone content</div>
+      </CodexFrame>,
+    );
+
+    const banner = screen.getByRole("banner");
+    const actions = within(banner).getByRole("group", {
+      name: "Global actions",
+    });
+    expect(banner).toHaveClass("min-w-0");
+    expect(banner.firstElementChild).toHaveClass("min-w-0", "overflow-hidden");
+    expect(actions).toHaveClass("shrink-0");
+
+    const actionNames = [
+      "Search",
+      "New note",
+      "Status",
+      "Switch to dark mode",
+    ] as const;
+    expect(within(actions).getAllByRole("button")).toHaveLength(
+      actionNames.length,
+    );
+    for (const name of actionNames) {
+      const button = within(actions).getByRole("button", { name });
+      expect(button).toHaveAttribute("aria-label", name);
+      expect(button.textContent?.trim().length).toBeLessThanOrEqual(3);
+    }
   });
 
   it("preserves real Constellation controls through real media-query changes", async () => {

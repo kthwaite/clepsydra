@@ -54,43 +54,49 @@ export function MobileCodexFrame({
 
   return (
     <>
-      <header className="cl-mobile-top order-0 flex flex-shrink-0 items-stretch border-b border-rule bg-paper">
-        <div className="flex flex-1 items-center px-3 py-2 font-sans text-sm font-black uppercase tracking-[0.08em] text-ink">
+      <header className="cl-mobile-top order-0 flex min-w-0 flex-shrink-0 items-stretch border-b border-rule bg-paper">
+        <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap px-3 py-2 font-sans text-sm font-black uppercase tracking-[0.08em] text-ink">
           <span className="text-accent">C</span>LEPSYDRA
         </div>
-        <button
-          type="button"
-          onClick={openSearch}
-          className="cl-mono min-h-11 border-l border-rule-soft px-3 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
-          aria-label="Search"
+        <div
+          role="group"
+          aria-label="Global actions"
+          className="flex shrink-0 items-stretch"
         >
-          Search
-        </button>
-        <button
-          type="button"
-          onClick={openInscribe}
-          className="cl-mono min-h-11 border-l border-rule-soft px-3 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
-          aria-label="New note"
-        >
-          New note
-        </button>
-        <button
-          type="button"
-          onClick={() => openSettings("appearance")}
-          className="cl-mono min-h-11 border-l border-rule-soft px-3 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
-          aria-label="Status"
-        >
-          Status
-        </button>
-        <button
-          type="button"
-          onClick={toggle}
-          className="cl-mono min-h-11 border-l border-rule-soft px-3 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
-          aria-label={dark ? "Switch to paper mode" : "Switch to dark mode"}
-          title={dark ? "Switch to paper mode" : "Switch to dark mode"}
-        >
-          [{dark ? "Dark" : "Paper"}]
-        </button>
+          <button
+            type="button"
+            onClick={openSearch}
+            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            aria-label="Search"
+          >
+            ⌕
+          </button>
+          <button
+            type="button"
+            onClick={openInscribe}
+            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            aria-label="New note"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => openSettings("appearance")}
+            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            aria-label="Status"
+          >
+            ST
+          </button>
+          <button
+            type="button"
+            onClick={toggle}
+            className="cl-mono min-h-11 border-l border-rule-soft px-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute"
+            aria-label={dark ? "Switch to paper mode" : "Switch to dark mode"}
+            title={dark ? "Switch to paper mode" : "Switch to dark mode"}
+          >
+            {dark ? "P" : "D"}
+          </button>
+        </div>
       </header>
 
       {bottomSlot

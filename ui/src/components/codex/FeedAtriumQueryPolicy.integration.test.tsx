@@ -105,6 +105,7 @@ vi.mock("#/components/codex/SkyCard", () => ({
 }));
 
 import { Atrium } from "#/components/codex/Atrium";
+import { FeedRiver } from "#/components/codex/FeedRiver";
 import { queryClient as productionQueryClient } from "#/lib/queryClient";
 
 const feedsKey = ["get", "/api/vault/feeds"] as const;
@@ -204,6 +205,41 @@ beforeEach(() => {
 afterAll(() => {
   vi.stubGlobal("Request", policyMocks.NativeRequest);
   vi.stubGlobal("fetch", policyMocks.nativeFetch);
+});
+
+describe("full FeedRiver query policy", () => {
+  it("announces a feed-list refetch failure without discarding cached entries", async () => {
+    const client = productionPolicyClient();
+    client.setQueryData(feedsKey, feedList, { updatedAt: 0 });
+    client.setQueryData(
+      unreadEntriesKey,
+      {
+        pages: [{ entries: [cachedEntry], next_cursor: null }],
+        pageParams: [undefined],
+      },
+      { updatedAt: Date.now() },
+    );
+    policyMocks.fetchMock.mockImplementation(async (input, init) => {
+      const request = requestFrom(input, init);
+      if (new URL(request.url).pathname === "/api/vault/feeds") {
+        return failedResponse("Feed subscriptions unavailable");
+      }
+      throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <FeedRiver filters={{ view: "unread" }} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /feed subscriptions unavailable|feed subscriptions could not be loaded/i,
+    );
+    expect(
+      screen.getByRole("article", { name: /cached dispatch/i }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("Atrium feed query policy", () => {

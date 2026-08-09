@@ -85,6 +85,17 @@ export function FeedRiver({
       aria-label="Feed river"
       className={compact ? "max-h-[36rem] overflow-y-auto" : undefined}
     >
+      {!compact && feedsQuery.isError ? (
+        <div
+          role="alert"
+          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+        >
+          {errorMessage(
+            feedsQuery.error,
+            "Feed subscriptions could not be loaded. Refresh the reader to try again.",
+          )}
+        </div>
+      ) : null}
       {entriesQuery.isError ? (
         <div
           role="alert"
