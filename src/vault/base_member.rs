@@ -1,8 +1,9 @@
 use crate::vault::base::{
-    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition, derived_comparison_matches,
-    filter_matches_meta,
+    BaseDefinition, Filter, MetaFilterContext, Op, ViewDefinition,
+    filter_matches_meta, fixed_candidate_comparison_matches,
 };
 use crate::vault::page::PageMeta;
+use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -74,6 +75,7 @@ pub fn candidate_matches(
     derived: &CandidateDerived,
 ) -> Result<(), Vec<BaseMemberDiagnostic>> {
     let context = MetaFilterContext {
+        base,
         meta,
         path,
         word_count: Some(derived.word_count),
@@ -119,17 +121,21 @@ pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability>
                 .file
                 .filter
                 .as_ref()
-                .map_or(Possibility::AlwaysTrue, filter_possibility);
+                .map_or(Possibility::AlwaysTrue, |filter| {
+                    filter_possibility(base, filter)
+                });
             let view_possibility = view
                 .filter
                 .as_ref()
-                .map_or(Possibility::AlwaysTrue, filter_possibility);
+                .map_or(Possibility::AlwaysTrue, |filter| {
+                    filter_possibility(base, filter)
+                });
 
             if let Some(filter) = &base.file.filter {
-                collect_fields(filter, true, false, &mut fields);
+                collect_fields(base, filter, true, false, &mut fields);
             }
             if let Some(filter) = &view.filter {
-                collect_fields(filter, false, true, &mut fields);
+                collect_fields(base, filter, false, true, &mut fields);
             }
 
             let enabled =
@@ -138,6 +144,7 @@ pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability>
             if !enabled {
                 if membership == Possibility::AlwaysFalse {
                     collect_contributors(
+                        base,
                         base.file
                             .filter
                             .as_ref()
@@ -150,6 +157,7 @@ pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability>
                 }
                 if view_possibility == Possibility::AlwaysFalse {
                     collect_contributors(
+                        base,
                         view.filter.as_ref().expect("analysed view filter"),
                         &format!("views.{}.filter", view.name),
                         Possibility::AlwaysFalse,
@@ -162,38 +170,82 @@ pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability>
             BaseMemberCapability {
                 view: view.name.clone(),
                 enabled,
-                fields,
+                fields: fields
+                    .into_iter()
+                    .map(|(_, requirement)| requirement)
+                    .collect(),
                 blockers,
             }
         })
         .collect()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum FieldIdentity {
+    System(SysField),
+    Property(String),
+}
+
 fn collect_fields(
+    base: &BaseDefinition,
     filter: &Filter,
     membership: bool,
     view: bool,
-    fields: &mut Vec<BaseMemberFieldRequirement>,
+    fields: &mut Vec<(FieldIdentity, BaseMemberFieldRequirement)>,
 ) {
     match filter {
         Filter::All(children) | Filter::Any(children) => {
             for child in children {
-                collect_fields(child, membership, view, fields);
+                collect_fields(base, child, membership, view, fields);
             }
         }
-        Filter::Not(child) => collect_fields(child, membership, view, fields),
+        Filter::Not(child) => collect_fields(base, child, membership, view, fields),
         Filter::Cmp { field, .. } => {
-            let bare = bare_field(field);
-            if let Some(existing) = fields.iter_mut().find(|item| item.field == bare) {
+            let Some((identity, request_key)) = resolved_requirement(base, field) else {
+                return;
+            };
+            if let Some((_, existing)) = fields
+                .iter_mut()
+                .find(|(candidate, _)| *candidate == identity)
+            {
                 existing.membership |= membership;
                 existing.view |= view;
             } else {
-                fields.push(BaseMemberFieldRequirement {
-                    field: bare.to_owned(),
-                    membership,
-                    view,
-                });
+                fields.push((
+                    identity,
+                    BaseMemberFieldRequirement {
+                        field: request_key,
+                        membership,
+                        view,
+                    },
+                ));
             }
+        }
+    }
+}
+
+fn resolved_requirement(
+    base: &BaseDefinition,
+    field: &str,
+) -> Option<(FieldIdentity, String)> {
+    let context = QueryContext::for_base(base);
+    match resolve_field(field, &context).ok()? {
+        ResolvedField::Sys(sys) => Some((
+            FieldIdentity::System(sys),
+            sys.as_str().to_owned(),
+        )),
+        ResolvedField::Prop { key, .. } => {
+            let bare_context = QueryContext::for_base(base);
+            let shadows_system = matches!(
+                resolve_field(&key, &bare_context),
+                Ok(ResolvedField::Sys(_))
+            );
+            let request_key = if shadows_system {
+                format!("prop.{key}")
+            } else {
+                key.clone()
+            };
+            Some((FieldIdentity::Property(key), request_key))
         }
     }
 }
@@ -223,21 +275,36 @@ fn candidate_diagnostic(
     }
 }
 
-fn filter_possibility(filter: &Filter) -> Possibility {
+fn filter_possibility(base: &BaseDefinition, filter: &Filter) -> Possibility {
     match filter {
-        Filter::All(children) => all(children.iter().map(filter_possibility)),
-        Filter::Any(children) => any(children.iter().map(filter_possibility)),
-        Filter::Not(child) => match filter_possibility(child) {
+        Filter::All(children) => all(
+            children
+                .iter()
+                .map(|child| filter_possibility(base, child)),
+        ),
+        Filter::Any(children) => any(
+            children
+                .iter()
+                .map(|child| filter_possibility(base, child)),
+        ),
+        Filter::Not(child) => match filter_possibility(base, child) {
             Possibility::AlwaysTrue => Possibility::AlwaysFalse,
             Possibility::Maybe => Possibility::Maybe,
             Possibility::AlwaysFalse => Possibility::AlwaysTrue,
         },
-        Filter::Cmp { field, op, value } => comparison_possibility(field, *op, value),
+        Filter::Cmp { field, op, value } => {
+            comparison_possibility(base, field, *op, value)
+        }
     }
 }
 
-fn comparison_possibility(field: &str, op: Op, value: &serde_json::Value) -> Possibility {
-    match derived_comparison_matches(field, op, value, Some(0), None) {
+fn comparison_possibility(
+    base: &BaseDefinition,
+    field: &str,
+    op: Op,
+    value: &serde_json::Value,
+) -> Possibility {
+    match fixed_candidate_comparison_matches(base, field, op, value) {
         Some(true) => Possibility::AlwaysTrue,
         Some(false) => Possibility::AlwaysFalse,
         None => Possibility::Maybe,
@@ -245,6 +312,7 @@ fn comparison_possibility(field: &str, op: Op, value: &serde_json::Value) -> Pos
 }
 
 fn collect_contributors(
+    base: &BaseDefinition,
     filter: &Filter,
     path: &str,
     desired: Possibility,
@@ -254,8 +322,9 @@ fn collect_contributors(
     match filter {
         Filter::All(children) => {
             for (index, child) in children.iter().enumerate() {
-                if filter_possibility(child) == desired {
+                if filter_possibility(base, child) == desired {
                     collect_contributors(
+                        base,
                         child,
                         &format!("{path}.all[{index}]"),
                         desired,
@@ -267,8 +336,9 @@ fn collect_contributors(
         }
         Filter::Any(children) => {
             for (index, child) in children.iter().enumerate() {
-                if filter_possibility(child) == desired {
+                if filter_possibility(base, child) == desired {
                     collect_contributors(
+                        base,
                         child,
                         &format!("{path}.any[{index}]"),
                         desired,
@@ -284,16 +354,22 @@ fn collect_contributors(
                 Possibility::AlwaysFalse => Possibility::AlwaysTrue,
                 Possibility::Maybe => return,
             };
-            collect_contributors(child, &format!("{path}.not"), opposite, scope, blockers);
+            collect_contributors(
+                base,
+                child,
+                &format!("{path}.not"),
+                opposite,
+                scope,
+                blockers,
+            );
         }
         Filter::Cmp { field, .. } => {
-            if filter_possibility(filter) == desired {
+            if filter_possibility(base, filter) == desired {
                 blockers.push(BaseMemberDiagnostic {
                     scope,
                     field: Some(bare_field(field).to_owned()),
                     filter_path: Some(path.to_owned()),
-                    message: "fixed derived-field comparison prevents blank member creation"
-                        .to_owned(),
+                    message: "fixed candidate state prevents blank member creation".to_owned(),
                 });
             }
         }
@@ -512,6 +588,9 @@ layout = "table"
         let base = base(
             r#"
 name = "Properties"
+[properties]
+word_count = { type = "number" }
+journal_date = { type = "text" }
 [filter]
 all = [
   { field = "prop.word_count", op = "eq", value = 7 },
@@ -544,5 +623,214 @@ layout = "table"
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn capability_fields_preserve_resolved_request_keys() {
+        let base = base(
+            r#"
+name = "Resolved fields"
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+journal_date = { type = "date" }
+status = { type = "select", options = ["reading"] }
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "sys.kind", op = "eq", value = "BOOK" },
+  { field = "prop.kind", op = "eq", value = "genre" },
+  { field = "word_count", op = "eq", value = 0 },
+  { field = "prop.word_count", op = "eq", value = 7 },
+  { field = "prop.journal_date", op = "is_empty" },
+  { field = "status", op = "eq", value = "reading" },
+  { field = "prop.status", op = "eq", value = "reading" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let fields = creation_capabilities(&base).remove(0).fields;
+        assert_eq!(
+            fields
+                .iter()
+                .map(|requirement| requirement.field.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "kind",
+                "prop.kind",
+                "word_count",
+                "prop.word_count",
+                "prop.journal_date",
+                "status",
+            ]
+        );
+    }
+
+    #[test]
+    fn undeclared_properties_are_fixed_absent_for_capability_analysis() {
+        let cases = [
+            ("is_empty", "", true),
+            ("ne", ", value = \"value\"", true),
+            ("not_empty", "", false),
+            ("eq", ", value = \"value\"", false),
+            ("contains", ", value = \"value\"", false),
+            ("gt", ", value = \"value\"", false),
+            ("in", ", value = [\"value\"]", false),
+            ("links_to", ", value = \"value\"", false),
+        ];
+
+        for (op, value, expected) in cases {
+            let base = base(&format!(
+                r#"
+name = "Absent property"
+filter = {{ field = "missing", op = "{op}"{value} }}
+[[views]]
+name = "All"
+layout = "table"
+"#
+            ));
+            let capability = creation_capabilities(&base).remove(0);
+
+            assert_eq!(
+                capability.enabled, expected,
+                "unexpected capability for undeclared property op {op}"
+            );
+            if expected {
+                assert!(capability.blockers.is_empty());
+            } else {
+                assert_eq!(capability.blockers.len(), 1);
+                assert_eq!(
+                    capability.blockers[0].field.as_deref(),
+                    Some("missing")
+                );
+                assert_eq!(
+                    capability.blockers[0].filter_path.as_deref(),
+                    Some("filter")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn candidate_property_contains_matches_query_type_semantics() {
+        let cases = [
+            (
+                "text",
+                toml::Value::String("Alphabet".into()),
+                "PHA",
+                true,
+            ),
+            (
+                "select",
+                toml::Value::String("reading".into()),
+                "read",
+                false,
+            ),
+            (
+                "select",
+                toml::Value::String("reading".into()),
+                "reading",
+                true,
+            ),
+            (
+                "multi_select",
+                toml::Value::Array(vec![toml::Value::String("memory".into())]),
+                "mem",
+                false,
+            ),
+            (
+                "multi_select",
+                toml::Value::Array(vec![toml::Value::String("memory".into())]),
+                "memory",
+                true,
+            ),
+            (
+                "relation",
+                toml::Value::String("[[Solar Cycle]]".into()),
+                "Solar",
+                false,
+            ),
+            (
+                "relation",
+                toml::Value::String("[[Solar Cycle]]".into()),
+                "[[Solar Cycle]]",
+                true,
+            ),
+        ];
+
+        for (property_type, current, expected_value, expected) in cases {
+            let base = base(&format!(
+                r#"
+name = "Typed contains"
+filter = {{ field = "value", op = "contains", value = "{expected_value}" }}
+[properties]
+value = {{ type = "{property_type}" }}
+[[views]]
+name = "All"
+layout = "table"
+"#
+            ));
+            let mut meta = PageMeta::new();
+            meta.extra.insert("value".into(), current);
+            let result = candidate_matches(
+                &base,
+                &base.file.views[0],
+                &meta,
+                "notes/20260809.typed.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+            );
+
+            assert_eq!(
+                result.is_ok(),
+                expected,
+                "unexpected contains result for {property_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn candidate_alias_membership_uses_canonical_names() {
+        let cases = [
+            ("eq", ", value = \"science fiction\"", true),
+            ("contains", ", value = \"SCIENCE FICTION\"", true),
+            ("in", ", value = [\"Science Fiction\"]", true),
+            ("ne", ", value = \"science fiction\"", false),
+        ];
+
+        for (op, value, expected) in cases {
+            let base = base(&format!(
+                r#"
+name = "Aliases"
+filter = {{ field = "aliases", op = "{op}"{value} }}
+[[views]]
+name = "All"
+layout = "table"
+"#
+            ));
+            let mut meta = PageMeta::new();
+            meta.aliases.push("Science Fiction".into());
+            let result = candidate_matches(
+                &base,
+                &base.file.views[0],
+                &meta,
+                "notes/20260809.aliases.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+            );
+
+            assert_eq!(
+                result.is_ok(),
+                expected,
+                "unexpected alias result for {op}"
+            );
+        }
     }
 }

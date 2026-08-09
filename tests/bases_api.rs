@@ -472,6 +472,63 @@ async fn get_base_returns_definition_and_unknown_is_404() {
         .assert_status_not_found();
 }
 
+fn seed_resolved_capability_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/resolved.base.toml"),
+        r#"
+name = "Resolved capability"
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+journal_date = { type = "date" }
+status = { type = "select", options = ["reading"] }
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "sys.kind", op = "eq", value = "BOOK" },
+  { field = "prop.kind", op = "eq", value = "genre" },
+  { field = "word_count", op = "eq", value = 0 },
+  { field = "prop.word_count", op = "eq", value = 7 },
+  { field = "prop.journal_date", op = "is_empty" },
+  { field = "status", op = "eq", value = "reading" },
+  { field = "prop.status", op = "eq", value = "reading" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn get_base_emits_resolved_member_creation_request_keys() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_resolved_capability_base)
+        .build();
+
+    let body = fixture
+        .server
+        .get("/api/vault/bases/resolved")
+        .await
+        .json::<serde_json::Value>();
+
+    assert_eq!(body["diagnostics"], serde_json::json!([]));
+
+    assert_eq!(
+        body["member_creation"][0]["fields"],
+        serde_json::json!([
+            { "field": "kind", "membership": true, "view": false },
+            { "field": "prop.kind", "membership": true, "view": false },
+            { "field": "word_count", "membership": true, "view": false },
+            { "field": "prop.word_count", "membership": true, "view": false },
+            { "field": "prop.journal_date", "membership": true, "view": false },
+            { "field": "status", "membership": true, "view": false }
+        ])
+    );
+}
+
 #[tokio::test]
 async fn view_evaluation_honors_view_filter_and_sort() {
     let (server, _tmp) = ApiFixture::builder()

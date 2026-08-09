@@ -56,6 +56,22 @@ impl SysField {
         })
     }
 
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            SysField::Id => "id",
+            SysField::Path => "path",
+            SysField::Title => "title",
+            SysField::Kind => "kind",
+            SysField::Project => "project",
+            SysField::Tags => "tags",
+            SysField::Aliases => "aliases",
+            SysField::CreatedAt => "created_at",
+            SysField::UpdatedAt => "updated_at",
+            SysField::JournalDate => "journal_date",
+            SysField::WordCount => "word_count",
+        }
+    }
+
     /// The `pages` column for scalar system fields; `None` for the
     /// multi-valued ones (`tags`, `aliases`).
     fn column(self) -> Option<&'static str> {
@@ -1036,7 +1052,7 @@ themes  = { type = "multi_select", options = [] }
                 "0190f8a0-0000-7000-8000-00000000000a",
                 "BOOK",
                 "Book A",
-                "tags = [\"sf\"]\nauthor = \"Wolfe\"\nstatus = \"reading\"\nrating = 9\nstarted = 2026-07-01\nthemes = [\"memory\"]\nseries = [\"[[Solar Cycle]]\"]\n",
+                "tags = [\"sf\"]\naliases = [\"Science Fiction\"]\nauthor = \"Wolfe\"\nstatus = \"reading\"\nrating = 9\nstarted = 2026-07-01\nthemes = [\"memory\"]\nseries = [\"[[Solar Cycle]]\"]\n",
             ),
         );
         write(
@@ -1108,6 +1124,78 @@ themes  = { type = "multi_select", options = [] }
             ..Default::default()
         };
         evaluate(index.connection(), &spec, &QueryContext::for_base(base)).unwrap()
+    }
+
+    #[test]
+    fn in_memory_matching_has_sql_parity_for_contains_and_aliases() {
+        let (_tmp, index, mut base) = fixture();
+        let mut meta = crate::vault::page::PageMeta::new();
+        meta.kind = Some(crate::vault::kind::Kind::Book);
+        meta.title = Some("Book A".into());
+        meta.tags.push("sf".into());
+        meta.aliases.push("Science Fiction".into());
+        meta.extra
+            .insert("author".into(), toml::Value::String("Wolfe".into()));
+        meta.extra
+            .insert("status".into(), toml::Value::String("reading".into()));
+        meta.extra.insert(
+            "themes".into(),
+            toml::Value::Array(vec![toml::Value::String("memory".into())]),
+        );
+        meta.extra.insert(
+            "series".into(),
+            toml::Value::Array(vec![toml::Value::String("[[Solar Cycle]]".into())]),
+        );
+        let cases = [
+            (
+                serde_json::json!({ "field": "author", "op": "contains", "value": "OLF" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "contains", "value": "read" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "contains", "value": "reading" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "contains", "value": "mem" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "contains", "value": "memory" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "contains", "value": "Solar" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "contains", "value": "[[Solar Cycle]]" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "aliases", "op": "eq", "value": "science fiction" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "aliases", "op": "contains", "value": "SCIENCE FICTION" }),
+                true,
+            ),
+        ];
+
+        for (filter_json, expected) in cases {
+            let filter: Filter = serde_json::from_value(filter_json.clone()).unwrap();
+            base.file.filter = Some(filter);
+            let in_memory = crate::vault::base::base_matches_meta(&base, &meta, "a.md");
+            let sql = flat_paths(&run(&index, &base, filter_json))
+                .iter()
+                .any(|path| path == "a.md");
+
+            assert_eq!(sql, expected, "unexpected SQL fixture result");
+            assert_eq!(in_memory, sql, "in-memory matcher diverged from SQL");
+        }
     }
 
     // -- Task 3.2: filter compilation -------------------------------------
