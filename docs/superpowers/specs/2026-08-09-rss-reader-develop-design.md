@@ -20,9 +20,9 @@ Annotations and capture-to-vault are excluded. A bookmarked entry remains durabl
 
 `feeds.md` at the vault root is the sole source of truth for subscription membership, ordering, groups, feed-level tags, and title overrides. The parser recognizes second-level headings and feed list items while preserving frontmatter, headings, prose, comments, and unrecognized lines byte-for-byte outside the transformed item.
 
-UI writes use the existing `MutationCoordinator` and an expected revision. They do not write or rename the file directly. A stale revision returns HTTP 409 without overwriting external edits. Successful writes update the vault index and reconcile feed storage immediately. External edits are reconciled from the existing vault watcher; the scheduler also reconciles before a due sweep as a recovery path. A warning-bearing manifest never replaces the last valid subscription set.
+`feeds.md` is a reserved managed manifest, not an indexed page. Clepsydra excludes that exact root path unconditionally, independently of user-configured exclusion patterns, so index frontmatter repair can never rewrite it. UI writes use a dedicated `MutationCoordinator` exact-create/exact-replace operation with path locking, atomic publication, durability, and expected-content CAS, but deliberately no `IndexHandle::apply_mutation`. A stale revision returns HTTP 409 without overwriting external edits. Successful writes reconcile feed storage and notify clients immediately. External edits are detected from the raw existing watcher batch before excluded paths are discarded; the scheduler also reconciles before a due sweep as a recovery path. A warning-bearing manifest updates diagnostics but never replaces the last valid subscription set.
 
-Feed runtime data lives in `.clepsydra/feeds.db`, separate from `.clepsydra/cache.db`. The database uses `rusqlite`, idempotent schema initialization, foreign keys, and forward-compatible column/table migrations. It contains the subscription cache and fetch bookkeeping plus durable entries, read state, bookmarks, and entry tags. The vault backup path creates a consistent SQLite snapshot of `feeds.db`; it never byte-copies a live database.
+Feed runtime data lives in `.clepsydra/feeds.db`, separate from `.clepsydra/cache.db`. The database uses `rusqlite`, idempotent schema initialization, foreign keys, and forward-compatible column/table migrations. It contains the subscription cache and fetch bookkeeping plus durable entries, read state, bookmarks, and entry tags. A reusable synchronous SQLite snapshot primitive serves both the live `FeedStoreHandle` and the one-shot backup CLI. Backup traversal skips `feeds.db`, `feeds.db-wal`, and `feeds.db-shm`, then archives only the consistent snapshot as `.clepsydra/feeds.db`.
 
 ## Backend architecture
 
@@ -37,7 +37,7 @@ Feed runtime data lives in `.clepsydra/feeds.db`, separate from `.clepsydra/cach
 
 `FeedStore` follows the existing `IndexHandle` approach: one owning worker thread receives typed operations over channels, keeping `rusqlite::Connection` off Tokio workers and serializing writes without an async mutex around blocking calls.
 
-`AppState` gains a cloneable feed handle, a checked feed HTTP client, manifest diagnostics, and a scheduler notifier. `build_app_state` opens feed storage beneath the vault root. `run_server` starts the scheduler after startup reconciliation and before serving. Existing server bind, TLS, static frontend, tracing, and shutdown behavior remain authoritative.
+`AppState` gains a cloneable feed handle, a checked feed HTTP client, manifest diagnostics, settings-derived limits, and a scheduler notifier. `build_app_state_with_feeds(vault_root, &FeedsSettings)` is the configured constructor; the existing `build_app_state(vault_root)` remains as a default-settings wrapper for MCP and test callers. `run_server` reconciles once, retains an owned scheduler cancellation/join guard while serving, and stops the scheduler when serving returns. The existing watcher notifies that same loop when raw batches contain `feeds.md`. Existing server bind, TLS, static frontend, tracing, and shutdown behavior remain authoritative.
 
 Configuration is added to the existing `Settings` model as a defaulted `[feeds]` section:
 
@@ -60,18 +60,20 @@ Responses are streamed under `max_response_bytes`. Oversized documents fail with
 
 All routes are part of the existing OpenAPI document and live below `/api/vault/feeds`:
 
-- `GET /api/vault/feeds` — grouped subscriptions, counts, diagnostics, and health;
-- `POST /api/vault/feeds` — discover, validate, subscribe, and fetch;
-- `PATCH /api/vault/feeds/{id}` — title override or group move;
-- `DELETE /api/vault/feeds/{id}` — unsubscribe;
+- `GET /api/vault/feeds` — grouped subscriptions, counts, diagnostics, health, and `manifest_revision`;
+- `POST /api/vault/feeds` — discover, validate, subscribe, and fetch; requires `expected_revision`;
+- `PATCH /api/vault/feeds/{id}` — title override or group move; requires `expected_revision`;
+- `DELETE /api/vault/feeds/{id}` — unsubscribe with a JSON body containing `expected_revision`;
 - `POST /api/vault/feeds/refresh` and `/refresh/{id}` — schedule refresh through the one pipeline;
 - `GET /api/vault/feeds/entries` — cursor-paginated entries filtered by view, feed, group, or tag;
 - `PATCH /api/vault/feeds/entries/{id}` — read, bookmark, or tag state;
 - `POST /api/vault/feeds/entries/mark-read` — bounded bulk read mutation;
-- `POST /api/vault/feeds/import` — OPML folders to manifest groups, deduplicated against existing and same-import URLs;
+- `POST /api/vault/feeds/import` — OPML folders to manifest groups, deduplicated against existing and same-import URLs; requires `expected_revision`;
 - `GET /api/vault/feeds/export` — OPML export preserving groups.
 
 Malformed supplied cursors return HTTP 400 and perform no mutation. An absent mark-read cursor is explicitly unbounded. A boundary cursor prevents entries arriving during the gesture from being marked.
+
+Membership-changing handlers compare the supplied revision with `page_revision(raw_manifest)`, pass the same raw bytes into the coordinator CAS, and map both preflight and publication races through `ApiError::revision_conflict(current_revision)`. Refresh and entry-state mutations do not require a manifest revision.
 
 Handlers use the existing `ApiError` conventions and Utoipa annotations. Frontend types come from regenerated `ui/src/api/schema.d.ts`; handwritten duplicate transport types are prohibited.
 
@@ -91,7 +93,7 @@ Desktop navigation adds `FEEDS` before `DOCS`; STATUS keeps its explicit non-vie
 
 Components use the current Vessel vocabulary and tokens: `Card`, `cl-mono`, `cl-marg`, paper/ink/rule/accent variables, square indicators, compact figure captions, and existing responsive breakpoints. Generic Zinc/Sky styling from PR #5 is not carried over. Interactive form, dialog, disclosure, toggle, and selection controls use existing React Aria primitives or React Aria Components where appropriate.
 
-`ui/src/api/feeds.ts` uses `$api`, generated schema types, `queryKeys`, and `invalidateByPath`. Optimistic entry mutations inspect every cached feed-entry query: entries are updated if they still satisfy its filters and removed if they no longer do. Errors restore exact captured pages; settlement refreshes counts and affected entry queries.
+`ui/src/api/feeds.ts` uses `$api`, generated schema types, `queryKeys`, and `invalidateByPath`. Infinite entry queries retain an OpenAPI-shaped key, `["get", "/api/vault/feeds/entries", init]`, so existing path invalidation works. Optimistic entry mutations patch entries already present in each cache if they remain members and remove them if they no longer match; they never invent or reorder an entry absent from a cache. Errors restore exact captured pages; settlement refreshes counts and all affected entry queries so newly matching tag views refetch. Membership-changing hooks carry the latest `manifest_revision` and surface structured revision conflicts.
 
 ## Retention and invariants
 
@@ -118,7 +120,7 @@ TDD covers observable contracts:
 - API status/error contracts, malformed cursors, bounded mark-read, OPML deduplication, and generated OpenAPI paths;
 - frontend query construction, filtered optimistic membership, exact rollback, navigation resolution, desktop/mobile roots, loading/empty/error states, keyboard interaction, and responsive river behavior.
 
-Final gates are `cargo fmt --check`, `cargo check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, `bun --cwd ui typecheck`, `bun --cwd ui lint`, `bun --cwd ui test`, and `bun --cwd ui build`. Browser verification exercises subscribe, refresh, river filtering, expand/read, bookmark/tag, management, and desktop/mobile navigation against a local fixture feed.
+Final gates are `cargo fmt --check`, `cargo check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, `bun run --cwd ui typecheck`, `bun run --cwd ui lint`, `bun run --cwd ui test`, and `bun run --cwd ui build`. Browser verification exercises subscribe, refresh, river filtering, expand/read, bookmark/tag, management, and desktop/mobile navigation against a local fixture feed.
 
 ## Integration history
 

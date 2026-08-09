@@ -14,8 +14,8 @@
 - Follow TDD: add one observable-contract test, run it and observe the expected failure, then add production code and run the focused test green.
 - Do not add SQLx or a second configuration loader.
 - All HTTP routes live below `/api/vault/feeds` and appear in the existing OpenAPI document.
-- `feeds.md` writes use `MutationCoordinator` with expected-revision conflict handling; no direct write/rename path.
-- `.clepsydra/feeds.db` is durable and must be backed up through a consistent SQLite snapshot.
+- `feeds.md` is an unconditionally excluded reserved root manifest. Its dedicated `MutationCoordinator` operation retains path locking, atomic publication, durability, and expected-content CAS but never indexes the file.
+- `.clepsydra/feeds.db` is durable. Backup skips its live DB/WAL/SHM files and archives a consistent SQLite snapshot produced by the shared synchronous snapshot primitive.
 - Keep `/` as Atrium; add a `/feeds` Codex view plus an Atrium panel.
 - Frontend transport types come from generated OpenAPI schemas.
 - Preserve checked-destination, redirect, body-limit, sanitization, conditional-fetch, backoff, and filter-aware optimistic-update behavior from PR #5.
@@ -181,14 +181,21 @@ pub struct FeedStoreHandle {
 
 enum Command {
     Reconcile { feeds: Vec<ManifestFeed>, reply: tokio::sync::oneshot::Sender<Result<(), FeedStoreError>> },
+    ListFeeds { reply: tokio::sync::oneshot::Sender<Result<Vec<FeedSummary>, FeedStoreError>> },
+    DueFeeds { now: DateTime<Utc>, reply: tokio::sync::oneshot::Sender<Result<Vec<FeedRecord>, FeedStoreError>> },
+    ApplyFetch { feed_id: i64, outcome: FetchOutcome, reply: tokio::sync::oneshot::Sender<Result<(), FeedStoreError>> },
     ListEntries { filters: EntryFilters, reply: tokio::sync::oneshot::Sender<Result<EntryPage, FeedStoreError>> },
-    // one typed variant per public operation
+    PatchEntry { id: i64, patch: EntryPatch, reply: tokio::sync::oneshot::Sender<Result<Entry, FeedStoreError>> },
+    MarkRead { scope: MarkReadScope, reply: tokio::sync::oneshot::Sender<Result<u64, FeedStoreError>> },
+    ScheduleRefresh { feed_id: Option<i64>, now: DateTime<Utc>, reply: tokio::sync::oneshot::Sender<Result<(), FeedStoreError>> },
+    Prune { now: DateTime<Utc>, retention_days: u64, unread_retention_days: u64, reply: tokio::sync::oneshot::Sender<Result<u64, FeedStoreError>> },
+    SnapshotTo { destination: PathBuf, reply: tokio::sync::oneshot::Sender<Result<(), FeedStoreError>> },
 }
 ```
 
 Open one connection on a named worker thread, enable foreign keys, initialize schema idempotently, and execute every command on that thread. Use `(COALESCE(published_at, fetched_at) DESC, id DESC)` cursor ordering. Store tags as normalized relational rows for entry tags and JSON only for manifest-derived feed tags.
 
-`FeedStoreHandle::snapshot_to` executes SQLite's online backup API or `VACUUM INTO` on the owning thread. Extend `backup.rs` so a present feed database is supplied as a consistent snapshot to the archive instead of traversed as a live file; keep `cache.db` excluded.
+Define `snapshot_database(source: &Path, destination: &Path) -> Result<(), FeedStoreError>` as the reusable synchronous SQLite snapshot primitive. `FeedStoreHandle::snapshot_to` invokes it through the owning worker. `create_backup` invokes the same primitive through a short-lived source connection because the CLI is a separate process without `AppState`: create the temporary snapshot outside the walked vault, skip `.clepsydra/feeds.db`, `feeds.db-wal`, and `feeds.db-shm`, then append only the snapshot under `.clepsydra/feeds.db`. Extend backup tests to reopen the archived database and assert the WAL/SHM names are absent; keep `cache.db` excluded.
 
 - [ ] **Step 4: Run store and backup tests GREEN**
 
@@ -287,14 +294,19 @@ git commit -m "feat(feeds): securely fetch and parse feeds"
 - Modify: `src/api/openapi.rs`
 - Modify: `src/lib.rs`
 - Modify: `src/config_command.rs`
+- Modify: `src/vault/config.rs`
+- Modify: `src/vault/mutation_coordinator.rs`
+- Modify: existing watcher/reconcile tests in `src/lib.rs`
 - Modify: `README.md`
-- Test: inline tests in `src/api/feeds.rs`, `src/feeds/scheduler.rs`, and existing configuration tests
-- Test: `tests/openapi_schema_test.rs` or the existing OpenAPI contract test location
+- Test: inline tests in `src/api/feeds.rs`, `src/feeds/scheduler.rs`, `src/vault/mutation_coordinator.rs`, and existing configuration/watcher tests
+- Test: the existing OpenAPI contract test location
 
 **Interfaces:**
-- Adds defaulted `FeedsSettings` to `Settings` with the exact defaults in the design.
-- Adds `feeds: FeedStoreHandle`, checked HTTP client, notifier, manifest diagnostics, and manifest-update serialization to `AppState`.
+- Adds `FeedsSettings: Clone + Default` to `Settings` with the exact defaults in the design.
+- Adds `build_app_state_with_feeds(vault_root, &FeedsSettings)` while retaining `build_app_state(vault_root)` as the default-settings wrapper.
+- Adds `feeds: FeedStoreHandle`, checked HTTP client, notifier, manifest diagnostics, settings-derived limits, and manifest-update serialization to `AppState`.
 - Produces `feeds::router() -> Router<Arc<AppState>>` nested at `/feeds` from `api_router`.
+- `GET /feeds` returns `manifest_revision`; subscribe, patch, delete, and import requests require `expected_revision`.
 
 - [ ] **Step 1: Add failing integration tests**
 
@@ -339,7 +351,7 @@ fn openapi_contains_feed_routes() {
 }
 ```
 
-Also cover last-good-manifest preservation, stale revision conflict, absent cursor unbounded behavior, boundary cursor behavior, OPML duplicate handling, grouped list diagnostics, and refresh notification.
+Also cover unconditional `feeds.md` exclusion, exact reserved-manifest CAS without index mutation, last-good-manifest preservation, structured stale-revision conflict for subscribe/patch/delete/import, absent cursor unbounded behavior, boundary cursor behavior, OPML duplicate handling, grouped list diagnostics including `manifest_revision`, watcher notification on valid/warning-bearing/removal edits, scheduler refresh notification, and scheduler cancellation/join when serving ends.
 
 - [ ] **Step 2: Run API/config tests RED**
 
@@ -354,11 +366,22 @@ Expected: compilation fails because settings, state, scheduler, and router are a
 pub struct FeedsSettings {
     #[serde(default = "default_fetch_interval_minutes")]
     pub fetch_interval_minutes: u64,
-    // remaining five fields with exact design defaults
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u64,
+    #[serde(default = "default_unread_retention_days")]
+    pub unread_retention_days: u64,
+    #[serde(default = "default_max_response_bytes")]
+    pub max_response_bytes: usize,
+    #[serde(default = "default_max_entry_content_bytes")]
+    pub max_entry_content_bytes: usize,
+    #[serde(default = "default_fetch_concurrency")]
+    pub fetch_concurrency: usize,
 }
 ```
 
-Build feed state in `build_app_state`, preserving the established test support constructor. Reconcile on startup. Start one scheduler from `run_server`; use a cancellation-safe Tokio task and bounded concurrency. Route all subscription transforms through an internal revision-guarded mutation helper using `MutationCoordinator`, then reconcile. Map domain errors through `ApiError` and annotate every request/response with Utoipa.
+Build configured feed state in `build_app_state_with_feeds`; preserve `build_app_state` and existing test/MCP callers through the default-settings wrapper. Add `feeds.md` to unconditional path exclusion, not merely the replaceable default pattern list. Add a reserved-manifest coordinator command that publishes exact bytes under CAS without `IndexHandle::apply_mutation`. Membership handlers compare `expected_revision` with `page_revision(raw_manifest)`, pass those same raw bytes into coordinator CAS, and map preflight/publication races through `ApiError::revision_conflict(current_revision)`.
+
+Implement one `reconcile_feed_manifest(state)` operation. Call it before serving and from a scheduler loop that selects between due timers and a shared notifier. Inspect raw watcher batches for `feeds.md` before excluded-path processing and notify the loop on upsert/removal. Retain a scheduler cancellation/join guard beside the existing watcher and stop it when `serve` returns. Use bounded fetch concurrency. Map domain errors through `ApiError` and annotate every request/response with Utoipa.
 
 Update the config template/reference and README with the `[feeds]` section, `feeds.md` format, API location, and retention/security behavior. Do not repeat the obsolete PR setup instructions.
 
@@ -414,7 +437,7 @@ it("restores the exact captured infinite pages after mutation failure", async ()
 });
 ```
 
-Also cover saved view removal, tag-view removal/addition, feed/group filter retention, multiple cached filter keys, and count invalidation.
+Also cover saved-view removal, tag-view removal for present entries, unchanged caches where an entry was absent, feed/group filter retention, multiple cached filter keys, OpenAPI-shaped infinite keys with preserved `pageParams`, first-page requests without `cursor`, and count/entry invalidation that refetches newly matching tag views.
 
 - [ ] **Step 2: Run frontend API tests RED**
 
@@ -424,7 +447,7 @@ Expected: module/functions are missing.
 
 - [ ] **Step 3: Implement generated hooks**
 
-Use `$api` for ordinary queries/mutations and `fetchClient` only where infinite-page or OPML response handling requires it. Add one `queryKeys.feeds` path prefix. In `onMutate`, cancel matching queries and capture every `[key, data]` pair; in `onError`, restore each exact pair; in `onSettled`, invalidate feed counts and affected entry paths.
+Use `$api` for ordinary queries/mutations and `fetchClient` only where infinite-page or OPML response handling requires it. Add one `queryKeys.feeds` path prefix. Build infinite query keys as `["get", "/api/vault/feeds/entries", init]`, preserve `pageParams`, and omit `cursor` on the first request. In `onMutate`, cancel matching queries and capture every `[key, data]` pair; patch/remove only entries already present and leave absent entries unchanged. In `onError`, restore each exact pair; in `onSettled`, invalidate feed counts and affected entry paths. Subscribe/update/delete/import carry the latest `manifest_revision` and refetch/surface structured 409 conflicts.
 
 - [ ] **Step 4: Run frontend API tests GREEN**
 
