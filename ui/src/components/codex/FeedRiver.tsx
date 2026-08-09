@@ -184,7 +184,18 @@ export function FeedRiver({
                       setTagEditorId(null);
                       if (expanded && !entry.read) {
                         patchEntry.reset();
-                        patchEntry.mutate({ id: entry.id, read: true });
+                        void patchEntry
+                          .mutateAsync({ id: entry.id, read: true })
+                          .then(() => {
+                            setExpandedEntry((current) =>
+                              current?.id === entry.id
+                                ? { ...current, read: true }
+                                : current,
+                            );
+                          })
+                          .catch(() => {
+                            // Keep the pinned unread snapshot aligned with rollback.
+                          });
                       }
                     }}
                     onToggleBookmark={() => {
@@ -279,7 +290,7 @@ function EntryDisclosure({
             className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 text-left outline-none hover:bg-paper-edge focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
           >
             <span
-              aria-hidden="true"
+              aria-label={entry.read ? "Read entry" : "Unread entry"}
               className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
             />
             <span className="min-w-0">

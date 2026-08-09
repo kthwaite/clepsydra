@@ -473,9 +473,11 @@ describe("FeedRiver", () => {
           ? input
           : new riverMocks.NativeRequest(input, init);
       if (request.method === "PATCH") {
-        return new Response(JSON.stringify(entry({ read: true })), {
-          headers: { "Content-Type": "application/json" },
-        });
+        const body = (await request.clone().json()) as { read?: boolean };
+        return new Response(
+          JSON.stringify(entry({ read: body.read ?? baseEntry.read })),
+          { headers: { "Content-Type": "application/json" } },
+        );
       }
       if (
         request.method === "GET" &&
@@ -519,6 +521,42 @@ describe("FeedRiver", () => {
       ).toBe(true);
     });
     expect(screen.getByText("The complete entry body.")).toBeVisible();
+    const pinnedArticle = screen.getByRole("article", {
+      name: /cache semantics/i,
+    });
+    await waitFor(() => {
+      expect(
+        within(pinnedArticle).getByLabelText(/^read entry$/i),
+      ).toBeVisible();
+      expect(
+        within(pinnedArticle).getByRole("button", {
+          name: /^mark unread$/i,
+        }),
+      ).toBeEnabled();
+    });
+    await user.click(
+      within(pinnedArticle).getByRole("button", { name: /^mark unread$/i }),
+    );
+    await waitFor(() => {
+      const patchRequests = riverMocks.fetchMock.mock.calls
+        .map(([input]) =>
+          input instanceof riverMocks.NativeRequest
+            ? input
+            : new riverMocks.NativeRequest(input),
+        )
+        .filter((request) => request.method === "PATCH");
+      expect(patchRequests).toHaveLength(2);
+    });
+    const patchRequests = riverMocks.fetchMock.mock.calls
+      .map(([input]) =>
+        input instanceof riverMocks.NativeRequest
+          ? input
+          : new riverMocks.NativeRequest(input),
+      )
+      .filter((request) => request.method === "PATCH");
+    await expect(patchRequests.at(-1)?.clone().json()).resolves.toEqual(
+      expect.objectContaining({ read: false }),
+    );
 
     await user.click(screen.getByRole("button", { expanded: true }));
     expect(
