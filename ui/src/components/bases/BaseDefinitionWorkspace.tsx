@@ -13,6 +13,7 @@ import {
 import { type BaseDraft, fromWire, toWire } from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
 import { MembershipEditor } from "./MembershipEditor";
+import { PropertiesEditor } from "./PropertiesEditor";
 import { ValidationSummary } from "./ValidationSummary";
 
 export type BaseDiagnostic = BaseDetailResponse["diagnostics"][number];
@@ -136,6 +137,9 @@ export function BaseDefinitionWorkspace({
   const [baseline, setBaseline] = useState<BaseDraft>();
   const [revision, setRevision] = useState("");
   const [diagnostics, setDiagnostics] = useState<BaseDiagnostic[]>([]);
+  const [localDiagnostics, setLocalDiagnostics] = useState<BaseDiagnostic[]>(
+    [],
+  );
   const [selectedSection, setSelectedSection] = useState<SectionId>("general");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
@@ -168,6 +172,7 @@ export function BaseDefinitionWorkspace({
     savedGeneration.current = 0;
     hydrated.current = true;
     setSaveError(undefined);
+    setLocalDiagnostics([]);
   }, [baseQuery.data, conflictMessage, isDirty]);
 
   const registerFocusTarget = useCallback<RegisterFocusTarget>(
@@ -210,6 +215,7 @@ export function BaseDefinitionWorkspace({
     setSaveError(undefined);
     setConflictMessage(undefined);
     setReloadError(undefined);
+    setLocalDiagnostics([]);
     setDiagnostics(baseQuery.data?.diagnostics ?? diagnostics);
   }, [baseQuery.data?.diagnostics, baseline, diagnostics]);
 
@@ -220,7 +226,14 @@ export function BaseDefinitionWorkspace({
   });
 
   async function save() {
-    if (!draft || !isDirty || saving || conflictMessage) return;
+    if (
+      !draft ||
+      !isDirty ||
+      saving ||
+      conflictMessage ||
+      localDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+    )
+      return;
     const submittedGeneration = editGeneration.current;
     const submittedRevision = revision;
     const submittedDraft = structuredClone(draft);
@@ -245,6 +258,7 @@ export function BaseDefinitionWorkspace({
     } catch (error) {
       const nextDiagnostics = diagnosticsFromError(error);
       if (nextDiagnostics.length > 0) setDiagnostics(nextDiagnostics);
+      setLocalDiagnostics([]);
       if (isApiConflict(error)) {
         setConflictMessage(
           "This base changed outside Clepsydra. Review your draft or deliberately reload the file.",
@@ -279,6 +293,7 @@ export function BaseDefinitionWorkspace({
     setConflictMessage(undefined);
     setSaveError(undefined);
     setReloadError(undefined);
+    setLocalDiagnostics([]);
     setReloadConfirmation(false);
   }
 
@@ -292,6 +307,7 @@ export function BaseDefinitionWorkspace({
     );
   }
   if (!draft) return <RecoveryState slug={slug} error={baseQuery.error} />;
+  const visibleDiagnostics = [...diagnostics, ...localDiagnostics];
 
   const status: DefinitionSaveStatus = saving
     ? "saving"
@@ -303,7 +319,7 @@ export function BaseDefinitionWorkspace({
   const editorProps: SectionEditorProps = {
     draft,
     setDraft: changeDraft,
-    diagnostics,
+    diagnostics: visibleDiagnostics,
     focusDiagnostic,
     registerFocusTarget,
   };
@@ -316,7 +332,14 @@ export function BaseDefinitionWorkspace({
         revision={revision}
         status={status}
         saveError={saveError ?? conflictMessage}
-        canSave={isDirty && !saving && !conflictMessage}
+        canSave={
+          isDirty &&
+          !saving &&
+          !conflictMessage &&
+          !localDiagnostics.some(
+            (diagnostic) => diagnostic.severity === "error",
+          )
+        }
         canDiscard={isDirty && !saving}
         onSave={() => void save()}
         onDiscard={discard}
@@ -400,11 +423,17 @@ export function BaseDefinitionWorkspace({
             </section>
           )}
           {selectedSection === "properties" && (
-            <SectionPlaceholder
-              section="properties"
-              heading="Properties"
-              message="Property editing is added in Task 9."
-              {...editorProps}
+            <PropertiesEditor
+              slug={slug}
+              properties={draft.properties}
+              persistedPropertyIds={
+                new Set(baseline?.properties.map((property) => property.id))
+              }
+              onChange={(properties) =>
+                changeDraft((current) => ({ ...current, properties }))
+              }
+              onDiagnosticsChange={setLocalDiagnostics}
+              registerFocus={registerFocusTarget}
             />
           )}
           {selectedSection === "views" && (
@@ -417,7 +446,7 @@ export function BaseDefinitionWorkspace({
           )}
         </div>
         <ValidationSummary
-          diagnostics={diagnostics}
+          diagnostics={visibleDiagnostics}
           focusDiagnostic={focusDiagnostic}
         />
       </div>
