@@ -28,7 +28,7 @@ export function TagInput({
   label,
   values,
   readOnlyValues = [],
-  suggestions = [],
+  suggestions,
   onChange,
   placeholder,
   className,
@@ -38,11 +38,12 @@ export function TagInput({
   const [highlight, setHighlight] = useState(0);
   const [navigated, setNavigated] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const hasSuggestions = suggestions !== undefined;
   const listId = useId();
   const query = inputValue.trim();
   const queryLower = query.toLowerCase();
   const matches = query
-    ? suggestions
+    ? (suggestions ?? [])
         .filter(
           (suggestion) =>
             suggestion.toLowerCase().includes(queryLower) &&
@@ -193,11 +194,13 @@ export function TagInput({
         ref={inputRef}
         type="text"
         value={inputValue}
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={open ? listId : undefined}
-        aria-activedescendant={open ? `${listId}-${selected}` : undefined}
-        aria-autocomplete="list"
+        role={hasSuggestions ? "combobox" : undefined}
+        aria-expanded={hasSuggestions ? open : undefined}
+        aria-controls={hasSuggestions && open ? listId : undefined}
+        aria-activedescendant={
+          hasSuggestions && open ? `${listId}-${selected}` : undefined
+        }
+        aria-autocomplete={hasSuggestions ? "list" : undefined}
         onChange={(e) => {
           setInputValue(e.target.value);
           setHighlight(0);

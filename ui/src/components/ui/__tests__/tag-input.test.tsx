@@ -71,7 +71,7 @@ describe("TagInput", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<TagInput label="Tags" values={["alpha"]} onChange={onChange} />);
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     await user.type(input, "beta{Enter}");
     expect(onChange).toHaveBeenCalledWith(["alpha", "beta"]);
   });
@@ -80,7 +80,7 @@ describe("TagInput", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<TagInput label="Tags" values={[]} onChange={onChange} />);
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     await user.type(input, "gamma,");
     expect(onChange).toHaveBeenCalledWith(["gamma"]);
   });
@@ -89,7 +89,7 @@ describe("TagInput", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<TagInput label="Tags" values={[]} onChange={onChange} />);
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     await user.type(input, "  delta  {Enter}");
     expect(onChange).toHaveBeenCalledWith(["delta"]);
   });
@@ -98,7 +98,7 @@ describe("TagInput", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<TagInput label="Tags" values={["alpha"]} onChange={onChange} />);
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     await user.type(input, "alpha{Enter}");
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe("TagInput", () => {
       />,
     );
 
-    await user.type(screen.getByRole("combobox"), "journal{Enter}");
+    await user.type(screen.getByRole("textbox"), "journal{Enter}");
 
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -132,7 +132,7 @@ describe("TagInput", () => {
       />,
     );
 
-    await user.type(screen.getByRole("combobox"), "daily{Enter}");
+    await user.type(screen.getByRole("textbox"), "daily{Enter}");
 
     expect(onChange).toHaveBeenCalledWith(["pkm", "daily"]);
     expect(onChange).not.toHaveBeenCalledWith(
@@ -147,7 +147,7 @@ describe("TagInput", () => {
       <TagInput label="Tags" values={["journal"]} onChange={onChange} />,
     );
 
-    await user.type(screen.getByRole("combobox"), "daily{Enter}");
+    await user.type(screen.getByRole("textbox"), "daily{Enter}");
 
     expect(onChange).toHaveBeenCalledWith(["journal", "daily"]);
   });
@@ -156,7 +156,7 @@ describe("TagInput", () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<TagInput label="Tags" values={[]} onChange={onChange} />);
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("textbox"));
     await user.keyboard("{Enter}");
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -167,7 +167,7 @@ describe("TagInput", () => {
     render(
       <TagInput label="Tags" values={["alpha", "beta"]} onChange={onChange} />,
     );
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     await user.click(input);
     await user.keyboard("{Backspace}");
     expect(onChange).toHaveBeenCalledWith(["alpha"]);
@@ -185,7 +185,7 @@ describe("TagInput", () => {
       />,
     );
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("textbox"));
     await user.keyboard("{Backspace}");
 
     expect(onChange).toHaveBeenCalledOnce();
@@ -212,7 +212,7 @@ describe("TagInput", () => {
         <button type="button">other</button>
       </>,
     );
-    const input = screen.getByRole("combobox");
+    const input = screen.getByRole("textbox");
     await user.type(input, "epsilon");
     await user.click(screen.getByText("other"));
     expect(onChange).toHaveBeenCalledWith(["epsilon"]);
@@ -260,11 +260,23 @@ describe("TagInput", () => {
     ).toBeNull();
   });
 
+  it("preserves textbox semantics when suggestions are omitted", () => {
+    render(<TagInput label="Tags" values={[]} onChange={() => {}} />);
+
+    expect(
+      screen.getByRole("textbox", { name: "Add tags" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+  });
+
   it("does not show suggestions when suggestions are omitted", async () => {
     const user = userEvent.setup();
     render(<TagInput label="Tags" values={[]} onChange={() => {}} />);
 
-    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "ru");
+    await user.type(screen.getByRole("textbox", { name: "Add tags" }), "ru");
 
     expect(
       screen.queryByRole("listbox", { name: "Tag suggestions" }),
