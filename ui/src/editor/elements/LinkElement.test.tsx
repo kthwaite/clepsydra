@@ -41,4 +41,9 @@ describe("LinkElement resource marks", () => {
     expect(link).not.toHaveAttribute("data-link-resource");
     expect(link).not.toHaveAttribute("href");
   });
+
+  it("exposes a CAS link through the vault blob endpoint", () => {
+    const link = renderLink("cas:sha256:abc123");
+    expect(link).toHaveAttribute("href", "/api/vault/cas/sha256:abc123");
+  });
 });

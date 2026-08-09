@@ -77,6 +77,14 @@ export interface LinkElement {
   children: Descendant[];
 }
 
+export interface ImageElement {
+  type: "image";
+  url: string;
+  alt: string;
+  title?: string;
+  children: CustomText[];
+}
+
 export interface BlockRefElement {
   type: "block-ref";
   blockId: string;
@@ -107,6 +115,7 @@ export type CustomElement =
   | JournalTimeElement
   | WikilinkElement
   | LinkElement
+  | ImageElement
   | BlockRefElement
   | FootnoteRefElement
   | FootnoteDefElement;

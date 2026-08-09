@@ -8,6 +8,7 @@ const INLINE = new Set<ElementType>([
   "block-ref",
   "footnote-ref",
   "link",
+  "image",
 ]);
 const VOID = new Set<ElementType>([
   "wikilink",
@@ -15,6 +16,7 @@ const VOID = new Set<ElementType>([
   "footnote-ref",
   "thematic-break",
   "journal-time",
+  "image",
 ]);
 
 const ALL_TYPES: ElementType[] = [
@@ -32,6 +34,7 @@ const ALL_TYPES: ElementType[] = [
   "footnote-ref",
   "footnote-def",
   "journal-time",
+  "image",
 ];
 
 describe("withSchema classification", () => {

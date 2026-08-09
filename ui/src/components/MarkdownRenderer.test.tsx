@@ -54,4 +54,22 @@ describe("MarkdownRenderer", () => {
       "data-link-resource",
     );
   });
+
+  it("resolves CAS links and images through the vault blob endpoint", () => {
+    render(
+      <MarkdownRenderer
+        content={
+          "[Archived snapshot](cas:sha256:snapshot)\n\n![Archived image](cas:sha256:image)"
+        }
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Archived snapshot" }),
+    ).toHaveAttribute("href", "/api/vault/cas/sha256:snapshot");
+    expect(screen.getByRole("img", { name: "Archived image" })).toHaveAttribute(
+      "src",
+      "/api/vault/cas/sha256:image",
+    );
+  });
 });

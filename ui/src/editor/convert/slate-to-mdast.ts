@@ -138,6 +138,15 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
           });
           break;
         }
+        case "image": {
+          result.push({
+            type: "image",
+            url: el.url,
+            alt: el.alt,
+            title: el.title ?? null,
+          });
+          break;
+        }
         case "wikilink": {
           const wl: WikiLinkMdast = {
             type: "wikiLink",

@@ -5,6 +5,7 @@ import { codeBlockDescriptor } from "./elements/codeBlock";
 import { footnoteDefDescriptor } from "./elements/footnoteDef";
 import { footnoteRefDescriptor } from "./elements/footnoteRef";
 import { headingDescriptor } from "./elements/heading";
+import { imageDescriptor } from "./elements/image";
 import { journalTimeDescriptor } from "./elements/journalTime";
 import { linkDescriptor } from "./elements/link";
 import {
@@ -29,6 +30,7 @@ const ALL: ElementDescriptor[] = [
   journalTimeDescriptor,
   wikilinkDescriptor,
   linkDescriptor,
+  imageDescriptor,
   blockRefDescriptor,
   footnoteRefDescriptor,
   footnoteDefDescriptor,

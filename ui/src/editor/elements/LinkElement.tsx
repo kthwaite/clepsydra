@@ -24,13 +24,9 @@ import { isSchemeLink, openSchemeLink } from "#/editor/schemeLinks";
 import type { LinkElement as LinkElementType } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
+import { resolveLinkTarget } from "#/lib/resourceUrl";
 
 type Props = RenderElementProps & { element: LinkElementType };
-
-/** External links open in the browser; scheme links resolve via the API; everything else is a vault path. */
-function isExternal(url: string): boolean {
-  return /^(https?:|mailto:)/i.test(url);
-}
 
 /** Trim a long URL for display, keeping the head readable. */
 function truncate(url: string, max = 56): string {
@@ -86,10 +82,13 @@ export function LinkElement({ attributes, children, element }: Props) {
           openTab: (type, path) => openTab(type, path),
           notify: (message) => toast.error(message),
         });
-      } else if (isExternal(url)) {
-        window.open(url, "_blank", "noopener,noreferrer");
       } else {
-        openTab("page", url);
+        const target = resolveLinkTarget(url);
+        if (target.kind === "browser") {
+          window.open(target.href, "_blank", "noopener,noreferrer");
+        } else {
+          openTab("page", target.path);
+        }
       }
       setOpen(false);
     },
@@ -119,7 +118,8 @@ export function LinkElement({ attributes, children, element }: Props) {
     e.preventDefault();
   };
 
-  const safeHref = isExternal(url) ? url : undefined;
+  const target = resolveLinkTarget(url);
+  const safeHref = target.kind === "browser" ? target.href : undefined;
   const resource = safeHref ? classifyLinkResource(safeHref) : null;
 
   return (

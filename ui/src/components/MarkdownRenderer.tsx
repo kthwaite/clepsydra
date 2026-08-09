@@ -1,11 +1,12 @@
 import { type ReactNode, useRef } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
+import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {
   content: string;
@@ -46,12 +47,19 @@ const remarkPlugins: PluggableList = [
   ],
 ];
 
+function transformMarkdownUrl(url: string): string {
+  return isCasResource(url)
+    ? resolveResourceUrl(url)
+    : defaultUrlTransform(url);
+}
+
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const openTab = useOpenTab();
 
   return (
     <Markdown
       remarkPlugins={remarkPlugins}
+      urlTransform={transformMarkdownUrl}
       components={{
         a: ({ href, children, ...props }) => {
           const resource = href ? classifyLinkResource(href) : null;

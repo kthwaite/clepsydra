@@ -8,6 +8,7 @@ import type {
   BlockRefElement,
   CustomElement,
   CustomText,
+  ImageElement,
   LinkElement,
   ListItemElement,
   WikilinkElement,
@@ -380,8 +381,15 @@ function convertPhrasingNode(
       );
 
     case "image":
-      // Images are not supported in the current Slate schema; render alt text
-      return [textNode(node.alt ?? "", marks)];
+      return [
+        {
+          type: "image",
+          url: node.url,
+          alt: node.alt ?? "",
+          ...(node.title ? { title: node.title } : {}),
+          children: [{ text: "" }],
+        } satisfies ImageElement as unknown as Descendant,
+      ];
 
     case "footnoteReference":
       return [
