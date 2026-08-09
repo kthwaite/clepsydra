@@ -193,6 +193,28 @@ describe("tryInlineTransform", () => {
     });
   });
 
+  describe("backslash parity before bracket labels", () => {
+    it.each([String.raw`\[label`, String.raw`\\\[label`])(
+      "keeps an odd backslash run as literal math syntax: %s",
+      (source) => {
+        const editor = editorWith(source, source.length);
+
+        expect(tryInlineTransform(editor, "]")).toBe(false);
+        expect(getLeaves(editor)).toEqual([{ text: source }]);
+      },
+    );
+
+    it.each([String.raw`\\[label`, String.raw`\\\\[label`])(
+      "scaffolds a bracket label after an even backslash run: %s",
+      (source) => {
+        const editor = editorWith(source, source.length);
+
+        expect(tryInlineTransform(editor, "]")).toBe(true);
+        expect(getLeaves(editor)).toEqual([{ text: `${source}]()` }]);
+      },
+    );
+  });
+
   it("does not transform in code-block context", () => {
     const editor = withHistory(createEditor());
     editor.children = [{ type: "code-block", children: [{ text: "*a" }] }];
