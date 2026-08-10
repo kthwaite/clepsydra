@@ -17,6 +17,7 @@ export interface DialogProps {
   onOpenChange: (isOpen: boolean) => void;
   title: string;
   description?: string;
+  ariaDescribedBy?: string;
   children: ReactNode;
   footer?: ReactNode;
   size?: DialogSize;
@@ -37,6 +38,7 @@ export function Dialog({
   onOpenChange,
   title,
   description,
+  ariaDescribedBy,
   children,
   footer,
   size = "md",
@@ -59,7 +61,11 @@ export function Dialog({
         )}
       >
         <RACDialog
-          aria-describedby={description ? descriptionId : undefined}
+          aria-describedby={
+            [description ? descriptionId : undefined, ariaDescribedBy]
+              .filter(Boolean)
+              .join(" ") || undefined
+          }
           className="outline-none"
         >
           {({ close }) => (

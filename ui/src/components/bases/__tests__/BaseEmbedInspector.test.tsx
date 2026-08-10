@@ -405,6 +405,21 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
+  it("blocks Save when a settled refetch error retains matching cached detail", () => {
+    apiState.details.reading = {
+      data: reading,
+      isPending: false,
+      isFetching: false,
+      error: new Error("refetch unavailable"),
+    };
+    renderInspector();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /could not load Reading Log details/i,
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("ignores delayed stale detail and enables Save only after matching detail arrives", async () => {
     const user = userEvent.setup();
     apiState.details.tasks = {
@@ -727,6 +742,22 @@ describe("pure Base embed validation bounds", () => {
     (_name, value, message) => {
       renderInspector(configured(value as Partial<ConfiguredBaseEmbedElement>));
       expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+
+      const owner =
+        _name === "canonical body"
+          ? screen.getByRole("dialog", { name: "Configure Base embed" })
+          : _name === "sort keys"
+            ? screen.getByRole("region", { name: "Sort order" })
+            : _name === "depth" ||
+                _name === "nodes" ||
+                _name === "group children"
+              ? screen.getByRole("region", { name: "Embed filter" })
+              : _name === "field bytes"
+                ? screen.getByRole("combobox", { name: "Sort field 1" })
+                : screen.getByRole("textbox", {
+                    name: "Value for condition 1",
+                  });
+      expect(owner).toHaveAccessibleDescription(message);
       expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     },
   );

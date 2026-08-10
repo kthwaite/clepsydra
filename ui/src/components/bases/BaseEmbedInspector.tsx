@@ -273,7 +273,9 @@ export function BaseEmbedInspector({
         detailReady,
       )
     : [];
-  const detailUnavailable = !!selectedSummary && !detailReady;
+  const detailFailed =
+    !!selectedSummary && detail.error != null && !detailRefreshing;
+  const detailUnavailable = !!selectedSummary && (!detailReady || detailFailed);
   const detailDiagnostics: BaseDiagnostic[] =
     detailUnavailable && !detailRefreshing
       ? [
@@ -345,6 +347,9 @@ export function BaseEmbedInspector({
         sourceRepair
           ? "Repair the persisted TOML before replacing this embed."
           : "Choose a saved Base view and local query overrides."
+      }
+      ariaDescribedBy={
+        rootDiagnostics.length > 0 ? "base-embed-root-diagnostics" : undefined
       }
       size="xl"
       footer={
