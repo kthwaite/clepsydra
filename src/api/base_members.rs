@@ -460,6 +460,9 @@ mod tests {
 name = "Collision"
 filter = { field = "kind", op = "eq", value = "NOTE" }
 
+[properties]
+rating = { type = "number" }
+
 [[views]]
 name = "All"
 "#,
@@ -537,6 +540,35 @@ name = "All"
             })
             .await
             .unwrap()
+    }
+
+    fn filter_at_serialized_size(size: usize) -> Filter {
+        use crate::vault::base::Op;
+
+        let children = (0..16)
+            .map(|index| Filter::Cmp {
+                field: "title".to_owned(),
+                op: Op::Eq,
+                value: serde_json::Value::String(if index < 15 {
+                    "x".repeat(4096)
+                } else {
+                    String::new()
+                }),
+            })
+            .collect();
+        let mut filter = Filter::All(children);
+        let current_size = serde_json::to_vec(&filter).unwrap().len();
+        let padding = size.checked_sub(current_size).unwrap();
+        assert!(padding <= 4096);
+        let Filter::All(children) = &mut filter else {
+            unreachable!();
+        };
+        let Filter::Cmp { value, .. } = &mut children[15] else {
+            unreachable!();
+        };
+        *value = serde_json::Value::String("x".repeat(padding));
+        assert_eq!(serde_json::to_vec(&filter).unwrap().len(), size);
+        filter
     }
 
     #[tokio::test]
@@ -649,6 +681,120 @@ name = "All"
             .unwrap_err();
 
             assert_eq!(error.status, expected_status);
+            assert!(!state.vault.root().join(expected_path).exists());
+            assert_eq!(indexed_uuid_count(&state, &page_id.to_string()).await, 0);
+        }
+
+        let filtered_cases = [
+            (
+                "Invalid operator",
+                "reject-d",
+                "notes/20260809.invalid-operator.reject-d.md",
+                "01951234-0000-7000-8000-000000000514",
+                Filter::Cmp {
+                    field: "prop.rating".to_owned(),
+                    op: Op::Contains,
+                    value: serde_json::json!(10),
+                },
+                400,
+                "invalid embed query",
+                Some("rating"),
+                "embed_filter.op",
+                "op `contains` is not valid for field `rating`",
+            ),
+            (
+                "Too complex",
+                "reject-e",
+                "notes/20260809.too-complex.reject-e.md",
+                "01951234-0000-7000-8000-000000000515",
+                Filter::All(
+                    (0..33)
+                        .map(|_| Filter::Cmp {
+                            field: "title".to_owned(),
+                            op: Op::Eq,
+                            value: serde_json::json!("x"),
+                        })
+                        .collect(),
+                ),
+                400,
+                "invalid embed query",
+                None,
+                "embed_filter",
+                "filter group has 33 children; maximum is 32",
+            ),
+            (
+                "Exact boundary",
+                "reject-f",
+                "notes/20260809.exact-boundary.reject-f.md",
+                "01951234-0000-7000-8000-000000000516",
+                filter_at_serialized_size(MAX_EMBED_FILTER_BYTES),
+                422,
+                "candidate is not valid for the selected Base view",
+                None,
+                "embed_filter",
+                "candidate does not match the embed filter",
+            ),
+            (
+                "Oversized filter",
+                "reject-g",
+                "notes/20260809.oversized-filter.reject-g.md",
+                "01951234-0000-7000-8000-000000000517",
+                filter_at_serialized_size(MAX_EMBED_FILTER_BYTES + 1),
+                400,
+                "invalid embed query",
+                None,
+                "embed_filter",
+                "serialized embed filter exceeds 65536 bytes",
+            ),
+        ];
+
+        for (
+            title,
+            short_id,
+            expected_path,
+            page_id,
+            embed_filter,
+            expected_status,
+            expected_error,
+            expected_field,
+            expected_filter_path,
+            expected_message,
+        ) in filtered_cases
+        {
+            let page_id = uuid::Uuid::parse_str(page_id).unwrap();
+            let error = create_base_member_with_ids(
+                Arc::clone(&state),
+                "collision".to_owned(),
+                BaseMemberCreateRequest {
+                    base_revision: revision.clone(),
+                    view: "All".to_owned(),
+                    title: title.to_owned(),
+                    fields: HashMap::new(),
+                    embed_filter: Some(embed_filter),
+                },
+                [short_id.to_owned()].into_iter(),
+                Some(page_id),
+            )
+            .await
+            .unwrap_err();
+
+            assert_eq!(error.status, expected_status);
+            assert_eq!(error.error, expected_error);
+            let detail = error.detail.unwrap();
+            if expected_status == 400 {
+                assert_eq!(detail["code"], "invalid_embed_query");
+            }
+            let diagnostics = detail["diagnostics"].as_array().unwrap().clone();
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0]["scope"], "embed");
+            assert_eq!(
+                diagnostics[0]["field"],
+                expected_field
+                    .map(serde_json::Value::from)
+                    .unwrap_or(serde_json::Value::Null)
+            );
+            assert_eq!(diagnostics[0]["filter_path"], expected_filter_path);
+            assert_eq!(diagnostics[0]["message"], expected_message);
             assert!(!state.vault.root().join(expected_path).exists());
             assert_eq!(indexed_uuid_count(&state, &page_id.to_string()).await, 0);
         }
