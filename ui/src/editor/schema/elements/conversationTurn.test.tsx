@@ -140,7 +140,7 @@ describe("conversation turn presentation", () => {
     expect(screen.queryByText("ChatGPT")).toBeNull();
   });
 
-  it("defaults to editable presentation when no provider is mounted", () => {
+  it("defaults to generic presentation when no kind-aware provider is mounted", () => {
     const editor = withReact(withSchema(createEditor()));
     render(
       <Slate editor={editor} initialValue={[turn(1)]}>
@@ -148,9 +148,31 @@ describe("conversation turn presentation", () => {
       </Slate>,
     );
 
+    expect(screen.getByText("turn 1").closest("blockquote")).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Change participant" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("combobox", { name: "Change participant" }),
+    ).toBeNull();
+  });
+
+  it("renders canonical turns as generic blockquotes outside conversation presentation", () => {
+    const sourceTurn = turn(1, "user");
+    renderConversation(
+      { mode: "generic", provider: null } as ConversationPresentation,
+      [sourceTurn],
+    );
+
+    const body = screen.getByText("turn 1");
+    expect(body.closest("blockquote")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `[!AI-USER source=${sourceTurn.source} sequence=1 timestamp=${sourceTurn.timestamp}]`,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("You")).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "Change participant" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add turn after" })).toBeNull();
   });
 
   it("shows semantic edit controls and participant correction changes only the role", async () => {

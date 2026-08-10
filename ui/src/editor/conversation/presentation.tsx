@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type ConversationDisplayMode = "read" | "edit";
+export type ConversationDisplayMode = "generic" | "read" | "edit";
 
 export interface ConversationPresentation {
   mode: ConversationDisplayMode;
@@ -8,7 +8,7 @@ export interface ConversationPresentation {
 }
 
 const DEFAULT_PRESENTATION: ConversationPresentation = {
-  mode: "edit",
+  mode: "generic",
   provider: null,
 };
 

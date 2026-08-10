@@ -119,65 +119,100 @@ vi.mock("#/editor/SlateEditor", () => ({
         data-readonly={String(readOnly)}
         data-mode={presentation.mode}
       >
-        {value.map((node, index) => {
-          if ("type" in node && node.type === "conversation-turn") {
-            const role = node.role as "user" | "assistant";
-            const provider = presentation.provider?.trim().toLowerCase();
-            const assistant = provider === "claude" ? "Claude" : "Assistant";
-            return (
-              <article key={`${role}-${index}`} data-role={role}>
-                <span>{role === "user" ? "You" : assistant}</span>
-                {!readOnly ? (
-                  <div>
-                    <select aria-label="Change participant" defaultValue={role}>
-                      <option value="user">You</option>
-                      <option value="assistant">{assistant}</option>
-                    </select>
-                    <button type="button" aria-label="Add turn after">+</button>
-                  </div>
-                ) : null}
+        {presentation.mode === "generic"
+          ? value.map((node, index) => {
+              if ("type" in node && node.type === "conversation-turn") {
+                const marker = slateToMarkdown([node])
+                  .split("\n", 1)[0]
+                  .replace(/^> /, "");
+                return (
+                  <blockquote key={index}>
+                    <span>{marker}</span>
+                    <textarea
+                      aria-label="Page body"
+                      value={Node.string(node)}
+                      onChange={(event) => {
+                        const next = [...editor.children] as Descendant[];
+                        next[index] = {
+                          ...node,
+                          children: [
+                            {
+                              type: "paragraph",
+                              children: [{ text: event.currentTarget.value }],
+                            },
+                          ],
+                        };
+                        editor.children = next;
+                        editor.onChange();
+                      }}
+                    />
+                  </blockquote>
+                );
+              }
+              return null;
+            })
+          : null}
+        {presentation.mode !== "generic"
+          ? value.map((node, index) => {
+              if ("type" in node && node.type === "conversation-turn") {
+                const role = node.role as "user" | "assistant";
+                const provider = presentation.provider?.trim().toLowerCase();
+                const assistant = provider === "claude" ? "Claude" : "Assistant";
+                return (
+                  <article key={`${role}-${index}`} data-role={role}>
+                    <span>{role === "user" ? "You" : assistant}</span>
+                    {!readOnly ? (
+                      <div>
+                        <select aria-label="Change participant" defaultValue={role}>
+                          <option value="user">You</option>
+                          <option value="assistant">{assistant}</option>
+                        </select>
+                        <button type="button" aria-label="Add turn after">+</button>
+                      </div>
+                    ) : null}
+                    <textarea
+                      aria-label={`Turn ${index + 1}`}
+                      readOnly={readOnly}
+                      value={Node.string(node)}
+                      onChange={(event) => {
+                        if (readOnly) return;
+                        const next = [...editor.children] as Descendant[];
+                        next[index] = {
+                          ...node,
+                          children: [
+                            {
+                              type: "paragraph",
+                              children: [{ text: event.currentTarget.value }],
+                            },
+                          ],
+                        };
+                        editor.children = next;
+                        editor.onChange();
+                      }}
+                    />
+                  </article>
+                );
+              }
+              return (
                 <textarea
-                  aria-label={`Turn ${index + 1}`}
+                  key={index}
+                  aria-label="Page body"
                   readOnly={readOnly}
                   value={Node.string(node)}
                   onChange={(event) => {
                     if (readOnly) return;
                     const next = [...editor.children] as Descendant[];
                     next[index] = {
-                      ...node,
-                      children: [
-                        {
-                          type: "paragraph",
-                          children: [{ text: event.currentTarget.value }],
-                        },
-                      ],
+                      type: "paragraph",
+                      children: [{ text: event.currentTarget.value }],
                     };
                     editor.children = next;
                     editor.onChange();
                   }}
                 />
-              </article>
-            );
-          }
-          return (
-            <textarea
-              key={index}
-              aria-label="Page body"
-              readOnly={readOnly}
-              value={Node.string(node)}
-              onChange={(event) => {
-                if (readOnly) return;
-                const next = [...editor.children] as Descendant[];
-                next[index] = {
-                  type: "paragraph",
-                  children: [{ text: event.currentTarget.value }],
-                };
-                editor.children = next;
-                editor.onChange();
-              }}
-            />
-          );
-        })}
+              );
+            })
+          : null}
         <button type="button" onClick={() => void onSaveNow()}>Editor save</button>
       </div>
     );
@@ -412,6 +447,43 @@ describe("Folio AI conversation presentation", () => {
     rendered.rerender(<Folio tabId="t1" path="journals/2026/08/09.md" />);
     expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
     expect(screen.getByTestId("slate-editor")).toHaveAttribute("data-readonly", "false");
+  });
+
+  it("opens canonical markers assigned as a Note with generic editable presentation and preserves them on save and reload", async () => {
+    const user = userEvent.setup();
+    const note = pageEditor({
+      kind: "NOTE",
+      bodyMarkdown: canonicalConversationMarkdown,
+      conversationProvider: null,
+    });
+    renderFolio(note, "notes/imported-conversation.md");
+
+    expect(screen.getByTestId("slate-editor")).toHaveAttribute(
+      "data-mode",
+      "generic",
+    );
+    expect(screen.queryByRole("group", { name: "Conversation mode" })).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "Change participant" }),
+    ).toBeNull();
+    expect(screen.queryByText("You")).toBeNull();
+    expect(
+      screen.getByText(
+        `[!AI-USER source=sha256:${HASH} sequence=1]`,
+      ),
+    ).toBeVisible();
+
+    const firstTurn = screen.getAllByRole("textbox", { name: "Page body" })[0];
+    await user.clear(firstTurn);
+    await user.type(firstTurn, "A retained question");
+    await user.click(screen.getByRole("button", { name: "Editor save" }));
+
+    const saved = note.savedMarkdown();
+    expect(saved).toContain(
+      `> [!AI-USER source=sha256:${HASH} sequence=1]`,
+    );
+    expect(saved).toContain("> A retained question");
+    expect(slateToMarkdown(markdownToSlate(saved ?? ""))).toBe(saved);
   });
 
   it("renders locked AI Folios before any transcript UI", () => {

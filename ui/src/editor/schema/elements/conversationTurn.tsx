@@ -40,6 +40,31 @@ function ConversationTurn({
   const editor = useSlateStatic();
   const presentation = useConversationPresentation();
   const readOnly = useReadOnly();
+  if (presentation.mode === "generic") {
+    const marker: ConversationMarker = {
+      role: element.role,
+      source: element.source,
+      sequence:
+        element.origin === "source" ? (element.sourceSequence ?? 1) : null,
+      timestamp: element.origin === "source" ? (element.timestamp ?? null) : null,
+      origin: element.origin,
+    };
+    return (
+      <blockquote
+        {...attributes}
+        className="my-4 border-l-2 border-accent bg-paper-2 py-2 pl-4 pr-3 text-[0.97em] italic text-ink-2"
+      >
+        <span
+          contentEditable={false}
+          className="cl-mono mb-2 block text-[0.8em] not-italic text-ink-mute"
+        >
+          {formatConversationMarker(marker)}
+        </span>
+        {children}
+      </blockquote>
+    );
+  }
+
   const assistantLabel = assistantDisplayLabel(presentation.provider);
   const participantLabel =
     element.role === "user" ? "You" : assistantLabel;

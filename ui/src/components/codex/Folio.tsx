@@ -424,7 +424,7 @@ export function Folio({ tabId, path }: FolioProps) {
         <WikilinkResolutionProvider path={path}>
           <ConversationPresentationProvider
             value={{
-              mode: isAiConversation ? conversationMode : "edit",
+              mode: isAiConversation ? conversationMode : "generic",
               provider: isAiConversation
                 ? editor.conversationProvider
                 : null,
