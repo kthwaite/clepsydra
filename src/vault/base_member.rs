@@ -13,6 +13,7 @@ pub enum BaseMemberScope {
     Membership,
     View,
     Field,
+    Embed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -20,6 +21,7 @@ pub struct BaseMemberFieldRequirement {
     pub field: String,
     pub membership: bool,
     pub view: bool,
+    pub embed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -74,16 +76,55 @@ pub fn candidate_matches(
     path: &str,
     derived: &CandidateDerived,
 ) -> Result<(), Vec<BaseMemberDiagnostic>> {
+    composed_candidate_matches(base, view, None, meta, path, derived)
+}
+
+pub fn composed_candidate_matches(
+    base: &BaseDefinition,
+    view: &ViewDefinition,
+    embed_filter: Option<&Filter>,
+    meta: &PageMeta,
+    path: &str,
+    derived: &CandidateDerived,
+) -> Result<(), Vec<BaseMemberDiagnostic>> {
     let link_targets = candidate_link_targets(base, meta, |_| {
         Ok::<Option<String>, std::convert::Infallible>(None)
     })
     .expect("infallible unresolved link collection");
-    candidate_matches_with_link_targets(base, view, meta, path, derived, &link_targets)
+    composed_candidate_matches_with_link_targets(
+        base,
+        view,
+        embed_filter,
+        meta,
+        path,
+        derived,
+        &link_targets,
+    )
 }
 
 pub(crate) fn candidate_matches_with_link_targets(
     base: &BaseDefinition,
     view: &ViewDefinition,
+    meta: &PageMeta,
+    path: &str,
+    derived: &CandidateDerived,
+    link_targets: &CandidateLinkTargets,
+) -> Result<(), Vec<BaseMemberDiagnostic>> {
+    composed_candidate_matches_with_link_targets(
+        base,
+        view,
+        None,
+        meta,
+        path,
+        derived,
+        link_targets,
+    )
+}
+
+pub(crate) fn composed_candidate_matches_with_link_targets(
+    base: &BaseDefinition,
+    view: &ViewDefinition,
+    embed_filter: Option<&Filter>,
     meta: &PageMeta,
     path: &str,
     derived: &CandidateDerived,
@@ -121,6 +162,17 @@ pub(crate) fn candidate_matches_with_link_targets(
             "candidate does not match the selected view filter",
         ));
     }
+    if let Some(filter) = embed_filter
+        && !filter_matches_meta(filter, &context)
+    {
+        diagnostics.push(candidate_diagnostic(
+            base,
+            BaseMemberScope::Embed,
+            filter,
+            "embed_filter",
+            "candidate does not match the embed filter",
+        ));
+    }
 
     if diagnostics.is_empty() {
         Ok(())
@@ -133,69 +185,91 @@ pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability>
     base.file
         .views
         .iter()
-        .map(|view| {
-            let mut fields = Vec::new();
-            let membership = base
-                .file
-                .filter
-                .as_ref()
-                .map_or(Possibility::AlwaysTrue, |filter| {
-                    filter_possibility(base, filter)
-                });
-            let view_possibility = view
-                .filter
-                .as_ref()
-                .map_or(Possibility::AlwaysTrue, |filter| {
-                    filter_possibility(base, filter)
-                });
-
-            if let Some(filter) = &base.file.filter {
-                collect_fields(base, filter, true, false, &mut fields);
-            }
-            if let Some(filter) = &view.filter {
-                collect_fields(base, filter, false, true, &mut fields);
-            }
-
-            let enabled =
-                all([membership, view_possibility].into_iter()) != Possibility::AlwaysFalse;
-            let mut blockers = Vec::new();
-            if !enabled {
-                if membership == Possibility::AlwaysFalse {
-                    collect_contributors(
-                        base,
-                        base.file
-                            .filter
-                            .as_ref()
-                            .expect("analysed membership filter"),
-                        "filter",
-                        Possibility::AlwaysFalse,
-                        BaseMemberScope::Membership,
-                        &mut blockers,
-                    );
-                }
-                if view_possibility == Possibility::AlwaysFalse {
-                    collect_contributors(
-                        base,
-                        view.filter.as_ref().expect("analysed view filter"),
-                        &format!("views.{}.filter", view.name),
-                        Possibility::AlwaysFalse,
-                        BaseMemberScope::View,
-                        &mut blockers,
-                    );
-                }
-            }
-
-            BaseMemberCapability {
-                view: view.name.clone(),
-                enabled,
-                fields: fields
-                    .into_iter()
-                    .map(|(_, requirement)| requirement)
-                    .collect(),
-                blockers,
-            }
-        })
+        .map(|view| composed_member_capability(base, view, None))
         .collect()
+}
+
+pub fn composed_member_capability(
+    base: &BaseDefinition,
+    view: &ViewDefinition,
+    embed_filter: Option<&Filter>,
+) -> BaseMemberCapability {
+    let mut fields = Vec::new();
+    let membership = base
+        .file
+        .filter
+        .as_ref()
+        .map_or(Possibility::AlwaysTrue, |filter| {
+            filter_possibility(base, filter)
+        });
+    let view_possibility = view
+        .filter
+        .as_ref()
+        .map_or(Possibility::AlwaysTrue, |filter| {
+            filter_possibility(base, filter)
+        });
+    let embed_possibility = embed_filter.map_or(Possibility::AlwaysTrue, |filter| {
+        filter_possibility(base, filter)
+    });
+
+    if let Some(filter) = &base.file.filter {
+        collect_fields(base, filter, true, false, false, &mut fields);
+    }
+    if let Some(filter) = &view.filter {
+        collect_fields(base, filter, false, true, false, &mut fields);
+    }
+    if let Some(filter) = embed_filter {
+        collect_fields(base, filter, false, false, true, &mut fields);
+    }
+
+    let enabled = all([membership, view_possibility, embed_possibility].into_iter())
+        != Possibility::AlwaysFalse;
+    let mut blockers = Vec::new();
+    if !enabled {
+        if membership == Possibility::AlwaysFalse {
+            collect_contributors(
+                base,
+                base.file
+                    .filter
+                    .as_ref()
+                    .expect("analysed membership filter"),
+                "filter",
+                Possibility::AlwaysFalse,
+                BaseMemberScope::Membership,
+                &mut blockers,
+            );
+        }
+        if view_possibility == Possibility::AlwaysFalse {
+            collect_contributors(
+                base,
+                view.filter.as_ref().expect("analysed view filter"),
+                &format!("views.{}.filter", view.name),
+                Possibility::AlwaysFalse,
+                BaseMemberScope::View,
+                &mut blockers,
+            );
+        }
+        if embed_possibility == Possibility::AlwaysFalse {
+            collect_contributors(
+                base,
+                embed_filter.expect("analysed embed filter"),
+                "embed_filter",
+                Possibility::AlwaysFalse,
+                BaseMemberScope::Embed,
+                &mut blockers,
+            );
+        }
+    }
+
+    BaseMemberCapability {
+        view: view.name.clone(),
+        enabled,
+        fields: fields
+            .into_iter()
+            .map(|(_, requirement)| requirement)
+            .collect(),
+        blockers,
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -209,15 +283,16 @@ fn collect_fields(
     filter: &Filter,
     membership: bool,
     view: bool,
+    embed: bool,
     fields: &mut Vec<(FieldIdentity, BaseMemberFieldRequirement)>,
 ) {
     match filter {
         Filter::All(children) | Filter::Any(children) => {
             for child in children {
-                collect_fields(base, child, membership, view, fields);
+                collect_fields(base, child, membership, view, embed, fields);
             }
         }
-        Filter::Not(child) => collect_fields(base, child, membership, view, fields),
+        Filter::Not(child) => collect_fields(base, child, membership, view, embed, fields),
         Filter::Cmp { field, .. } => {
             let Some((identity, request_key)) = resolved_requirement(base, field) else {
                 return;
@@ -228,6 +303,7 @@ fn collect_fields(
             {
                 existing.membership |= membership;
                 existing.view |= view;
+                existing.embed |= embed;
             } else {
                 fields.push((
                     identity,
@@ -235,6 +311,7 @@ fn collect_fields(
                         field: request_key,
                         membership,
                         view,
+                        embed,
                     },
                 ));
             }
@@ -390,9 +467,15 @@ fn collect_contributors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::base::{BaseDefinition, parse_base};
+    use crate::vault::Vault;
+    use crate::vault::base::{BaseDefinition, Op, parse_base};
+    use crate::vault::base_embed::{
+        EmbedOverrides, validate_embed_overrides,
+    };
+    use crate::vault::index::VaultIndex;
     use crate::vault::kind::Kind;
     use crate::vault::page::PageMeta;
+    use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
     use std::path::Path;
 
     fn base(source: &str) -> BaseDefinition {
@@ -411,6 +494,540 @@ name = "Unread"
 layout = "table"
 filter = { field = "status", op = "eq", value = "reading" }
 "#;
+
+    fn comparison(field: &str, op: Op, value: serde_json::Value) -> Filter {
+        Filter::Cmp {
+            field: field.to_owned(),
+            op,
+            value,
+        }
+    }
+
+    fn derived() -> CandidateDerived {
+        CandidateDerived {
+            word_count: 0,
+            journal_date: None,
+        }
+    }
+
+    #[test]
+    fn composed_capability_deduplicates_all_predicates_with_embed_provenance() {
+        let base = base(
+            r#"
+name = "Composed"
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "prop.kind", op = "eq", value = "genre" },
+  { field = "status", op = "ne", value = "finished" }
+]
+[properties]
+kind = { type = "text" }
+status = { type = "select", options = ["reading", "finished"] }
+rating = { type = "number" }
+[[views]]
+name = "Reading"
+layout = "table"
+filter = { field = "status", op = "eq", value = "reading" }
+"#,
+        );
+        let embed_filter = Filter::All(vec![
+            comparison("sys.kind", Op::Eq, serde_json::json!("BOOK")),
+            comparison("prop.kind", Op::Eq, serde_json::json!("genre")),
+            Filter::Any(vec![
+                comparison("status", Op::Eq, serde_json::json!("reading")),
+                comparison("rating", Op::Gte, serde_json::json!(4)),
+            ]),
+        ]);
+
+        let capability =
+            composed_member_capability(&base, &base.file.views[0], Some(&embed_filter));
+
+        assert!(capability.enabled);
+        assert_eq!(
+            capability.fields,
+            vec![
+                BaseMemberFieldRequirement {
+                    field: "kind".into(),
+                    membership: true,
+                    view: false,
+                    embed: true,
+                },
+                BaseMemberFieldRequirement {
+                    field: "prop.kind".into(),
+                    membership: true,
+                    view: false,
+                    embed: true,
+                },
+                BaseMemberFieldRequirement {
+                    field: "status".into(),
+                    membership: true,
+                    view: true,
+                    embed: true,
+                },
+                BaseMemberFieldRequirement {
+                    field: "rating".into(),
+                    membership: false,
+                    view: false,
+                    embed: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn composed_capability_reports_nested_embed_blocker_with_exact_identity() {
+        let base = base(
+            r#"
+name = "Nested blocker"
+[properties]
+word_count = { type = "number" }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        let embed_filter = Filter::All(vec![Filter::Not(Box::new(comparison(
+            "sys.word_count",
+            Op::Eq,
+            serde_json::json!(0),
+        )))]);
+
+        let capability =
+            composed_member_capability(&base, &base.file.views[0], Some(&embed_filter));
+
+        assert!(!capability.enabled);
+        assert_eq!(capability.blockers.len(), 1);
+        assert_eq!(capability.blockers[0].scope, BaseMemberScope::Embed);
+        assert_eq!(
+            capability.blockers[0].field.as_deref(),
+            Some("word_count")
+        );
+        assert_eq!(
+            capability.blockers[0].filter_path.as_deref(),
+            Some("embed_filter.all[0].not")
+        );
+    }
+
+    #[test]
+    fn composed_candidate_matches_nested_embed_and_reports_exact_embed_diagnostic() {
+        let base = base(
+            r#"
+name = "Typed embed"
+[properties]
+kind = { type = "text" }
+status = { type = "select", options = ["reading", "queued"] }
+rating = { type = "number" }
+done = { type = "bool" }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        let nested = Filter::All(vec![
+            comparison("rating", Op::Gte, serde_json::json!(4.5)),
+            Filter::Any(vec![
+                comparison("status", Op::Eq, serde_json::json!("reading")),
+                comparison("status", Op::Eq, serde_json::json!("queued")),
+            ]),
+            Filter::Not(Box::new(comparison(
+                "done",
+                Op::Eq,
+                serde_json::json!(false),
+            ))),
+        ]);
+        let mut meta = PageMeta::new();
+        meta.extra
+            .insert("rating".into(), toml::Value::Float(4.5));
+        meta.extra
+            .insert("status".into(), toml::Value::String("reading".into()));
+        meta.extra
+            .insert("done".into(), toml::Value::Boolean(true));
+
+        assert!(
+            composed_candidate_matches(
+                &base,
+                &base.file.views[0],
+                Some(&nested),
+                &meta,
+                "notes/typed.md",
+                &derived(),
+            )
+            .is_ok()
+        );
+
+        let shadowed = comparison("prop.kind", Op::Eq, serde_json::json!("genre"));
+        let errors = composed_candidate_matches(
+            &base,
+            &base.file.views[0],
+            Some(&shadowed),
+            &meta,
+            "notes/typed.md",
+            &derived(),
+        )
+        .unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].scope, BaseMemberScope::Embed);
+        assert_eq!(errors[0].field.as_deref(), Some("prop.kind"));
+        assert_eq!(errors[0].filter_path.as_deref(), Some("embed_filter"));
+    }
+
+    #[test]
+    fn composed_candidate_has_query_parity_for_every_supported_property_operator_pair() {
+        const TARGET_ID: &str = "0190f8a0-0000-7000-8000-0000000000aa";
+        const TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000AA";
+        const SOURCE: &str = r#"
+name = "Parity"
+[properties]
+text_value = { type = "text" }
+number_value = { type = "number" }
+bool_value = { type = "bool" }
+date_value = { type = "date" }
+datetime_value = { type = "datetime" }
+select_value = { type = "select" }
+multi_value = { type = "multi_select" }
+url_value = { type = "url" }
+relation_value = { type = "relation" }
+[[views]]
+name = "All"
+layout = "table"
+"#;
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("bases")).unwrap();
+        std::fs::write(temp.path().join("bases/parity.base.toml"), SOURCE).unwrap();
+        std::fs::write(
+            temp.path().join("a.md"),
+            "+++\nid = \"0190f8a0-0000-7000-8000-000000000001\"\ntitle = \"Candidate\"\ntext_value = \"Alphabet\"\nnumber_value = 7\nbool_value = true\ndate_value = 2026-08-09\ndatetime_value = 2026-08-09T12:34:56Z\nselect_value = \"reading\"\nmulti_value = [\"memory\"]\nurl_value = \"https://example.test/path\"\nrelation_value = [\"[[Solar Cycle]]\", \"[[Science Fiction]]\"]\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("solar-cycle.md"),
+            format!(
+                "+++\nid = \"{TARGET_ID}\"\ntitle = \"Solar Cycle\"\naliases = [\"Science Fiction\"]\n+++\n"
+            ),
+        )
+        .unwrap();
+        let vault = Vault::open(temp.path()).unwrap();
+        let mut index = VaultIndex::open(&temp.path().join(".clepsydra/index.db")).unwrap();
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+        let base = base(SOURCE);
+        let mut meta = PageMeta::new();
+        meta.title = Some("Candidate".into());
+        meta.extra
+            .insert("text_value".into(), toml::Value::String("Alphabet".into()));
+        meta.extra
+            .insert("number_value".into(), toml::Value::Integer(7));
+        meta.extra
+            .insert("bool_value".into(), toml::Value::Boolean(true));
+        meta.extra.insert(
+            "date_value".into(),
+            toml::Value::Datetime("2026-08-09".parse().unwrap()),
+        );
+        meta.extra.insert(
+            "datetime_value".into(),
+            toml::Value::Datetime("2026-08-09T12:34:56Z".parse().unwrap()),
+        );
+        meta.extra.insert(
+            "select_value".into(),
+            toml::Value::String("reading".into()),
+        );
+        meta.extra.insert(
+            "multi_value".into(),
+            toml::Value::Array(vec![toml::Value::String("memory".into())]),
+        );
+        meta.extra.insert(
+            "url_value".into(),
+            toml::Value::String("https://example.test/path".into()),
+        );
+        meta.extra.insert(
+            "relation_value".into(),
+            toml::Value::Array(vec![
+                toml::Value::String("[[Solar Cycle]]".into()),
+                toml::Value::String("[[Science Fiction]]".into()),
+            ]),
+        );
+        let link_targets = candidate_link_targets(&base, &meta, |canonical| {
+            index.resolve_link_target_id(canonical)
+        })
+        .unwrap();
+
+        let properties = vec![
+            (
+                "text_value",
+                serde_json::json!("Alphabet"),
+                serde_json::json!("Other"),
+            ),
+            (
+                "number_value",
+                serde_json::json!(7),
+                serde_json::json!(8),
+            ),
+            (
+                "bool_value",
+                serde_json::json!(true),
+                serde_json::json!(false),
+            ),
+            (
+                "date_value",
+                serde_json::json!("2026-08-09"),
+                serde_json::json!("2026-08-10"),
+            ),
+            (
+                "datetime_value",
+                serde_json::json!("2026-08-09T12:34:56Z"),
+                serde_json::json!("2026-08-10T12:34:56Z"),
+            ),
+            (
+                "select_value",
+                serde_json::json!("reading"),
+                serde_json::json!("queued"),
+            ),
+            (
+                "multi_value",
+                serde_json::json!("memory"),
+                serde_json::json!("identity"),
+            ),
+            (
+                "url_value",
+                serde_json::json!("https://example.test/path"),
+                serde_json::json!("https://other.test"),
+            ),
+            (
+                "relation_value",
+                serde_json::json!("[[Solar Cycle]]"),
+                serde_json::json!("[[Other]]"),
+            ),
+        ];
+        let mut cases = Vec::new();
+        for (field, current, other) in &properties {
+            cases.push((
+                format!("{field} eq"),
+                comparison(field, Op::Eq, current.clone()),
+                true,
+            ));
+            cases.push((
+                format!("{field} ne"),
+                comparison(field, Op::Ne, other.clone()),
+                true,
+            ));
+            cases.push((
+                format!("{field} in"),
+                comparison(
+                    field,
+                    Op::In,
+                    serde_json::json!([other.clone(), current.clone()]),
+                ),
+                true,
+            ));
+            cases.push((
+                format!("{field} is_empty"),
+                comparison(field, Op::IsEmpty, serde_json::Value::Null),
+                false,
+            ));
+            cases.push((
+                format!("{field} not_empty"),
+                comparison(field, Op::NotEmpty, serde_json::Value::Null),
+                true,
+            ));
+        }
+        for (field, op, value) in [
+            ("number_value", Op::Lt, serde_json::json!(8)),
+            ("number_value", Op::Lte, serde_json::json!(7)),
+            ("number_value", Op::Gt, serde_json::json!(6)),
+            ("number_value", Op::Gte, serde_json::json!(7)),
+            ("date_value", Op::Lt, serde_json::json!("2026-08-10")),
+            ("date_value", Op::Lte, serde_json::json!("2026-08-09")),
+            ("date_value", Op::Gt, serde_json::json!("2026-08-08")),
+            ("date_value", Op::Gte, serde_json::json!("2026-08-09")),
+            (
+                "datetime_value",
+                Op::Lt,
+                serde_json::json!("2026-08-10T12:34:56Z"),
+            ),
+            (
+                "datetime_value",
+                Op::Lte,
+                serde_json::json!("2026-08-09T12:34:56Z"),
+            ),
+            (
+                "datetime_value",
+                Op::Gt,
+                serde_json::json!("2026-08-08T12:34:56Z"),
+            ),
+            (
+                "datetime_value",
+                Op::Gte,
+                serde_json::json!("2026-08-09T12:34:56Z"),
+            ),
+        ] {
+            cases.push((
+                format!("{field} {op:?}"),
+                comparison(field, op, value),
+                true,
+            ));
+        }
+        for (field, value) in [
+            ("text_value", serde_json::json!("PHA")),
+            ("date_value", serde_json::json!("2026-08")),
+            ("datetime_value", serde_json::json!("12:34")),
+            ("select_value", serde_json::json!("reading")),
+            ("multi_value", serde_json::json!("memory")),
+            ("url_value", serde_json::json!("EXAMPLE")),
+            ("relation_value", serde_json::json!("[[Solar Cycle]]")),
+        ] {
+            cases.push((
+                format!("{field} contains"),
+                comparison(field, Op::Contains, value),
+                true,
+            ));
+        }
+        for target in [
+            "Solar Cycle",
+            "Science Fiction",
+            TARGET_ID,
+            TARGET_MIXED_ID,
+        ] {
+            cases.push((
+                format!("relation_value links_to {target}"),
+                comparison(
+                    "relation_value",
+                    Op::LinksTo,
+                    serde_json::json!(target),
+                ),
+                true,
+            ));
+        }
+        cases.push((
+            "nested all/any/not".to_owned(),
+            Filter::All(vec![
+                Filter::Any(vec![
+                    comparison("text_value", Op::Eq, serde_json::json!("Alphabet")),
+                    comparison("text_value", Op::Eq, serde_json::json!("Other")),
+                ]),
+                Filter::Not(Box::new(comparison(
+                    "bool_value",
+                    Op::Eq,
+                    serde_json::json!(false),
+                ))),
+            ]),
+            true,
+        ));
+        assert_eq!(cases.len(), 69);
+
+        for (label, filter, expected) in cases {
+            validate_embed_overrides(
+                &base,
+                EmbedOverrides {
+                    filter: Some(&filter),
+                    sort: None,
+                    limit: None,
+                },
+            )
+            .unwrap_or_else(|diagnostics| panic!("{label} should validate: {diagnostics:?}"));
+            let output = evaluate(
+                index.connection(),
+                &QuerySpec {
+                    filter: Some(filter.clone()),
+                    ..Default::default()
+                },
+                &QueryContext::for_base(&base),
+            )
+            .unwrap_or_else(|error| panic!("{label} query failed: {error}"));
+            let query_matches = match output {
+                QueryOutput::Flat { rows, .. } => rows.iter().any(|row| row.path == "a.md"),
+                QueryOutput::Grouped { .. } => panic!("{label} unexpectedly grouped"),
+            };
+            let candidate_matches = composed_candidate_matches_with_link_targets(
+                &base,
+                &base.file.views[0],
+                Some(&filter),
+                &meta,
+                "a.md",
+                &derived(),
+                &link_targets,
+            )
+            .is_ok();
+
+            assert_eq!(query_matches, expected, "unexpected query result for {label}");
+            assert_eq!(
+                candidate_matches, query_matches,
+                "candidate/query mismatch for {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_embed_operator_type_pairs_fail_validation_before_matching() {
+        let base = base(
+            r#"
+name = "Unsupported"
+[properties]
+text_value = { type = "text" }
+number_value = { type = "number" }
+bool_value = { type = "bool" }
+date_value = { type = "date" }
+datetime_value = { type = "datetime" }
+select_value = { type = "select" }
+multi_value = { type = "multi_select" }
+url_value = { type = "url" }
+relation_value = { type = "relation" }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+        let mut filters = vec![
+            comparison("number_value", Op::Contains, serde_json::json!(7)),
+            comparison("bool_value", Op::Contains, serde_json::json!(true)),
+        ];
+        for field in [
+            "text_value",
+            "number_value",
+            "bool_value",
+            "date_value",
+            "datetime_value",
+            "select_value",
+            "multi_value",
+            "url_value",
+        ] {
+            filters.push(comparison(
+                field,
+                Op::LinksTo,
+                serde_json::json!("Solar Cycle"),
+            ));
+        }
+        for field in [
+            "text_value",
+            "bool_value",
+            "select_value",
+            "multi_value",
+            "url_value",
+            "relation_value",
+        ] {
+            for op in [Op::Lt, Op::Lte, Op::Gt, Op::Gte] {
+                filters.push(comparison(field, op, serde_json::json!("value")));
+            }
+        }
+
+        for filter in filters {
+            let Filter::Cmp { field, op, .. } = &filter else {
+                unreachable!()
+            };
+            let diagnostics = validate_embed_overrides(
+                &base,
+                EmbedOverrides {
+                    filter: Some(&filter),
+                    sort: None,
+                    limit: None,
+                },
+            )
+            .expect_err("unsupported predicate must fail validation");
+            assert_eq!(diagnostics.len(), 1, "{field} {op:?}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].field.as_deref(), Some(field.as_str()));
+            assert_eq!(diagnostics[0].filter_path.as_deref(), Some("filter.op"));
+        }
+    }
 
     #[test]
     fn capability_orders_membership_and_view_fields_without_duplicates() {
@@ -442,11 +1059,13 @@ columns = ["title", "rating"]
                     field: "kind".into(),
                     membership: true,
                     view: false,
+                    embed: false,
                 },
                 BaseMemberFieldRequirement {
                     field: "status".into(),
                     membership: true,
                     view: true,
+                    embed: false,
                 },
             ]
         );

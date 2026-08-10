@@ -484,7 +484,7 @@ async fn list_bases_includes_diagnostics_for_broken_base() {
 }
 
 #[tokio::test]
-async fn get_base_returns_definition_and_unknown_is_404() {
+async fn get_base_returns_definition_capability_and_unknown_is_404() {
     let (server, tmp) = ApiFixture::builder()
         .pre_index_seed(seed)
         .build()
@@ -511,7 +511,8 @@ async fn get_base_returns_definition_and_unknown_is_404() {
             .iter()
             .any(|field| field["field"] == "status"
                 && field["membership"] == false
-                && field["view"] == true)
+                && field["view"] == true
+                && field["embed"] == false)
     );
 
     server
@@ -551,7 +552,7 @@ layout = "table"
 }
 
 #[tokio::test]
-async fn get_base_emits_resolved_member_creation_request_keys() {
+async fn get_base_capability_emits_resolved_member_creation_request_keys() {
     let fixture = ApiFixture::builder()
         .pre_index_seed(seed_resolved_capability_base)
         .build();
@@ -567,13 +568,29 @@ async fn get_base_emits_resolved_member_creation_request_keys() {
     assert_eq!(
         body["member_creation"][0]["fields"],
         serde_json::json!([
-            { "field": "kind", "membership": true, "view": false },
-            { "field": "prop.kind", "membership": true, "view": false },
-            { "field": "word_count", "membership": true, "view": false },
-            { "field": "prop.word_count", "membership": true, "view": false },
-            { "field": "prop.journal_date", "membership": true, "view": false },
-            { "field": "status", "membership": true, "view": false }
+            { "field": "kind", "membership": true, "view": false, "embed": false },
+            { "field": "prop.kind", "membership": true, "view": false, "embed": false },
+            { "field": "word_count", "membership": true, "view": false, "embed": false },
+            { "field": "prop.word_count", "membership": true, "view": false, "embed": false },
+            { "field": "prop.journal_date", "membership": true, "view": false, "embed": false },
+            { "field": "status", "membership": true, "view": false, "embed": false }
         ])
+    );
+}
+
+#[test]
+fn capability_openapi_includes_embed_scope_and_required_provenance() {
+    let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    assert_eq!(
+        document["components"]["schemas"]["BaseMemberScope"]["enum"],
+        serde_json::json!(["membership", "view", "field", "embed"])
+    );
+    assert!(
+        document["components"]["schemas"]["BaseMemberFieldRequirement"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "embed")
     );
 }
 
