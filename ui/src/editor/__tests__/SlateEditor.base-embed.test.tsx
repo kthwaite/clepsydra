@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
+import { useRef, useState } from "react";
 import {
   type Descendant,
   Editor,
@@ -18,6 +19,7 @@ import {
 } from "slate";
 import { ReactEditor } from "slate-react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { IS_MAC } from "#/lib/shortcuts";
 
 const harnessState = vi.hoisted(() => {
   Object.defineProperty(InputEvent.prototype, "getTargetRanges", {
@@ -214,6 +216,42 @@ function renderEditor(initialValue: Descendant[]) {
     onChange,
     onSaveNow,
   };
+}
+
+function PersistenceRoundTripHarness({
+  saveGate,
+  onSaveStarted,
+}: {
+  saveGate: Promise<void>;
+  onSaveStarted(): void;
+}) {
+  const [persisted, setPersisted] = useState<Descendant[]>([
+    configured(),
+    paragraph("after"),
+  ]);
+  const [roundTrips, setRoundTrips] = useState(0);
+  const latest = useRef(persisted);
+  return (
+    <>
+      <SlateEditor
+        initialValue={persisted}
+        onChange={(value) => {
+          latest.current = value;
+        }}
+        onSaveNow={async () => {
+          onSaveStarted();
+          await saveGate;
+          const markdown = slateToMarkdown(latest.current);
+          setPersisted(markdownToSlate(markdown));
+          setRoundTrips((count) => count + 1);
+        }}
+      />
+      <output data-testid="persistence-round-trips">{roundTrips}</output>
+      <output data-testid="persisted-markdown">
+        {slateToMarkdown(persisted)}
+      </output>
+    </>
+  );
 }
 
 async function insertBaseFromSlash() {
@@ -479,14 +517,18 @@ describe("Base embed keyboard ownership", () => {
       paragraph("after"),
     ]);
     selectBase(editor, [1]);
-    const edit = screen.getByRole("button", { name: "Edit embed" });
-    edit.focus();
+    const selected = editor.children[1];
     const focused = vi
       .spyOn(ReactEditor, "isFocused")
       .mockReturnValueOnce(false);
-    fireEvent.keyDown(edit, { key: "Delete" });
+
+    fireEvent.keyDown(editable, { key: "Delete" });
+
+    expect(focused).toHaveBeenCalledOnce();
+    expect(focused).toHaveBeenCalledWith(editor);
     focused.mockRestore();
-    expect((editor.children[1] as BaseEmbedElement).type).toBe("base-embed");
+    expect(editor.children[1]).toBe(selected);
+    expect(editor.selection?.anchor.path.slice(0, 1)).toEqual([1]);
 
     await focusSlate(editor, editable);
     fireEvent.keyDown(editable, { key: "Delete" });
@@ -519,30 +561,49 @@ describe("Base embed keyboard ownership", () => {
     );
   });
 
-  it("preserves descendant focus and Slate selection through autosave and parent rerender", async () => {
-    const { editor, editable, onSaveNow, rerender, client } = renderEditor([
-      configured(),
-      paragraph("after"),
-    ]);
-    selectBase(editor, [0]);
-    const table = screen.getByRole("button", { name: "Table entry" });
-    table.focus();
-    const selection = editor.selection;
-    act(() => {
-      onSaveNow();
+  it("preserves descendant focus and Slate selection through an async save round trip", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, enabled: false } },
     });
-    expect(onSaveNow).toHaveBeenCalledOnce();
-    rerender(
+    let releaseSave = () => {};
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const onSaveStarted = vi.fn();
+    render(
       <QueryClientProvider client={client}>
-        <SlateEditor
-          initialValue={[configured(), paragraph("after")]}
-          onChange={vi.fn()}
-          onSaveNow={onSaveNow}
+        <PersistenceRoundTripHarness
+          saveGate={saveGate}
+          onSaveStarted={onSaveStarted}
         />
       </QueryClientProvider>,
     );
+    const editor = harnessState.editor;
+    if (!editor) throw new Error("Slate editor was not mounted");
+    const editable = screen.getByRole("textbox");
+    selectBase(editor, [0]);
+    await focusSlate(editor, editable);
+    fireEvent.keyDown(editable, {
+      key: "s",
+      ctrlKey: !IS_MAC,
+      metaKey: IS_MAC,
+    });
+    expect(onSaveStarted).toHaveBeenCalledOnce();
+
+    const table = screen.getByRole("button", { name: "Table entry" });
+    table.focus();
+    const selection = structuredClone(editor.selection);
+    expect(table).toHaveFocus();
+    act(() => releaseSave());
+    await waitFor(() =>
+      expect(screen.getByTestId("persistence-round-trips")).toHaveTextContent(
+        "1",
+      ),
+    );
+    expect(screen.getByTestId("persisted-markdown")).toHaveTextContent(
+      'base = "reading"',
+    );
     expect(table).toHaveFocus();
     expect(editor.selection).toEqual(selection);
-    expect(editable).toBeInTheDocument();
   });
 });

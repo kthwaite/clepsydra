@@ -355,12 +355,21 @@ describe("EmbeddedBaseTable live Slate adapter", () => {
     },
   );
 
-  it("obsoletes controller callbacks when unmounted so stale work cannot transform the node", () => {
+  it("obsoletes queued and later controller work when unmounted", async () => {
     const { editor, unmount } = renderConfigured();
     const staleView = adapterState.options?.onViewChange;
     const staleSort = adapterState.options?.onSortChange;
     const original = editor.children[0];
+    const apply = vi.spyOn(editor, "apply");
+
+    staleSort?.(undefined);
     unmount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "set_node" }),
+    );
     act(() => {
       staleView?.("Unread");
       staleSort?.([{ field: "title", dir: "asc" }]);
