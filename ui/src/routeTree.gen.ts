@@ -9,48 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as WorkspaceRouteImport } from './routes/workspace'
-import { Route as TaskingRouteImport } from './routes/tasking'
-import { Route as LinkMissRouteImport } from './routes/link-miss'
-import { Route as GraphRouteImport } from './routes/graph'
-import { Route as GazetteerRouteImport } from './routes/gazetteer'
-import { Route as DocsRouteImport } from './routes/docs'
-import { Route as AgendaRouteImport } from './routes/agenda'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as GazetteerRouteImport } from './routes/gazetteer'
+import { Route as GraphRouteImport } from './routes/graph'
+import { Route as LinkMissRouteImport } from './routes/link-miss'
+import { Route as TaskingRouteImport } from './routes/tasking'
+import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as BasesIndexRouteImport } from './routes/bases.index'
-import { Route as PagesSplatRouteImport } from './routes/pages/$'
-import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
+import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
+import { Route as PagesSplatRouteImport } from './routes/pages/$'
 import { Route as BasesSlugEditRouteImport } from './routes/bases.$slug.edit'
 
-const WorkspaceRoute = WorkspaceRouteImport.update({
-  id: '/workspace',
-  path: '/workspace',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TaskingRoute = TaskingRouteImport.update({
-  id: '/tasking',
-  path: '/tasking',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LinkMissRoute = LinkMissRouteImport.update({
-  id: '/link-miss',
-  path: '/link-miss',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GraphRoute = GraphRouteImport.update({
-  id: '/graph',
-  path: '/graph',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GazetteerRoute = GazetteerRouteImport.update({
-  id: '/gazetteer',
-  path: '/gazetteer',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgendaRoute = AgendaRouteImport.update({
@@ -58,9 +33,34 @@ const AgendaRoute = AgendaRouteImport.update({
   path: '/agenda',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GazetteerRoute = GazetteerRouteImport.update({
+  id: '/gazetteer',
+  path: '/gazetteer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GraphRoute = GraphRouteImport.update({
+  id: '/graph',
+  path: '/graph',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LinkMissRoute = LinkMissRouteImport.update({
+  id: '/link-miss',
+  path: '/link-miss',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TaskingRoute = TaskingRouteImport.update({
+  id: '/tasking',
+  path: '/tasking',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceRoute = WorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BasesIndexRoute = BasesIndexRouteImport.update({
@@ -68,9 +68,9 @@ const BasesIndexRoute = BasesIndexRouteImport.update({
   path: '/bases/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PagesSplatRoute = PagesSplatRouteImport.update({
-  id: '/pages/$',
-  path: '/pages/$',
+const BasesSlugRoute = BasesSlugRouteImport.update({
+  id: '/bases/$slug',
+  path: '/bases/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
@@ -78,9 +78,9 @@ const DocsSlugRoute = DocsSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => DocsRoute,
 } as any)
-const BasesSlugRoute = BasesSlugRouteImport.update({
-  id: '/bases/$slug',
-  path: '/bases/$slug',
+const PagesSplatRoute = PagesSplatRouteImport.update({
+  id: '/pages/$',
+  path: '/pages/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BasesSlugEditRoute = BasesSlugEditRouteImport.update({
@@ -199,46 +199,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/workspace': {
-      id: '/workspace'
-      path: '/workspace'
-      fullPath: '/workspace'
-      preLoaderRoute: typeof WorkspaceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/tasking': {
-      id: '/tasking'
-      path: '/tasking'
-      fullPath: '/tasking'
-      preLoaderRoute: typeof TaskingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/link-miss': {
-      id: '/link-miss'
-      path: '/link-miss'
-      fullPath: '/link-miss'
-      preLoaderRoute: typeof LinkMissRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/graph': {
-      id: '/graph'
-      path: '/graph'
-      fullPath: '/graph'
-      preLoaderRoute: typeof GraphRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/gazetteer': {
-      id: '/gazetteer'
-      path: '/gazetteer'
-      fullPath: '/gazetteer'
-      preLoaderRoute: typeof GazetteerRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agenda': {
@@ -248,11 +213,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgendaRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/gazetteer': {
+      id: '/gazetteer'
+      path: '/gazetteer'
+      fullPath: '/gazetteer'
+      preLoaderRoute: typeof GazetteerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/graph': {
+      id: '/graph'
+      path: '/graph'
+      fullPath: '/graph'
+      preLoaderRoute: typeof GraphRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/link-miss': {
+      id: '/link-miss'
+      path: '/link-miss'
+      fullPath: '/link-miss'
+      preLoaderRoute: typeof LinkMissRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tasking': {
+      id: '/tasking'
+      path: '/tasking'
+      fullPath: '/tasking'
+      preLoaderRoute: typeof TaskingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workspace': {
+      id: '/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof WorkspaceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/bases/': {
@@ -262,11 +262,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BasesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/pages/$': {
-      id: '/pages/$'
-      path: '/pages/$'
-      fullPath: '/pages/$'
-      preLoaderRoute: typeof PagesSplatRouteImport
+    '/bases/$slug': {
+      id: '/bases/$slug'
+      path: '/bases/$slug'
+      fullPath: '/bases/$slug'
+      preLoaderRoute: typeof BasesSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs/$slug': {
@@ -276,11 +276,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsSlugRouteImport
       parentRoute: typeof DocsRoute
     }
-    '/bases/$slug': {
-      id: '/bases/$slug'
-      path: '/bases/$slug'
-      fullPath: '/bases/$slug'
-      preLoaderRoute: typeof BasesSlugRouteImport
+    '/pages/$': {
+      id: '/pages/$'
+      path: '/pages/$'
+      fullPath: '/pages/$'
+      preLoaderRoute: typeof PagesSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/bases/$slug/edit': {
