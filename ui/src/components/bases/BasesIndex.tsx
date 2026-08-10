@@ -311,7 +311,7 @@ export function BasesIndex() {
   const createBase = useCreateBase();
   const deleteBase = useDeleteBase();
   const createRequested =
-    new URLSearchParams(location.search).get("create") === "true";
+    new URLSearchParams(location.searchStr).get("create") === "true";
   const [createOpen, setCreateOpen] = useState(createRequested);
   const [operationError, setOperationError] = useState<string>();
 

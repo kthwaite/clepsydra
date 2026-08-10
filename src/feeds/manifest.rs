@@ -359,14 +359,12 @@ fn heading_text(line: &str) -> Option<&str> {
 }
 
 fn list_item(line: &str) -> Option<ListItem<'_>> {
-    let trimmed = line.trim_start_matches(|character| character == ' ' || character == '\t');
+    let trimmed = line.trim_start_matches([' ', '\t']);
     let indent_len = line.len() - trimmed.len();
     let (marker, content) = if let Some(content) = trimmed.strip_prefix("- ") {
         ('-', content)
-    } else if let Some(content) = trimmed.strip_prefix("* ") {
-        ('*', content)
     } else {
-        return None;
+        ('*', trimmed.strip_prefix("* ")?)
     };
 
     Some(ListItem {

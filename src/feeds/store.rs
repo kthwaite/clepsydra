@@ -421,7 +421,7 @@ fn worker_loop(opened: &mut OpenedConnection, rx: mpsc::Receiver<Command>) {
                 reply,
             } => {
                 let result = prune(
-                    &mut opened.connection,
+                    &opened.connection,
                     now,
                     retention_days,
                     unread_retention_days,
@@ -487,16 +487,17 @@ static AFTER_SNAPSHOT_GENERATION_SHARED_LOCKED: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
 #[cfg(test)]
-static FAIL_AFTER_DURABLE_WAL_APPEND: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+#[derive(Clone, Copy)]
+struct IncrementalWalTestControl {
+    checkpoint_bytes: u64,
+    fail_after_append: bool,
+    fail_after_checkpoint_rename: bool,
+}
 
 #[cfg(test)]
-static FORCED_WAL_CHECKPOINT_BYTES: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(u64::MAX);
-
-#[cfg(test)]
-static AFTER_CHECKPOINT_MAIN_RENAME_SYNCED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static INCREMENTAL_WAL_TEST_CONTROLS: std::sync::LazyLock<
+    parking_lot::Mutex<BTreeMap<PathBuf, IncrementalWalTestControl>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(BTreeMap::new()));
 
 #[cfg(test)]
 fn normalize_test_barrier_path(path: &Path) -> PathBuf {
@@ -513,6 +514,36 @@ fn normalize_test_barrier_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(parent)
         .map(|parent| parent.join(filename))
         .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+fn take_fail_after_durable_wal_append(path: &Path) -> bool {
+    let path = normalize_test_barrier_path(path);
+    INCREMENTAL_WAL_TEST_CONTROLS
+        .lock()
+        .get_mut(&path)
+        .map(|control| std::mem::take(&mut control.fail_after_append))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+fn take_fail_after_checkpoint_rename(path: &Path) -> bool {
+    let path = normalize_test_barrier_path(path);
+    INCREMENTAL_WAL_TEST_CONTROLS
+        .lock()
+        .get_mut(&path)
+        .map(|control| std::mem::take(&mut control.fail_after_checkpoint_rename))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+fn forced_wal_checkpoint_bytes(path: &Path) -> Option<u64> {
+    let path = normalize_test_barrier_path(path);
+    INCREMENTAL_WAL_TEST_CONTROLS
+        .lock()
+        .get(&path)
+        .map(|control| control.checkpoint_bytes)
+        .filter(|threshold| *threshold != u64::MAX)
 }
 
 #[cfg(test)]
@@ -694,15 +725,13 @@ pub(crate) fn open_feed_lock_file(
             });
         }
     };
-    if created {
-        if let Err(source) = fchmod(&file, Mode::RUSR | Mode::WUSR) {
-            let _ = unlinkat(directory, filename, AtFlags::empty());
-            return Err(FeedStoreError::Io {
-                operation: "set owner-only feed database lock mode",
-                path,
-                source: source.into(),
-            });
-        }
+    if created && let Err(source) = fchmod(&file, Mode::RUSR | Mode::WUSR) {
+        let _ = unlinkat(directory, filename, AtFlags::empty());
+        return Err(FeedStoreError::Io {
+            operation: "set owner-only feed database lock mode",
+            path,
+            source: source.into(),
+        });
     }
     let metadata = fstat(&file).map_err(|source| FeedStoreError::Io {
         operation: "inspect feed database lock",
@@ -1511,7 +1540,7 @@ fn append_private_wal(opened: &mut OpenedConnection) -> Result<WalPublication, F
     opened.backing.wal_header = private_header;
 
     #[cfg(test)]
-    if FAIL_AFTER_DURABLE_WAL_APPEND.swap(false, std::sync::atomic::Ordering::SeqCst) {
+    if take_fail_after_durable_wal_append(&opened.backing.path) {
         return Err(FeedStoreError::Io {
             operation: "publish feed database WAL",
             path: wal_path,
@@ -1664,7 +1693,7 @@ fn checkpoint_private_connection(opened: &mut OpenedConnection) -> Result<(), Fe
     publish_checkpointed_main(&opened.working_path, &mut opened.backing)?;
 
     #[cfg(test)]
-    if AFTER_CHECKPOINT_MAIN_RENAME_SYNCED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+    if take_fail_after_checkpoint_rename(&opened.backing.path) {
         rebuild_private_connection(opened)?;
         return Ok(());
     }
@@ -1718,13 +1747,12 @@ fn checkpoint_private_connection(opened: &mut OpenedConnection) -> Result<(), Fe
 }
 
 #[cfg(unix)]
-fn wal_checkpoint_threshold() -> u64 {
+fn wal_checkpoint_threshold(path: &Path) -> u64 {
+    #[cfg(not(test))]
+    let _ = path;
     #[cfg(test)]
-    {
-        let forced = FORCED_WAL_CHECKPOINT_BYTES.load(std::sync::atomic::Ordering::SeqCst);
-        if forced != u64::MAX {
-            return forced;
-        }
+    if let Some(forced) = forced_wal_checkpoint_bytes(path) {
+        return forced;
     }
     64 * 1024 * 1024
 }
@@ -1775,7 +1803,8 @@ fn publish_mutation<T>(
                 }
             }
             WalPublication::Appended => {
-                if opened.backing.published_wal_len >= wal_checkpoint_threshold()
+                if opened.backing.published_wal_len
+                    >= wal_checkpoint_threshold(&opened.backing.path)
                     && checkpoint_private_connection(opened).is_err()
                     && rebuild_private_connection(opened).is_err()
                 {
@@ -2826,8 +2855,8 @@ fn schedule_refresh(
             [datetime_to_db(now)],
         )?
     };
-    if feed_id.is_some() && changed == 0 {
-        return Err(FeedStoreError::FeedNotFound(feed_id.unwrap()));
+    if let (Some(feed_id), 0) = (feed_id, changed) {
+        return Err(FeedStoreError::FeedNotFound(feed_id));
     }
     Ok(())
 }
@@ -3387,41 +3416,40 @@ mod tests {
 
     #[cfg(unix)]
     struct IncrementalWalTestControls {
-        prior_fail_after_append: bool,
-        prior_checkpoint_bytes: u64,
-        prior_fail_after_checkpoint_rename: bool,
+        path: PathBuf,
+        prior: Option<super::IncrementalWalTestControl>,
     }
 
     #[cfg(unix)]
     impl IncrementalWalTestControls {
         fn install(
+            database: &Path,
             checkpoint_bytes: u64,
             fail_after_append: bool,
             fail_after_checkpoint_rename: bool,
         ) -> Self {
-            use std::sync::atomic::Ordering;
-
-            Self {
-                prior_fail_after_append: super::FAIL_AFTER_DURABLE_WAL_APPEND
-                    .swap(fail_after_append, Ordering::SeqCst),
-                prior_checkpoint_bytes: super::FORCED_WAL_CHECKPOINT_BYTES
-                    .swap(checkpoint_bytes, Ordering::SeqCst),
-                prior_fail_after_checkpoint_rename: super::AFTER_CHECKPOINT_MAIN_RENAME_SYNCED
-                    .swap(fail_after_checkpoint_rename, Ordering::SeqCst),
-            }
+            let path = super::normalize_test_barrier_path(database);
+            let prior = super::INCREMENTAL_WAL_TEST_CONTROLS.lock().insert(
+                path.clone(),
+                super::IncrementalWalTestControl {
+                    checkpoint_bytes,
+                    fail_after_append,
+                    fail_after_checkpoint_rename,
+                },
+            );
+            Self { path, prior }
         }
     }
 
     #[cfg(unix)]
     impl Drop for IncrementalWalTestControls {
         fn drop(&mut self) {
-            use std::sync::atomic::Ordering;
-
-            super::FAIL_AFTER_DURABLE_WAL_APPEND
-                .store(self.prior_fail_after_append, Ordering::SeqCst);
-            super::FORCED_WAL_CHECKPOINT_BYTES.store(self.prior_checkpoint_bytes, Ordering::SeqCst);
-            super::AFTER_CHECKPOINT_MAIN_RENAME_SYNCED
-                .store(self.prior_fail_after_checkpoint_rename, Ordering::SeqCst);
+            let mut controls = super::INCREMENTAL_WAL_TEST_CONTROLS.lock();
+            if let Some(prior) = self.prior {
+                controls.insert(self.path.clone(), prior);
+            } else {
+                controls.remove(&self.path);
+            }
         }
     }
 
@@ -3460,7 +3488,7 @@ mod tests {
     async fn small_patch_appends_durable_wal_without_replacing_public_main_database() {
         let (store, temp, entry) = store_with_one_entry().await;
         let database = temp.path().join("feeds.db");
-        let _controls = IncrementalWalTestControls::install(u64::MAX, false, false);
+        let _controls = IncrementalWalTestControls::install(&database, u64::MAX, false, false);
         let before = durable_database_state(&database);
 
         let patched = store
@@ -3504,7 +3532,7 @@ mod tests {
         let database = temp.path().join("feeds.db");
         let baseline_entries = store.list_entries(filters(EntryView::All)).await.unwrap();
         let baseline_files = durable_database_state(&database);
-        let _controls = IncrementalWalTestControls::install(u64::MAX, true, false);
+        let _controls = IncrementalWalTestControls::install(&database, u64::MAX, true, false);
 
         let result = store
             .patch_entry(
@@ -3543,7 +3571,7 @@ mod tests {
     async fn checkpoint_failure_after_main_rename_reopens_complete_new_state_with_old_wal() {
         let (store, temp, entry) = store_with_one_entry().await;
         let database = temp.path().join("feeds.db");
-        let _controls = IncrementalWalTestControls::install(1, false, true);
+        let _controls = IncrementalWalTestControls::install(&database, 1, false, true);
 
         let patched = store
             .patch_entry(
@@ -3582,7 +3610,7 @@ mod tests {
         let database = temp.path().join("feeds.db");
         let feed = manifest_feed("https://unchanged.example/feed", "News", &["daily"]);
         add_feed(&store, feed.clone()).await;
-        let _controls = IncrementalWalTestControls::install(u64::MAX, false, false);
+        let _controls = IncrementalWalTestControls::install(&database, u64::MAX, false, false);
         let before = durable_database_state(&database);
 
         store.reconcile(vec![feed]).await.unwrap();
@@ -3643,7 +3671,7 @@ mod tests {
         let (store, temp, entry) = store_with_one_entry().await;
         let database = temp.path().join("feeds.db");
         let destination = temp.path().join("generation-snapshot.db");
-        let _controls = IncrementalWalTestControls::install(1, false, false);
+        let _controls = IncrementalWalTestControls::install(&database, 1, false, false);
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         super::install_after_snapshot_generation_shared_locked_barrier(
             database.canonicalize().unwrap(),

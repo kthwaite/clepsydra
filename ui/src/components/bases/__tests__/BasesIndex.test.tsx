@@ -5,7 +5,7 @@ import type { BaseListResponse } from "#/api/bases";
 import { BasesIndex, BasesIndexView } from "#/components/bases/BasesIndex";
 
 const navigateMock = vi.fn();
-const locationState = { search: "" };
+const locationState = { searchStr: "" };
 const deleteMock = vi.fn();
 const { detailGetMock } = vi.hoisted(() => ({ detailGetMock: vi.fn() }));
 let basesState: {
@@ -230,7 +230,7 @@ describe("BasesIndexView", () => {
 describe("BasesIndex", () => {
   beforeEach(() => {
     navigateMock.mockReset();
-    locationState.search = "";
+    locationState.searchStr = "";
     deleteMock.mockReset();
     basesState = { data: undefined, isPending: false, error: null };
     detailGetMock.mockReset();
@@ -255,7 +255,7 @@ describe("BasesIndex", () => {
   });
 
   it("opens guided creation from the command deep link", () => {
-    locationState.search = "?create=true";
+    locationState.searchStr = "?create=true";
     basesState.data = { bases: [], diagnostics: [] };
 
     render(<BasesIndex />);
