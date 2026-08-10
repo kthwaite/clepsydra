@@ -4,6 +4,7 @@ pub mod archive_hook;
 pub mod atomic_file;
 pub mod backup;
 pub mod base;
+pub mod base_embed;
 pub mod base_document;
 pub mod base_member;
 pub mod bcl;

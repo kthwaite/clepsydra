@@ -35,6 +35,7 @@ pub enum SysField {
     Aliases,
     CreatedAt,
     UpdatedAt,
+    Encryption,
     JournalDate,
     WordCount,
 }
@@ -51,6 +52,7 @@ impl SysField {
             "aliases" => SysField::Aliases,
             "created_at" => SysField::CreatedAt,
             "updated_at" => SysField::UpdatedAt,
+            "encryption" => SysField::Encryption,
             "journal_date" => SysField::JournalDate,
             "word_count" => SysField::WordCount,
             _ => return None,
@@ -68,6 +70,7 @@ impl SysField {
             SysField::Aliases => "aliases",
             SysField::CreatedAt => "created_at",
             SysField::UpdatedAt => "updated_at",
+            SysField::Encryption => "encryption",
             SysField::JournalDate => "journal_date",
             SysField::WordCount => "word_count",
         }
@@ -84,10 +87,28 @@ impl SysField {
             SysField::Project => "p.project",
             SysField::CreatedAt => "p.created_at",
             SysField::UpdatedAt => "p.updated_at",
+            SysField::Encryption => "p.encrypted",
             SysField::JournalDate => "p.journal_date",
             SysField::WordCount => "p.word_count",
             SysField::Tags | SysField::Aliases => return None,
         })
+    }
+
+    pub(crate) fn property_type(self) -> PropertyType {
+        match self {
+            SysField::Encryption => PropertyType::Bool,
+            SysField::WordCount => PropertyType::Number,
+            SysField::JournalDate => PropertyType::Date,
+            _ => PropertyType::Text,
+        }
+    }
+
+    pub(crate) fn is_scalar_sortable(self) -> bool {
+        !matches!(self, SysField::Tags | SysField::Aliases | SysField::Encryption)
+    }
+
+    pub(crate) fn supports_contains(self) -> bool {
+        self.property_type().supports_contains()
     }
 }
 
@@ -333,7 +354,7 @@ fn compile_cmp(
                     }
                     Ok(format!("{column} IN ({})", holes.join(", ")))
                 }
-                Op::Contains if sys == SysField::WordCount => Err(QueryError::InvalidOp {
+                Op::Contains if !sys.supports_contains() => Err(QueryError::InvalidOp {
                     field: field.to_string(),
                     op,
                 }),
@@ -369,11 +390,7 @@ fn bind_sys_value(
     sys: SysField,
     value: &serde_json::Value,
 ) -> Result<SqlValue, QueryError> {
-    let ty = match sys {
-        SysField::WordCount => PropertyType::Number,
-        _ => PropertyType::Text,
-    };
-    bind_value(field, ty, value)
+    bind_value(field, sys.property_type(), value)
 }
 
 /// Membership-style compile for `tags` / `aliases`.
@@ -608,6 +625,12 @@ fn prepare(spec: &QuerySpec, ctx: &QueryContext) -> Result<PreparedQuery, QueryE
         };
         match resolve_field(&sort_key.field, ctx)? {
             ResolvedField::Sys(sys) => {
+                if !sys.is_scalar_sortable() {
+                    return Err(QueryError::InvalidOp {
+                        field: sort_key.field.clone(),
+                        op: Op::Eq,
+                    });
+                }
                 let column = sys.column().ok_or_else(|| QueryError::InvalidOp {
                     field: sort_key.field.clone(),
                     op: Op::Eq,
@@ -865,7 +888,7 @@ fn fetch_rows(
     // columns (tags, aliases) come from the exact meta_json arrays; scalar
     // system columns are already in the fixed select list.
     let mut select_cols =
-        "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.journal_date, p.word_count"
+        "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.encrypted, p.journal_date, p.word_count"
             .to_string();
     let mut column_joins = String::new();
     let mut column_params: Vec<SqlValue> = Vec::new();
@@ -947,12 +970,12 @@ fn fetch_rows(
     }
 
     let mut stmt = conn.prepare(&sql)?;
-    let n_fixed = 9;
+    let n_fixed = 10;
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
         let mut columns = serde_json::Map::new();
         // Scalar system columns requested by name (the full SYSTEM_FIELDS
         // contract; tags/aliases arrive via the appended json columns).
-        let sys_pairs: [(&str, serde_json::Value); 9] = [
+        let sys_pairs: [(&str, serde_json::Value); 10] = [
             ("id", sql_value_to_json(row.get(0)?)),
             ("path", sql_value_to_json(row.get(1)?)),
             ("title", sql_value_to_json(row.get(2)?)),
@@ -960,8 +983,9 @@ fn fetch_rows(
             ("project", sql_value_to_json(row.get(4)?)),
             ("created_at", sql_value_to_json(row.get(5)?)),
             ("updated_at", sql_value_to_json(row.get(6)?)),
-            ("journal_date", sql_value_to_json(row.get(7)?)),
-            ("word_count", sql_value_to_json(row.get(8)?)),
+            ("encryption", serde_json::Value::Bool(row.get(7)?)),
+            ("journal_date", sql_value_to_json(row.get(8)?)),
+            ("word_count", sql_value_to_json(row.get(9)?)),
         ];
         for name in &spec.columns {
             if let Some((_, v)) = sys_pairs.iter().find(|(n, _)| n == name) {
