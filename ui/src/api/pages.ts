@@ -1,11 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "./client";
-import {
-  invalidateByPath,
-  invalidatePageContent,
-  invalidatePageStructure,
-  queryKeys,
-} from "./keys";
+import { invalidatePageContent, invalidatePageStructure } from "./keys";
 
 export function usePages() {
   return $api.useQuery("get", "/api/vault/pages");
@@ -41,11 +36,6 @@ export function usePage(path: string) {
   );
 }
 
-export function useFolderTreePaths() {
-  const query = $api.useQuery("get", "/api/vault/folders/tree");
-  return { ...query, data: query.data?.paths };
-}
-
 export function useCreatePage() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/vault/pages/{path}", {
@@ -53,13 +43,17 @@ export function useCreatePage() {
   });
 }
 
-export function useCreateFolder() {
+export function useMovePage() {
   const qc = useQueryClient();
-  return $api.useMutation("post", "/api/vault/folders/{path}", {
-    onSuccess: () => {
-      invalidateByPath(qc, queryKeys.pages.pathPrefix);
-      invalidateByPath(qc, queryKeys.folders.pathPrefix);
-    },
+  return $api.useMutation("post", "/api/vault/pages-move/{path}", {
+    onSuccess: () => invalidatePageStructure(qc),
+  });
+}
+
+export function useDeletePage() {
+  const qc = useQueryClient();
+  return $api.useMutation("delete", "/api/vault/pages/{path}", {
+    onSuccess: () => invalidatePageStructure(qc),
   });
 }
 

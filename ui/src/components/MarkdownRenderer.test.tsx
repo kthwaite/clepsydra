@@ -72,13 +72,11 @@ w = z^2
 
     expect(container.querySelectorAll(".katex")).toHaveLength(4);
     expect(
-      container.querySelectorAll(
-        "span.folio-math:not(.folio-math--display)",
-      ),
+      container.querySelectorAll("span.folio-math:not(.folio-math--display)"),
     ).toHaveLength(2);
-    expect(
-      container.querySelectorAll("div.folio-math--display"),
-    ).toHaveLength(2);
+    expect(container.querySelectorAll("div.folio-math--display")).toHaveLength(
+      2,
+    );
   });
 
   it("preserves the exact authored source when TeX is invalid", () => {
@@ -119,4 +117,21 @@ w = z^2
     expect(container).toHaveTextContent(source);
   });
 
+  it("resolves CAS links and images through the vault blob endpoint", () => {
+    render(
+      <MarkdownRenderer
+        content={
+          "[Archived snapshot](cas:sha256:snapshot)\n\n![Archived image](cas:sha256:image)"
+        }
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Archived snapshot" }),
+    ).toHaveAttribute("href", "/api/vault/cas/sha256:snapshot");
+    expect(screen.getByRole("img", { name: "Archived image" })).toHaveAttribute(
+      "src",
+      "/api/vault/cas/sha256:image",
+    );
+  });
 });

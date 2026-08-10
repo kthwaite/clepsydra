@@ -184,7 +184,7 @@ pub async fn patch_properties(
             removed: notification.removed,
         });
     };
-    state
+    let replacement = state
         .mutation_coordinator
         .replace_page_content(
             &state.vault,
@@ -238,7 +238,7 @@ pub async fn patch_properties(
     Ok(Json(PropertyPatchResponse {
         id: page_id,
         path,
-        revision: page_revision(&new_content),
+        revision: page_revision(&replacement.content),
         properties: grouped,
     }))
 }

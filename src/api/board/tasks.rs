@@ -118,7 +118,6 @@ pub(crate) async fn create_task(
         meta.extra
             .insert("link".to_string(), toml::Value::String(l.clone()));
     }
-
     // 6. Build checklist body
     let page_body = if let Some(items) = body.checklist {
         if items.is_empty() {
@@ -272,7 +271,8 @@ pub(crate) async fn patch_task(
         None => ProjectAssignment::Unchanged,
     };
     let reconcile = body.project.is_some();
-    meta.updated_at = Some(Utc::now());
+    let now = Utc::now();
+    meta.updated_at = Some(now);
 
     let notify = |notification: MutationNotification| {
         let _ = state.change_tx.send(SyncNotification::IndexChanged {

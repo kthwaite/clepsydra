@@ -123,12 +123,6 @@ function ModeGlyph({ gl }: { gl: string }) {
   );
 }
 
-// ── sparkline data (hardcoded per prototype) ─────────────────────────────────
-
-// Synthetic placeholder data per plan decision 11 — real 14d seal-rate
-// telemetry is a later task; the prototype hardcodes this exact series.
-const SEAL_SPARKLINE = [1, 2, 1, 3, 2, 4, 2, 3, 5, 3, 4, 2, 5, 4];
-
 // ── BoardHeader ──────────────────────────────────────────────────────────────
 
 interface BoardHeaderProps {
@@ -139,6 +133,10 @@ interface BoardHeaderProps {
   /** The active operation object when a single op is selected, else null. */
   activeOp: BoardOperation | null;
   onOpenDossier?: (dossier: string) => void;
+  sealHistory?: number[];
+  sealHistoryPending?: boolean;
+  sealHistoryError?: boolean;
+  sealHistoryApplicable?: boolean;
 }
 
 export function BoardHeader({
@@ -147,6 +145,10 @@ export function BoardHeader({
   tasks,
   activeOp,
   onOpenDossier,
+  sealHistory = [],
+  sealHistoryPending = false,
+  sealHistoryError = false,
+  sealHistoryApplicable = true,
 }: BoardHeaderProps) {
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
@@ -247,12 +249,26 @@ export function BoardHeader({
             <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               SEAL RATE 14d
             </span>
-            <Spark
-              data={SEAL_SPARKLINE}
-              width={96}
-              height={26}
-              accent="var(--cool)"
-            />
+            {!sealHistoryApplicable ? (
+              <span className="text-[9px] text-[var(--ink-mute)]">
+                NOT APPLICABLE
+              </span>
+            ) : sealHistoryPending ? (
+              <span className="text-[9px] text-[var(--ink-mute)]">LOADING</span>
+            ) : sealHistoryError ? (
+              <span className="text-[9px] text-[var(--hot)]">UNAVAILABLE</span>
+            ) : sealHistory.length === 0 || sealHistory.every((count) => count === 0) ? (
+              <span className="text-[9px] text-[var(--ink-mute)]">NO SEALS</span>
+            ) : (
+              <div aria-label={`14-day seal history: ${sealHistory.join(", ")}`}>
+                <Spark
+                  data={sealHistory}
+                  width={96}
+                  height={26}
+                  accent="var(--cool)"
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

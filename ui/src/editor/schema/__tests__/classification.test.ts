@@ -15,6 +15,7 @@ const INLINE = new Set<ElementType>([
   "block-ref",
   "footnote-ref",
   "link",
+  "image",
 ]);
 const VOID = new Set<ElementType>([
   "wikilink",
@@ -24,6 +25,7 @@ const VOID = new Set<ElementType>([
   "thematic-break",
   "journal-time",
   "math-block",
+  "image",
 ]);
 
 const ALL_TYPES: ElementType[] = [
@@ -43,6 +45,7 @@ const ALL_TYPES: ElementType[] = [
   "footnote-def",
   "journal-time",
   "math-block",
+  "image",
 ];
 
 describe("withSchema classification", () => {
@@ -61,15 +64,15 @@ describe("withSchema classification", () => {
   });
 
   it("classifies inline and display math as void elements", () => {
-    expect(
-      editor.isInline(makeInlineMath({ tex: "x", delimiter: "$" })),
-    ).toBe(true);
+    expect(editor.isInline(makeInlineMath({ tex: "x", delimiter: "$" }))).toBe(
+      true,
+    );
     expect(editor.isVoid(makeInlineMath({ tex: "x", delimiter: "$" }))).toBe(
       true,
     );
-    expect(
-      editor.isInline(makeMathBlock({ tex: "x", delimiter: "$$" })),
-    ).toBe(false);
+    expect(editor.isInline(makeMathBlock({ tex: "x", delimiter: "$$" }))).toBe(
+      false,
+    );
     expect(editor.isVoid(makeMathBlock({ tex: "x", delimiter: "$$" }))).toBe(
       true,
     );

@@ -11,6 +11,7 @@ use axum::routing::{get, post};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
@@ -20,7 +21,7 @@ use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator,
 use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ArchiveRequest {
     pub url: String,
     pub canonical_url: Option<String>,
@@ -35,14 +36,14 @@ pub struct ArchiveRequest {
     pub blobs: Vec<BlobUpload>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, ToSchema)]
 pub struct BlobUpload {
     pub hash: String,
     pub content_type: String,
     pub data: String, // base64
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ArchiveResponse {
     pub page_id: String,
     pub vault_path: String,
@@ -51,12 +52,19 @@ pub struct ArchiveResponse {
     pub status: ArchiveStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchiveStatus {
     Created,
     AlreadyExists,
     ContentChanged,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ArchiveStatsResponse {
+    pub enabled: bool,
+    pub blob_count: u64,
+    pub total_size_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -410,7 +418,19 @@ fn store_decoded_blobs(
     })
 }
 
-async fn serve_blob(
+#[utoipa::path(
+    get,
+    path = "/cas/{hash}",
+    context_path = "/api/vault",
+    tag = "Archive",
+    params(("hash" = String, Path, description = "Content-addressed blob hash")),
+    responses(
+        (status = 200, description = "Archived blob bytes", body = String, content_type = "application/octet-stream"),
+        (status = 404, description = "Blob not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn serve_blob(
     State(state): State<Arc<AppState>>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
@@ -422,24 +442,47 @@ async fn serve_blob(
     Ok((StatusCode::OK, [(header::CONTENT_TYPE, content_type)], data).into_response())
 }
 
-async fn archive_status(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/archive/status",
+    context_path = "/api/vault",
+    tag = "Archive",
+    responses(
+        (status = 200, description = "Archive service status", body = ArchiveStatsResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn archive_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ArchiveStatsResponse>, ApiError> {
     let cas = state.cas.lock();
     let stats = cas
         .stats()
         .map_err(|e| ApiError::internal(format!("stats: {e}")))?;
 
-    Ok((
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "enabled": state.vault.config().archive.enabled,
-            "blob_count": stats.blob_count,
-            "total_size_bytes": stats.total_size_bytes,
-        })),
-    )
-        .into_response())
+    Ok(Json(ArchiveStatsResponse {
+        enabled: state.vault.config().archive.enabled,
+        blob_count: stats.blob_count,
+        total_size_bytes: stats.total_size_bytes,
+    }))
 }
 
-async fn ingest_archive(
+#[utoipa::path(
+    post,
+    path = "/archive",
+    context_path = "/api/vault",
+    tag = "Archive",
+    request_body = ArchiveRequest,
+    responses(
+        (status = 200, description = "Archive already exists", body = ArchiveResponse),
+        (status = 201, description = "Archive created", body = ArchiveResponse),
+        (status = 400, description = "Invalid archive payload", body = ApiError),
+        (status = 403, description = "Archiving disabled", body = ApiError),
+        (status = 409, description = "Archive content conflict", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn ingest_archive(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ArchiveRequest>,
 ) -> Result<Response, ApiError> {

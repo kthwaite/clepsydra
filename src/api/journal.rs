@@ -10,6 +10,7 @@ use axum::{Router, http::StatusCode};
 use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -26,18 +27,20 @@ use crate::vault::path::VaultPath;
 // Request / query types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CaptureRequest {
     pub content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RangeQuery {
     pub from: String,
     pub to: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RecentQuery {
     #[serde(default = "default_days")]
     pub days: u32,
@@ -47,7 +50,7 @@ fn default_days() -> u32 {
     7
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct JournalSummary {
     pub id: String,
     pub path: String,
@@ -55,9 +58,10 @@ pub struct JournalSummary {
     pub journal_date: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct JournalTodayResponse {
     #[serde(flatten)]
+    #[schema(value_type = crate::api::pages::PageDetailResponse)]
     pub page: PageDetail,
     pub carried_forward: Vec<TaskItem>,
 }
@@ -177,7 +181,18 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
 /// journal pages in the past 7 days (excluding today). These tasks are not
 /// copied into today's file — they are surfaced in the API response for the
 /// UI to render.
-async fn get_today(
+#[utoipa::path(
+    get,
+    path = "/journal/today",
+    context_path = "/api/vault",
+    tag = "Journal",
+    responses(
+        (status = 200, description = "Today's journal", body = JournalTodayResponse),
+        (status = 404, description = "Journal not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<JournalTodayResponse>, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
@@ -294,7 +309,18 @@ async fn get_today(
 /// Returns 201 with the page when it was created, 200 when it already
 /// existed. The journal template (title = date, `journal` tag) lives in
 /// `ensure_journal` and nowhere else.
-async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
+#[utoipa::path(
+    post,
+    path = "/journal/today",
+    context_path = "/api/vault",
+    tag = "Journal",
+    responses(
+        (status = 200, description = "Existing journal", body = crate::api::pages::PageDetailResponse),
+        (status = 201, description = "Created journal", body = crate::api::pages::PageDetailResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
     let (vault_path, created) = ensure_journal(&state, &date).await?;
 
@@ -311,7 +337,20 @@ async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response, Ap
 }
 
 /// GET /journal/:date — get a journal page by date.
-async fn get_by_date(
+#[utoipa::path(
+    get,
+    path = "/journal/{date}",
+    context_path = "/api/vault",
+    tag = "Journal",
+    params(("date" = String, Path, description = "Journal date in YYYY-MM-DD format")),
+    responses(
+        (status = 200, description = "Journal page", body = crate::api::pages::PageDetailResponse),
+        (status = 400, description = "Invalid date", body = ApiError),
+        (status = 404, description = "Journal not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_by_date(
     State(state): State<Arc<AppState>>,
     Path(date): Path<String>,
 ) -> Result<Json<PageDetail>, ApiError> {
@@ -330,7 +369,19 @@ async fn get_by_date(
 }
 
 /// GET /journal/range?from=YYYY-MM-DD&to=YYYY-MM-DD — list journals in range.
-async fn get_range(
+#[utoipa::path(
+    get,
+    path = "/journal/range",
+    context_path = "/api/vault",
+    tag = "Journal",
+    params(RangeQuery),
+    responses(
+        (status = 200, description = "Journals in date range", body = [JournalSummary]),
+        (status = 400, description = "Invalid date range", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_range(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RangeQuery>,
 ) -> Result<Json<Vec<JournalSummary>>, ApiError> {
@@ -372,7 +423,18 @@ async fn get_range(
 }
 
 /// GET /journal/recent?days=7 — list recent journal pages.
-async fn get_recent(
+#[utoipa::path(
+    get,
+    path = "/journal/recent",
+    context_path = "/api/vault",
+    tag = "Journal",
+    params(RecentQuery),
+    responses(
+        (status = 200, description = "Recent journals", body = [JournalSummary]),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_recent(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RecentQuery>,
 ) -> Result<Json<Vec<JournalSummary>>, ApiError> {
@@ -446,7 +508,19 @@ fn format_capture_entry(now: DateTime<Utc>, content: &str) -> String {
 }
 
 /// POST /journal/today/capture — append content to today's journal.
-async fn capture_today(
+#[utoipa::path(
+    post,
+    path = "/journal/today/capture",
+    context_path = "/api/vault",
+    tag = "Journal",
+    request_body = CaptureRequest,
+    responses(
+        (status = 200, description = "Updated journal", body = crate::api::pages::PageDetailResponse),
+        (status = 409, description = "Protected journal", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn capture_today(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CaptureRequest>,
 ) -> Result<Response, ApiError> {

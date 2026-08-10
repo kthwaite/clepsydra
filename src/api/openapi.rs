@@ -63,6 +63,11 @@ impl Modify for FilterSchema {
         (name = "Attachments", description = "Attachment upload and retrieval"),
         (name = "Index", description = "Index, graph, tags and search"),
         (name = "Academic", description = "Academic works, annotations and importers"),
+        (name = "Archive", description = "Web archives and content-addressed blobs"),
+        (name = "Journal", description = "Daily journal retrieval and capture"),
+        (name = "Tasks", description = "Indexed task queries and status updates"),
+        (name = "Agenda", description = "Today, week and overdue task views"),
+        (name = "Blocks", description = "Block lookup, search and identifiers"),
         (name = "Events", description = "Server-sent events stream"),
         (name = "BCL", description = "Brimley-Cocoon Line countdown"),
         (name = "Location", description = "Vault geographic location"),
@@ -130,6 +135,29 @@ impl Modify for FilterSchema {
         crate::api::academic::import_doi,
         crate::api::academic::import_isbn_handler,
         crate::api::academic::import_zotero_handler,
+        // Archive / CAS
+        crate::api::archive::ingest_archive,
+        crate::api::archive::archive_status,
+        crate::api::archive::serve_blob,
+        // Journal
+        crate::api::journal::get_today,
+        crate::api::journal::ensure_today,
+        crate::api::journal::capture_today,
+        crate::api::journal::get_range,
+        crate::api::journal::get_recent,
+        crate::api::journal::get_by_date,
+        // Tasks and agenda
+        crate::api::tasks::list_tasks,
+        crate::api::tasks::get_task_completion_history,
+        crate::api::tasks::update_task_status,
+        crate::api::agenda::agenda_today,
+        crate::api::agenda::agenda_week,
+        crate::api::agenda::agenda_overdue,
+        crate::api::agenda::get_cycle_burndown,
+        // Blocks
+        crate::api::blocks::search_blocks,
+        crate::api::blocks::assign_block_id,
+        crate::api::blocks::get_block,
         // BCL
         crate::api::bcl::get_bcl,
         // Location
@@ -276,6 +304,28 @@ impl Modify for FilterSchema {
             crate::vault::academic::WorkUrls,
             crate::vault::academic::SourceLocation,
             crate::vault::import_zotero::ImportZoteroRequest,
+            // Archive / CAS
+            crate::api::archive::ArchiveRequest,
+            crate::api::archive::BlobUpload,
+            crate::api::archive::ArchiveResponse,
+            crate::api::archive::ArchiveStatus,
+            crate::api::archive::ArchiveStatsResponse,
+            // Journal
+            crate::api::journal::CaptureRequest,
+            crate::api::journal::JournalSummary,
+            crate::api::journal::JournalTodayResponse,
+            // Tasks and agenda
+            crate::api::tasks::TaskItem,
+            crate::api::tasks::TaskListResponse,
+            crate::api::tasks::UpdateStatusRequest,
+            crate::api::agenda::AgendaTodayResponse,
+            crate::api::agenda::AgendaWeekResponse,
+            crate::api::agenda::AgendaDay,
+            crate::api::agenda::AgendaOverdueResponse,
+            // Blocks
+            crate::api::blocks::BlockResponse,
+            crate::api::blocks::AssignIdRequest,
+            crate::api::blocks::AssignIdResponse,
             // BCL
             crate::api::bcl::BclResponse,
             // Location

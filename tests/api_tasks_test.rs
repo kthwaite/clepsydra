@@ -18,10 +18,11 @@ fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
     Arc::new(vec![Box::new(AcademicMoveHook)])
 }
 
-fn setup_server() -> (TestServer, TempDir) {
+fn setup_server_with_seed(seed: impl FnOnce(&std::path::Path)) -> (TestServer, TempDir) {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("vault");
     init_vault(&root).unwrap();
+    seed(&root);
 
     let vault = Vault::open(&root).unwrap();
     let db_path = vault.root().join(".clepsydra/cache.db");
@@ -72,6 +73,281 @@ fn setup_server() -> (TestServer, TempDir) {
 
     let server = TestServer::new(app).unwrap();
     (server, tmp)
+}
+
+fn setup_server() -> (TestServer, TempDir) {
+    setup_server_with_seed(|_| {})
+}
+
+#[tokio::test]
+async fn task_history_returns_fourteen_daily_seal_counts_for_the_requested_project() {
+    let today = chrono::Utc::now().date_naive();
+    let yesterday = today - chrono::Duration::days(1);
+    let outside_window = today - chrono::Duration::days(14);
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/alpha")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/beta")).unwrap();
+
+        for (path, id, project, status, updated_at) in [
+            (
+                "tasks/alpha/today.md",
+                "01951234-0000-7000-8000-bbb000000001",
+                "alpha",
+                "SEALED",
+                today,
+            ),
+            (
+                "tasks/alpha/yesterday.md",
+                "01951234-0000-7000-8000-bbb000000002",
+                "alpha",
+                "SEALED",
+                yesterday,
+            ),
+            (
+                "tasks/alpha/old.md",
+                "01951234-0000-7000-8000-bbb000000003",
+                "alpha",
+                "SEALED",
+                outside_window,
+            ),
+            (
+                "tasks/alpha/open.md",
+                "01951234-0000-7000-8000-bbb000000004",
+                "alpha",
+                "FIELD",
+                today,
+            ),
+            (
+                "tasks/beta/sealed.md",
+                "01951234-0000-7000-8000-bbb000000005",
+                "beta",
+                "SEALED",
+                today,
+            ),
+        ] {
+            let content = format!(
+                "---\nid: {id}\ntitle: Telemetry task\ntype: TASK\nproject: {project}\nstatus: {status}\npriority: P2\ncreated_at: {updated_at}T09:00:00Z\nupdated_at: {updated_at}T12:00:00Z\n---\n"
+            );
+            std::fs::write(root.join(path), content).unwrap();
+        }
+    });
+
+    let response = server
+        .get("/api/vault/tasks/history?days=14&project=alpha")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let days = body["days"].as_array().expect("history days");
+
+    assert_eq!(
+        days.len(),
+        14,
+        "history must include every day in the window"
+    );
+    assert_eq!(days[12]["date"], yesterday.format("%Y-%m-%d").to_string());
+    assert_eq!(days[12]["count"], 1);
+    assert_eq!(days[13]["date"], today.format("%Y-%m-%d").to_string());
+    assert_eq!(days[13]["count"], 1);
+    assert_eq!(
+        days.iter()
+            .map(|day| day["count"].as_u64().unwrap())
+            .sum::<u64>(),
+        2,
+        "old, open, and other-project tasks must not affect the series"
+    );
+}
+
+#[tokio::test]
+async fn task_history_survives_later_edits_and_reopening() {
+    let today = chrono::Utc::now().date_naive();
+    let sealed_on = today - chrono::Duration::days(1);
+    let task_id = "01951234-0000-7000-8000-bbb000000099";
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/alpha")).unwrap();
+        std::fs::write(
+            root.join("tasks/alpha/sealed.md"),
+            format!(
+                "---\nid: {task_id}\ntitle: Sealed yesterday\ntype: TASK\nproject: alpha\nstatus: SEALED\npriority: P2\ncreated_at: {}T09:00:00Z\nupdated_at: {sealed_on}T12:00:00Z\n---\n",
+                sealed_on - chrono::Duration::days(1)
+            ),
+        )
+        .unwrap();
+    });
+
+    server
+        .patch(&format!("/api/vault/board/tasks/{task_id}"))
+        .json(&serde_json::json!({ "title": "Edited after sealing" }))
+        .await
+        .assert_status_ok();
+    server
+        .patch(&format!("/api/vault/board/tasks/{task_id}"))
+        .json(&serde_json::json!({ "status": "FIELD" }))
+        .await
+        .assert_status_ok();
+
+    let response = server
+        .get("/api/vault/tasks/history?days=14&project=alpha")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let counts: std::collections::HashMap<_, _> = body["days"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|day| {
+            (
+                day["date"].as_str().unwrap().to_string(),
+                day["count"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(counts[&sealed_on.format("%Y-%m-%d").to_string()], 1);
+    assert_eq!(counts[&today.format("%Y-%m-%d").to_string()], 0);
+}
+
+#[tokio::test]
+async fn task_history_unfiled_scope_includes_unknown_and_missing_projects() {
+    let today = chrono::Utc::now().date_naive();
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("projects/alpha.md"),
+            "---\nid: 01951234-0000-7000-8000-aaa000000099\ntitle: Alpha\ntype: PROJECT\nproject: alpha\nboard: true\n---\n",
+        )
+        .unwrap();
+        for (name, id, project) in [
+            (
+                "known",
+                "01951234-0000-7000-8000-bbb000000091",
+                Some("alpha"),
+            ),
+            (
+                "unknown",
+                "01951234-0000-7000-8000-bbb000000092",
+                Some("orphan"),
+            ),
+            ("missing", "01951234-0000-7000-8000-bbb000000093", None),
+        ] {
+            let project_line = project
+                .map(|value| format!("project: {value}\n"))
+                .unwrap_or_default();
+            std::fs::write(
+                root.join(format!("tasks/{name}.md")),
+                format!(
+                    "---\nid: {id}\ntitle: {name}\ntype: TASK\n{project_line}status: SEALED\npriority: P2\ncreated_at: {today}T09:00:00Z\nupdated_at: {today}T09:00:00Z\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+
+    let response = server
+        .get("/api/vault/tasks/history?days=14&unfiled=true")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["days"][13]["count"], 2);
+}
+
+#[tokio::test]
+async fn generic_page_edit_persists_a_manually_observed_seal_time() {
+    let today = chrono::Utc::now().date_naive();
+    let created_on = today - chrono::Duration::days(2);
+    let sealed_on = today - chrono::Duration::days(1);
+    let (server, tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/alpha")).unwrap();
+        std::fs::write(
+            root.join("tasks/alpha/manual.md"),
+            format!(
+                "---\nid: 01951234-0000-7000-8000-bbb000000094\ntitle: Manual task\ntype: TASK\nproject: alpha\nstatus: FIELD\npriority: P2\ncreated_at: {created_on}T09:00:00Z\nupdated_at: {created_on}T09:00:00Z\n---\n"
+            ),
+        )
+        .unwrap();
+    });
+    let path = tmp.path().join("vault/tasks/alpha/manual.md");
+    let manually_sealed = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("status: FIELD", "status: SEALED")
+        .replace(
+            &format!("updated_at: {created_on}T09:00:00Z"),
+            &format!("updated_at: {sealed_on}T12:00:00Z"),
+        );
+    std::fs::write(&path, manually_sealed).unwrap();
+
+    let current = server.get("/api/vault/pages/tasks/alpha/manual.md").await;
+    current.assert_status_ok();
+    let current: serde_json::Value = current.json();
+    let property_edit = server
+        .patch("/api/vault/pages/by-id/01951234-0000-7000-8000-bbb000000094/properties")
+        .json(&serde_json::json!({
+            "set": { "note": "Edited after manual seal" },
+            "expected_revision": current["revision"]
+        }))
+        .await;
+    property_edit.assert_status_ok();
+    let property_edit: serde_json::Value = property_edit.json();
+    server
+        .put("/api/vault/pages/tasks/alpha/manual.md")
+        .json(&serde_json::json!({
+            "title": "Edited after manual seal",
+            "expected_revision": property_edit["revision"]
+        }))
+        .await
+        .assert_status_ok();
+
+    let response = server
+        .get("/api/vault/tasks/history?days=14&project=alpha")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let counts: std::collections::HashMap<_, _> = body["days"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|day| {
+            (
+                day["date"].as_str().unwrap().to_string(),
+                day["count"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(counts[&sealed_on.format("%Y-%m-%d").to_string()], 1);
+    assert_eq!(counts[&today.format("%Y-%m-%d").to_string()], 0);
+
+    let persisted = std::fs::read_to_string(path).unwrap();
+    assert!(persisted.contains("task_history"));
+    assert!(persisted.contains(&format!("{sealed_on}T12:00:00+00:00")));
+}
+
+#[tokio::test]
+async fn property_edit_heals_task_history_when_legacy_timestamps_are_missing() {
+    let task_id = "01951234-0000-7000-8000-bbb000000095";
+    let (server, tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/no-time.md"),
+            format!(
+                "---\nid: {task_id}\ntitle: No timestamps\ntype: TASK\nstatus: FIELD\npriority: P2\n---\n"
+            ),
+        )
+        .unwrap();
+    });
+    let current: serde_json::Value = server.get("/api/vault/pages/tasks/no-time.md").await.json();
+
+    server
+        .patch(&format!("/api/vault/pages/by-id/{task_id}/properties"))
+        .json(&serde_json::json!({
+            "set": { "note": "still mutable" },
+            "expected_revision": current["revision"]
+        }))
+        .await
+        .assert_status_ok();
+
+    let persisted = std::fs::read_to_string(tmp.path().join("vault/tasks/no-time.md")).unwrap();
+    assert!(persisted.contains("note = \"still mutable\""));
+    assert!(persisted.contains("task_history"));
 }
 
 #[tokio::test]

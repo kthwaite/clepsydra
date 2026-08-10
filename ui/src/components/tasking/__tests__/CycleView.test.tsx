@@ -348,7 +348,13 @@ describe("CycleView — metrics and burndown", () => {
   });
 
   it("renders the Spark SVG for burndown", () => {
-    renderCycleView(ACTIVE_CYCLE, C01_TASKS);
+    render(
+      <CycleView
+        cycle={ACTIVE_CYCLE}
+        tasks={C01_TASKS}
+        burndown={[3, 2, 1]}
+      />,
+    );
     // Spark renders an SVG polyline
     const svg = document.querySelector("svg");
     expect(svg).toBeInTheDocument();

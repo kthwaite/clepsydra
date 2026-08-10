@@ -1,5 +1,5 @@
 import { type ReactNode, useRef } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
@@ -7,10 +7,8 @@ import { MathExpression } from "#/components/MathExpression";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
-import {
-  remarkFolioMath,
-  type MathDelimiter,
-} from "#/lib/markdown/folioMath";
+import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
+import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {
   content: string;
@@ -56,12 +54,19 @@ const remarkPlugins: PluggableList = [
   ],
 ];
 
+function transformMarkdownUrl(url: string): string {
+  return isCasResource(url)
+    ? resolveResourceUrl(url)
+    : defaultUrlTransform(url);
+}
+
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const openTab = useOpenTab();
 
   return (
     <Markdown
       remarkPlugins={remarkPlugins}
+      urlTransform={transformMarkdownUrl}
       components={{
         span: ({ children, node, ...props }) => {
           const tex = node?.properties["data-tex"];

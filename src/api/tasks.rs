@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::routing::{get, put};
+use chrono::Duration;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -15,12 +17,14 @@ use crate::vault::index::find_body_start;
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
 use crate::vault::page::parse_frontmatter;
 use crate::vault::path::VaultPath;
+use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
 
 // ---------------------------------------------------------------------------
 // Request / response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct TaskQueryParams {
     pub status: Option<String>,
     pub due_before: Option<String>,
@@ -36,7 +40,7 @@ pub struct TaskQueryParams {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TaskItem {
     pub block_id: Option<String>,
     pub content: String,
@@ -48,14 +52,36 @@ pub struct TaskItem {
     pub span_end: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TaskListResponse {
     pub tasks: Vec<TaskItem>,
     pub total: i64,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TaskHistoryQueryParams {
+    /// Number of calendar days to return. Defaults to 14 and is capped at 90.
+    pub days: Option<u32>,
+    /// Optional project slug used by the tasking board's operation filter.
+    pub project: Option<String>,
+    /// Restrict telemetry to tasks without a known board project.
+    pub unfiled: Option<bool>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskCompletionDay {
+    pub date: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TaskCompletionHistoryResponse {
+    pub days: Vec<TaskCompletionDay>,
+}
+
 /// Request body for `PUT /tasks/status`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateStatusRequest {
     pub page_path: String,
     pub span_start: i64,
@@ -69,14 +95,121 @@ pub struct UpdateStatusRequest {
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_tasks))
+        .route("/history", get(get_task_completion_history))
         .route("/status", put(update_task_status))
+}
+
+// ---------------------------------------------------------------------------
+// GET /tasks/history — daily task-page seal counts
+// ---------------------------------------------------------------------------
+
+#[utoipa::path(
+    get,
+    path = "/tasks/history",
+    context_path = "/api/vault",
+    tag = "Tasks",
+    params(TaskHistoryQueryParams),
+    responses(
+        (status = 200, description = "Daily sealed task counts", body = TaskCompletionHistoryResponse),
+        (status = 400, description = "Invalid telemetry scope", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_task_completion_history(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<TaskHistoryQueryParams>,
+) -> Result<Json<TaskCompletionHistoryResponse>, ApiError> {
+    let day_count = params.days.unwrap_or(14).clamp(1, 90);
+    let today = state.clock.now().date_naive();
+    let start = today - Duration::days(i64::from(day_count - 1));
+    let project = params.project;
+    let unfiled = params.unfiled.unwrap_or(false);
+    if unfiled && project.is_some() {
+        return Err(ApiError::bad_request(
+            "project and unfiled cannot be requested together",
+        ));
+    }
+
+    let (task_metadata, known_projects) = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
+            let mut task_stmt =
+                conn.prepare("SELECT meta_json FROM pages WHERE kind = 'TASK' ORDER BY path")?;
+            let task_metadata = task_stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(Result::ok)
+                .filter_map(|value| serde_json::from_str(&value).ok())
+                .collect::<Vec<serde_json::Value>>();
+
+            let mut project_stmt = conn.prepare(
+                "SELECT DISTINCT project FROM pages \
+                 WHERE kind = 'PROJECT' AND project IS NOT NULL \
+                   AND json_extract(meta_json, '$.board') = 1",
+            )?;
+            let known_projects = project_stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<HashSet<_>, _>>()?;
+            Ok::<_, rusqlite::Error>((task_metadata, known_projects))
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    let mut counts = HashMap::<String, u32>::new();
+    for meta in &task_metadata {
+        let mut was_sealed = false;
+        for event in effective_indexed_history(meta) {
+            let is_sealed = event.status == "SEALED";
+            if is_sealed
+                && !was_sealed
+                && matches_project_scope(
+                    event.project.as_deref(),
+                    project.as_deref(),
+                    unfiled,
+                    &known_projects,
+                )
+                && let Some(date) = event.timestamp().map(|value| value.date_naive())
+                && date >= start
+                && date <= today
+            {
+                let date = date.format("%Y-%m-%d").to_string();
+                *counts.entry(date).or_default() += 1;
+            }
+            was_sealed = is_sealed;
+        }
+    }
+
+    let days = (0..day_count)
+        .map(|offset| {
+            let date = start + Duration::days(i64::from(offset));
+            let date = date.format("%Y-%m-%d").to_string();
+            TaskCompletionDay {
+                count: counts.get(&date).copied().unwrap_or(0),
+                date,
+            }
+        })
+        .collect();
+
+    Ok(Json(TaskCompletionHistoryResponse { days }))
 }
 
 // ---------------------------------------------------------------------------
 // GET /tasks — list_tasks
 // ---------------------------------------------------------------------------
 
-async fn list_tasks(
+#[utoipa::path(
+    get,
+    path = "/tasks",
+    context_path = "/api/vault",
+    tag = "Tasks",
+    params(TaskQueryParams),
+    responses(
+        (status = 200, description = "Task list", body = TaskListResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_tasks(
     State(state): State<Arc<AppState>>,
     Query(params): Query<TaskQueryParams>,
 ) -> Result<Json<TaskListResponse>, ApiError> {
@@ -297,7 +430,21 @@ async fn list_tasks(
 // PUT /tasks/status — update_task_status
 // ---------------------------------------------------------------------------
 
-async fn update_task_status(
+#[utoipa::path(
+    put,
+    path = "/tasks/status",
+    context_path = "/api/vault",
+    tag = "Tasks",
+    request_body = UpdateStatusRequest,
+    responses(
+        (status = 200, description = "Updated task", body = TaskItem),
+        (status = 400, description = "Invalid task update", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Task target is stale or protected", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn update_task_status(
     State(state): State<Arc<AppState>>,
     Json(body): Json<UpdateStatusRequest>,
 ) -> Result<Json<TaskItem>, ApiError> {

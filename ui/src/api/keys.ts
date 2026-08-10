@@ -10,7 +10,9 @@ export const queryKeys = {
 
   tasks: {
     all: ["tasks"] as const,
-    list: (params: Record<string, string>) => ["tasks", params] as const,
+    list: (params: object) => ["tasks", params] as const,
+    history: (project?: string, unfiled = false) =>
+      ["tasks", "history", project, unfiled] as const,
   },
 
   agenda: {
@@ -18,6 +20,11 @@ export const queryKeys = {
     today: ["agenda", "today"] as const,
     week: ["agenda", "week"] as const,
     overdue: ["agenda", "overdue"] as const,
+    cycleBurndown: (
+      cycle: string | null,
+      project?: string,
+      unfiled = false,
+    ) => ["agenda", "cycle-burndown", cycle, project, unfiled] as const,
   },
 
   journal: {
@@ -39,6 +46,8 @@ export const queryKeys = {
   },
 
   encryption: { pathPrefix: "/api/vault/encryption" },
+  attachments: { pathPrefix: "/api/vault/attachments" },
+  academic: { pathPrefix: "/api/vault/academic" },
 
   feeds: { pathPrefix: "/api/vault/feeds" },
 

@@ -107,7 +107,7 @@ function UpcomingPanel() {
 }
 
 function InboxPanel() {
-  const params = useMemo(() => ({ has_no_date: "true", status: "todo" }), []);
+  const params = useMemo(() => ({ has_no_date: true, status: "todo" }), []);
   const { data, isLoading } = useTasks(params);
 
   if (isLoading) {

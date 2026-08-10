@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use super::pagination::{PaginatedResponse, PaginationParams};
+use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
@@ -392,54 +392,72 @@ pub async fn list_pages(
         .transpose()?;
     let tag = query.tag.clone();
     let project = query.project.clone();
+    let limit = query.limit;
+    let offset = query.offset.unwrap_or(0);
 
-    let pages = state
+    let (pages, total) = state
         .index
         .with_index(move |index, _vault| {
-            let mut sql = String::from(
+            let mut where_sql = String::new();
+            let mut clauses: Vec<&str> = Vec::new();
+            let mut values: Vec<rusqlite::types::Value> = Vec::new();
+            if let Some(kind) = kind {
+                clauses.push("p.kind = ?");
+                values.push(kind.into());
+            }
+            if let Some(tag) = tag {
+                clauses
+                    .push("EXISTS (SELECT 1 FROM tags t2 WHERE t2.page_id = p.id AND t2.tag = ?)");
+                values.push(tag.into());
+            }
+            if let Some(project) = project {
+                clauses.push("p.project = ?");
+                values.push(project.into());
+            }
+            if !clauses.is_empty() {
+                where_sql.push_str(" WHERE ");
+                where_sql.push_str(&clauses.join(" AND "));
+            }
+
+            let count_sql = format!("SELECT COUNT(*) FROM pages p{where_sql}");
+            let total = index.connection().query_row(
+                &count_sql,
+                rusqlite::params_from_iter(values.iter()),
+                |row| row.get::<_, u32>(0),
+            )?;
+
+            let mut page_sql = String::from(
                 "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
                         p.project, p.encrypted,
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t WHERE t.page_id = p.id), '')
                    FROM pages p",
             );
-            let mut clauses: Vec<&str> = Vec::new();
-            let mut values: Vec<String> = Vec::new();
-            if let Some(kind) = kind {
-                clauses.push("p.kind = ?");
-                values.push(kind);
-            }
-            if let Some(tag) = tag {
-                clauses
-                    .push("EXISTS (SELECT 1 FROM tags t2 WHERE t2.page_id = p.id AND t2.tag = ?)");
-                values.push(tag);
-            }
-            if let Some(project) = project {
-                clauses.push("p.project = ?");
-                values.push(project);
-            }
-            if !clauses.is_empty() {
-                sql.push_str(" WHERE ");
-                sql.push_str(&clauses.join(" AND "));
-            }
-            sql.push_str(" ORDER BY p.path");
+            page_sql.push_str(&where_sql);
+            page_sql.push_str(" ORDER BY p.path LIMIT ? OFFSET ?");
+            values.push(rusqlite::types::Value::Integer(limit.map_or(-1, i64::from)));
+            values.push(rusqlite::types::Value::Integer(i64::from(offset)));
 
-            let mut stmt = index.connection().prepare(&sql)?;
+            let mut stmt = index.connection().prepare(&page_sql)?;
             let pages: Vec<PageSummary> = stmt
-                .query_map(rusqlite::params_from_iter(values), page_summary_from_row)?
+                .query_map(
+                    rusqlite::params_from_iter(values.iter()),
+                    page_summary_from_row,
+                )?
                 .collect::<Result<_, _>>()?;
 
-            Ok::<_, rusqlite::Error>(pages)
+            Ok::<_, rusqlite::Error>((pages, total))
         })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let pagination = PaginationParams {
-        limit: query.limit,
-        offset: query.offset,
-    };
-    Ok(Json(PaginatedResponse::from_vec(pages, &pagination)))
+    Ok(Json(PaginatedResponse {
+        items: pages,
+        total,
+        limit,
+        offset,
+    }))
 }
 
 #[utoipa::path(

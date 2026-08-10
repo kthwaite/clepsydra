@@ -1,7 +1,7 @@
 # Backend–Frontend Affordance Audit
 
-Date: 2026-08-09  
-Scope: registered HTTP routes, CLI surfaces, the React frontend, and the browser extension.  
+Date: 2026-08-09
+Scope: registered HTTP routes, CLI surfaces, the React frontend, and the browser extension.
 Method: static route inventory, frontend call-site and reachability tracing, source-level stub/TODO review, generated OpenAPI comparison, and `bun run knip`.
 
 ## Executive Summary

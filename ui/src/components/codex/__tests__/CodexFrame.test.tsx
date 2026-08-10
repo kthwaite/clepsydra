@@ -152,42 +152,42 @@ describe("CodexFrame destination integration", () => {
     workspaceState.activeTabId = null;
   });
 
-  it.each([
-    "/docs",
-    "/docs/getting-started",
-  ])("renders Docs as the active shell view for %s", (pathname) => {
-    locationState.pathname = pathname;
-    renderFrame();
+  it.each(["/docs", "/docs/getting-started"])(
+    "renders Docs as the active shell view for %s",
+    (pathname) => {
+      locationState.pathname = pathname;
+      renderFrame();
 
-    const docsButton = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /07.*DOCS/i });
-    expect(docsButton).toHaveAttribute("aria-current", "page");
-    expect(
-      screen.getByRole("button", { name: /08.*STATUS/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
-    expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
-  });
+      const docsButton = within(
+        screen.getByRole("navigation", { name: "Primary navigation" }),
+      ).getByRole("button", { name: /08.*DOCS/i });
+      expect(docsButton).toHaveAttribute("aria-current", "page");
+      expect(
+        screen.getByRole("button", { name: /08.*STATUS/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+      expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
+    },
+  );
 
-  it.each([
-    "/docs-old",
-    "/docsfoo",
-  ])("keeps near-prefix Docs path %s in Atrium", (pathname) => {
-    locationState.pathname = pathname;
-    renderFrame();
+  it.each(["/docs-old", "/docsfoo"])(
+    "keeps near-prefix Docs path %s in Atrium",
+    (pathname) => {
+      locationState.pathname = pathname;
+      renderFrame();
 
-    const nav = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    );
-    expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(nav.getByRole("button", { name: /07.*DOCS/i })).not.toHaveAttribute(
-      "aria-current",
-    );
-  });
+      const nav = within(
+        screen.getByRole("navigation", { name: "Primary navigation" }),
+      );
+      expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(
+        nav.getByRole("button", { name: /08.*DOCS/i }),
+      ).not.toHaveAttribute("aria-current");
+    },
+  );
 
   it("navigates Docs to the typed default guide route", async () => {
     const user = userEvent.setup();
@@ -197,7 +197,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /07.*DOCS/i }),
+      ).getByRole("button", { name: /08.*DOCS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({
@@ -213,8 +213,8 @@ describe("CodexFrame destination integration", () => {
     const nav = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
     );
-    const feedsButton = nav.getByRole("button", { name: /06.*FEEDS/i });
-    const docsButton = nav.getByRole("button", { name: /07.*DOCS/i });
+    const feedsButton = nav.getByRole("button", { name: /07.*FEEDS/i });
+    const docsButton = nav.getByRole("button", { name: /08.*DOCS/i });
 
     expect(feedsButton).toHaveAttribute("aria-current", "page");
     expect(
@@ -236,7 +236,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /06.*FEEDS/i }),
+      ).getByRole("button", { name: /07.*FEEDS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
@@ -253,30 +253,30 @@ describe("CodexFrame destination integration", () => {
 
     const basesButton = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /05.*BASES/i });
+    ).getByRole("button", { name: /06.*BASES/i });
     expect(basesButton).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE BASES.*VIEW BASES/)).toBeInTheDocument();
   });
 
-  it.each([
-    "/bases-old",
-    "/basesfoo",
-  ])("does not treat near-prefix path %s as Bases", (pathname) => {
-    locationState.pathname = pathname;
-    renderFrame();
+  it.each(["/bases-old", "/basesfoo"])(
+    "does not treat near-prefix path %s as Bases",
+    (pathname) => {
+      locationState.pathname = pathname;
+      renderFrame();
 
-    const nav = within(
-      screen.getByRole("navigation", { name: "Primary navigation" }),
-    );
-    expect(nav.getByRole("button", { name: /05.*BASES/i })).not.toHaveAttribute(
-      "aria-current",
-    );
-    expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-  });
+      const nav = within(
+        screen.getByRole("navigation", { name: "Primary navigation" }),
+      );
+      expect(
+        nav.getByRole("button", { name: /06.*BASES/i }),
+      ).not.toHaveAttribute("aria-current");
+      expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    },
+  );
 
   it("navigates to the Bases index", async () => {
     const user = userEvent.setup();
@@ -286,11 +286,27 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /05.*BASES/i }),
+      ).getByRole("button", { name: /06.*BASES/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
     expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("marks Academic active and navigates to its library", async () => {
+    const user = userEvent.setup();
+    locationState.pathname = "/academic";
+    renderFrame();
+
+    const academic = within(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    ).getByRole("button", { name: /05.*ACADEMIC/i });
+    expect(academic).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText(/FILE ACADEMIC.*VIEW ACADEMIC/)).toBeVisible();
+    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+
+    await user.click(academic);
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
   });
 
   it("retains the reading percentage for Folio", () => {
@@ -335,12 +351,12 @@ describe("CodexFrame responsive shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the five roots and global actions in the mobile chrome", () => {
+  it("shows the six roots and global actions in the mobile chrome", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
     const roots = screen.getByRole("navigation", { name: "Mobile roots" });
-    expect(within(roots).getAllByRole("button")).toHaveLength(5);
+    expect(within(roots).getAllByRole("button")).toHaveLength(6);
     expect(
       within(roots).getByRole("button", { name: "Atrium" }),
     ).toHaveAttribute("aria-current", "page");
@@ -349,6 +365,9 @@ describe("CodexFrame responsive shell", () => {
     ).toBeVisible();
     expect(within(roots).getByRole("button", { name: "Bases" })).toBeVisible();
     expect(within(roots).getByRole("button", { name: "Feeds" })).toBeVisible();
+    expect(
+      within(roots).getByRole("button", { name: "Academic" }),
+    ).toBeVisible();
     expect(
       within(roots).getByRole("button", { name: "Constellation" }),
     ).toBeVisible();
@@ -361,23 +380,26 @@ describe("CodexFrame responsive shell", () => {
   it.each([
     ["mobile", true],
     ["desktop", false],
-  ] as const)("keeps %s bottom chrome after the routed content in DOM order", (_label, mobile) => {
-    mobileLayoutState.matches = mobile;
-    renderFrame();
+  ] as const)(
+    "keeps %s bottom chrome after the routed content in DOM order",
+    (_label, mobile) => {
+      mobileLayoutState.matches = mobile;
+      renderFrame();
 
-    const main = document.querySelector("main");
-    const bottomChrome = mobile
-      ? screen.getByRole("navigation", { name: "Mobile roots" })
-      : document.querySelector("footer");
+      const main = document.querySelector("main");
+      const bottomChrome = mobile
+        ? screen.getByRole("navigation", { name: "Mobile roots" })
+        : document.querySelector("footer");
 
-    if (!main || !bottomChrome) {
-      throw new Error("Expected main and responsive bottom chrome");
-    }
-    expect(
-      main.compareDocumentPosition(bottomChrome) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
+      if (!main || !bottomChrome) {
+        throw new Error("Expected main and responsive bottom chrome");
+      }
+      expect(
+        main.compareDocumentPosition(bottomChrome) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    },
+  );
 
   it("wires the mobile global actions and Constellation root", async () => {
     const user = userEvent.setup();
@@ -440,7 +462,7 @@ describe("CodexFrame responsive shell", () => {
       name: "Primary navigation",
     });
     const feeds = within(primary).getByRole("button", {
-      name: /06.*feeds/i,
+      name: /07.*feeds/i,
     });
 
     expect(header).toHaveClass("min-w-0");
@@ -453,7 +475,7 @@ describe("CodexFrame responsive shell", () => {
     ).toBeVisible();
   });
 
-  it("fits five 44px mobile targets at 320px with short labels and full accessible names", () => {
+  it("fits six 44px mobile targets at 320px with short labels and full accessible names", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
@@ -461,6 +483,7 @@ describe("CodexFrame responsive shell", () => {
     const expectedRoots = [
       ["Atrium", "ATR"],
       ["Gazetteer", "GAZ"],
+      ["Academic", "ACAD"],
       ["Bases", "BASE"],
       ["Feeds", "FEED"],
       ["Constellation", "GRAPH"],
@@ -478,6 +501,21 @@ describe("CodexFrame responsive shell", () => {
       expect(root).toHaveTextContent(visualLabel);
       expect(root.textContent?.trim()).toHaveLength(visualLabel.length);
     }
+  });
+
+  it("marks Academic active on mobile and navigates to its library", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/academic";
+    renderFrame();
+
+    const academic = within(
+      screen.getByRole("navigation", { name: "Mobile roots" }),
+    ).getByRole("button", { name: "Academic" });
+    expect(academic).toHaveAttribute("aria-current", "page");
+
+    await user.click(academic);
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
   });
 
   it("preserves the routed child instance and local state across desktop/mobile breakpoint changes", async () => {

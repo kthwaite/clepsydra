@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use chrono::Utc;
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
@@ -53,18 +53,35 @@ pub struct CreateWorkRequest {
     pub body: Option<String>,
 }
 
+fn deserialize_tri_state<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let inner: Option<T> = Option::deserialize(deserializer)?;
+    Ok(Some(inner))
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateWorkRequest {
     pub title: Option<String>,
     pub authors: Option<Vec<String>>,
-    pub year: Option<i32>,
-    pub venue: Option<String>,
-    pub publisher: Option<String>,
-    pub status: Option<ReadingStatus>,
-    pub rating: Option<u8>,
-    pub external_ids: Option<ExternalIds>,
-    pub urls: Option<WorkUrls>,
-    pub cite_key: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub year: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub venue: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub publisher: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub status: Option<Option<ReadingStatus>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub rating: Option<Option<u8>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub external_ids: Option<Option<ExternalIds>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub urls: Option<Option<WorkUrls>>,
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub cite_key: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
     pub body: Option<String>,
@@ -1489,7 +1506,7 @@ pub async fn update_work(
     Json(req): Json<UpdateWorkRequest>,
 ) -> Result<Json<WorkDetail>, ApiError> {
     // 1. Validate rating if provided
-    if let Some(rating) = req.rating
+    if let Some(Some(rating)) = req.rating
         && !(1..=5).contains(&rating)
     {
         return Err(ApiError {
@@ -1539,7 +1556,7 @@ pub async fn update_work(
     let mut wm = extra_to_work_meta(&meta.extra)
         .ok_or_else(|| ApiError::internal("failed to extract work metadata"))?;
 
-    if let Some(ref cite_key) = req.cite_key
+    if let Some(Some(ref cite_key)) = req.cite_key
         && cite_key_in_use(&state, cite_key, Some(uuid.as_str())).await
     {
         return Err(ApiError::conflict(format!(
@@ -1565,28 +1582,28 @@ pub async fn update_work(
         wm.authors = authors;
     }
     if let Some(year) = req.year {
-        wm.year = Some(year);
+        wm.year = year;
     }
     if let Some(venue) = req.venue {
-        wm.venue = Some(venue);
+        wm.venue = venue;
     }
     if let Some(publisher) = req.publisher {
-        wm.publisher = Some(publisher);
+        wm.publisher = publisher;
     }
     if let Some(status) = req.status {
-        wm.status = Some(status);
+        wm.status = status;
     }
     if let Some(rating) = req.rating {
-        wm.rating = Some(rating);
+        wm.rating = rating;
     }
     if let Some(external_ids) = req.external_ids {
-        wm.external_ids = Some(external_ids);
+        wm.external_ids = external_ids;
     }
     if let Some(urls) = req.urls {
-        wm.urls = Some(urls);
+        wm.urls = urls;
     }
     if let Some(cite_key) = req.cite_key {
-        wm.cite_key = Some(cite_key);
+        wm.cite_key = cite_key;
     }
 
     // 6. Write back extra and update timestamp

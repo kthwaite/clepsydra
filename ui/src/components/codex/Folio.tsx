@@ -1,5 +1,13 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
@@ -11,23 +19,23 @@ import {
 } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
-import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
+import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
-import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
+import { todayJournalPath } from "#/lib/journal";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
-import { todayJournalPath } from "#/lib/journal";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
@@ -44,6 +52,24 @@ const EMPTY_EDITOR_VALUE: [] = [];
 const NoteProtectionDialog = lazy(() =>
   import("#/components/codex/NoteProtectionDialog").then((module) => ({
     default: module.NoteProtectionDialog,
+  })),
+);
+
+const AttachmentManager = lazy(() =>
+  import("#/components/attachments/AttachmentManager").then((module) => ({
+    default: module.AttachmentManager,
+  })),
+);
+
+const PageActionsMenu = lazy(() =>
+  import("#/components/page-tree/PageActionsMenu").then((module) => ({
+    default: module.PageActionsMenu,
+  })),
+);
+
+const FolderActionsMenu = lazy(() =>
+  import("#/components/page-tree/FolderActionsMenu").then((module) => ({
+    default: module.FolderActionsMenu,
   })),
 );
 
@@ -82,11 +108,7 @@ export function Folio({ tabId, path }: FolioProps) {
     router.history.back();
   };
   useEffect(() => {
-    if (
-      isTodayDraftPath &&
-      journalToday?.path &&
-      journalToday.path !== path
-    ) {
+    if (isTodayDraftPath && journalToday?.path && journalToday.path !== path) {
       updateTabPath(
         tabId,
         journalToday.path,
@@ -105,6 +127,20 @@ export function Folio({ tabId, path }: FolioProps) {
   const [protectionDialog, setProtectionDialog] = useState<
     "protect" | "unprotect" | null
   >(null);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [organizationOpen, setOrganizationOpen] = useState(false);
+  const insertionIdRef = useRef(0);
+  const [attachmentInsertion, setAttachmentInsertion] = useState<{
+    id: number;
+    markdown: string;
+  } | null>(null);
+  const requestAttachmentInsertion = useCallback((markdown: string) => {
+    insertionIdRef.current += 1;
+    setAttachmentInsertion({ id: insertionIdRef.current, markdown });
+  }, []);
+  const finishAttachmentInsertion = useCallback((id: number) => {
+    setAttachmentInsertion((current) => (current?.id === id ? null : current));
+  }, []);
 
   // Assigning a kind/project writes frontmatter AND moves the file, so the
   // page path changes. Repoint the open tab to the new path; because FOLIO is
@@ -305,6 +341,8 @@ export function Folio({ tabId, path }: FolioProps) {
             initialValue={currentEditorValue}
             onChange={editor.onSlateChange}
             onSaveNow={editor.saveNow}
+            insertionRequest={attachmentInsertion}
+            onInsertionHandled={finishAttachmentInsertion}
           />
         </WikilinkResolutionProvider>
       </article>
@@ -321,72 +359,71 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const details = (
     <Block label="Document">
-        <KV k="ID" v={folioCode} />
-        <KV
-          k="Kind"
-          v={
-            <KindSelect
-              value={kind}
-              inferred={inferred}
-              onAssign={(k) =>
-                assign.mutate(
-                  { params: { path: { path } }, body: { kind: k } },
-                  { onSuccess: followMove },
-                )
-              }
-            />
-          }
-        />
-        <KV
-          k="Project"
-          v={
-            <ProjectCombo
-              key={project ?? ""}
-              value={project}
-              options={projects}
-              onAssign={(slug) =>
-                assign.mutate(
-                  { params: { path: { path } }, body: { project: slug } },
-                  { onSuccess: followMove },
-                )
-              }
-              onClear={() =>
-                assign.mutate(
-                  {
-                    params: { path: { path } },
-                    body: { clear_project: true },
-                  },
-                  { onSuccess: followMove },
-                )
-              }
-            />
-          }
-        />
-        <KV
-          k="Path"
-          v={<span className="break-all text-ink-mute">{path}</span>}
-        />
-        <KV
-          k="Protection"
-          v={
-            <button
-              type="button"
-              className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
-              disabled={!editor.pageId}
-              onClick={() =>
-                setProtectionDialog(encrypted ? "unprotect" : "protect")
-              }
-            >
-              {encrypted ? "encrypted · remove" : "plaintext · protect"}
-            </button>
-          }
-        />
-      </Block>
+      <KV k="ID" v={folioCode} />
+      <KV
+        k="Kind"
+        v={
+          <KindSelect
+            value={kind}
+            inferred={inferred}
+            onAssign={(k) =>
+              assign.mutate(
+                { params: { path: { path } }, body: { kind: k } },
+                { onSuccess: followMove },
+              )
+            }
+          />
+        }
+      />
+      <KV
+        k="Project"
+        v={
+          <ProjectCombo
+            key={project ?? ""}
+            value={project}
+            options={projects}
+            onAssign={(slug) =>
+              assign.mutate(
+                { params: { path: { path } }, body: { project: slug } },
+                { onSuccess: followMove },
+              )
+            }
+            onClear={() =>
+              assign.mutate(
+                {
+                  params: { path: { path } },
+                  body: { clear_project: true },
+                },
+                { onSuccess: followMove },
+              )
+            }
+          />
+        }
+      />
+      <KV
+        k="Path"
+        v={<span className="break-all text-ink-mute">{path}</span>}
+      />
+      <KV
+        k="Protection"
+        v={
+          <button
+            type="button"
+            className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
+            disabled={!editor.pageId}
+            onClick={() =>
+              setProtectionDialog(encrypted ? "unprotect" : "protect")
+            }
+          >
+            {encrypted ? "encrypted · remove" : "plaintext · protect"}
+          </button>
+        }
+      />
+    </Block>
   );
 
   const supplementalDetails = (
     <>
-
       <Block label="Chronology">
         <KV k="Created" v={formatAbsoluteDate(editor.createdAt)} />
         <KV k="Modified" v={formatRelativeTime(editor.updatedAt)} />
@@ -406,6 +443,84 @@ export function Folio({ tabId, path }: FolioProps) {
           </Block>
         ) : null;
       })()}
+
+      <Block label="Attachments">
+        <button
+          type="button"
+          aria-expanded={attachmentsOpen}
+          className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+          onClick={() => setAttachmentsOpen((open) => !open)}
+        >
+          <span>Manage attachments</span>
+          <span aria-hidden>{attachmentsOpen ? "⌄" : "›"}</span>
+        </button>
+        {attachmentsOpen ? (
+          <Suspense
+            fallback={
+              <p className="cl-marg mt-2 mb-0">Loading attachment tools…</p>
+            }
+          >
+            <div className="mt-2">
+              <AttachmentManager
+                protectedPage={encrypted}
+                onInsertMarkdown={requestAttachmentInsertion}
+              />
+            </div>
+          </Suspense>
+        ) : null}
+      </Block>
+
+      <Block label="Organization">
+        <button
+          type="button"
+          aria-expanded={organizationOpen}
+          className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+          onClick={() => setOrganizationOpen((open) => !open)}
+        >
+          <span>Manage paths</span>
+          <span aria-hidden>{organizationOpen ? "⌄" : "›"}</span>
+        </button>
+        {organizationOpen ? (
+          <Suspense
+            fallback={<p className="cl-marg mt-2 mb-0">Loading path tools…</p>}
+          >
+            <div className="mt-2 grid gap-2">
+              {editor.isDraft ? (
+                <p className="cl-marg mb-0">
+                  Save this page before moving or deleting it.
+                </p>
+              ) : (
+                <PageActionsMenu
+                  path={path}
+                  beforeMutation={editor.saveNow}
+                  onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
+                  onDeleted={() => {
+                    closeTab(tabId);
+                    if (mobile) void navigate({ to: "/" });
+                  }}
+                />
+              )}
+              <FolderActionsMenu
+                beforeMutation={editor.saveNow}
+                onMoved={(source, destination) => {
+                  if (path === source || path.startsWith(`${source}/`)) {
+                    updateTabPath(
+                      tabId,
+                      `${destination}${path.slice(source.length)}`,
+                    );
+                  }
+                }}
+                onDeleted={(source) => {
+                  if (path === source || path.startsWith(`${source}/`)) {
+                    closeTab(tabId);
+                    if (mobile) void navigate({ to: "/" });
+                  }
+                }}
+              />
+            </div>
+          </Suspense>
+        ) : null}
+      </Block>
 
       <OpenFilesAccordion activeTabId={tabId} />
     </>
@@ -526,24 +641,25 @@ export function Folio({ tabId, path }: FolioProps) {
     </>
   );
 
-  const protection = protectionDialog && editor.pageId ? (
-    <Suspense fallback={null}>
-      <NoteProtectionDialog
-        mode={protectionDialog}
-        page={{
-          id: editor.pageId,
-          path,
-          title: editor.title,
-          tags: editor.tags ?? [],
-        }}
-        saveNow={editor.saveNow}
-        getPlaintext={editor.getPlaintext}
-        getRevision={editor.getRevision}
-        onComplete={() => setProtectionDialog(null)}
-        onDismiss={() => setProtectionDialog(null)}
-      />
-    </Suspense>
-  ) : null;
+  const protection =
+    protectionDialog && editor.pageId ? (
+      <Suspense fallback={null}>
+        <NoteProtectionDialog
+          mode={protectionDialog}
+          page={{
+            id: editor.pageId,
+            path,
+            title: editor.title,
+            tags: editor.tags ?? [],
+          }}
+          saveNow={editor.saveNow}
+          getPlaintext={editor.getPlaintext}
+          getRevision={editor.getRevision}
+          onComplete={() => setProtectionDialog(null)}
+          onDismiss={() => setProtectionDialog(null)}
+        />
+      </Suspense>
+    ) : null;
 
   if (mobile) {
     return (

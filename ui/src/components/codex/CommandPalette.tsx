@@ -118,6 +118,12 @@ function CommandPaletteContent() {
       },
       {
         kind: "cmd",
+        id: "nav.academic",
+        title: "Open Academic Library",
+        action: () => navigate({ to: "/academic" }),
+      },
+      {
+        kind: "cmd",
         id: "bases.create",
         title: "Create Base",
         action: () => navigate({ to: "/bases", search: { create: true } }),

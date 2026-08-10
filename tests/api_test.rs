@@ -3591,6 +3591,48 @@ async fn update_work_changes_status() {
 }
 
 #[tokio::test]
+async fn update_work_clears_optional_metadata_with_null() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/academic/works")
+        .json(&serde_json::json!({
+            "work_type": "paper",
+            "title": "Clear Metadata Test",
+            "year": 2024,
+            "venue": "Example Venue",
+            "publisher": "Example Publisher",
+            "status": "reading",
+            "rating": 4,
+            "cite_key": "clear-metadata-test"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = res.json();
+    let uuid = created["id"].as_str().unwrap();
+
+    let res = server
+        .put(&format!("/api/vault/academic/works/by-id/{uuid}"))
+        .json(&serde_json::json!({
+            "year": null,
+            "venue": null,
+            "publisher": null,
+            "status": null,
+            "rating": null,
+            "cite_key": null
+        }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["year"].is_null());
+    assert!(body["venue"].is_null());
+    assert!(body["publisher"].is_null());
+    assert!(body["status"].is_null());
+    assert!(body["rating"].is_null());
+    assert!(body["cite_key"].is_null());
+}
+
+#[tokio::test]
 async fn update_work_duplicate_cite_key_returns_409() {
     let (server, _tmp) = setup_server();
 

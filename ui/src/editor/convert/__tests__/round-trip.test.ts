@@ -46,6 +46,12 @@ describe("round-trip: markdown → slate → markdown", () => {
     expect(normalize(roundTrip(input))).toBe(normalize(input));
   });
 
+  it("preserves CAS-backed images with alt text and title", () => {
+    const input =
+      'Before ![Archived chart](cas:sha256:abc123 "Quarterly chart") after';
+    expect(normalize(roundTrip(input))).toBe(normalize(input));
+  });
+
   it("preserves thematic breaks", () => {
     const input = "Above\n\n---\n\nBelow";
     // The serializer uses `---` for thematic breaks (rule: "-")

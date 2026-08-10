@@ -47,6 +47,7 @@ pub mod reconcile;
 pub mod relabel;
 pub mod rewriter;
 pub mod sync;
+pub mod task_history;
 pub mod toml_json;
 pub mod toml_patch;
 pub mod tree;

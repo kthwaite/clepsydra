@@ -169,4 +169,15 @@ describe("CommandPalette keyboard navigation", () => {
     expect(useUiStore.getState().isSearchOpen).toBe(false);
     expect(useUiStore.getState().isBookImportOpen).toBe(true);
   });
+
+  it("opens the Academic library with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Open Academic Library{Enter}");
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
 });

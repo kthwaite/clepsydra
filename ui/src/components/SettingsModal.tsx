@@ -6,6 +6,7 @@ import { useStats } from "#/api/index";
 import { useLocation } from "#/api/location";
 import { LocationForm } from "#/components/codex/LocationForm";
 import { NavigationModeSelector } from "#/components/NavigationModeSelector";
+import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
@@ -147,16 +148,7 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
   return (
     <>
       <EncryptionSettings />
-      <SettingsCard
-        title="Diagnostics"
-        description="Performance and debugging controls will be available here."
-        trailing={<ComingSoonBadge />}
-      />
-      <SettingsCard
-        title="Data Management"
-        description="Import/export and maintenance actions are planned for this section."
-        trailing={<ComingSoonBadge />}
-      />
+      <IndexHealthPanel />
     </>
   );
 }

@@ -14,6 +14,12 @@ export type PatchCycleRequest = components["schemas"]["PatchCycleRequest"];
 
 const API_BASE = "/api/vault/board";
 
+function invalidateTaskingTelemetry(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: queryKeys.board.all });
+  qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
+  qc.invalidateQueries({ queryKey: queryKeys.agenda.all });
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
@@ -113,7 +119,7 @@ export function useCreateTask() {
       if (!res.ok) throw new Error("Failed to create task");
       return res.json() as Promise<BoardTask>;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.board.all }),
+    onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }
 
@@ -150,7 +156,7 @@ export function usePatchTask() {
         qc.setQueryData(queryKeys.board.all, ctx.previous);
       }
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.board.all }),
+    onSettled: () => invalidateTaskingTelemetry(qc),
   });
 }
 
@@ -196,7 +202,7 @@ export function useCreateCycle() {
       if (!res.ok) throw new Error("Failed to create cycle");
       return res.json() as Promise<BoardCycle>;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.board.all }),
+    onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }
 
@@ -216,6 +222,6 @@ export function usePatchCycle() {
       if (!res.ok) throw new Error("Failed to patch cycle");
       return res.json() as Promise<BoardCycle>;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.board.all }),
+    onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }

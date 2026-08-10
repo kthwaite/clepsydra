@@ -27,6 +27,7 @@ const NAV: ReadonlyArray<readonly [CodexView, string]> = [
   ["gazetteer", "GAZETTEER"],
   ["constellation", "CONSTELLATION"],
   ["tasking", "TASKING"],
+  ["academic", "ACADEMIC"],
   ["bases", "BASES"],
   ["feeds", "FEEDS"],
   ["docs", "DOCS"],
@@ -54,6 +55,7 @@ export function DesktopCodexFrame({
   const onNav = (target: CodexView) => {
     if (target === "atrium") navigate({ to: "/" });
     else if (target === "gazetteer") navigate({ to: "/gazetteer" });
+    else if (target === "academic") navigate({ to: "/academic" });
     else if (target === "bases") navigate({ to: "/bases" });
     else if (target === "feeds") navigate({ to: "/feeds" } as never);
     else if (target === "docs") {
@@ -178,6 +180,7 @@ export function DesktopCodexFrame({
 
       {/* ── SHEAF — hidden on full-surface destinations ─────────────── */}
       {view !== "atrium" &&
+        view !== "academic" &&
         view !== "bases" &&
         view !== "constellation" &&
         view !== "feeds" &&
@@ -240,6 +243,7 @@ function useFolioCode(view: CodexView): string {
   if (view === "constellation") return "GRAPH";
   if (view === "gazetteer") return "INDEX";
   if (view === "tasking") return "TASKING";
+  if (view === "academic") return "ACADEMIC";
   if (view === "bases") return "BASES";
   if (view === "feeds") return "FEEDS";
   if (view === "docs") return "DOC-001";

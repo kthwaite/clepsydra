@@ -297,6 +297,31 @@ describe("markdownToSlate", () => {
     });
   });
 
+  describe("images", () => {
+    it("converts a CAS-backed markdown image without dropping its metadata", () => {
+      const result = markdownToSlate(
+        'Before ![Archived chart](cas:sha256:abc123 "Quarterly chart") after',
+      );
+
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "Before " },
+            {
+              type: "image",
+              url: "cas:sha256:abc123",
+              alt: "Archived chart",
+              title: "Quarterly chart",
+              children: [{ text: "" }],
+            },
+            { text: " after" },
+          ],
+        },
+      ]);
+    });
+  });
+
   describe("thematic breaks", () => {
     it("converts a thematic break", () => {
       const result = markdownToSlate("Above\n\n---\n\nBelow");

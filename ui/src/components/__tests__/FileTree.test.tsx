@@ -4,16 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockOpenTab = vi.fn();
 
+vi.mock("#/api/folders", () => ({
+  useFolderTreePaths: vi.fn(),
+}));
+
 vi.mock("#/api/pages", () => ({
   usePages: vi.fn(),
-  useFolderTreePaths: vi.fn(),
 }));
 
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => mockOpenTab,
 }));
 
-import { useFolderTreePaths, usePages } from "#/api/pages";
+import { useFolderTreePaths } from "#/api/folders";
+import { usePages } from "#/api/pages";
 import { FileTree } from "../FileTree";
 
 const mockedUsePages = vi.mocked(usePages);

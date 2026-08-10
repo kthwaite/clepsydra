@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AcademicRouteImport } from './routes/academic'
 import { Route as AgendaRouteImport } from './routes/agenda'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as FeedsRouteImport } from './routes/feeds'
@@ -27,6 +28,11 @@ import { Route as BasesSlugEditRouteImport } from './routes/bases.$slug.edit'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AcademicRoute = AcademicRouteImport.update({
+  id: '/academic',
+  path: '/academic',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgendaRoute = AgendaRouteImport.update({
@@ -97,6 +103,7 @@ const BasesSlugEditRoute = BasesSlugEditRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
@@ -130,6 +138,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
@@ -148,6 +157,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/academic'
     | '/agenda'
     | '/docs'
     | '/feeds'
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/academic'
     | '/agenda'
     | '/docs'
     | '/feeds'
@@ -180,6 +191,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/academic'
     | '/agenda'
     | '/docs'
     | '/feeds'
@@ -197,6 +209,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AcademicRoute: typeof AcademicRoute
   AgendaRoute: typeof AgendaRoute
   DocsRoute: typeof DocsRouteWithChildren
   FeedsRoute: typeof FeedsRoute
@@ -217,6 +230,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/academic': {
+      id: '/academic'
+      path: '/academic'
+      fullPath: '/academic'
+      preLoaderRoute: typeof AcademicRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agenda': {
@@ -337,6 +357,7 @@ const BasesSlugRouteWithChildren = BasesSlugRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AcademicRoute: AcademicRoute,
   AgendaRoute: AgendaRoute,
   DocsRoute: DocsRouteWithChildren,
   FeedsRoute: FeedsRoute,

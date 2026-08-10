@@ -1,43 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { components, operations } from "#/api/schema";
+import { fetchClient } from "./client";
 import { invalidatePageContent, queryKeys } from "./keys";
 
-const API_BASE = "/api/vault";
+export type TaskItem = components["schemas"]["TaskItem"];
+export type AgendaTodayResponse = components["schemas"]["AgendaTodayResponse"];
+export type AgendaWeekResponse = components["schemas"]["AgendaWeekResponse"];
+export type AgendaOverdueResponse =
+  components["schemas"]["AgendaOverdueResponse"];
+export type TaskListResponse = components["schemas"]["TaskListResponse"];
+type TaskCompletionHistoryResponse =
+  components["schemas"]["TaskCompletionHistoryResponse"];
+type CycleBurndownResponse =
+  components["schemas"]["CycleBurndownResponse"];
+export type TaskFilters = NonNullable<
+  operations["list_tasks"]["parameters"]["query"]
+>;
 
-export interface TaskItem {
-  block_id: string | null;
-  content: string;
-  status: string;
-  properties: Record<string, string>;
-  page_path: string;
-  page_title: string | null;
-  span_start: number;
-  span_end: number;
-}
-
-export interface AgendaTodayResponse {
-  tasks: TaskItem[];
-}
-
-export interface AgendaWeekResponse {
-  days: Array<{ date: string; tasks: TaskItem[] }>;
-}
-
-export interface AgendaOverdueResponse {
-  tasks: TaskItem[];
-}
-
-export interface TaskListResponse {
-  tasks: TaskItem[];
-  total: number;
+function apiError(error: components["schemas"]["ApiError"], fallback: string) {
+  return new Error(error.error || fallback);
 }
 
 export function useAgendaToday() {
   return useQuery<AgendaTodayResponse>({
     queryKey: queryKeys.agenda.today,
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/agenda/today`);
-      if (!res.ok) throw new Error("Failed to fetch agenda");
-      return res.json();
+      const { data, error } = await fetchClient.GET("/api/vault/agenda/today");
+      if (error) throw apiError(error, "Failed to fetch agenda");
+      if (!data) throw new Error("Agenda response was empty");
+      return data;
     },
   });
 }
@@ -46,9 +37,10 @@ export function useAgendaWeek() {
   return useQuery<AgendaWeekResponse>({
     queryKey: queryKeys.agenda.week,
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/agenda/week`);
-      if (!res.ok) throw new Error("Failed to fetch weekly agenda");
-      return res.json();
+      const { data, error } = await fetchClient.GET("/api/vault/agenda/week");
+      if (error) throw apiError(error, "Failed to fetch weekly agenda");
+      if (!data) throw new Error("Weekly agenda response was empty");
+      return data;
     },
   });
 }
@@ -57,21 +49,78 @@ export function useAgendaOverdue() {
   return useQuery<AgendaOverdueResponse>({
     queryKey: queryKeys.agenda.overdue,
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/agenda/overdue`);
-      if (!res.ok) throw new Error("Failed to fetch overdue tasks");
-      return res.json();
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/agenda/overdue",
+      );
+      if (error) throw apiError(error, "Failed to fetch overdue tasks");
+      if (!data) throw new Error("Overdue agenda response was empty");
+      return data;
     },
   });
 }
 
-export function useTasks(params: Record<string, string>) {
-  const search = new URLSearchParams(params).toString();
+export function useTasks(params: TaskFilters) {
   return useQuery<TaskListResponse>({
     queryKey: queryKeys.tasks.list(params),
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/tasks?${search}`);
-      if (!res.ok) throw new Error("Failed to fetch tasks");
-      return res.json();
+      const { data, error } = await fetchClient.GET("/api/vault/tasks", {
+        params: { query: params },
+      });
+      if (error) throw apiError(error, "Failed to fetch tasks");
+      if (!data) throw new Error("Task list response was empty");
+      return data;
+    },
+  });
+}
+
+export function useTaskCompletionHistory(
+  project?: string,
+  unfiled = false,
+  enabled = true,
+) {
+  return useQuery<TaskCompletionHistoryResponse>({
+    queryKey: queryKeys.tasks.history(project, unfiled),
+    enabled,
+    throwOnError: false,
+    queryFn: async () => {
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/tasks/history",
+        {
+          params: {
+            query: { days: 14, project, unfiled: unfiled || undefined },
+          },
+        },
+      );
+      if (error) throw apiError(error, "Failed to fetch task history");
+      if (!data) throw new Error("Task history response was empty");
+      return data;
+    },
+  });
+}
+
+export function useCycleBurndown(
+  cycle: string | null,
+  project?: string,
+  unfiled = false,
+  enabled = true,
+) {
+  return useQuery<CycleBurndownResponse>({
+    queryKey: queryKeys.agenda.cycleBurndown(cycle, project, unfiled),
+    enabled: enabled && cycle !== null,
+    throwOnError: false,
+    queryFn: async () => {
+      if (cycle === null) throw new Error("Cycle is required");
+      const { data, error } = await fetchClient.GET(
+        "/api/vault/agenda/cycle-burndown",
+        {
+          params: {
+            query: { cycle, project, unfiled: unfiled || undefined },
+          },
+        },
+      );
+      if (error) throw apiError(error, "Failed to fetch cycle burndown");
+      if (!data) throw new Error("Cycle burndown response was empty");
+      return data;
     },
   });
 }
@@ -84,17 +133,16 @@ export function useToggleTaskStatus() {
     { pagePath: string; spanStart: number; status: string }
   >({
     mutationFn: async ({ pagePath, spanStart, status }) => {
-      const res = await fetch(`${API_BASE}/tasks/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { data, error } = await fetchClient.PUT("/api/vault/tasks/status", {
+        body: {
           page_path: pagePath,
           span_start: spanStart,
           status,
-        }),
+        },
       });
-      if (!res.ok) throw new Error("Failed to update task");
-      return res.json();
+      if (error) throw apiError(error, "Failed to update task");
+      if (!data) throw new Error("Task update response was empty");
+      return data;
     },
     onSuccess: (_data, variables) =>
       invalidatePageContent(qc, variables.pagePath),

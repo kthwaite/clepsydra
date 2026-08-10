@@ -1,42 +1,66 @@
 //! Agenda-related endpoints: /agenda/today, /agenda/week, /agenda/overdue.
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::routing::get;
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use rusqlite::params;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
 use super::tasks::TaskItem;
+use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
 
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaTodayResponse {
     pub tasks: Vec<TaskItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaWeekResponse {
     pub days: Vec<AgendaDay>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaDay {
     pub date: String,
     pub tasks: Vec<TaskItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaOverdueResponse {
     pub tasks: Vec<TaskItem>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CycleBurndownQueryParams {
+    pub cycle: String,
+    /// Optional project slug used by the tasking board's operation filter.
+    pub project: Option<String>,
+    /// Restrict telemetry to tasks without a known board project.
+    pub unfiled: Option<bool>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CycleBurndownPoint {
+    pub date: String,
+    pub remaining: u32,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CycleBurndownResponse {
+    pub cycle: String,
+    pub points: Vec<CycleBurndownPoint>,
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +72,198 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/today", get(agenda_today))
         .route("/week", get(agenda_week))
         .route("/overdue", get(agenda_overdue))
+        .route("/cycle-burndown", get(get_cycle_burndown))
+}
+
+// ---------------------------------------------------------------------------
+// GET /agenda/cycle-burndown
+// ---------------------------------------------------------------------------
+
+#[utoipa::path(
+    get,
+    path = "/agenda/cycle-burndown",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    params(CycleBurndownQueryParams),
+    responses(
+        (status = 200, description = "Historical cycle burndown", body = CycleBurndownResponse),
+        (status = 400, description = "Invalid cycle dates or telemetry scope", body = ApiError),
+        (status = 404, description = "Cycle not found", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn get_cycle_burndown(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<CycleBurndownQueryParams>,
+) -> Result<Json<CycleBurndownResponse>, ApiError> {
+    let cycle = params.cycle;
+    let project = params.project;
+    let unfiled = params.unfiled.unwrap_or(false);
+    if unfiled && project.is_some() {
+        return Err(ApiError::bad_request(
+            "project and unfiled cannot be requested together",
+        ));
+    }
+    let today = state.clock.now().date_naive();
+    let cycle_for_query = cycle.clone();
+
+    let history = state
+        .index
+        .with_index(move |index, _vault| {
+            let conn = index.connection();
+            let cycle_dates = conn.query_row(
+                "SELECT json_extract(meta_json, '$.start'), json_extract(meta_json, '$.end') \
+                 FROM pages \
+                 WHERE kind = 'CYCLE' AND upper(path) = upper('cycles/' || ?1 || '.md')",
+                params![cycle_for_query],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            );
+
+            let cycle_dates = match cycle_dates {
+                Ok(dates) => Some(dates),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(error) => return Err(error),
+            };
+
+            let Some((start, end)) = cycle_dates else {
+                return Ok(None);
+            };
+
+            let mut task_stmt =
+                conn.prepare("SELECT meta_json FROM pages WHERE kind = 'TASK' ORDER BY path")?;
+            let task_metadata = task_stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(Result::ok)
+                .filter_map(|value| serde_json::from_str(&value).ok())
+                .collect::<Vec<serde_json::Value>>();
+            let mut project_stmt = conn.prepare(
+                "SELECT DISTINCT project FROM pages \
+                 WHERE kind = 'PROJECT' AND project IS NOT NULL \
+                   AND json_extract(meta_json, '$.board') = 1",
+            )?;
+            let known_projects = project_stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<HashSet<_>, _>>()?;
+            Ok(Some((start, end, task_metadata, known_projects)))
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("cycle not found: {cycle}")))?;
+
+    let (start, end, task_metadata, known_projects) = history;
+    let start = start
+        .ok_or_else(|| ApiError::bad_request("cycle start date is required"))
+        .and_then(|date| {
+            NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map_err(|_| ApiError::bad_request("cycle start date must use YYYY-MM-DD"))
+        })?;
+    let declared_end = end
+        .map(|date| {
+            NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map_err(|_| ApiError::bad_request("cycle end date must use YYYY-MM-DD"))
+        })
+        .transpose()?
+        .unwrap_or(today);
+    if declared_end < start {
+        return Err(ApiError::bad_request(
+            "cycle end date must not precede its start date",
+        ));
+    }
+    let end = declared_end.min(today);
+    if start > end {
+        return Ok(Json(CycleBurndownResponse {
+            cycle,
+            points: Vec::new(),
+        }));
+    }
+    const MAX_BURNDOWN_DAYS: i64 = 366;
+    let day_span = (end - start).num_days() + 1;
+    if day_span > MAX_BURNDOWN_DAYS {
+        return Err(ApiError::bad_request(format!(
+            "cycle burndown is limited to {MAX_BURNDOWN_DAYS} days"
+        )));
+    }
+
+    let mut baseline = 0_i64;
+    let mut deltas = BTreeMap::<NaiveDate, i64>::new();
+    let mut has_cycle_history = false;
+    for meta in &task_metadata {
+        let history = effective_indexed_history(meta);
+        let mut included = false;
+        for event in &history {
+            let Some(date) = event.timestamp().map(|value| value.date_naive()) else {
+                continue;
+            };
+            let in_scope = matches_project_scope(
+                event.project.as_deref(),
+                project.as_deref(),
+                unfiled,
+                &known_projects,
+            );
+            if event.cycle.as_deref() == Some(cycle.as_str()) && in_scope {
+                has_cycle_history = true;
+            }
+            let next = event.cycle.as_deref() == Some(cycle.as_str())
+                && event.status != "SEALED"
+                && in_scope;
+            if date < start {
+                included = next;
+            }
+        }
+        if included {
+            baseline += 1;
+        }
+        for event in history {
+            let Some(date) = event.timestamp().map(|value| value.date_naive()) else {
+                continue;
+            };
+            if date < start {
+                continue;
+            }
+            if date > end {
+                break;
+            }
+            let in_scope = matches_project_scope(
+                event.project.as_deref(),
+                project.as_deref(),
+                unfiled,
+                &known_projects,
+            );
+            let next = event.cycle.as_deref() == Some(cycle.as_str())
+                && event.status != "SEALED"
+                && in_scope;
+            if next != included {
+                *deltas.entry(date).or_default() += if next { 1 } else { -1 };
+                included = next;
+            }
+        }
+    }
+    if !has_cycle_history {
+        return Ok(Json(CycleBurndownResponse {
+            cycle,
+            points: Vec::new(),
+        }));
+    }
+
+    let mut remaining = baseline;
+    let points = (0..day_span)
+        .map(|offset| {
+            let date = start + Duration::days(offset);
+            remaining += deltas.get(&date).copied().unwrap_or_default();
+            CycleBurndownPoint {
+                date: date.format("%Y-%m-%d").to_string(),
+                remaining: u32::try_from(remaining.max(0)).unwrap_or(u32::MAX),
+            }
+        })
+        .collect();
+
+    Ok(Json(CycleBurndownResponse { cycle, points }))
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +296,17 @@ fn fill_properties(
 // GET /agenda/today
 // ---------------------------------------------------------------------------
 
-async fn agenda_today(
+#[utoipa::path(
+    get,
+    path = "/agenda/today",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    responses(
+        (status = 200, description = "Today's agenda", body = AgendaTodayResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn agenda_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgendaTodayResponse>, ApiError> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -175,7 +401,17 @@ async fn agenda_today(
 // GET /agenda/week
 // ---------------------------------------------------------------------------
 
-async fn agenda_week(
+#[utoipa::path(
+    get,
+    path = "/agenda/week",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    responses(
+        (status = 200, description = "Seven-day agenda", body = AgendaWeekResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn agenda_week(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgendaWeekResponse>, ApiError> {
     let today_date = Utc::now().date_naive();
@@ -304,7 +540,17 @@ async fn agenda_week(
 // GET /agenda/overdue
 // ---------------------------------------------------------------------------
 
-async fn agenda_overdue(
+#[utoipa::path(
+    get,
+    path = "/agenda/overdue",
+    context_path = "/api/vault",
+    tag = "Agenda",
+    responses(
+        (status = 200, description = "Overdue tasks", body = AgendaOverdueResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn agenda_overdue(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AgendaOverdueResponse>, ApiError> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
