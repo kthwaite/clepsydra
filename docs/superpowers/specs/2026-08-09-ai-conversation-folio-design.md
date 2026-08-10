@@ -51,13 +51,13 @@ type = "AI_CONVERSATION"
 
 [conversation]
 provider = "claude"
-host_id = "provider-owned-id"
+host_id_hash = "sha256:..."
 captured_turn_count = 12
 captured_prefix_hash = "sha256:..."
 last_source_identity = "sha256:..."
 ```
 
-`conversation.provider` is optional when no host conversation ID is supplied. A host conversation ID requires a provider because identity is namespaced by `(provider, host_id)`. The exact identity is indexed for lookup. The capture cursor, turn count, and cumulative prefix hash form an API-owned ledger independent of the editable body.
+`conversation.provider` is optional when no host conversation ID is supplied. A host conversation ID requires a provider because identity is namespaced by `(provider, host_id_hash)`. The API hashes the provider-owned ID before lookup and never persists the raw ID. The exact hashed identity is indexed for lookup. The capture cursor, turn count, and cumulative prefix hash form an API-owned ledger independent of the editable body.
 
 ## Canonical Markdown representation
 
@@ -143,7 +143,7 @@ Clepsydra cannot independently read host chat history. Context omitted or trunca
 
 When no host conversation ID is supplied, every capture creates a new conversation Folio. Clepsydra does not fingerprint whole conversations to select a write target.
 
-When `(provider, host_conversation_id)` has no match, capture creates one page atomically with all validated turns and typed conversation metadata.
+When the hash of `(provider, host_conversation_id)` has no match, capture creates one page atomically with all validated turns and typed conversation metadata; the raw host ID is not stored.
 
 ### Append
 
@@ -201,7 +201,7 @@ A locally inserted turn receives a Clepsydra-local identity and is never mistake
 
 ## Failure handling
 
-- Exact provider/conversation identity only; no fuzzy matching.
+- Exact hashed provider/conversation identity only; no fuzzy matching and no persisted raw host conversation ID.
 - Conversation ID without provider is rejected.
 - Concurrent captures use the existing revision/conflict machinery.
 - A source turn ID reused with conflicting role/content is a hard conflict.
