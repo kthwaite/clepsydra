@@ -80,7 +80,7 @@ vi.mock("#/api/bases", async (importOriginal) => {
       mocks.useBaseViewEvaluation(config);
       return {
         ...mocks.evaluationState,
-        refetch: mocks.evaluationRefetch,
+        refetch: () => mocks.evaluationRefetch(config),
       };
     },
     useCreateBaseMember: () => ({
@@ -222,6 +222,82 @@ describe("useBaseTableController embedded mode", () => {
     await waitFor(() => expect(result.current.focusCreatedId).toBe("created"));
     expect(result.current.memberNotice).toBeUndefined();
   });
+
+  it.each([
+    {
+      label: "focuses when only the current query includes the created row",
+      oldOutput: output([]),
+      currentOutput: output(),
+      expectedFocus: "created",
+      expectedNotice: undefined,
+    },
+    {
+      label: "announces exclusion when only the old query includes the created row",
+      oldOutput: output(),
+      currentOutput: output([]),
+      expectedFocus: undefined,
+      expectedNotice:
+        "The member was created, but it is not included in the current view.",
+    },
+  ])(
+    "$label after sort changes while POST is pending",
+    async ({
+      oldOutput,
+      currentOutput,
+      expectedFocus,
+      expectedNotice,
+    }) => {
+      const pending = deferred<{
+        id: string;
+        path: string;
+        title: string;
+        revision: string;
+      }>();
+      const newSort: SortKey[] = [{ field: "title", dir: "desc" }];
+      const current = options();
+      mocks.createMember.mockReturnValue(pending.promise);
+      mocks.evaluationRefetch.mockImplementation(
+        async (config: { sort?: SortKey[] }) => ({
+          data: evaluation({
+            output: config.sort === undefined ? oldOutput : currentOutput,
+          }),
+        }),
+      );
+      const { result, rerender } = renderHook(
+        ({ value }) => useBaseTableController(value),
+        { initialProps: { value: current } },
+      );
+
+      act(() => result.current.onAddMember());
+      act(() =>
+        result.current.onSaveMember({ title: "Created", fields: {} }),
+      );
+      mocks.evaluationState.data = evaluation({ output: currentOutput });
+      rerender({ value: { ...current, sort: newSort } });
+      pending.resolve({
+        id: "created",
+        path: "created.md",
+        title: "Created",
+        revision: "page-rev-1",
+      });
+      await act(async () => {
+        await pending.promise;
+        await Promise.resolve();
+      });
+
+      await waitFor(() =>
+        expect(result.current.memberNotice).toBe(expectedNotice),
+      );
+      expect(result.current.focusCreatedId).toBe(expectedFocus);
+      expect(mocks.evaluationRefetch).toHaveBeenLastCalledWith({
+        base: "reading",
+        view: "Continues",
+        filter: readingFilter,
+        sort: newSort,
+        limit: EMBED_DEFAULT_LIMIT,
+      });
+    },
+  );
 
   it("retains same-predicate draft state and capability while a new exact query is pending, but disables Save", async () => {
     const firstSort: SortKey[] = [{ field: "title", dir: "asc" }];

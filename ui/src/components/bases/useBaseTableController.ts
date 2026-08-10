@@ -165,8 +165,13 @@ export function useBaseTableController(
   );
   const evaluationQuery = useBaseViewEvaluation(embeddedConfig);
   const commit = usePropertyCommit();
-  const createMemberMutation = useCreateBaseMember();
+  const { mutateAsync: createMemberAsync } = useCreateBaseMember();
   const projects = useProjects();
+  const detailRevision = detail.data?.revision;
+  const detailRefetch = detail.refetch;
+  const evaluationRevision = evaluationQuery.data?.revision;
+  const evaluationRefetch = evaluationQuery.refetch;
+  const savedViewRefetch = savedViewQuery.refetch;
 
   const predicate = mode === "embedded"
     ? predicateIdentity(embeddedConfig)
@@ -181,6 +186,14 @@ export function useBaseTableController(
   const activeViewRef = useRef(activeView);
   activeViewRef.current = activeView;
   const lastEmbeddedSuccess = useRef<EmbeddedSuccess | undefined>(undefined);
+  const currentEmbeddedQuery = useRef({
+    query: embeddedQueryKey,
+    refetch: evaluationRefetch,
+  });
+  currentEmbeddedQuery.current = {
+    query: embeddedQueryKey,
+    refetch: evaluationRefetch,
+  };
 
   if (generationRef.current.predicate !== predicate) {
     generationRef.current = {
@@ -258,6 +271,18 @@ export function useBaseTableController(
       currentOperation.current.operation === operation,
     [],
   );
+  const refetchCurrentEmbeddedQuery = useCallback(
+    async (operation: number, operationGeneration: number) => {
+      while (operationIsCurrent(operation, operationGeneration)) {
+        const target = currentEmbeddedQuery.current;
+        const refreshed = await target.refetch();
+        if (!operationIsCurrent(operation, operationGeneration)) return undefined;
+        if (currentEmbeddedQuery.current.query === target.query) return refreshed;
+      }
+      return undefined;
+    },
+    [operationIsCurrent],
+  );
   const finishMemberOperation = useCallback(
     (operation: number, operationGeneration: number, notice?: string) => {
       if (!operationIsCurrent(operation, operationGeneration)) return;
@@ -327,8 +352,8 @@ export function useBaseTableController(
   const createMember = useCallback(async (value: BaseMemberDraftValue) => {
     if (mode === "embedded" && !embeddedAuthoritative) return;
     const revision = mode === "embedded"
-      ? evaluationQuery.data?.revision
-      : detail.data?.revision;
+      ? evaluationRevision
+      : detailRevision;
     if (!revision || !activeView) return;
 
     const operation = nextOperation.current + 1;
@@ -353,7 +378,7 @@ export function useBaseTableController(
 
     let created;
     try {
-      created = await createMemberMutation.mutateAsync({
+      created = await createMemberAsync({
         params: { path: { slug } },
         body: {
           base_revision: revision,
@@ -375,8 +400,11 @@ export function useBaseTableController(
       );
       if (isRevisionConflict(error)) {
         try {
-          if (mode === "embedded") await evaluationQuery.refetch();
-          else await detail.refetch();
+          if (mode === "embedded") {
+            await refetchCurrentEmbeddedQuery(operation, operationGeneration);
+          } else {
+            await detailRefetch();
+          }
         } finally {
           finishMemberOperation(operation, operationGeneration);
         }
@@ -403,8 +431,9 @@ export function useBaseTableController(
     );
     try {
       const refreshed = mode === "embedded"
-        ? await evaluationQuery.refetch()
-        : await savedViewQuery.refetch();
+        ? await refetchCurrentEmbeddedQuery(operation, operationGeneration)
+        : await savedViewRefetch();
+      if (!refreshed) return;
       if (!operationIsCurrent(operation, operationGeneration)) return;
       if (
         mode === "standalone" &&
@@ -467,16 +496,18 @@ export function useBaseTableController(
   }, [
     activeView,
     activeViewDefinition?.columns,
-    createMemberMutation,
-    detail,
+    createMemberAsync,
+    detailRefetch,
+    detailRevision,
     embeddedAuthoritative,
-    evaluationQuery,
+    evaluationRevision,
     filter,
     finishMemberOperation,
     generation,
     mode,
     operationIsCurrent,
-    savedViewQuery,
+    refetchCurrentEmbeddedQuery,
+    savedViewRefetch,
     slug,
   ]);
 
