@@ -207,6 +207,40 @@ async fn property_patch_rejects_conversation_ledger_mutation() {
 
 
 #[tokio::test]
+async fn query_and_base_views_redact_conversation_ledger() {
+    let (server, _tmp) = fixture_builder()
+        .configure(|root| {
+            fs::create_dir_all(root.join("bases")).unwrap();
+            fs::write(
+                root.join("bases/public.base.toml"),
+                "name = \"Public\"\n\n[[views]]\nname = \"All\"\nlayout = \"table\"\ncolumns = [\"conversation\"]\n",
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+    capture(&server, payload(turns(&[("user", "Hello")]))).await;
+
+    let query_response = server
+        .post("/api/vault/query")
+        .json(&json!({"columns": ["conversation"]}))
+        .await;
+    query_response.assert_status_ok();
+    let query: Value = query_response.json();
+    let view_response = server
+        .get("/api/vault/bases/public/views/All")
+        .await;
+    view_response.assert_status_ok();
+    let view: Value = view_response.json();
+    for response in [query, view] {
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(!serialized.contains("host_id_hash"));
+        assert!(!serialized.contains("captured_prefix_hash"));
+        assert!(!serialized.contains("raw-provider-id-must-not-persist"));
+    }
+}
+
+#[tokio::test]
 async fn identical_recapture_is_unchanged_without_second_notification() {
     let (server, _tmp, state) = setup_server_with_state();
     let mut changes = state.change_tx.subscribe();

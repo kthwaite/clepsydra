@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use crate::vault::base::{Aggregate, Filter, PropertyType, SortKey};
-use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use crate::vault::query::{QueryContext, QueryOutput, QueryRow, QuerySpec, evaluate};
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct QueryRequest {
@@ -38,6 +38,21 @@ pub struct QueryRequest {
     pub offset: u32,
     #[serde(default)]
     pub group_row_limit: Option<u32>,
+}
+
+/// Remove system-owned conversation ledger values from public query rows while
+/// leaving index-side filtering, sorting, and grouping unchanged.
+pub(crate) fn redact_conversation_columns(output: &mut QueryOutput) {
+    fn redact_row(row: &mut QueryRow) {
+        row.columns.remove("conversation");
+    }
+    match output {
+        QueryOutput::Flat { rows, .. } => rows.iter_mut().for_each(redact_row),
+        QueryOutput::Grouped { groups } => groups
+            .iter_mut()
+            .flat_map(|group| group.rows.iter_mut())
+            .for_each(redact_row),
+    }
 }
 
 /// Evaluate an ad-hoc query over the whole vault.
@@ -68,7 +83,7 @@ pub async fn run_query(
     };
     let types = request.types;
 
-    let output = state
+    let mut output = state
         .index
         .with_index(move |index, _vault| {
             let ctx = QueryContext { base: None, types };
@@ -77,6 +92,7 @@ pub async fn run_query(
         .await
         .map_err(|e| ApiError::internal(format!("index error: {e}")))?
         .map_err(|e| ApiError::bad_request(format!("query error: {e}")))?;
+    redact_conversation_columns(&mut output);
     Ok(Json(output))
 }
 
