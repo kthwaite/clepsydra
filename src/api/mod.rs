@@ -1,3 +1,4 @@
+pub mod conversations;
 pub mod academic;
 pub mod agenda;
 pub mod archive;
@@ -177,6 +178,7 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/index", index_routes::router())
         .nest("/journal", journal::router())
         .nest("/tasks", tasks::router())
+        .nest("/conversations", conversations::router())
         .nest("/board", board::router())
         .nest("/agenda", agenda::router())
         .nest("/bases", bases::router())

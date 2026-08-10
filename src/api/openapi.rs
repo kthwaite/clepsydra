@@ -65,7 +65,7 @@ impl Modify for FilterSchema {
         (name = "Academic", description = "Academic works, annotations and importers"),
         (name = "Archive", description = "Web archives and content-addressed blobs"),
         (name = "Journal", description = "Daily journal retrieval and capture"),
-        (name = "Tasks", description = "Indexed task queries and status updates"),
+        (name = "Conversations", description = "Atomic AI conversation capture"),
         (name = "Agenda", description = "Today, week and overdue task views"),
         (name = "Blocks", description = "Block lookup, search and identifiers"),
         (name = "Events", description = "Server-sent events stream"),
@@ -139,7 +139,8 @@ impl Modify for FilterSchema {
         crate::api::archive::ingest_archive,
         crate::api::archive::archive_status,
         crate::api::archive::serve_blob,
-        // Journal
+        // Conversations
+        crate::api::conversations::capture_conversation,
         crate::api::journal::get_today,
         crate::api::journal::ensure_today,
         crate::api::journal::capture_today,
@@ -310,7 +311,13 @@ impl Modify for FilterSchema {
             crate::api::archive::ArchiveResponse,
             crate::api::archive::ArchiveStatus,
             crate::api::archive::ArchiveStatsResponse,
-            // Journal
+            // Conversations
+            crate::api::conversations::ConversationRoleRequest,
+            crate::api::conversations::CaptureConversationTurnRequest,
+            crate::api::conversations::CaptureConversationRequest,
+            crate::api::conversations::CaptureConversationOperation,
+            crate::api::conversations::CaptureConversationResponse,
+            crate::api::conversations::ConversationSummaryResponse,
             crate::api::journal::CaptureRequest,
             crate::api::journal::JournalSummary,
             crate::api::journal::JournalTodayResponse,
@@ -515,6 +522,16 @@ mod tests {
                 .paths
                 .contains_key("/api/vault/attachments/{path}")
         );
+        assert!(spec
+            .paths
+            .paths
+            .contains_key("/api/vault/conversations/capture"));
+        assert!(spec
+            .components
+            .as_ref()
+            .unwrap()
+            .schemas
+            .contains_key("CaptureConversationResponse"));
     }
 
     #[test]
