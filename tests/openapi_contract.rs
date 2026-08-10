@@ -11,6 +11,7 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/journal/range", "get"),
     ("/api/vault/journal/recent", "get"),
     ("/api/vault/journal/{date}", "get"),
+    ("/api/vault/conversations/capture", "post"),
     ("/api/vault/tasks", "get"),
     ("/api/vault/tasks/history", "get"),
     ("/api/vault/tasks/status", "put"),
@@ -32,13 +33,13 @@ fn openapi_documents_every_registered_vault_operation() {
 
     let missing: Vec<String> = VAULT_OPERATIONS
         .iter()
-        .filter_map(|(path, method)| {
+        .filter(|(path, method)| {
             paths
                 .get(*path)
                 .and_then(|item| item.get(*method))
                 .is_none()
-                .then(|| format!("{method:>6} {path}"))
         })
+        .map(|(path, method)| format!("{method:>6} {path}"))
         .collect();
     assert!(
         missing.is_empty(),
@@ -57,7 +58,7 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 102,
-        "OpenAPI should document all 102 registered /api/vault operations"
+        operation_count, 103,
+        "OpenAPI should document all 103 registered /api/vault operations"
     );
 }
