@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BaseFilter, BaseSummary, SortKey } from "#/api/bases";
 import { useBase, useBases } from "#/api/bases";
 import { Button } from "#/components/ui/button";
@@ -53,7 +53,7 @@ function draftFromNode(
       filter:
         node.filter === undefined ? undefined : structuredClone(node.filter),
       sort:
-        node.sort === undefined
+        node.sort === undefined || node.sort.length === 0
           ? undefined
           : node.sort.map((sort) => ({ ...sort })),
       limit: node.limit ?? 50,
@@ -206,6 +206,22 @@ export function BaseEmbedInspector({
   const [source, setSource] = useState(() =>
     node.status === "invalid" ? extractBaseEmbedTomlBody(node.rawBlock) : "",
   );
+  const wasOpen = useRef(isOpen);
+  const previousNode = useRef(node);
+  useEffect(() => {
+    const opened = isOpen && !wasOpen.current;
+    const replaced = node !== previousNode.current;
+    if (isOpen && (opened || replaced)) {
+      setDraft(draftFromNode(node, bases));
+      setSource(
+        node.status === "invalid"
+          ? extractBaseEmbedTomlBody(node.rawBlock)
+          : "",
+      );
+    }
+    wasOpen.current = isOpen;
+    previousNode.current = node;
+  }, [bases, isOpen, node]);
   const sourceRepair = node.status === "invalid";
   const parsedSource = useMemo(() => parseBaseEmbedConfig(source), [source]);
   const selectedSlug = sourceRepair
@@ -242,7 +258,9 @@ export function BaseEmbedInspector({
       : {}),
   };
   const codecDiagnostics = sourceRepair
-    ? parsedSource.diagnostics
+    ? parsedSource.config
+      ? validateBaseEmbedConfig(parsedSource.config)
+      : parsedSource.diagnostics
     : validateBaseEmbedConfig(structuredConfig);
   const candidate = sourceRepair ? parsedSource.config : structuredConfig;
   const domainDiagnostics = candidate
@@ -255,6 +273,18 @@ export function BaseEmbedInspector({
         detailReady,
       )
     : [];
+  const detailUnavailable = !!selectedSummary && !detailReady;
+  const detailDiagnostics: BaseDiagnostic[] =
+    detailUnavailable && !detailRefreshing
+      ? [
+          {
+            slug: selectedSlug,
+            path: "base",
+            severity: "error",
+            message: `Could not load ${selectedSummary.name} details. Retry after the Base finishes loading.`,
+          },
+        ]
+      : [];
   const diagnostics: BaseDiagnostic[] = [
     ...codecDiagnostics.map((diagnostic) => ({
       slug: selectedSlug,
@@ -263,9 +293,11 @@ export function BaseEmbedInspector({
       message: diagnostic.message,
     })),
     ...domainDiagnostics,
+    ...detailDiagnostics,
   ];
   const refreshing = registryRefreshing || detailRefreshing;
-  const saveDisabled = refreshing || !candidate || diagnostics.length > 0;
+  const saveDisabled =
+    refreshing || detailUnavailable || !candidate || diagnostics.length > 0;
 
   const baseDiagnostics = diagnostics.filter(
     (diagnostic) => diagnostic.path === "base",
@@ -275,6 +307,20 @@ export function BaseEmbedInspector({
   );
   const limitDiagnostics = diagnostics.filter(
     (diagnostic) => diagnostic.path === "limit",
+  );
+  const rootDiagnostics = diagnostics.filter(
+    (diagnostic) => diagnostic.path === "$",
+  );
+  const filterSectionDiagnostics = diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.path?.startsWith("filter") &&
+      !/\.(field|op|value)$/.test(diagnostic.path),
+  );
+  const sortSectionDiagnostics = diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.path === "sort" ||
+      (diagnostic.path?.startsWith("sort[") &&
+        !diagnostic.path.endsWith(".field")),
   );
 
   function closeWithoutSaving() {
@@ -343,6 +389,17 @@ export function BaseEmbedInspector({
         </div>
       ) : (
         <div className="grid gap-5">
+          {rootDiagnostics.length > 0 ? (
+            <div
+              id="base-embed-root-diagnostics"
+              role="alert"
+              className="border border-destructive px-3 py-2 text-xs text-destructive"
+            >
+              {rootDiagnostics.map((diagnostic) => (
+                <p key={diagnostic.message}>{diagnostic.message}</p>
+              ))}
+            </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className={labelClass} htmlFor="base-embed-base">
@@ -386,6 +443,7 @@ export function BaseEmbedInspector({
               <div
                 id="base-embed-base-diagnostics"
                 className="text-xs text-destructive"
+                role={baseDiagnostics.length > 0 ? "alert" : undefined}
               >
                 {baseDiagnostics.map((diagnostic) => (
                   <p key={diagnostic.message}>{diagnostic.message}</p>
@@ -443,6 +501,12 @@ export function BaseEmbedInspector({
           <section
             className={sectionClass}
             aria-labelledby="base-embed-filter-heading"
+            aria-invalid={filterSectionDiagnostics.length > 0}
+            aria-describedby={
+              filterSectionDiagnostics.length > 0
+                ? "base-embed-filter-diagnostics"
+                : undefined
+            }
           >
             <h3 id="base-embed-filter-heading" className={labelClass}>
               Embed filter
@@ -463,11 +527,30 @@ export function BaseEmbedInspector({
                 registerFocus={() => {}}
               />
             </div>
+            {filterSectionDiagnostics.length > 0 ? (
+              <div
+                id="base-embed-filter-diagnostics"
+                role="alert"
+                className="mt-2 text-xs text-destructive"
+              >
+                {filterSectionDiagnostics.map((diagnostic) => (
+                  <p key={`${diagnostic.path}-${diagnostic.message}`}>
+                    {diagnostic.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <section
             className={sectionClass}
             aria-labelledby="base-embed-sort-heading"
+            aria-invalid={sortSectionDiagnostics.length > 0}
+            aria-describedby={
+              sortSectionDiagnostics.length > 0
+                ? "base-embed-sort-diagnostics"
+                : undefined
+            }
           >
             <h3 id="base-embed-sort-heading" className={labelClass}>
               Sort order
@@ -482,9 +565,27 @@ export function BaseEmbedInspector({
               diagnostics={diagnostics}
               diagnosticRoot="sort"
               idPrefix="base-embed"
-              onChange={(sort) => setDraft((current) => ({ ...current, sort }))}
+              onChange={(sort) =>
+                setDraft((current) => ({
+                  ...current,
+                  sort: sort.length === 0 ? undefined : sort,
+                }))
+              }
               registerFocus={() => {}}
             />
+            {sortSectionDiagnostics.length > 0 ? (
+              <div
+                id="base-embed-sort-diagnostics"
+                role="alert"
+                className="mt-2 text-xs text-destructive"
+              >
+                {sortSectionDiagnostics.map((diagnostic) => (
+                  <p key={`${diagnostic.path}-${diagnostic.message}`}>
+                    {diagnostic.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <section className={sectionClass}>

@@ -1,10 +1,11 @@
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import {
   Heading,
   Modal,
   ModalOverlay,
   Dialog as RACDialog,
+  Text,
 } from "react-aria-components";
 import { IconButton } from "#/components/ui/icon-button";
 import { cn } from "#/lib/cn";
@@ -42,6 +43,7 @@ export function Dialog({
   isDismissable = true,
   className,
 }: DialogProps) {
+  const descriptionId = useId();
   return (
     <ModalOverlay
       isOpen={isOpen}
@@ -56,7 +58,10 @@ export function Dialog({
           className,
         )}
       >
-        <RACDialog className="outline-none">
+        <RACDialog
+          aria-describedby={description ? descriptionId : undefined}
+          className="outline-none"
+        >
           {({ close }) => (
             <>
               <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -68,9 +73,13 @@ export function Dialog({
                     {title}
                   </Heading>
                   {description && (
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <Text
+                      id={descriptionId}
+                      slot="description"
+                      className="mt-1 block text-xs text-muted-foreground"
+                    >
                       {description}
-                    </p>
+                    </Text>
                   )}
                 </div>
                 <IconButton

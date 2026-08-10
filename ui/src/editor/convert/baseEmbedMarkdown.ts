@@ -388,6 +388,22 @@ export interface BaseEmbedValidationDiagnostic {
   message: string;
 }
 
+export function validateBaseEmbedShape(
+  value: unknown,
+): BaseEmbedValidationDiagnostic[] {
+  try {
+    assertValidBaseEmbedConfig(value);
+    return [];
+  } catch (error) {
+    return [
+      {
+        path: error instanceof BaseEmbedValidationError ? error.path : "$",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    ];
+  }
+}
+
 export function validateBaseEmbedConfig(
   value: unknown,
 ): BaseEmbedValidationDiagnostic[] {
@@ -417,7 +433,7 @@ export function parseBaseEmbedConfig(source: string): ParsedBaseEmbedConfig {
       );
     }
     const config = parse(source) as unknown;
-    const diagnostics = validateBaseEmbedConfig(config);
+    const diagnostics = validateBaseEmbedShape(config);
     if (diagnostics.length > 0) return { diagnostics };
     return { config: config as BaseEmbedConfig, diagnostics: [] };
   } catch (error) {

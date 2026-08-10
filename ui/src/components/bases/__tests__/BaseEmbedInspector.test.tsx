@@ -114,7 +114,7 @@ function renderInspector(
   const onSave = vi.fn();
   const onCancel = vi.fn();
   const onRestoreFocus = vi.fn();
-  render(
+  const rendered = render(
     <BaseEmbedInspector
       isOpen
       node={node}
@@ -124,7 +124,19 @@ function renderInspector(
       {...overrides}
     />,
   );
-  return { onSave, onCancel, onRestoreFocus };
+  const rerenderInspector = (nextNode: BaseEmbedElement, isOpen = true) => {
+    rendered.rerender(
+      <BaseEmbedInspector
+        isOpen={isOpen}
+        node={nextNode}
+        onSave={onSave}
+        onCancel={onCancel}
+        onRestoreFocus={onRestoreFocus}
+        {...overrides}
+      />,
+    );
+  };
+  return { onSave, onCancel, onRestoreFocus, rerenderInspector };
 }
 
 beforeEach(() => {
@@ -175,6 +187,9 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(
       screen.getByRole("dialog", { name: "Configure Base embed" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Configure Base embed" }),
+    ).toHaveAccessibleDescription(/saved Base view and local query overrides/i);
     const base = screen.getByRole("combobox", { name: "Base" });
     expect(base).toHaveFocus();
     expect(base).toHaveAccessibleDescription(/saved Base/i);
@@ -237,6 +252,19 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(screen.queryByRole("combobox", { name: "Sort field 1" })).toBeNull();
   });
 
+  it("treats an empty inspector sort as inherited and omits it on Save", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderInspector(
+      configured({ sort: [{ field: "rating", dir: "desc" }] }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove sort 1" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(callbacks.onSave).toHaveBeenCalledTimes(1);
+    expect(callbacks.onSave.mock.calls[0]?.[0]).not.toHaveProperty("sort");
+  });
+
   it("emits one complete configured node only after valid Save", async () => {
     const user = userEvent.setup();
     const { onSave, onRestoreFocus } = renderInspector();
@@ -276,6 +304,44 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(first.onSave).not.toHaveBeenCalled();
     expect(first.onCancel).toHaveBeenCalledTimes(1);
     expect(first.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets canceled drafts only for a new open session and preserves ordinary rerenders", async () => {
+    const user = userEvent.setup();
+    const original = configured();
+    const callbacks = renderInspector(original);
+    const base = screen.getByRole("combobox", { name: "Base" });
+
+    await user.selectOptions(base, "tasks");
+    callbacks.rerenderInspector(original);
+    expect(base).toHaveValue("tasks");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    callbacks.rerenderInspector(original, false);
+    callbacks.rerenderInspector(original, true);
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Base" })).toHaveValue(
+        "reading",
+      ),
+    );
+  });
+
+  it("resets the session when the inspected node identity is replaced", async () => {
+    const first = configured();
+    const callbacks = renderInspector(first);
+    const repaired = invalid('````base\nbase = "tasks"\nview = "Open"\n````\n');
+
+    callbacks.rerenderInspector(repaired);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Base embed TOML" }),
+      ).toHaveValue('base = "tasks"\nview = "Open"\n'),
+    );
+
+    callbacks.rerenderInspector(configured({ base: "tasks", view: "Open" }));
+    expect(await screen.findByRole("combobox", { name: "Base" })).toHaveValue(
+      "tasks",
+    );
   });
 
   it("keeps missing Base and view references visible and recoverable", async () => {
@@ -322,6 +388,53 @@ describe("BaseEmbedInspector structured mode", () => {
       /refreshing Base configuration/i,
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("shows a settled selected-Base detail error and blocks Save", () => {
+    apiState.details.reading = {
+      data: undefined,
+      isPending: false,
+      isFetching: false,
+      error: new Error("network unavailable"),
+    };
+    renderInspector();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /could not load Reading Log details/i,
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("ignores delayed stale detail and enables Save only after matching detail arrives", async () => {
+    const user = userEvent.setup();
+    apiState.details.tasks = {
+      data: reading,
+      isPending: true,
+      isFetching: true,
+      error: null,
+    };
+    const original = configured();
+    const callbacks = renderInspector(original);
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Base" }),
+      "tasks",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(
+      screen.queryByRole("option", { name: "rating" }),
+    ).not.toBeInTheDocument();
+
+    apiState.details.tasks = {
+      data: tasks,
+      isPending: false,
+      isFetching: false,
+      error: null,
+    };
+    callbacks.rerenderInspector(original);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    );
   });
 
   it("shows declared-field diagnostics and disables Save without stale results after rapid Base changes", async () => {
@@ -500,6 +613,123 @@ describe("pure Base embed validation bounds", () => {
     expect(diagnostics.length === 0).toBe(isValid);
     if (!isValid) expect(diagnostics[0]?.path).toContain(path);
   });
+
+  it.each([
+    ["depth", valid({ filter: nestedNot(8) })],
+    ["nodes", valid({ filter: nodeCountFilter(31, 1) })],
+    [
+      "group children",
+      valid({
+        filter: { all: Array.from({ length: 32 }, () => comparison()) },
+      }),
+    ],
+    [
+      "in values",
+      valid({
+        filter: {
+          field: "kind",
+          op: "in",
+          value: Array(100).fill("NOTE"),
+        },
+      }),
+    ],
+    [
+      "sort keys",
+      valid({
+        sort: Array.from({ length: 8 }, () => ({ field: "title" })),
+      }),
+    ],
+    ["field bytes", valid({ sort: [{ field: "é".repeat(128) }] })],
+    ["string bytes", valid({ filter: comparison("title", "é".repeat(2048)) })],
+    ["body bytes", valid({ base: "x".repeat(65_536 - 23) })],
+  ])("keeps Save enabled for %s at N", (_name, value) => {
+    if (_name === "field bytes") {
+      const field = "é".repeat(128);
+      const properties = apiState.details.reading.data?.properties;
+      if (properties) properties[field] = { type: "text" };
+    }
+    const slug = String(value.base);
+    if (!apiState.details[slug]) {
+      apiState.bases.data?.bases.push({
+        slug,
+        name: "Boundary Base",
+        diagnostic_count: 0,
+        match_count: 0,
+        views: ["All"],
+      });
+      apiState.details[slug] = {
+        data: detail(slug, "Boundary Base", ["All"]),
+        isPending: false,
+        isFetching: false,
+        error: null,
+      };
+    }
+    renderInspector(
+      configured({
+        ...(value as Partial<ConfiguredBaseEmbedElement>),
+        ...(_name === "body bytes" ? { limit: undefined } : {}),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it.each([
+    ["depth", valid({ filter: nestedNot(9) }), /Filter depth 9 exceeds/i],
+    ["nodes", valid({ filter: nodeCountFilter(32, 0) }), /more than 64 nodes/i],
+    [
+      "group children",
+      valid({
+        filter: { all: Array.from({ length: 33 }, () => comparison()) },
+      }),
+      /33 children; maximum is 32/i,
+    ],
+    [
+      "in values",
+      valid({
+        filter: {
+          field: "kind",
+          op: "in",
+          value: Array(101).fill("NOTE"),
+        },
+      }),
+      /at most 100 values/i,
+    ],
+    [
+      "sort keys",
+      valid({
+        sort: Array.from({ length: 9 }, () => ({ field: "title" })),
+      }),
+      /9 keys; maximum is 8/i,
+    ],
+    [
+      "field bytes",
+      valid({ sort: [{ field: "é".repeat(129) }] }),
+      /258 UTF-8 bytes; maximum is 256/i,
+    ],
+    [
+      "string bytes",
+      valid({ filter: comparison("title", "é".repeat(2049)) }),
+      /4098 UTF-8 bytes; maximum is 4096/i,
+    ],
+    [
+      "canonical body",
+      valid({
+        filter: {
+          all: Array.from({ length: 16 }, () =>
+            comparison("title", "x".repeat(4096)),
+          ),
+        },
+      }),
+      /TOML body exceeds 65536 UTF-8 bytes/i,
+    ],
+  ])(
+    "renders the owning %s diagnostic and disables Save",
+    (_name, value, message) => {
+      renderInspector(configured(value as Partial<ConfiguredBaseEmbedElement>));
+      expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    },
+  );
 });
 
 describe("BaseEmbedInspector source repair", () => {
@@ -523,6 +753,9 @@ describe("BaseEmbedInspector source repair", () => {
     expect(
       screen.getByRole("textbox", { name: "Base embed TOML" }),
     ).toHaveFocus();
+    expect(
+      screen.getByRole("dialog", { name: "Configure Base embed" }),
+    ).toHaveAccessibleDescription(/Repair the persisted TOML/i);
   });
 
   it("keeps invalid source local on Cancel", async () => {
@@ -552,5 +785,19 @@ describe("BaseEmbedInspector source repair", () => {
     expect(callbacks.onSave).toHaveBeenCalledTimes(1);
     expect(callbacks.onSave).toHaveBeenCalledWith(configured({ limit: 40 }));
     expect(callbacks.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies canonical representation size validation before source-repair Save", () => {
+    const literal = `'${"\\".repeat(3500)}'`;
+    const body = `base = "reading"\nview = "All"\nfilter = { field = "title", op = "in", value = [${Array(
+      10,
+    )
+      .fill(literal)
+      .join(", ")}] }\n`;
+    renderInspector(invalid(`\`\`\`base\n${body}\`\`\`\n`));
+    expect(
+      screen.getByText(/TOML body exceeds 65536 UTF-8 bytes/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 });

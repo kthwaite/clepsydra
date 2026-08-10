@@ -1,6 +1,7 @@
 import { createEditor, Editor } from "slate";
 import { describe, expect, it } from "vitest";
 import { withSchema } from "#/editor/schema/withSchema";
+import { validateBaseEmbedConfig } from "../baseEmbedMarkdown";
 import { markdownToSlate, slateToMarkdown } from "../index";
 
 const encoder = new TextEncoder();
@@ -220,36 +221,54 @@ describe("Base embed Markdown source preservation", () => {
     const raw = baseFence(rejectedBody);
     expect(expectInvalid(raw).rawBlock).toBe(raw);
   });
+
+  it("keeps raw bodies configured when only canonical basic-string escaping exceeds 64 KiB", () => {
+    const literal = `'${"\\".repeat(3500)}'`;
+    const body = documentBody(
+      `filter = { field = "title", op = "in", value = [${Array(10)
+        .fill(literal)
+        .join(", ")}] }`,
+    );
+    expect(encoder.encode(body).length).toBeLessThanOrEqual(64 * 1024);
+
+    const configured = expectConfigured(baseFence(body));
+    expect(
+      validateBaseEmbedConfig({
+        base: configured.base,
+        view: configured.view,
+        filter: configured.filter,
+      })[0]?.message,
+    ).toMatch(/exceeds 65536 UTF-8 bytes/);
+  });
 });
 
 describe("Base fence recognition and closed TOML shapes", () => {
   it("recognizes only lang=base with no metadata", () => {
     expectConfigured(baseFence(documentBody()));
 
-    expect(markdownToSlate("```base extra\nbase = \"b\"\nview = \"v\"\n```"))
-      .toEqual([
-        {
-          type: "code-block",
-          language: "base",
-          children: [{ text: 'base = "b"\nview = "v"' }],
-        },
-      ]);
-    expect(markdownToSlate("```Base\nbase = \"b\"\nview = \"v\"\n```"))
-      .toEqual([
-        {
-          type: "code-block",
-          language: "Base",
-          children: [{ text: 'base = "b"\nview = "v"' }],
-        },
-      ]);
-    expect(markdownToSlate("```python\nbase = \"b\"\n```"))
-      .toEqual([
-        {
-          type: "code-block",
-          language: "python",
-          children: [{ text: 'base = "b"' }],
-        },
-      ]);
+    expect(
+      markdownToSlate('```base extra\nbase = "b"\nview = "v"\n```'),
+    ).toEqual([
+      {
+        type: "code-block",
+        language: "base",
+        children: [{ text: 'base = "b"\nview = "v"' }],
+      },
+    ]);
+    expect(markdownToSlate('```Base\nbase = "b"\nview = "v"\n```')).toEqual([
+      {
+        type: "code-block",
+        language: "Base",
+        children: [{ text: 'base = "b"\nview = "v"' }],
+      },
+    ]);
+    expect(markdownToSlate('```python\nbase = "b"\n```')).toEqual([
+      {
+        type: "code-block",
+        language: "python",
+        children: [{ text: 'base = "b"' }],
+      },
+    ]);
   });
 
   it.each([
@@ -299,9 +318,7 @@ describe("Base fence recognition and closed TOML shapes", () => {
     ],
     [
       "unknown operator",
-      documentBody(
-        `filter = { field = "f", op = "unknown", value = 1 }`,
-      ),
+      documentBody(`filter = { field = "f", op = "unknown", value = 1 }`),
     ],
     [
       "value-carrying operator misses value",
@@ -309,15 +326,11 @@ describe("Base fence recognition and closed TOML shapes", () => {
     ],
     [
       "is_empty carries a value",
-      documentBody(
-        `filter = { field = "f", op = "is_empty", value = true }`,
-      ),
+      documentBody(`filter = { field = "f", op = "is_empty", value = true }`),
     ],
     [
       "not_empty carries a value",
-      documentBody(
-        `filter = { field = "f", op = "not_empty", value = false }`,
-      ),
+      documentBody(`filter = { field = "f", op = "not_empty", value = false }`),
     ],
     [
       "links_to value is not a string",
@@ -327,9 +340,7 @@ describe("Base fence recognition and closed TOML shapes", () => {
     ],
     [
       "in value is not an array",
-      documentBody(
-        `filter = { field = "f", op = "in", value = "one" }`,
-      ),
+      documentBody(`filter = { field = "f", op = "in", value = "one" }`),
     ],
     ["sort is not an array", documentBody("sort = true")],
     ["sort item is not a table", documentBody("sort = [1]")],
@@ -349,9 +360,7 @@ describe("Base fence recognition and closed TOML shapes", () => {
     ["limit is not numeric", documentBody('limit = "20"')],
     [
       "TOML date value is not JSON data",
-      documentBody(
-        `filter = { field = "f", op = "eq", value = 1979-05-27 }`,
-      ),
+      documentBody(`filter = { field = "f", op = "eq", value = 1979-05-27 }`),
     ],
     [
       "non-finite value is not JSON data",
@@ -363,8 +372,11 @@ describe("Base fence recognition and closed TOML shapes", () => {
   });
 
   it("preserves required string contents without trimming", () => {
-    expect(expectConfigured(baseFence(lines('base = "  books  "', 'view = "  Reading  "'))))
-      .toMatchObject({ base: "  books  ", view: "  Reading  " });
+    expect(
+      expectConfigured(
+        baseFence(lines('base = "  books  "', 'view = "  Reading  "')),
+      ),
+    ).toMatchObject({ base: "  books  ", view: "  Reading  " });
   });
 
   it("accepts all supported operators with the required value semantics", () => {
@@ -386,7 +398,9 @@ describe("Base fence recognition and closed TOML shapes", () => {
 
     expectConfigured(
       baseFence(
-        documentBody(`filter = { all = [${[...carrying, ...valueless].join(", ")}] }`),
+        documentBody(
+          `filter = { all = [${[...carrying, ...valueless].join(", ")}] }`,
+        ),
       ),
     );
   });
@@ -457,13 +471,13 @@ describe("Base embed complexity boundaries", () => {
     },
   ];
 
-  it.each(cases)("accepts $name at the bound and rejects bound plus one", ({
-    accepted,
-    rejected,
-  }) => {
-    expectConfigured(baseFence(accepted));
-    expectInvalid(baseFence(rejected));
-  });
+  it.each(cases)(
+    "accepts $name at the bound and rejects bound plus one",
+    ({ accepted, rejected }) => {
+      expectConfigured(baseFence(accepted));
+      expectInvalid(baseFence(rejected));
+    },
+  );
 
   it("measures multibyte field and scalar bounds by UTF-8 bytes", () => {
     expect(encoder.encode(field256)).toHaveLength(256);
@@ -490,10 +504,7 @@ describe("configured Base embed canonical TOML", () => {
           { not: { field: "archived", op: "is_empty" } },
         ],
       },
-      sort: [
-        { field: "title" },
-        { field: "rating", dir: "desc" },
-      ],
+      sort: [{ field: "title" }, { field: "rating", dir: "desc" }],
       limit: 20,
       children: emptyChildren,
     };
@@ -535,18 +546,9 @@ describe("configured Base embed canonical TOML", () => {
   });
 
   it.each([
-    [
-      "base high surrogate",
-      { base: "books\ud800", view: "Reading" },
-    ],
-    [
-      "base low surrogate",
-      { base: "books\udc00", view: "Reading" },
-    ],
-    [
-      "view",
-      { base: "books", view: "Reading\ud800" },
-    ],
+    ["base high surrogate", { base: "books\ud800", view: "Reading" }],
+    ["base low surrogate", { base: "books\udc00", view: "Reading" }],
+    ["view", { base: "books", view: "Reading\ud800" }],
     [
       "filter field",
       {
@@ -599,24 +601,27 @@ describe("configured Base embed canonical TOML", () => {
         },
       },
     ],
-  ])("recovers instead of emitting invalid TOML for an unpaired surrogate in %s", (_name, config) => {
-    const recovery = lines("```base", "```");
-    const markdown = slateToMarkdown([
-      {
-        type: "base-embed",
-        status: "configured",
-        ...config,
-        children: emptyChildren,
-      },
-    ] as never);
+  ])(
+    "recovers instead of emitting invalid TOML for an unpaired surrogate in %s",
+    (_name, config) => {
+      const recovery = lines("```base", "```");
+      const markdown = slateToMarkdown([
+        {
+          type: "base-embed",
+          status: "configured",
+          ...config,
+          children: emptyChildren,
+        },
+      ] as never);
 
-    expect(markdown).toBe(recovery);
-    expect(markdownToSlate(markdown)[0]).toMatchObject({
-      type: "base-embed",
-      status: "invalid",
-      rawBlock: recovery,
-    });
-  });
+      expect(markdown).toBe(recovery);
+      expect(markdownToSlate(markdown)[0]).toMatchObject({
+        type: "base-embed",
+        status: "invalid",
+        rawBlock: recovery,
+      });
+    },
+  );
 
   it("keeps absent sort absent and preserves an explicitly empty sort", () => {
     const withoutSort = {
@@ -647,7 +652,7 @@ describe("configured Base embed canonical TOML", () => {
       lines(
         "# valid comments may canonicalize",
         'view = "Reading"',
-        "base    =    \"books\"",
+        'base    =    "books"',
       ),
     );
     expect(slateToMarkdown(markdownToSlate(authored))).toBe(
