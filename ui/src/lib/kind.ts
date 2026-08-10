@@ -122,7 +122,7 @@ function normalizeKind(value: string | undefined | null): Kind | null {
 }
 
 const FRONTMATTER_RE = /^\s*---\r?\n([\s\S]*?)\r?\n---/;
-const TYPE_LINE_RE = /^(?:type|kind)\s*:\s*["']?([A-Za-z]+)["']?\s*$/im;
+const TYPE_LINE_RE = /^(?:type|kind)\s*:\s*["']?([A-Za-z_]+)["']?\s*$/im;
 
 export function parseFrontmatterKind(
   body: string | undefined | null,

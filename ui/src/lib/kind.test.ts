@@ -46,6 +46,11 @@ describe("parseFrontmatterKind", () => {
     const body = "---\ntype: project\ntitle: X\n---\n# heading\n";
     expect(parseFrontmatterKind(body)).toBe("PROJECT");
   });
+  it("reads underscore-bearing AI conversation kinds", () => {
+    expect(
+      parseFrontmatterKind("---\ntype: AI_CONVERSATION\n---\nbody"),
+    ).toBe("AI_CONVERSATION");
+  });
 
   it("also accepts a `kind` key", () => {
     expect(parseFrontmatterKind("---\nkind: Todo\n---\nbody")).toBe("TODO");
