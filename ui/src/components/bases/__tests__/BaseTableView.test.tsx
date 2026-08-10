@@ -325,6 +325,39 @@ describe("BaseTableView", () => {
     expect(onCreatedRowFocused).not.toHaveBeenCalled();
   });
 
+  it("rechecks error after the focus timer and before its completion microtask", () => {
+    vi.useFakeTimers();
+    const onCreatedRowFocused = vi.fn();
+    const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+    const queuedMicrotasks: VoidFunction[] = [];
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, "queueMicrotask")
+      .mockImplementation((task) => queuedMicrotasks.push(task));
+
+    try {
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+      const title = screen.getByRole("button", {
+        name: "The Book of the New Sun",
+      });
+      expect(title).toHaveFocus();
+      expect(onCreatedRowFocused).not.toHaveBeenCalled();
+      expect(queuedMicrotasks.length).toBeGreaterThan(0);
+
+      props.rerender({ viewError: "query error: stale evaluation" });
+      act(() => {
+        for (const task of queuedMicrotasks.splice(0)) task();
+      });
+
+      expect(screen.getByRole("alert")).toHaveTextContent("stale evaluation");
+      expect(onCreatedRowFocused).not.toHaveBeenCalled();
+    } finally {
+      queueMicrotaskSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not claim created focus when the active view omits title", async () => {
     const onCreatedRowFocused = vi.fn();
     vi.useFakeTimers();
@@ -620,7 +653,7 @@ describe("BaseTableView", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("bad filter");
   });
 
-  it("invalidates each same-revision evaluation identity dimension", () => {
+  it("invalidates every evaluation identity dimension independently", () => {
     const props = renderView({});
     let previousGrid = screen.getByRole("grid");
     const expectRemount = (next: Partial<ViewProps>) => {
@@ -637,6 +670,36 @@ describe("BaseTableView", () => {
         sort: undefined,
       });
     };
+
+    expectRemount({
+      definition: { ...definition, revision: "revision-2" },
+    });
+    restoreBaseline();
+
+    const twinViewDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "First",
+          layout: "table",
+          columns: ["title", "author"],
+        },
+        {
+          name: "Second",
+          layout: "table",
+          columns: ["title", "author"],
+        },
+      ],
+    };
+    expectRemount({
+      definition: twinViewDefinition,
+      activeView: "First",
+    });
+    expectRemount({
+      definition: twinViewDefinition,
+      activeView: "Second",
+    });
+    restoreBaseline();
 
     expectRemount({
       definition: {
@@ -682,8 +745,29 @@ describe("BaseTableView", () => {
     });
     restoreBaseline();
 
+    expectRemount({ sort: [] });
+    restoreBaseline();
+
     expectRemount({
-      sort: [{ field: "author", dir: "asc" }],
+      sort: [
+        { field: "author", dir: "asc" },
+        { field: "rating", dir: "asc" },
+        { field: "status", dir: "desc" },
+      ],
+    });
+    expectRemount({
+      sort: [
+        { field: "author", dir: "asc" },
+        { field: "status", dir: "desc" },
+        { field: "rating", dir: "asc" },
+      ],
+    });
+    expectRemount({
+      sort: [
+        { field: "author", dir: "asc" },
+        { field: "status", dir: "asc" },
+        { field: "rating", dir: "asc" },
+      ],
     });
     expect(screen.getByRole("columnheader", { name: /author/ })).toHaveAttribute(
       "aria-sort",
@@ -700,6 +784,29 @@ describe("BaseTableView", () => {
       },
     });
     expect(screen.getByText("reading")).toBeInTheDocument();
+  });
+
+  it("invalidates a grouped table when raw keys share a formatted label", () => {
+    const props = renderView({
+      output: {
+        shape: "grouped",
+        groups: [{ key: null, total: 1, aggregates: [], rows: [row] }],
+      },
+    });
+    const nullKeyGrid = screen.getByRole("grid");
+    expect(screen.getByText("(empty)")).toBeInTheDocument();
+
+    props.rerender({
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "(empty)", total: 1, aggregates: [], rows: [row] },
+        ],
+      },
+    });
+
+    expect(screen.getByText("(empty)")).toBeInTheDocument();
+    expect(screen.getByRole("grid")).not.toBe(nullKeyGrid);
   });
 
   it("announces flat output excluded by the current cap", () => {
