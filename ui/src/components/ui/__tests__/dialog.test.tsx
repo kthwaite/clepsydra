@@ -51,6 +51,33 @@ describe("Dialog", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDefined();
   });
 
+  it("keeps long content scrollable while the footer stays in the viewport", () => {
+    render(
+      <Dialog
+        isOpen
+        onOpenChange={() => {}}
+        title="Long dialog"
+        footer={<button type="button">Save</button>}
+      >
+        <p>Long body</p>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Long dialog" });
+    const modal = dialog.parentElement;
+    const body = screen.getByText("Long body").parentElement;
+    const footer = screen.getByRole("button", { name: "Save" }).parentElement;
+
+    expect(modal).toHaveClass(
+      "flex",
+      "max-h-[calc(100dvh-2rem)]",
+      "flex-col",
+    );
+    expect(dialog).toHaveClass("flex", "min-h-0", "flex-1", "flex-col");
+    expect(body).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+    expect(footer).toHaveClass("shrink-0");
+  });
+
   it("calls onOpenChange(false) when Escape is pressed", async () => {
     const user = userEvent.setup();
     const handler = vi.fn();

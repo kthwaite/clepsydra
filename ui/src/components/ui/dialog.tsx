@@ -55,7 +55,7 @@ export function Dialog({
     >
       <Modal
         className={cn(
-          "w-full border border-border bg-background shadow-lg",
+          "flex max-h-[calc(100dvh-2rem)] w-full flex-col border border-border bg-background shadow-lg",
           sizeClasses[size],
           className,
         )}
@@ -66,11 +66,11 @@ export function Dialog({
               .filter(Boolean)
               .join(" ") || undefined
           }
-          className="outline-none"
+          className="flex min-h-0 flex-1 flex-col outline-none"
         >
           {({ close }) => (
             <>
-              <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
                 <div>
                   <Heading
                     slot="title"
@@ -97,9 +97,11 @@ export function Dialog({
                   <X />
                 </IconButton>
               </div>
-              <div className="px-4 py-3">{children}</div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                {children}
+              </div>
               {footer && (
-                <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+                <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">
                   {footer}
                 </div>
               )}
