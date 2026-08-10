@@ -933,6 +933,45 @@ describe("BaseEmbedInspector source repair", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
+  it("does not validate repaired source against stale detail from another Base", async () => {
+    const tasksSummary = apiState.bases.data?.bases.find(
+      ({ slug }) => slug === "tasks",
+    );
+    if (!tasksSummary) throw new Error("test fixture requires the tasks Base");
+    tasksSummary.views = ["All"];
+    apiState.details.tasks = {
+      data: reading,
+      isPending: false,
+      isFetching: false,
+      error: null,
+    };
+    const repaired = invalid(
+      '```base\nbase = "tasks"\nview = "All"\nfilter = { field = "priority", op = "gte", value = 3 }\n```\n',
+    );
+    const callbacks = renderInspector(repaired);
+    const source = screen.getByRole("textbox", { name: "Base embed TOML" });
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(source).toHaveAccessibleDescription(
+      /Could not load Tasks details/i,
+    );
+    expect(screen.queryByText(/unknown field.*priority/i)).toBeNull();
+
+    apiState.details.tasks = {
+      data: detail("tasks", "Tasks", ["All"], {
+        priority: { type: "number" },
+      }),
+      isPending: false,
+      isFetching: false,
+      error: null,
+    };
+    callbacks.rerenderInspector(repaired);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    );
+  });
+
   it("applies canonical representation size validation before source-repair Save", () => {
     const literal = `'${"\\".repeat(3500)}'`;
     const body = `base = "reading"\nview = "All"\nfilter = { field = "title", op = "in", value = [${Array(
