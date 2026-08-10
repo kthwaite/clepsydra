@@ -9,6 +9,8 @@ import type { BaseEmbedConfig } from "#/components/bases/embed-query";
 export interface ParagraphElement {
   type: "paragraph";
   blockId?: string;
+  /** Editor-only caret escape synthesized after a terminal Base embed. */
+  baseEmbedTrailingSentinel?: true;
   properties?: Record<string, string>;
   children: Descendant[];
 }

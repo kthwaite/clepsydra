@@ -92,6 +92,7 @@ describe("trailing paragraph after a code block", () => {
     expect(editor.children).toHaveLength(2);
     expect(editor.children[1]).toEqual({
       type: "paragraph",
+      baseEmbedTrailingSentinel: true,
       children: [{ text: "" }],
     });
   });

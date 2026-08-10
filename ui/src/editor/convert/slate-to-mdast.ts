@@ -340,6 +340,34 @@ const ctx: SerializeCtx = {
 
 // ---------------------------------------------------------------------------
 // Public API
+function withoutBaseEmbedTrailingSentinel(
+  nodes: Descendant[],
+): Descendant[] {
+  if (nodes.length < 2) return nodes;
+  const base = nodes[nodes.length - 2];
+  const sentinel = nodes[nodes.length - 1];
+  if (
+    SlateText.isText(base) ||
+    base.type !== "base-embed" ||
+    SlateText.isText(sentinel) ||
+    sentinel.type !== "paragraph" ||
+    sentinel.baseEmbedTrailingSentinel !== true ||
+    Object.keys(sentinel).length !== 3 ||
+    sentinel.children.length !== 1
+  ) {
+    return nodes;
+  }
+  const child = sentinel.children[0];
+  if (
+    !SlateText.isText(child) ||
+    child.text !== "" ||
+    Object.keys(child).length !== 1
+  ) {
+    return nodes;
+  }
+  return nodes.slice(0, -1);
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -348,7 +376,9 @@ const ctx: SerializeCtx = {
 export function slateToMdast(nodes: Descendant[]): string {
   const root: Root = {
     type: "root",
-    children: convertBlockChildren(nodes) as RootContent[],
+    children: convertBlockChildren(
+      withoutBaseEmbedTrailingSentinel(nodes),
+    ) as RootContent[],
   };
 
   const markdown = toMarkdown(root as Nodes, {

@@ -1,4 +1,6 @@
+import { createEditor, Editor } from "slate";
 import { describe, expect, it } from "vitest";
+import { withSchema } from "#/editor/schema/withSchema";
 import { markdownToSlate, slateToMarkdown } from "../index";
 
 const encoder = new TextEncoder();
@@ -155,6 +157,58 @@ describe("Base embed Markdown source preservation", () => {
       );
     },
   );
+
+  it.each([
+    {
+      name: "closed invalid fence without final LF",
+      raw: baseFence(lines('base = "books"'), { finalEol: false }),
+    },
+    {
+      name: "unclosed terminal invalid fence",
+      raw: baseFence(lines('base = "books"'), { closed: false }),
+    },
+  ])(
+    "preserves $name through public parse, normalize, save, and reload",
+    ({ raw }) => {
+      const editor = withSchema(createEditor());
+      editor.children = markdownToSlate(raw);
+      Editor.normalize(editor, { force: true });
+
+      expect(editor.children).toHaveLength(2);
+      expect(editor.children[1]).toMatchObject({
+        type: "paragraph",
+        baseEmbedTrailingSentinel: true,
+        children: [{ text: "" }],
+      });
+
+      const saved = slateToMarkdown(editor.children);
+      expect(saved).toBe(raw);
+      expect(markdownToSlate(saved)).toHaveLength(1);
+      expect(markdownToSlate(saved)[0]).toMatchObject({
+        type: "base-embed",
+        status: "invalid",
+        rawBlock: raw,
+      });
+    },
+  );
+
+  it("preserves a real authored empty paragraph after a terminal Base embed", () => {
+    const rawBlock = baseFence(lines("unknown = true"), {
+      finalEol: false,
+    });
+    const nodes = [
+      {
+        type: "base-embed",
+        status: "invalid",
+        rawBlock,
+        parseError: "authored error",
+        children: emptyChildren,
+      },
+      { type: "paragraph", children: [{ text: "" }] },
+    ];
+
+    expect(slateToMarkdown(nodes as never)).toBe(`${rawBlock}\n\n`);
+  });
 
   it("measures the raw TOML body in UTF-8 bytes at 64 KiB and plus one", () => {
     const acceptedBody = bodyOfUtf8Size(64 * 1024);
@@ -456,6 +510,112 @@ describe("configured Base embed canonical TOML", () => {
 
     expect(slateToMarkdown([node] as never)).toBe(expected);
     expect(markdownToSlate(expected)).toEqual([node]);
+  });
+
+  it("encodes DEL as TOML Unicode escapes in every configurable string position", () => {
+    const del = "\u007f";
+    const node = {
+      type: "base-embed",
+      status: "configured",
+      base: `books${del}📚`,
+      view: `Reading${del}`,
+      filter: {
+        field: `field${del}`,
+        op: "eq",
+        value: { [`key${del}`]: `value${del}` },
+      },
+      sort: [{ field: `sort${del}`, dir: "desc" }],
+      children: emptyChildren,
+    };
+
+    const markdown = slateToMarkdown([node] as never);
+    expect(markdown).not.toContain(del);
+    expect(markdown.match(/\\u007F/g)).toHaveLength(6);
+    expect(markdownToSlate(markdown)).toEqual([node]);
+  });
+
+  it.each([
+    [
+      "base high surrogate",
+      { base: "books\ud800", view: "Reading" },
+    ],
+    [
+      "base low surrogate",
+      { base: "books\udc00", view: "Reading" },
+    ],
+    [
+      "view",
+      { base: "books", view: "Reading\ud800" },
+    ],
+    [
+      "filter field",
+      {
+        base: "books",
+        view: "Reading",
+        filter: { field: "field\ud800", op: "eq", value: 1 },
+      },
+    ],
+    [
+      "filter operator",
+      {
+        base: "books",
+        view: "Reading",
+        filter: { field: "field", op: "eq\ud800", value: 1 },
+      },
+    ],
+    [
+      "sort field",
+      {
+        base: "books",
+        view: "Reading",
+        sort: [{ field: "field\ud800", dir: "asc" }],
+      },
+    ],
+    [
+      "sort direction",
+      {
+        base: "books",
+        view: "Reading",
+        sort: [{ field: "field", dir: "asc\ud800" }],
+      },
+    ],
+    [
+      "nested value",
+      {
+        base: "books",
+        view: "Reading",
+        filter: { field: "field", op: "eq", value: ["value\ud800"] },
+      },
+    ],
+    [
+      "nested key",
+      {
+        base: "books",
+        view: "Reading",
+        filter: {
+          field: "field",
+          op: "eq",
+          value: { ["key\ud800"]: "value" },
+        },
+      },
+    ],
+  ])("recovers instead of emitting invalid TOML for an unpaired surrogate in %s", (_name, config) => {
+    const recovery = lines("```base", "```");
+    const markdown = slateToMarkdown([
+      {
+        type: "base-embed",
+        status: "configured",
+        ...config,
+        children: emptyChildren,
+      },
+    ] as never);
+
+    expect(markdown).toBe(recovery);
+    expect(markdownToSlate(markdown)[0]).toMatchObject({
+      type: "base-embed",
+      status: "invalid",
+      rawBlock: recovery,
+    });
   });
 
   it("keeps absent sort absent and preserves an explicitly empty sort", () => {

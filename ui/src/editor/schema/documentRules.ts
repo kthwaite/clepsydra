@@ -58,7 +58,13 @@ function ensureTrailingParagraph(editor: Editor): boolean {
 
   Transforms.insertNodes(
     editor,
-    { type: "paragraph", children: [{ text: "" }] } as never,
+    {
+      type: "paragraph",
+      ...(last.type === "base-embed"
+        ? { baseEmbedTrailingSentinel: true }
+        : {}),
+      children: [{ text: "" }],
+    } as never,
     { at: [children.length] },
   );
   return true;

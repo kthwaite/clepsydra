@@ -40,6 +40,13 @@ const FILTER_OPERATORS: Record<string, true> = {
   is_empty: true,
   not_empty: true,
 };
+const TOML_SHORT_ESCAPE_BY_CODE: Record<number, string> = {
+  0x08: "\\b",
+  0x09: "\\t",
+  0x0a: "\\n",
+  0x0c: "\\f",
+  0x0d: "\\r",
+};
 
 class BaseEmbedValidationError extends Error {}
 
@@ -215,12 +222,45 @@ function validateBaseEmbedConfig(value: unknown): asserts value is BaseEmbedConf
   }
 }
 
-function quotedTomlKey(key: string): string {
-  return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+function encodeTomlBasicString(value: string): string {
+  let encoded = '"';
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit === 0x22) {
+      encoded += '\\"';
+      continue;
+    }
+    if (unit === 0x5c) {
+      encoded += "\\\\";
+      continue;
+    }
+    if (Object.hasOwn(TOML_SHORT_ESCAPE_BY_CODE, unit)) {
+      encoded += TOML_SHORT_ESCAPE_BY_CODE[unit];
+      continue;
+    }
+    if (unit <= 0x1f || unit === 0x7f) {
+      encoded += `\\u${unit.toString(16).toUpperCase().padStart(4, "0")}`;
+      continue;
+    }
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        fail("TOML strings cannot contain unpaired UTF-16 surrogates");
+      }
+      encoded += value[index] + value[index + 1];
+      index += 1;
+      continue;
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff) {
+      fail("TOML strings cannot contain unpaired UTF-16 surrogates");
+    }
+    encoded += value[index];
+  }
+  return `${encoded}"`;
 }
 
 function serializeTomlValue(value: unknown): string {
-  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "string") return encodeTomlBasicString(value);
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
@@ -230,7 +270,12 @@ function serializeTomlValue(value: unknown): string {
   if (isTable(value)) {
     const entries = Object.keys(value)
       .sort()
-      .map((key) => `${quotedTomlKey(key)} = ${serializeTomlValue(value[key])}`);
+      .map((key) => {
+        const encodedKey = /^[A-Za-z0-9_-]+$/.test(key)
+          ? key
+          : encodeTomlBasicString(key);
+        return `${encodedKey} = ${serializeTomlValue(value[key])}`;
+      });
     return entries.length === 0 ? "{}" : `{ ${entries.join(", ")} }`;
   }
   return fail("Unsupported TOML value");
@@ -246,8 +291,8 @@ function serializeFilter(filter: BaseFilter): string {
   if ("not" in filter) return `{ not = ${serializeFilter(filter.not)} }`;
 
   const fields = [
-    `field = ${JSON.stringify(filter.field)}`,
-    `op = ${JSON.stringify(filter.op)}`,
+    `field = ${encodeTomlBasicString(filter.field)}`,
+    `op = ${encodeTomlBasicString(filter.op)}`,
   ];
   if (!Object.hasOwn(VALUELESS_OPERATORS, filter.op)) {
     fields.push(`value = ${serializeTomlValue(filter.value)}`);
@@ -258,8 +303,10 @@ function serializeFilter(filter: BaseFilter): string {
 function serializeSort(sort: SortKey[]): string {
   return `[${sort
     .map((key) => {
-      const fields = [`field = ${JSON.stringify(key.field)}`];
-      if (key.dir !== undefined) fields.push(`dir = ${JSON.stringify(key.dir)}`);
+      const fields = [`field = ${encodeTomlBasicString(key.field)}`];
+      if (key.dir !== undefined) {
+        fields.push(`dir = ${encodeTomlBasicString(key.dir)}`);
+      }
       return `{ ${fields.join(", ")} }`;
     })
     .join(", ")}]`;
@@ -268,8 +315,8 @@ function serializeSort(sort: SortKey[]): string {
 function canonicalBody(config: BaseEmbedConfig): string {
   validateBaseEmbedConfig(config);
   const lines = [
-    `base = ${JSON.stringify(config.base)}`,
-    `view = ${JSON.stringify(config.view)}`,
+    `base = ${encodeTomlBasicString(config.base)}`,
+    `view = ${encodeTomlBasicString(config.view)}`,
   ];
   if (config.filter !== undefined) {
     lines.push(`filter = ${serializeFilter(config.filter)}`);
