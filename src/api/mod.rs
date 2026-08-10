@@ -1,4 +1,3 @@
-pub mod conversations;
 pub mod academic;
 pub mod agenda;
 pub mod archive;
@@ -8,6 +7,7 @@ pub mod bases;
 pub mod bcl;
 pub mod blocks;
 pub mod board;
+pub mod conversations;
 pub mod deeplink;
 pub mod encryption;
 pub mod error;

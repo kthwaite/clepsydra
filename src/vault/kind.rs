@@ -227,7 +227,10 @@ mod tests {
             Kind::from_folder("conversations"),
             Some(Kind::AiConversation)
         );
-        assert_eq!(Kind::from_folder("conversation"), Some(Kind::AiConversation));
+        assert_eq!(
+            Kind::from_folder("conversation"),
+            Some(Kind::AiConversation)
+        );
         assert_eq!(Kind::from_folder("chats"), Some(Kind::AiConversation));
     }
 

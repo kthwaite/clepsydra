@@ -522,16 +522,18 @@ mod tests {
                 .paths
                 .contains_key("/api/vault/attachments/{path}")
         );
-        assert!(spec
-            .paths
-            .paths
-            .contains_key("/api/vault/conversations/capture"));
-        assert!(spec
-            .components
-            .as_ref()
-            .unwrap()
-            .schemas
-            .contains_key("CaptureConversationResponse"));
+        assert!(
+            spec.paths
+                .paths
+                .contains_key("/api/vault/conversations/capture")
+        );
+        assert!(
+            spec.components
+                .as_ref()
+                .unwrap()
+                .schemas
+                .contains_key("CaptureConversationResponse")
+        );
     }
 
     #[test]

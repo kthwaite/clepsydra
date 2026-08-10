@@ -320,7 +320,8 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
     // Conversation identity and ledger hashes are operational metadata, not
     // public page metadata. Keep ordinary reads non-destructive by sanitizing
     // only this response-owned copy.
-    meta.extra.remove(crate::vault::conversation::CONVERSATION_META_KEY);
+    meta.extra
+        .remove(crate::vault::conversation::CONVERSATION_META_KEY);
     PageDetail {
         path: page.path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),

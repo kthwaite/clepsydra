@@ -1169,7 +1169,10 @@ mod tests {
             }))
             .await
             .expect("second capture should append");
-        assert!(appended.contains(r#""operation": "appended""#), "{appended}");
+        assert!(
+            appended.contains(r#""operation": "appended""#),
+            "{appended}"
+        );
         assert!(!appended.contains("mcp-host-id"), "{appended}");
     }
 

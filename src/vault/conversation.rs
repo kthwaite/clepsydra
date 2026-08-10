@@ -86,7 +86,9 @@ pub enum ConversationError {
     ProviderConflict,
     #[error("submitted transcript host identity differs from the stored conversation")]
     HostIdentityConflict,
-    #[error("submitted transcript has {submitted} turns but the stored conversation has {existing}")]
+    #[error(
+        "submitted transcript has {submitted} turns but the stored conversation has {existing}"
+    )]
     TruncatedTranscript { existing: u64, submitted: u64 },
     #[error("submitted transcript diverges from the stored conversation at sequence {sequence}")]
     DivergentTranscript { sequence: u64 },
@@ -99,19 +101,16 @@ pub fn normalize_provider(raw: Option<&str>) -> Result<Option<String>, Conversat
     let normalized = raw.trim().to_ascii_lowercase();
     if normalized.is_empty()
         || normalized.len() > 64
-        || !normalized
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte))
+        || !normalized.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+        })
     {
         return Err(ConversationError::InvalidProvider);
     }
     Ok(Some(normalized))
 }
 
-pub fn host_identity_hash(
-    provider: &str,
-    host_id: &str,
-) -> Result<String, ConversationError> {
+pub fn host_identity_hash(provider: &str, host_id: &str) -> Result<String, ConversationError> {
     let provider = normalize_provider(Some(provider))?
         .expect("normalizing a supplied provider always returns Some");
     if host_id.trim().is_empty() {
@@ -234,8 +233,9 @@ pub fn verify_append(
         });
     }
 
-    let existing_count = usize::try_from(existing.captured_turn_count)
-        .map_err(|_| ConversationError::InvalidLedger("turn count exceeds platform limits".into()))?;
+    let existing_count = usize::try_from(existing.captured_turn_count).map_err(|_| {
+        ConversationError::InvalidLedger("turn count exceeds platform limits".into())
+    })?;
     if existing_count > 0
         && submitted.prefix_hashes[existing_count - 1] != existing.captured_prefix_hash
     {
@@ -364,9 +364,7 @@ fn turn_identity(
     hash_string(digest)
 }
 
-fn validate_prepared_transcript(
-    transcript: &PreparedTranscript,
-) -> Result<(), ConversationError> {
+fn validate_prepared_transcript(transcript: &PreparedTranscript) -> Result<(), ConversationError> {
     let turn_count = usize::try_from(transcript.ledger.captured_turn_count).map_err(|_| {
         ConversationError::InvalidTranscript("turn count exceeds platform limits".into())
     })?;
@@ -435,8 +433,7 @@ fn validate_ledger(ledger: &ConversationLedger) -> Result<(), ConversationError>
             ));
         }
     } else {
-        validate_sha256(&ledger.last_source_identity)
-            .map_err(ConversationError::InvalidLedger)?;
+        validate_sha256(&ledger.last_source_identity).map_err(ConversationError::InvalidLedger)?;
     }
     Ok(())
 }
@@ -633,7 +630,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(transcript.turns[0].source_identity, transcript.turns[1].source_identity);
+        assert_eq!(
+            transcript.turns[0].source_identity,
+            transcript.turns[1].source_identity
+        );
         assert_eq!(transcript.turns[0].source_sequence, 1);
         assert_eq!(transcript.turns[1].source_sequence, 2);
         assert_ne!(transcript.prefix_hashes[0], transcript.prefix_hashes[1]);

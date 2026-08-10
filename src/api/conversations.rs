@@ -19,9 +19,7 @@ use crate::vault::conversation::{
     verify_append, write_ledger,
 };
 use crate::vault::kind::Kind;
-use crate::vault::mutation_coordinator::{
-    CreatePageCommand, ProjectAssignment, UpdatePageCommand,
-};
+use crate::vault::mutation_coordinator::{CreatePageCommand, ProjectAssignment, UpdatePageCommand};
 use crate::vault::new_note::build_projected_note_path;
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
@@ -242,7 +240,8 @@ async fn find_identity_paths(
                    AND json_extract(pp.value_json, '$.host_id_hash') = ?2
                  ORDER BY p.path",
             )?;
-            let rows = statement.query_map(params![provider, hash], |row| row.get::<_, String>(0))?;
+            let rows =
+                statement.query_map(params![provider, hash], |row| row.get::<_, String>(0))?;
             rows.collect::<Result<Vec<_>, _>>()
         })
         .await
@@ -250,8 +249,9 @@ async fn find_identity_paths(
         .map_err(|error| ApiError::internal(error.to_string()))?;
     rows.into_iter()
         .map(|path| {
-            VaultPath::new(&path)
-                .map_err(|error| ApiError::internal(format!("invalid indexed conversation path: {error}")))
+            VaultPath::new(&path).map_err(|error| {
+                ApiError::internal(format!("invalid indexed conversation path: {error}"))
+            })
         })
         .collect()
 }
@@ -262,16 +262,21 @@ async fn capture_existing(
     request: PreparedRequest,
 ) -> Result<Response, ApiError> {
     let absolute = state.vault.resolve(&path);
-    let page = Page::from_file(&absolute, path.clone())
-        .map_err(|error| ApiError::internal(format!("failed to read conversation page: {error}")))?;
+    let page = Page::from_file(&absolute, path.clone()).map_err(|error| {
+        ApiError::internal(format!("failed to read conversation page: {error}"))
+    })?;
     if page.is_encrypted() {
-        return Err(ApiError::conflict("matching conversation page is protected"));
+        return Err(ApiError::conflict(
+            "matching conversation page is protected",
+        ));
     }
     let existing = read_ledger(&page.meta)
         .map_err(|error| ApiError::internal(error.to_string()))?
-        .ok_or_else(|| ApiError::internal("matching conversation page has no conversation ledger"))?;
-    let decision = verify_append(&existing, &request.prepared)
-        .map_err(conversation_decision_error)?;
+        .ok_or_else(|| {
+            ApiError::internal("matching conversation page has no conversation ledger")
+        })?;
+    let decision =
+        verify_append(&existing, &request.prepared).map_err(conversation_decision_error)?;
     let existing_count = usize::try_from(existing.captured_turn_count)
         .map_err(|_| ApiError::internal("conversation turn count exceeds platform limits"))?;
     match decision {

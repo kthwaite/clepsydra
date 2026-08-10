@@ -127,20 +127,30 @@ async fn creates_conversation_under_conversations_with_declared_kind() {
     let file = tmp.path().join("vault").join(path);
     let page = Page::from_file(&file, VaultPath::new(path).unwrap()).unwrap();
     assert_eq!(page.meta.kind, Some(Kind::AiConversation));
-    assert_eq!(page.meta.extra["conversation"]["provider"].as_str(), Some("claude"));
+    assert_eq!(
+        page.meta.extra["conversation"]["provider"].as_str(),
+        Some("claude")
+    );
 }
 
 #[tokio::test]
 async fn response_contains_provider_summary_and_counts() {
     let (server, _tmp) = setup_server();
-    let (status, body) = capture(&server, payload(turns(&[("user", "Hello"), ("assistant", "Hi")]))).await;
+    let (status, body) = capture(
+        &server,
+        payload(turns(&[("user", "Hello"), ("assistant", "Hi")])),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["operation"], "created");
     assert_eq!(body["appended_turns"], 2);
     assert_eq!(body["skipped_turns"], 0);
 
     let detail: Value = server
-        .get(&format!("/api/vault/pages/{}", body["path"].as_str().unwrap()))
+        .get(&format!(
+            "/api/vault/pages/{}",
+            body["path"].as_str().unwrap()
+        ))
         .await
         .json();
     assert_eq!(detail["conversation"]["provider"], "claude");
@@ -201,10 +211,12 @@ async fn property_patch_rejects_conversation_ledger_mutation() {
             .json(&patch)
             .await
             .assert_status(StatusCode::BAD_REQUEST);
-        assert_eq!(fs::read(tmp.path().join("vault").join(path)).unwrap(), before);
+        assert_eq!(
+            fs::read(tmp.path().join("vault").join(path)).unwrap(),
+            before
+        );
     }
 }
-
 
 #[tokio::test]
 async fn query_and_base_views_redact_conversation_ledger() {
@@ -227,9 +239,7 @@ async fn query_and_base_views_redact_conversation_ledger() {
         .await;
     query_response.assert_status_ok();
     let query: Value = query_response.json();
-    let view_response = server
-        .get("/api/vault/bases/public/views/All")
-        .await;
+    let view_response = server.get("/api/vault/bases/public/views/All").await;
     view_response.assert_status_ok();
     let view: Value = view_response.json();
     for response in [query, view] {
@@ -244,7 +254,7 @@ async fn query_and_base_views_redact_conversation_ledger() {
 async fn identical_recapture_is_unchanged_without_second_notification() {
     let (server, _tmp, state) = setup_server_with_state();
     let mut changes = state.change_tx.subscribe();
-    let body = payload(turns(&[("user", "Hello")])) ;
+    let body = payload(turns(&[("user", "Hello")]));
     let (status, _created) = capture(&server, body.clone()).await;
     assert_eq!(status, StatusCode::CREATED);
     recv_change(&mut changes).await;
@@ -263,14 +273,19 @@ async fn complete_prefix_capture_appends_one_suffix_turn() {
     assert_eq!(first_status, StatusCode::CREATED);
     let (status, appended) = capture(
         &server,
-        payload(turns(&[("user", "Hello"), ("assistant", "Hi")])) ,
+        payload(turns(&[("user", "Hello"), ("assistant", "Hi")])),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(appended["operation"], "appended");
     assert_eq!(appended["appended_turns"], 1);
     assert_eq!(appended["skipped_turns"], 1);
-    let bytes = fs::read_to_string(tmp.path().join("vault").join(first["path"].as_str().unwrap())).unwrap();
+    let bytes = fs::read_to_string(
+        tmp.path()
+            .join("vault")
+            .join(first["path"].as_str().unwrap()),
+    )
+    .unwrap();
     assert!(bytes.contains("> Hi"));
 }
 
@@ -282,7 +297,11 @@ async fn edited_existing_body_remains_edited_after_append() {
     let page = read_page(&state, path);
     let edited = page.raw_content.replacen("> Hello", "> Hello (edited)", 1);
     fs::write(tmp.path().join("vault").join(path), edited).unwrap();
-    let (status, appended) = capture(&server, payload(turns(&[("user", "Hello"), ("assistant", "Hi")]))).await;
+    let (status, appended) = capture(
+        &server,
+        payload(turns(&[("user", "Hello"), ("assistant", "Hi")])),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(appended["operation"], "appended");
     let bytes = fs::read_to_string(tmp.path().join("vault").join(path)).unwrap();
@@ -293,15 +312,29 @@ async fn edited_existing_body_remains_edited_after_append() {
 #[tokio::test]
 async fn truncated_or_divergent_transcript_returns_conflict_without_writing() {
     let (server, tmp, state) = setup_server_with_state();
-    let (_status, first) = capture(&server, payload(turns(&[("user", "Hello"), ("assistant", "Hi")]))).await;
+    let (_status, first) = capture(
+        &server,
+        payload(turns(&[("user", "Hello"), ("assistant", "Hi")])),
+    )
+    .await;
     let path = first["path"].as_str().unwrap();
     let original = fs::read(tmp.path().join("vault").join(path)).unwrap();
     let (status, _) = capture(&server, payload(turns(&[("user", "Hello")]))).await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(fs::read(tmp.path().join("vault").join(path)).unwrap(), original);
-    let (status, _) = capture(&server, payload(turns(&[("user", "Different"), ("assistant", "Hi")]))).await;
+    assert_eq!(
+        fs::read(tmp.path().join("vault").join(path)).unwrap(),
+        original
+    );
+    let (status, _) = capture(
+        &server,
+        payload(turns(&[("user", "Different"), ("assistant", "Hi")])),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(fs::read(tmp.path().join("vault").join(path)).unwrap(), original);
+    assert_eq!(
+        fs::read(tmp.path().join("vault").join(path)).unwrap(),
+        original
+    );
     let _ = state;
 }
 
@@ -315,7 +348,10 @@ async fn no_host_id_creates_new_page_every_time() {
     assert_eq!(first_status, StatusCode::CREATED);
     assert_eq!(second_status, StatusCode::CREATED);
     assert_ne!(first["path"], second["path"]);
-    assert_eq!(files_under(&tmp.path().join("vault"), "conversations").len(), 2);
+    assert_eq!(
+        files_under(&tmp.path().join("vault"), "conversations").len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -369,7 +405,12 @@ async fn duplicate_exact_identity_pages_return_conflict() {
     let transcript = prepare_transcript(
         Some(provider),
         Some(host_hash.clone()),
-        &[ConversationTurn { role: ConversationRole::User, content: "Hello".into(), source_turn_id: Some("turn-1".into()), timestamp: None }],
+        &[ConversationTurn {
+            role: ConversationRole::User,
+            content: "Hello".into(),
+            source_turn_id: Some("turn-1".into()),
+            timestamp: None,
+        }],
     )
     .unwrap();
     let ledger = toml::Value::try_from(&transcript.ledger).unwrap();
@@ -377,14 +418,27 @@ async fn duplicate_exact_identity_pages_return_conflict() {
     let captured_prefix_hash = ledger["captured_prefix_hash"].as_str().unwrap().to_owned();
     let last_source_identity = ledger["last_source_identity"].as_str().unwrap().to_owned();
     let source_identity = transcript.turns[0].source_identity.clone();
-    let page = move |id: &str| format!(
-        "+++\nid = \"{id}\"\ntitle = \"Conversation about capture semantics\"\ntype = \"AI_CONVERSATION\"\n[conversation]\nprovider = \"claude\"\nhost_id_hash = \"{host_hash}\"\ncaptured_turn_count = {captured_turn_count}\ncaptured_prefix_hash = \"{captured_prefix_hash}\"\nlast_source_identity = \"{last_source_identity}\"\n+++\n> [!AI-USER source={source_identity} sequence=1]\n> Hello\n",
-    );
-    let (server, _tmp) = fixture_builder().pre_index_seed(move |root| {
-        fs::create_dir_all(root.join("conversations")).unwrap();
-        fs::write(root.join("conversations/one.md"), page("01951234-0000-7000-8000-000000000001")).unwrap();
-        fs::write(root.join("conversations/two.md"), page("01951234-0000-7000-8000-000000000002")).unwrap();
-    }).build().into_server_and_temp();
+    let page = move |id: &str| {
+        format!(
+            "+++\nid = \"{id}\"\ntitle = \"Conversation about capture semantics\"\ntype = \"AI_CONVERSATION\"\n[conversation]\nprovider = \"claude\"\nhost_id_hash = \"{host_hash}\"\ncaptured_turn_count = {captured_turn_count}\ncaptured_prefix_hash = \"{captured_prefix_hash}\"\nlast_source_identity = \"{last_source_identity}\"\n+++\n> [!AI-USER source={source_identity} sequence=1]\n> Hello\n",
+        )
+    };
+    let (server, _tmp) = fixture_builder()
+        .pre_index_seed(move |root| {
+            fs::create_dir_all(root.join("conversations")).unwrap();
+            fs::write(
+                root.join("conversations/one.md"),
+                page("01951234-0000-7000-8000-000000000001"),
+            )
+            .unwrap();
+            fs::write(
+                root.join("conversations/two.md"),
+                page("01951234-0000-7000-8000-000000000002"),
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
     let (status, _) = capture(&server, payload(turns(&[("user", "Hello")]))).await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
@@ -394,19 +448,29 @@ async fn protected_matching_page_returns_conflict() {
     let provider = "claude";
     let host_hash = host_identity_hash(provider, RAW_HOST_ID).unwrap();
     let transcript = prepare_transcript(
-        Some(provider), Some(host_hash.clone()),
-        &[ConversationTurn { role: ConversationRole::User, content: "Hello".into(), source_turn_id: Some("turn-1".into()), timestamp: None }],
-    ).unwrap();
+        Some(provider),
+        Some(host_hash.clone()),
+        &[ConversationTurn {
+            role: ConversationRole::User,
+            content: "Hello".into(),
+            source_turn_id: Some("turn-1".into()),
+            timestamp: None,
+        }],
+    )
+    .unwrap();
     let ledger = &transcript.ledger;
     let armor = include_str!("support/fixtures/private-note.age");
     let page = format!(
         "+++\nid = \"01951234-0000-7000-8000-000000000003\"\ntitle = \"Protected\"\ntype = \"AI_CONVERSATION\"\nencryption = {{ format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }}\n[conversation]\nprovider = \"claude\"\nhost_id_hash = \"{host_hash}\"\ncaptured_turn_count = {}\ncaptured_prefix_hash = \"{}\"\nlast_source_identity = \"{}\"\n+++\n{armor}",
         ledger.captured_turn_count, ledger.captured_prefix_hash, ledger.last_source_identity
     );
-    let (server, _tmp) = fixture_builder().pre_index_seed(move |root| {
-        fs::create_dir_all(root.join("conversations")).unwrap();
-        fs::write(root.join("conversations/protected.md"), page).unwrap();
-    }).build().into_server_and_temp();
+    let (server, _tmp) = fixture_builder()
+        .pre_index_seed(move |root| {
+            fs::create_dir_all(root.join("conversations")).unwrap();
+            fs::write(root.join("conversations/protected.md"), page).unwrap();
+        })
+        .build()
+        .into_server_and_temp();
     let (status, _) = capture(&server, payload(turns(&[("user", "Hello")]))).await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
@@ -422,17 +486,27 @@ async fn concurrent_first_captures_for_identity_do_not_duplicate() {
         capture(&server_left, body.clone()),
         capture(&server_right, body)
     );
-    assert!([first.0, second.0]
-        .iter()
-        .all(|status| *status == StatusCode::CREATED || *status == StatusCode::OK));
+    assert!(
+        [first.0, second.0]
+            .iter()
+            .all(|status| *status == StatusCode::CREATED || *status == StatusCode::OK)
+    );
     let operations = [
         first.1["operation"].as_str().unwrap(),
         second.1["operation"].as_str().unwrap(),
     ];
-    println!("concurrent responses: {:?} {:?}, ops {:?}", first.1, second.1, operations);
+    println!(
+        "concurrent responses: {:?} {:?}, ops {:?}",
+        first.1, second.1, operations
+    );
     assert!(operations.iter().any(|operation| *operation == "created"));
-    assert!(operations
-        .iter()
-        .any(|operation| *operation == "unchanged" || *operation == "appended"));
-    assert_eq!(files_under(&tmp.path().join("vault"), "conversations").len(), 1);
+    assert!(
+        operations
+            .iter()
+            .any(|operation| *operation == "unchanged" || *operation == "appended")
+    );
+    assert_eq!(
+        files_under(&tmp.path().join("vault"), "conversations").len(),
+        1
+    );
 }
