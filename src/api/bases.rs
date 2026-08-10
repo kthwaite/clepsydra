@@ -8,11 +8,12 @@
 
 use std::sync::Arc;
 
-use axum::Json;
-use axum::Router;
-use axum::extract::{Path, Query, State};
+use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -20,13 +21,18 @@ use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
-    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, SortDir,
+    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter, SortDir,
     SortKey, ViewDefinition, validate_definition,
 };
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
-use crate::vault::base_member::{BaseMemberCapability, creation_capabilities};
-use crate::vault::base_embed::composed_query_spec;
+use crate::vault::base_embed::{
+    EmbedOverrides, EmbedValidationDiagnostic, composed_query_spec, validate_embed_overrides,
+};
+use crate::vault::base_member::{
+    BaseMemberCapability, BaseMemberDiagnostic, BaseMemberScope, composed_member_capability,
+    creation_capabilities,
+};
 use crate::vault::query::{GroupRowLimit, QueryContext, QueryOutput, QuerySpec, evaluate};
 
 /// One entry in the registry listing.
@@ -118,6 +124,115 @@ pub struct BasePreviewResponse {
     pub diagnostics: Vec<BaseDiagnostic>,
     pub output: Option<QueryOutput>,
     pub evaluation_error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BaseViewEvaluateRequest {
+    pub filter: Option<Filter>,
+    #[schema(max_items = 8)]
+    pub sort: Option<Vec<SortKey>>,
+    #[schema(minimum = 1, maximum = 200)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BaseViewEvaluateResponse {
+    pub output: QueryOutput,
+    pub revision: String,
+    pub member_creation: BaseMemberCapability,
+}
+
+struct PreparedEmbeddedEvaluation {
+    base: BaseDefinition,
+    spec: QuerySpec,
+    revision: String,
+    member_creation: BaseMemberCapability,
+}
+
+fn prepare_embedded_evaluation<L>(
+    root: &std::path::Path,
+    slug: &str,
+    view_name: &str,
+    request: BaseViewEvaluateRequest,
+    load: L,
+) -> Result<PreparedEmbeddedEvaluation, ApiError>
+where
+    L: FnOnce(&std::path::Path, &str) -> Result<StoredBase, BaseDocumentError>,
+{
+    let stored = load(root, slug).map_err(embedded_document_error)?;
+    let view = stored.definition.view(view_name).cloned().ok_or_else(|| {
+        ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
+    })?;
+    validate_embed_overrides(
+        &stored.definition,
+        EmbedOverrides {
+            filter: request.filter.as_ref(),
+            sort: request.sort.as_deref(),
+            limit: request.limit,
+        },
+    )
+    .map_err(|diagnostics| {
+        ApiError::invalid_embed_query(
+            diagnostics
+                .into_iter()
+                .map(public_embed_diagnostic)
+                .collect(),
+        )
+    })?;
+
+    let member_creation =
+        composed_member_capability(&stored.definition, &view, request.filter.as_ref());
+    let spec = composed_query_spec(
+        &stored.definition,
+        &view,
+        request.filter,
+        request.sort,
+        request.limit,
+    );
+
+    Ok(PreparedEmbeddedEvaluation {
+        base: stored.definition,
+        spec,
+        revision: stored.revision,
+        member_creation,
+    })
+}
+
+fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {
+    let filter_path = diagnostic.filter_path.map(|path| {
+        path.strip_prefix("filter").map_or(path.clone(), |suffix| {
+            format!("embed_filter{suffix}")
+        })
+    });
+    BaseMemberDiagnostic {
+        scope: BaseMemberScope::Embed,
+        field: diagnostic.field,
+        filter_path,
+        message: diagnostic.message,
+    }
+}
+
+fn embedded_document_error(error: BaseDocumentError) -> ApiError {
+    match error {
+        BaseDocumentError::InvalidSlug(_) => ApiError::bad_request("invalid base reference"),
+        BaseDocumentError::NotFound(slug) => {
+            ApiError::not_found(format!("no base with slug `{slug}`"))
+        }
+        error @ (BaseDocumentError::UnsupportedDocument(_)
+        | BaseDocumentError::InvalidDefinition(_)) => {
+            tracing::warn!(error = ?error, error_display = %error, "Base definition unavailable");
+            ApiError::conflict("base definition is unavailable")
+        }
+        error @ (BaseDocumentError::Io(_)
+        | BaseDocumentError::PublishedButNotDurable(_)
+        | BaseDocumentError::AlreadyExists(_)
+        | BaseDocumentError::Conflict { .. }) => internal_evaluation_error(error),
+    }
+}
+
+fn internal_evaluation_error(error: impl std::fmt::Debug + std::fmt::Display) -> ApiError {
+    tracing::error!(error = ?error, error_display = %error, "Base view evaluation failed");
+    ApiError::internal("base evaluation failed")
 }
 
 fn query_spec(
@@ -466,6 +581,66 @@ pub async fn evaluate_view(
     Ok(Json(output))
 }
 
+/// Evaluate a saved view with request-owned embed overrides.
+#[utoipa::path(
+    post,
+    path = "/{slug}/views/{view}/evaluate",
+    context_path = "/api/vault/bases",
+    tag = "Bases",
+    params(
+        ("slug" = String, Path, description = "Base slug"),
+        ("view" = String, Path, description = "Saved view name")
+    ),
+    request_body = BaseViewEvaluateRequest,
+    responses(
+        (status = 200, body = BaseViewEvaluateResponse),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError),
+        (status = 500, body = ApiError)
+    )
+)]
+pub async fn evaluate_embedded_view(
+    State(state): State<Arc<AppState>>,
+    Path((slug, view_name)): Path<(String, String)>,
+    payload: Result<Bytes, BytesRejection>,
+) -> Result<Json<BaseViewEvaluateResponse>, ApiError> {
+    let bytes = payload.map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
+    let request = serde_json::from_slice(&bytes)
+        .map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
+    let prepared = prepare_embedded_evaluation(
+        state.vault.root(),
+        &slug,
+        &view_name,
+        request,
+        base_document::load,
+    )?;
+    let PreparedEmbeddedEvaluation {
+        base,
+        spec,
+        revision,
+        member_creation,
+    } = prepared;
+    let output = state
+        .index
+        .with_index(move |index, _vault| {
+            evaluate(
+                index.connection(),
+                &spec,
+                &QueryContext::for_base(&base),
+            )
+        })
+        .await
+        .map_err(internal_evaluation_error)?
+        .map_err(internal_evaluation_error)?;
+
+    Ok(Json(BaseViewEvaluateResponse {
+        output,
+        revision,
+        member_creation,
+    }))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_bases).post(create_base))
@@ -476,6 +651,10 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/{slug}/views/{view}", get(evaluate_view))
         .route(
+            "/{slug}/views/{view}/evaluate",
+            post(evaluate_embedded_view).layer(DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             "/{slug}/members",
             post(super::base_members::create_base_member),
         )
@@ -483,10 +662,12 @@ pub fn router() -> Router<Arc<AppState>> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::io;
 
-    use super::document_error;
-    use crate::vault::base_document::BaseDocumentError;
+    use super::{BaseViewEvaluateRequest, document_error, prepare_embedded_evaluation};
+    use crate::vault::base::{BaseDefinition, BaseFile, Filter, Op, ViewDefinition};
+    use crate::vault::base_document::{BaseDocumentError, StoredBase};
 
     #[test]
     fn published_but_not_durable_maps_to_distinct_internal_error() {
@@ -501,5 +682,60 @@ mod tests {
         );
         assert_eq!(error.detail, None);
         assert_eq!(error.hint, None);
+    }
+
+    #[test]
+    fn evaluate_embedded_preparation_loads_exactly_one_snapshot() {
+        let calls = Cell::new(0);
+        let snapshot = StoredBase {
+            definition: BaseDefinition {
+                slug: "embedded".to_string(),
+                file: BaseFile {
+                    name: "Snapshot".to_string(),
+                    description: None,
+                    filter: None,
+                    properties: Vec::new(),
+                    views: vec![ViewDefinition {
+                        name: "Configured View".to_string(),
+                        layout: "table".to_string(),
+                        filter: None,
+                        sort: Vec::new(),
+                        group_by: None,
+                        aggregates: Vec::new(),
+                        columns: vec!["title".to_string()],
+                    }],
+                },
+            },
+            diagnostics: Vec::new(),
+            revision: "snapshot-revision".to_string(),
+        };
+        let request = BaseViewEvaluateRequest {
+            filter: Some(Filter::Cmp {
+                field: "title".to_string(),
+                op: Op::Eq,
+                value: serde_json::json!("Snapshot"),
+            }),
+            sort: None,
+            limit: Some(1),
+        };
+
+        let prepared = prepare_embedded_evaluation(
+            std::path::Path::new("unused"),
+            "embedded",
+            "CONFIGURED VIEW",
+            request,
+            |_, _| {
+                calls.set(calls.get() + 1);
+                Ok(snapshot)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(prepared.base.file.name, "Snapshot");
+        assert_eq!(prepared.revision, "snapshot-revision");
+        assert_eq!(prepared.member_creation.view, "Configured View");
+        assert_eq!(prepared.spec.columns, vec!["title"]);
+        assert_eq!(prepared.spec.limit, Some(1));
     }
 }

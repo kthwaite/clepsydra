@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
-use axum::http::StatusCode;
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode};
 use clepsydra::api::Clock;
 use clepsydra::api::events::SyncNotification;
 use clepsydra::api::openapi::ApiDoc;
@@ -14,6 +15,7 @@ use clepsydra::vault::base_document;
 use support::ApiFixture;
 use tokio::sync::broadcast::error::TryRecvError;
 use utoipa::OpenApi;
+use tower::ServiceExt;
 
 const READING_BASE: &str = r#"
 name = "Reading Log"
@@ -121,6 +123,37 @@ async fn indexed_page_count(fixture: &ApiFixture) -> i64 {
         .await
         .unwrap()
 }
+async fn raw_embed_evaluation(
+    fixture: &ApiFixture,
+    body: Vec<u8>,
+) -> (StatusCode, serde_json::Value) {
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(
+            Request::post("/api/vault/bases/embedded/views/reading/evaluate")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = serde_json::from_slice(&bytes).unwrap();
+    (status, body)
+}
+
+fn canonical_invalid_embed_query() -> serde_json::Value {
+    serde_json::json!({
+        "status": 400,
+        "error": "invalid embed query",
+        "detail": {
+            "code": "invalid_embed_query",
+            "diagnostics": []
+        }
+    })
+}
 
 fn seed_identity_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
@@ -193,6 +226,96 @@ columns = ["title", "rating"]
             index + 1
         );
         fs::write(root.join(format!("group-{index:02}.md")), page).unwrap();
+    }
+}
+fn seed_embed_evaluation(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/embedded.base.toml"),
+        r#"
+name = "Embedded"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+
+[properties]
+status = { type = "select", options = ["reading", "queued"] }
+rating = { type = "number" }
+featured = { type = "bool" }
+started = { type = "date" }
+series = { type = "relation" }
+
+[[views]]
+name = "Reading"
+layout = "table"
+filter = { field = "status", op = "eq", value = "reading" }
+sort = [ { field = "started", dir = "desc" } ]
+columns = ["title", "rating", "featured", "series"]
+
+[[views]]
+name = "By Status"
+layout = "table"
+group_by = "status"
+sort = [ { field = "rating", dir = "desc" } ]
+aggregates = [ { fn = "count" }, { fn = "sum", field = "rating" } ]
+columns = ["title", "rating"]
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("solar-cycle.md"),
+        "+++\nid = \"0190f8a0-0000-7000-8000-0000000000f1\"\ntitle = \"Solar Cycle\"\naliases = [\"Science Fiction\"]\ntype = \"NOTE\"\n+++\n",
+    )
+    .unwrap();
+    for (path, id, title, status, rating, featured, started, series) in [
+        (
+            "a.md",
+            "0190f8a0-0000-7000-8000-0000000000a1",
+            "Zulu",
+            "reading",
+            10,
+            true,
+            "2026-01-01",
+            Some("[[Solar Cycle]]"),
+        ),
+        (
+            "b.md",
+            "0190f8a0-0000-7000-8000-0000000000b1",
+            "Alpha",
+            "reading",
+            7,
+            false,
+            "2026-03-01",
+            Some("[[Science Fiction]]"),
+        ),
+        (
+            "d.md",
+            "0190f8a0-0000-7000-8000-0000000000d1",
+            "Middle",
+            "reading",
+            10,
+            false,
+            "2026-02-01",
+            None,
+        ),
+        (
+            "c.md",
+            "0190f8a0-0000-7000-8000-0000000000c1",
+            "Queued",
+            "queued",
+            10,
+            true,
+            "2026-04-01",
+            Some("[[Solar Cycle]]"),
+        ),
+    ] {
+        let series = series.map_or_else(String::new, |value| format!("series = \"{value}\"\n"));
+        fs::write(
+            root.join(path),
+            format!(
+                "+++\nid = \"{id}\"\ntitle = \"{title}\"\ntype = \"BOOK\"\nstatus = \"{status}\"\nrating = {rating}\nfeatured = {featured}\nstarted = {started}\n{series}+++\nbody\n"
+            ),
+        )
+        .unwrap();
     }
 }
 
@@ -749,6 +872,414 @@ async fn grouped_saved_view_without_limit_keeps_default_fifty_row_cap() {
     assert_eq!(groups[0]["rows"].as_array().unwrap().len(), 50);
     assert_eq!(groups[0]["total"], 55);
     assert_eq!(groups[0]["aggregates"], serde_json::json!([55, 1540.0]));
+}
+#[tokio::test]
+async fn evaluate_embedded_flat_composes_typed_relation_and_logical_filters() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+    let expected_revision = base_document::revision(
+        &fs::read_to_string(
+            fixture
+                .state
+                .vault
+                .root()
+                .join("bases/embedded.base.toml"),
+        )
+        .unwrap(),
+    );
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/embedded/views/rEaDiNg/evaluate")
+        .json(&serde_json::json!({
+            "filter": {
+                "all": [
+                    { "field": "rating", "op": "gte", "value": 10 },
+                    { "field": "started", "op": "gte", "value": "2026-01-01" },
+                    {
+                        "any": [
+                            { "field": "featured", "op": "eq", "value": true },
+                            {
+                                "field": "series",
+                                "op": "links_to",
+                                "value": "Science Fiction"
+                            }
+                        ]
+                    },
+                    {
+                        "not": {
+                            "field": "title",
+                            "op": "eq",
+                            "value": "Never"
+                        }
+                    }
+                ]
+            }
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(
+        body.as_object().unwrap().keys().collect::<Vec<_>>(),
+        vec!["member_creation", "output", "revision"]
+    );
+    assert_eq!(body["output"]["shape"], "flat");
+    let rows = body["output"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{body}");
+    assert_eq!(rows[0]["path"], "a.md");
+    assert_eq!(body["member_creation"]["view"], "Reading");
+    assert_eq!(body["member_creation"]["enabled"], true);
+    assert_eq!(body["member_creation"]["blockers"], serde_json::json!([]));
+    let requirements = body["member_creation"]["fields"].as_array().unwrap();
+    let embed_fields = requirements
+        .iter()
+        .filter(|field| field["embed"] == true)
+        .map(|field| field["field"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        embed_fields,
+        vec!["rating", "started", "featured", "series", "title"]
+    );
+    assert_eq!(body["revision"], expected_revision);
+    assert!(body.get("diagnostics").is_none(), "{body}");
+}
+
+#[tokio::test]
+async fn evaluate_embedded_capability_blockers_use_embed_scope_without_duplicate_diagnostics() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/embedded/views/reading/evaluate")
+        .json(&serde_json::json!({
+            "filter": {
+                "not": { "field": "word_count", "op": "eq", "value": 0 }
+            }
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["member_creation"]["enabled"], false);
+    let blockers = body["member_creation"]["blockers"].as_array().unwrap();
+    assert_eq!(blockers.len(), 1, "{body}");
+    assert_eq!(blockers[0]["scope"], "embed");
+    assert_eq!(blockers[0]["field"], "word_count");
+    assert_eq!(blockers[0]["filter_path"], "embed_filter.not");
+    assert!(body.get("diagnostics").is_none(), "{body}");
+}
+
+#[tokio::test]
+async fn evaluate_embedded_sort_inheritance_empty_reset_and_replacement_are_exact() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+    let cases = [
+        (serde_json::json!({}), vec!["b.md", "d.md", "a.md"]),
+        (
+            serde_json::json!({ "sort": [] }),
+            vec!["a.md", "b.md", "d.md"],
+        ),
+        (
+            serde_json::json!({
+                "sort": [
+                    { "field": "rating", "dir": "desc" },
+                    { "field": "title", "dir": "asc" }
+                ]
+            }),
+            vec!["d.md", "a.md", "b.md"],
+        ),
+    ];
+
+    for (request, expected_paths) in cases {
+        let body: serde_json::Value = fixture
+            .server
+            .post("/api/vault/bases/embedded/views/Reading/evaluate")
+            .json(&request)
+            .await
+            .json();
+        let paths = body["output"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, expected_paths, "{body}");
+    }
+}
+
+#[tokio::test]
+async fn evaluate_embedded_grouped_limit_is_per_group_and_absence_is_uncapped() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build();
+
+    for (request, expected_rows, expected_total, expected_aggregates) in [
+        (serde_json::json!({}), 55, 55, serde_json::json!([55, 1540.0])),
+        (
+            serde_json::json!({ "limit": 1 }),
+            1,
+            55,
+            serde_json::json!([55, 1540.0]),
+        ),
+        (
+            serde_json::json!({ "limit": 200 }),
+            55,
+            55,
+            serde_json::json!([55, 1540.0]),
+        ),
+        (
+            serde_json::json!({
+                "filter": { "field": "rating", "op": "gt", "value": 50 }
+            }),
+            5,
+            5,
+            serde_json::json!([5, 265.0]),
+        ),
+    ] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/grouped/views/by%20STATUS/evaluate")
+            .json(&request)
+            .await;
+        response.assert_status_ok();
+        let body: serde_json::Value = response.json();
+        let groups = body["output"]["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 1, "{body}");
+        assert_eq!(
+            groups[0]["rows"].as_array().unwrap().len(),
+            expected_rows,
+            "{body}"
+        );
+        assert_eq!(groups[0]["total"], expected_total);
+        assert_eq!(groups[0]["aggregates"], expected_aggregates);
+    }
+}
+
+#[tokio::test]
+async fn evaluate_embedded_flat_accepts_limit_boundaries_and_rejects_out_of_range_limits() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+
+    for (limit, expected_rows) in [(1, 1), (200, 3)] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/embedded/views/reading/evaluate")
+            .json(&serde_json::json!({ "limit": limit }))
+            .await;
+        response.assert_status_ok();
+        let body: serde_json::Value = response.json();
+        assert_eq!(
+            body["output"]["rows"].as_array().unwrap().len(),
+            expected_rows
+        );
+    }
+
+    for limit in [0, 201] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/embedded/views/reading/evaluate")
+            .json(&serde_json::json!({ "limit": limit }))
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let error: serde_json::Value = response.json();
+        assert_eq!(error["status"], 400);
+        assert_eq!(error["error"], "invalid embed query");
+        assert_eq!(error["detail"]["code"], "invalid_embed_query");
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1, "{error}");
+        assert_eq!(diagnostics[0]["scope"], "embed");
+        assert_eq!(diagnostics[0]["field"], "limit");
+        assert_eq!(diagnostics[0]["filter_path"], serde_json::Value::Null);
+        assert_eq!(
+            diagnostics[0]["message"],
+            "limit must be between 1 and 200"
+        );
+    }
+}
+
+#[tokio::test]
+async fn evaluate_embedded_rejects_unknown_and_duplicate_canonical_sort_fields_once() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+    let cases = [
+        (
+            serde_json::json!({ "sort": [{ "field": "missing", "dir": "asc" }] }),
+            "missing",
+            "unknown field `missing`",
+        ),
+        (
+            serde_json::json!({
+                "sort": [
+                    { "field": "title", "dir": "asc" },
+                    { "field": "sys.title", "dir": "desc" }
+                ]
+            }),
+            "title",
+            "duplicate canonical sort field `title`",
+        ),
+        (
+            serde_json::json!({ "sort": [{ "field": "prop.missing", "dir": "asc" }] }),
+            "missing",
+            "unknown property field `missing`",
+        ),
+    ];
+
+    for (request, field, message) in cases {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/embedded/views/reading/evaluate")
+            .json(&request)
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let error: serde_json::Value = response.json();
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1, "{error}");
+        assert_eq!(diagnostics[0]["scope"], "embed");
+        assert_eq!(diagnostics[0]["field"], field);
+        assert_eq!(diagnostics[0]["filter_path"], serde_json::Value::Null);
+        assert_eq!(diagnostics[0]["message"], message);
+    }
+}
+
+#[tokio::test]
+async fn evaluate_embedded_maps_domain_diagnostics_to_canonical_embed_filter_paths() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+    let cases = [
+        (
+            serde_json::json!({
+                "filter": {
+                    "all": [{ "field": "prop.rating", "op": "eq", "value": "ten" }]
+                }
+            }),
+            "rating",
+            "embed_filter.all[0].value",
+        ),
+        (
+            serde_json::json!({
+                "filter": { "field": "featured", "op": "gt", "value": true }
+            }),
+            "featured",
+            "embed_filter.op",
+        ),
+        (
+            serde_json::json!({
+                "filter": { "field": "series", "op": "links_to", "value": 7 }
+            }),
+            "series",
+            "embed_filter.value",
+        ),
+        (
+            serde_json::json!({
+                "filter": { "field": "prop.missing", "op": "eq", "value": "x" }
+            }),
+            "missing",
+            "embed_filter.field",
+        ),
+    ];
+
+    for (request, field, path) in cases {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/embedded/views/reading/evaluate")
+            .json(&request)
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let error: serde_json::Value = response.json();
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1, "{error}");
+        assert_eq!(diagnostics[0]["scope"], "embed");
+        assert_eq!(diagnostics[0]["field"], field);
+        assert_eq!(diagnostics[0]["filter_path"], path);
+    }
+}
+
+#[tokio::test]
+async fn evaluate_embedded_missing_stale_and_io_failures_do_not_leak_internal_causes() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+
+    fixture
+        .server
+        .post("/api/vault/bases/missing/views/reading/evaluate")
+        .json(&serde_json::json!({}))
+        .await
+        .assert_status_not_found();
+    fixture
+        .server
+        .post("/api/vault/bases/embedded/views/missing/evaluate")
+        .json(&serde_json::json!({}))
+        .await
+        .assert_status_not_found();
+
+    let base_path = fixture
+        .state
+        .vault
+        .root()
+        .join("bases/embedded.base.toml");
+    fs::write(&base_path, "name = = stale syntax").unwrap();
+    let stale = fixture
+        .server
+        .post("/api/vault/bases/embedded/views/reading/evaluate")
+        .json(&serde_json::json!({}))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let stale_error: serde_json::Value = stale.json();
+    assert_eq!(
+        stale_error,
+        serde_json::json!({
+            "status": 409,
+            "error": "base definition is unavailable"
+        })
+    );
+
+    fs::remove_file(&base_path).unwrap();
+    fs::create_dir(&base_path).unwrap();
+    let internal = fixture
+        .server
+        .post("/api/vault/bases/embedded/views/reading/evaluate")
+        .json(&serde_json::json!({}))
+        .await;
+    internal.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let internal_error: serde_json::Value = internal.json();
+    assert_eq!(
+        internal_error,
+        serde_json::json!({
+            "status": 500,
+            "error": "base evaluation failed"
+        })
+    );
+}
+
+#[tokio::test]
+async fn evaluate_embedded_body_bound_and_malformed_json_use_the_canonical_400_envelope() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_embed_evaluation)
+        .build();
+
+    let mut exact = b"{}".to_vec();
+    exact.resize(64 * 1024, b' ');
+    let (status, body) = raw_embed_evaluation(&fixture, exact).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = raw_embed_evaluation(&fixture, b"{".to_vec()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, canonical_invalid_embed_query());
+
+    let mut oversized = b"{}".to_vec();
+    oversized.resize(64 * 1024 + 1, b' ');
+    let (status, body) = raw_embed_evaluation(&fixture, oversized).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, canonical_invalid_embed_query());
 }
 
 #[tokio::test]
