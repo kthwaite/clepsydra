@@ -264,9 +264,61 @@ describe("Folio AI conversation presentation", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Turn 1" }), {
       target: { value: "Read mode mutation" },
     });
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    const browserHandled = fireEvent.keyDown(window, {
+      key: "s",
+      ctrlKey: true,
+    });
+    expect(browserHandled).toBe(false);
     expect(editor.onSlateChange).not.toHaveBeenCalled();
     expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("renders all page mutation surfaces as noninteractive values in Read", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor({
+      tags: ["research"],
+      aliases: ["thread"],
+      project: "atlas",
+    });
+    renderFolio(editor);
+
+    expect(
+      screen.getByRole("heading", { name: "Conversation" }),
+    ).toBeVisible();
+    expect(screen.getByText("research")).toBeVisible();
+    expect(screen.getByText("thread")).toBeVisible();
+    expect(screen.getByText("atlas")).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Page title" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Add tags" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Kind" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Project" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /plaintext · protect/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Manage attachments" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Manage paths" }),
+    ).toBeNull();
+    expect(editor.setTitle).not.toHaveBeenCalled();
+    expect(editor.setTags).not.toHaveBeenCalled();
+    expect(editor.setAliases).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByRole("textbox", { name: "Page title" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Add tags" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Kind" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Project" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /plaintext · protect/i }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Manage paths" })).toBeVisible();
   });
 
   it("enables transcript role and action controls only in Edit", async () => {
