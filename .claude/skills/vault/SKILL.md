@@ -1,11 +1,11 @@
 ---
 name: vault
-description: Work with the clepsydra vault (the personal knowledge base) through the clepsydra-vault MCP tools — capturing notes, creating and editing pages, searching, and filing/organising the digital garden. Use when asked to add something to the vault, capture a thought, find or read notes, tag or file pages, or reorganise vault content.
+description: Use when asked to add or capture something in the clepsydra vault, create or edit pages, search or read notes, tag or file pages, reorganise vault content, or send the current conversation to Clepsydra.
 ---
 
 # Working the clepsydra vault
 
-The vault is a folder of markdown pages with YAML frontmatter, served by
+The vault is a folder of markdown pages with TOML frontmatter, served by
 `clep serve` and operated on through the `clepsydra-vault` MCP tools
 (`vault_*`). The server must be running; if tools report it unreachable,
 tell the user to start `clep serve` — don't fall back to editing vault
@@ -14,10 +14,11 @@ files directly, which bypasses locking, link rewriting, and the index.
 ## Vocabulary
 
 - **Kinds** — every page has exactly one kind, declared in frontmatter
-  (`type:`) or inferred from its top-level folder. Tokens and canonical
+  (`type =`) or inferred from its top-level folder. Tokens and canonical
   folders: NOTE→`notes/`, PROJECT→`projects/`, JOURNAL→`journals/`,
   TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`, CAPTURE→`captures/`,
-  CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`.
+  CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
+  AI_CONVERSATION→`conversations/`.
 - **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
   `aliases`, `project`, `created_at`/`updated_at`.
 - **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or
@@ -33,6 +34,7 @@ files directly, which bypasses locking, link rewriting, and the index.
 | Intent | Tool |
 | --- | --- |
 | Fleeting thought, log entry | `vault_journal_capture` |
+| Current visible conversation | `vault_capture_conversation` — not create |
 | New standalone page | `vault_create_page` |
 | Targeted body change | `vault_edit_page` |
 | Add to a page or a section | `vault_append_page` |
@@ -50,6 +52,20 @@ files directly, which bypasses locking, link rewriting, and the index.
 `vault_journal_capture` (markdown bullet, e.g. `- idea: ...`). Substantial
 input becomes a page: `vault_create_page` with `kind: CAPTURE` if it still
 needs processing, or its real kind if it's already formed.
+
+**Conversation.** “Send this conversation to Clepsydra” means
+`vault_capture_conversation`, never `vault_create_page`: generic creation
+omits the identity and prefix ledger needed for safe append. Send every
+complete visible user/assistant turn in source order, verbatim. Do not
+summarize. Clepsydra cannot retrieve omitted or truncated turns, hidden
+system/developer prompts, tool calls or results, or attachment contents.
+When the host exposes both provider and conversation ID, pass both; the
+server keeps the normalized provider and a derived hash, not the raw host
+ID, then creates once and appends only an exact new suffix. A missing host
+ID creates a new Folio. Report the returned `created`, `appended`, or
+`unchanged` operation. On truncation or divergence conflict, ask the user
+to re-run from a host context containing the complete earlier prefix; never
+fuzzy-match or overwrite.
 
 **Create.** Always `vault_search` first — the note may exist; extend it
 instead of duplicating. Check `vault_tags` and reuse existing tag spellings.
@@ -79,6 +95,8 @@ plain text). For folders, inspect with `vault_tree` before any
 - Don't edit vault files with filesystem tools while the server is running.
 - Don't invent filenames, ids, or kind tokens (valid kinds are listed above).
 - Don't create near-duplicate pages — search, then extend or link instead.
+- Don't use `vault_create_page` for a current conversation; it cannot provide
+  conversation identity, verified-prefix, or safe suffix-append semantics.
 - Don't force-delete or recursively delete without surfacing what will be
   affected to the user first.
 

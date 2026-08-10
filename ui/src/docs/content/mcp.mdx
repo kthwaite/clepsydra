@@ -56,6 +56,7 @@ it trusts the server's own mkcert certificate. It refuses a non-loopback
 | `vault_edit_page` | write | Exact-match string edit of the body, guarded by the current revision |
 | `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
 | `vault_journal_capture` | write | Quick-capture into today's journal |
+| `vault_capture_conversation` | write | Create or safely append a visible user/assistant chat as an `AI_CONVERSATION` Folio |
 | `vault_assign` | organise | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organise | Explicit rename/relocate with link rewriting |
 | `vault_folder` | organise | Create / delete (`recursive` opt-in) / move folders |
@@ -75,6 +76,86 @@ cannot be silently overwritten. `vault_create_page`
 declares kind/project inside the create mutation itself, and its `folder`
 parameter is constrained to locations the metadata-projected layout
 (ADR-0001) would not immediately move the page out of.
+
+## Capture a conversation
+
+Ask the agent directly:
+
+```text
+Send this conversation to Clepsydra.
+Send this conversation to Clepsydra as “AI conversation Folio design”.
+```
+
+Both requests map to `vault_capture_conversation`, not
+`vault_create_page`. Generic page creation does not write the conversation
+identity and prefix ledger, so it cannot safely append later turns to the
+same chat.
+
+The MCP host must expose and send every complete visible user and assistant
+turn in source order, verbatim. Clepsydra does not fetch chat history and
+cannot retrieve omitted or truncated turns, hidden system/developer prompts,
+tool calls or results, or attachment contents. Do not summarize missing
+context or include invented placeholder turns.
+
+The tool arguments are:
+
+| Field | Required | Value |
+| --- | --- | --- |
+| `title` | yes | Non-blank Folio title; used when creation is required |
+| `provider` | no | Host provider, such as `claude`; required with `host_conversation_id` |
+| `host_conversation_id` | no | Stable ID exposed by the host; enables identity lookup with `provider` |
+| `turns` | yes | Non-empty array of complete visible turns in source order |
+| `turns[].role` | yes | Exactly `user` or `assistant` |
+| `turns[].content` | yes | Non-blank visible Markdown, verbatim |
+| `turns[].source_turn_id` | no | Stable turn ID exposed by the host |
+| `turns[].timestamp` | no | RFC 3339 timestamp exposed by the host |
+
+For a three-turn visible chat, valid arguments are:
+
+```json
+{
+  "title": "AI conversation Folio design",
+  "provider": "claude",
+  "host_conversation_id": "host-conversation-42",
+  "turns": [
+    {
+      "role": "user",
+      "content": "What will Read mode do?",
+      "source_turn_id": "turn-1"
+    },
+    {
+      "role": "assistant",
+      "content": "AI conversation Folios open in Read mode; choose Edit to change them.",
+      "source_turn_id": "turn-2"
+    },
+    {
+      "role": "user",
+      "content": "Send this conversation to Clepsydra as “AI conversation Folio design”.",
+      "source_turn_id": "turn-3"
+    }
+  ]
+}
+```
+
+When both identity fields are available, Clepsydra persists the normalized
+provider and a hash derived from the provider and host conversation ID in
+Folio metadata, not the raw host ID; the result omits it too. The first
+capture returns
+`operation: "created"`. A later submission with the same identity and exact
+earlier prefix appends only the new suffix and returns
+`operation: "appended"`; an identical resubmission returns
+`operation: "unchanged"`. The result also reports `path`, `page_id`,
+`appended_turns`, `skipped_turns`, and `warnings`.
+
+Without `host_conversation_id`, each call creates a new Folio. A shorter
+submission or one whose earlier prefix diverges returns a conflict instead
+of guessing. Ask the user to re-run from a host context that contains the
+complete earlier prefix; do not fuzzy-match or overwrite the existing Folio.
+
+AI conversation Folios open in **Read**, a non-mutating editorial transcript
+view. Choose **Edit** to change participant roles or content, reorder, add,
+or remove turns, and save through the normal revision guard. On disk, turns
+remain portable Markdown blockquote callouts.
 
 ## Evaluation
 
