@@ -10,9 +10,7 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::base::{
-    BaseDefinition, Filter, SYSTEM_FIELDS, candidate_link_targets,
-};
+use crate::vault::base::{BaseDefinition, Filter, SYSTEM_FIELDS, candidate_link_targets};
 use crate::vault::base_document;
 use crate::vault::base_embed::{
     EmbedOverrides, EmbedValidationDiagnostic, validate_embed_overrides,
@@ -172,9 +170,7 @@ fn validate_create_embed_filter(
             EmbedValidationDiagnostic {
                 field: None,
                 filter_path: Some("filter".to_owned()),
-                message: format!(
-                    "serialized embed filter exceeds {MAX_EMBED_FILTER_BYTES} bytes"
-                ),
+                message: format!("serialized embed filter exceeds {MAX_EMBED_FILTER_BYTES} bytes"),
             },
         ]));
     }
@@ -189,7 +185,6 @@ fn validate_create_embed_filter(
     )
     .map_err(super::bases::invalid_embed_query)
 }
-
 
 fn is_reserved_field(key: &str) -> bool {
     matches!(

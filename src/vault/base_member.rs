@@ -450,9 +450,7 @@ mod tests {
     use super::*;
     use crate::vault::Vault;
     use crate::vault::base::{BaseDefinition, Op, parse_base};
-    use crate::vault::base_embed::{
-        EmbedOverrides, validate_embed_overrides,
-    };
+    use crate::vault::base_embed::{EmbedOverrides, validate_embed_overrides};
     use crate::vault::index::VaultIndex;
     use crate::vault::kind::Kind;
     use crate::vault::page::PageMeta;
@@ -580,10 +578,7 @@ layout = "table"
         assert!(!capability.enabled);
         assert_eq!(capability.blockers.len(), 1);
         assert_eq!(capability.blockers[0].scope, BaseMemberScope::Embed);
-        assert_eq!(
-            capability.blockers[0].field.as_deref(),
-            Some("word_count")
-        );
+        assert_eq!(capability.blockers[0].field.as_deref(), Some("word_count"));
         assert_eq!(
             capability.blockers[0].filter_path.as_deref(),
             Some("embed_filter.all[0].not")
@@ -618,12 +613,10 @@ layout = "table"
             ))),
         ]);
         let mut meta = PageMeta::new();
-        meta.extra
-            .insert("rating".into(), toml::Value::Float(4.5));
+        meta.extra.insert("rating".into(), toml::Value::Float(4.5));
         meta.extra
             .insert("status".into(), toml::Value::String("reading".into()));
-        meta.extra
-            .insert("done".into(), toml::Value::Boolean(true));
+        meta.extra.insert("done".into(), toml::Value::Boolean(true));
 
         assert!(
             composed_candidate_matches(
@@ -709,10 +702,8 @@ layout = "table"
             "datetime_value".into(),
             toml::Value::Datetime("2026-08-09T12:34:56Z".parse().unwrap()),
         );
-        meta.extra.insert(
-            "select_value".into(),
-            toml::Value::String("reading".into()),
-        );
+        meta.extra
+            .insert("select_value".into(), toml::Value::String("reading".into()));
         meta.extra.insert(
             "multi_value".into(),
             toml::Value::Array(vec![toml::Value::String("memory".into())]),
@@ -739,11 +730,7 @@ layout = "table"
                 serde_json::json!("Alphabet"),
                 serde_json::json!("Other"),
             ),
-            (
-                "number_value",
-                serde_json::json!(7),
-                serde_json::json!(8),
-            ),
+            ("number_value", serde_json::json!(7), serde_json::json!(8)),
             (
                 "bool_value",
                 serde_json::json!(true),
@@ -863,19 +850,10 @@ layout = "table"
                 true,
             ));
         }
-        for target in [
-            "Solar Cycle",
-            "Science Fiction",
-            TARGET_ID,
-            TARGET_MIXED_ID,
-        ] {
+        for target in ["Solar Cycle", "Science Fiction", TARGET_ID, TARGET_MIXED_ID] {
             cases.push((
                 format!("relation_value links_to {target}"),
-                comparison(
-                    "relation_value",
-                    Op::LinksTo,
-                    serde_json::json!(target),
-                ),
+                comparison("relation_value", Op::LinksTo, serde_json::json!(target)),
                 true,
             ));
         }
@@ -930,7 +908,10 @@ layout = "table"
             )
             .is_ok();
 
-            assert_eq!(query_matches, expected, "unexpected query result for {label}");
+            assert_eq!(
+                query_matches, expected,
+                "unexpected query result for {label}"
+            );
             assert_eq!(
                 candidate_matches, query_matches,
                 "candidate/query mismatch for {label}"

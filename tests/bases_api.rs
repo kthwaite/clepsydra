@@ -14,8 +14,8 @@ use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::base_document;
 use support::ApiFixture;
 use tokio::sync::broadcast::error::TryRecvError;
-use utoipa::OpenApi;
 use tower::ServiceExt;
+use utoipa::OpenApi;
 
 const READING_BASE: &str = r#"
 name = "Reading Log"
@@ -900,14 +900,7 @@ async fn evaluate_embedded_flat_composes_typed_relation_and_logical_filters() {
         .pre_index_seed(seed_embed_evaluation)
         .build();
     let expected_revision = base_document::revision(
-        &fs::read_to_string(
-            fixture
-                .state
-                .vault
-                .root()
-                .join("bases/embedded.base.toml"),
-        )
-        .unwrap(),
+        &fs::read_to_string(fixture.state.vault.root().join("bases/embedded.base.toml")).unwrap(),
     );
 
     let response = fixture
@@ -1040,7 +1033,12 @@ async fn evaluate_embedded_grouped_limit_is_per_group_and_absence_is_uncapped() 
         .build();
 
     for (request, expected_rows, expected_total, expected_aggregates) in [
-        (serde_json::json!({}), 55, 55, serde_json::json!([55, 1540.0])),
+        (
+            serde_json::json!({}),
+            55,
+            55,
+            serde_json::json!([55, 1540.0]),
+        ),
         (
             serde_json::json!({ "limit": 1 }),
             1,
@@ -1117,10 +1115,7 @@ async fn evaluate_embedded_flat_accepts_limit_boundaries_and_rejects_out_of_rang
         assert_eq!(diagnostics[0]["scope"], "embed");
         assert_eq!(diagnostics[0]["field"], "limit");
         assert_eq!(diagnostics[0]["filter_path"], serde_json::Value::Null);
-        assert_eq!(
-            diagnostics[0]["message"],
-            "limit must be between 1 and 200"
-        );
+        assert_eq!(diagnostics[0]["message"], "limit must be between 1 and 200");
     }
 }
 
@@ -1242,11 +1237,7 @@ async fn evaluate_embedded_missing_stale_and_io_failures_do_not_leak_internal_ca
         .await
         .assert_status_not_found();
 
-    let base_path = fixture
-        .state
-        .vault
-        .root()
-        .join("bases/embedded.base.toml");
+    let base_path = fixture.state.vault.root().join("bases/embedded.base.toml");
     fs::write(&base_path, "name = = stale syntax").unwrap();
     let stale = fixture
         .server
@@ -2053,10 +2044,7 @@ async fn filtered_member_serialized_filter_enforces_the_exact_64_kib_boundary() 
         .await;
     exact.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
     let exact_error: serde_json::Value = exact.json();
-    assert_eq!(
-        exact_error["detail"]["diagnostics"][0]["scope"],
-        "embed"
-    );
+    assert_eq!(exact_error["detail"]["diagnostics"][0]["scope"], "embed");
     assert_eq!(
         page_paths(exact_fixture.state.vault.root()),
         exact_before_paths
@@ -2710,7 +2698,12 @@ async fn filtered_member_relation_candidate_matches_indexed_links_for_canonical_
             "[[Science Fiction]]",
             "Science Fiction",
         ),
-        ("Uuid", "UUID relation", "[[Science Fiction]]", LINK_TARGET_MIXED_ID),
+        (
+            "Uuid",
+            "UUID relation",
+            "[[Science Fiction]]",
+            LINK_TARGET_MIXED_ID,
+        ),
         (
             "MixedUuid",
             "Mixed UUID relation",
@@ -2738,9 +2731,7 @@ async fn filtered_member_relation_candidate_matches_indexed_links_for_canonical_
 
         let queried = fixture
             .server
-            .post(&format!(
-                "/api/vault/bases/relations/views/{view}/evaluate"
-            ))
+            .post(&format!("/api/vault/bases/relations/views/{view}/evaluate"))
             .json(&serde_json::json!({
                 "filter": {
                     "field": "series",

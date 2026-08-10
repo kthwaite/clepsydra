@@ -104,7 +104,10 @@ impl SysField {
     }
 
     pub(crate) fn is_scalar_sortable(self) -> bool {
-        !matches!(self, SysField::Tags | SysField::Aliases | SysField::Encryption)
+        !matches!(
+            self,
+            SysField::Tags | SysField::Aliases | SysField::Encryption
+        )
     }
 
     pub(crate) fn supports_contains(self) -> bool {
@@ -1684,7 +1687,10 @@ moment  = { type = "datetime" }
 
         assert_eq!(group.rows.len(), 50);
         assert_eq!(group.total, 55);
-        assert_eq!(group.aggregates, vec![serde_json::json!(55), serde_json::json!(1540.0)]);
+        assert_eq!(
+            group.aggregates,
+            vec![serde_json::json!(55), serde_json::json!(1540.0)]
+        );
     }
 
     #[test]
@@ -1711,7 +1717,10 @@ moment  = { type = "datetime" }
 
         assert_eq!(group.rows.len(), 1);
         assert_eq!(group.total, 55);
-        assert_eq!(group.aggregates, vec![serde_json::json!(55), serde_json::json!(1540.0)]);
+        assert_eq!(
+            group.aggregates,
+            vec![serde_json::json!(55), serde_json::json!(1540.0)]
+        );
     }
 
     #[test]
@@ -1723,8 +1732,7 @@ moment  = { type = "datetime" }
             ..Default::default()
         };
 
-        let output =
-            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
+        let output = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
 
         assert_eq!(flat_paths(&output).len(), 55);
     }

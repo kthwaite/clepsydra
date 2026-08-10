@@ -21,8 +21,8 @@ use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
-    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter, SortDir,
-    SortKey, ViewDefinition, validate_definition,
+    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
+    SortDir, SortKey, ViewDefinition, validate_definition,
 };
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
@@ -229,9 +229,8 @@ pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -
 
 fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {
     let filter_path = diagnostic.filter_path.map(|path| {
-        path.strip_prefix("filter").map_or(path.clone(), |suffix| {
-            format!("embed_filter{suffix}")
-        })
+        path.strip_prefix("filter")
+            .map_or(path.clone(), |suffix| format!("embed_filter{suffix}"))
     });
     BaseMemberDiagnostic {
         scope: BaseMemberScope::Embed,
@@ -635,8 +634,8 @@ pub async fn evaluate_embedded_view(
     payload: Result<Bytes, BytesRejection>,
 ) -> Result<Json<BaseViewEvaluateResponse>, ApiError> {
     let bytes = payload.map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
-    let request = serde_json::from_slice(&bytes)
-        .map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
+    let request =
+        serde_json::from_slice(&bytes).map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
     let index = state.index.clone();
     let response = evaluate_embedded_view_with(
         state.vault.root(),
@@ -647,11 +646,7 @@ pub async fn evaluate_embedded_view(
         move |base, spec| async move {
             index
                 .with_index(move |index, _vault| {
-                    evaluate(
-                        index.connection(),
-                        &spec,
-                        &QueryContext::for_base(&base),
-                    )
+                    evaluate(index.connection(), &spec, &QueryContext::for_base(&base))
                 })
                 .await
                 .map_err(internal_evaluation_error)?

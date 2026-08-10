@@ -21,10 +21,7 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/blocks/search", "get"),
     ("/api/vault/blocks/assign-id", "post"),
     ("/api/vault/blocks/{block_id}", "get"),
-    (
-        "/api/vault/bases/{slug}/views/{view}/evaluate",
-        "post",
-    ),
+    ("/api/vault/bases/{slug}/views/{view}/evaluate", "post"),
 ];
 
 #[test]
@@ -36,13 +33,13 @@ fn openapi_documents_every_registered_vault_operation() {
 
     let missing: Vec<String> = VAULT_OPERATIONS
         .iter()
-        .filter_map(|(path, method)| {
+        .filter(|(path, method)| {
             paths
                 .get(*path)
                 .and_then(|item| item.get(*method))
                 .is_none()
-                .then(|| format!("{method:>6} {path}"))
         })
+        .map(|(path, method)| format!("{method:>6} {path}"))
         .collect();
     assert!(
         missing.is_empty(),
@@ -69,8 +66,7 @@ fn openapi_documents_every_registered_vault_operation() {
 #[test]
 fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
     let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
-    let operation =
-        &document["paths"]["/api/vault/bases/{slug}/views/{view}/evaluate"]["post"];
+    let operation = &document["paths"]["/api/vault/bases/{slug}/views/{view}/evaluate"]["post"];
     assert_eq!(operation["operationId"], "evaluate_embedded_view");
     assert_eq!(
         operation["requestBody"]["content"]["application/json"]["schema"]["$ref"],

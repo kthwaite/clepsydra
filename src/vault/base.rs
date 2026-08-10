@@ -1781,5 +1781,4 @@ rating = { type = "number" }
             "filter: op `contains` is not valid for non-text field `prop.rating`"
         );
     }
-
 }

@@ -113,10 +113,7 @@ fn validate_complexity(overrides: EmbedOverrides<'_>) -> Vec<EmbedValidationDiag
             diagnostics.push(diagnostic(
                 Some("sort"),
                 None,
-                format!(
-                    "sort has {} keys; maximum is {MAX_SORT_KEYS}",
-                    sort.len()
-                ),
+                format!("sort has {} keys; maximum is {MAX_SORT_KEYS}", sort.len()),
             ));
         }
         for key in sort {
@@ -306,10 +303,7 @@ fn validate_comparison(
         diagnostics.push(diagnostic(
             Some(&canonical),
             Some(&format!("{path}.op")),
-            format!(
-                "op `{}` is not valid for field `{canonical}`",
-                op_name(op)
-            ),
+            format!("op `{}` is not valid for field `{canonical}`", op_name(op)),
         ));
         return;
     }
@@ -365,10 +359,7 @@ fn validate_comparison(
     }
 }
 
-fn resolve_declared_field(
-    base: &BaseDefinition,
-    field: &str,
-) -> Result<ResolvedField, String> {
+fn resolve_declared_field(base: &BaseDefinition, field: &str) -> Result<ResolvedField, String> {
     let resolved =
         resolve_field(field, &QueryContext::for_base(base)).map_err(|error| error.to_string())?;
     if let ResolvedField::Prop { key, .. } = &resolved
@@ -460,7 +451,10 @@ fn resolved_property_type(field: &ResolvedField) -> PropertyType {
     }
 }
 
-fn scalar_type_error(property_type: PropertyType, value: &serde_json::Value) -> Option<&'static str> {
+fn scalar_type_error(
+    property_type: PropertyType,
+    value: &serde_json::Value,
+) -> Option<&'static str> {
     match property_type {
         PropertyType::Number if !value.is_number() => Some("expected a number"),
         PropertyType::Bool if !value.is_boolean() => Some("expected a boolean"),
@@ -661,7 +655,10 @@ mod tests {
         assert_eq!(spec.group_row_limit, GroupRowLimit::Limit(17));
     }
 
-    fn validate_filter(base: &BaseDefinition, filter: &Filter) -> Result<(), Vec<super::EmbedValidationDiagnostic>> {
+    fn validate_filter(
+        base: &BaseDefinition,
+        filter: &Filter,
+    ) -> Result<(), Vec<super::EmbedValidationDiagnostic>> {
         validate_embed_overrides(
             base,
             EmbedOverrides {
@@ -705,9 +702,7 @@ mod tests {
     #[test]
     fn accepts_relation_links_to_filter() {
         let base = base();
-        assert!(
-            validate_filter(&base, &cmp("series", Op::LinksTo, json!("Reading List"))).is_ok()
-        );
+        assert!(validate_filter(&base, &cmp("series", Op::LinksTo, json!("Reading List"))).is_ok());
     }
 
     #[test]
@@ -789,13 +784,23 @@ mod tests {
     fn canonical_sort_aliases_cannot_bypass_duplicate_or_reserved_rules() {
         let base = base();
         let duplicate_system = [
-            SortKey { field: "title".into(), dir: SortDir::Asc },
-            SortKey { field: "sys.title".into(), dir: SortDir::Desc },
+            SortKey {
+                field: "title".into(),
+                dir: SortDir::Asc,
+            },
+            SortKey {
+                field: "sys.title".into(),
+                dir: SortDir::Desc,
+            },
         ];
         assert_one_error(
             validate_embed_overrides(
                 &base,
-                EmbedOverrides { filter: None, sort: Some(&duplicate_system), limit: None },
+                EmbedOverrides {
+                    filter: None,
+                    sort: Some(&duplicate_system),
+                    limit: None,
+                },
             ),
             Some("title"),
             None,
@@ -803,13 +808,23 @@ mod tests {
         );
 
         let duplicate_property = [
-            SortKey { field: "rating".into(), dir: SortDir::Asc },
-            SortKey { field: "prop.rating".into(), dir: SortDir::Desc },
+            SortKey {
+                field: "rating".into(),
+                dir: SortDir::Asc,
+            },
+            SortKey {
+                field: "prop.rating".into(),
+                dir: SortDir::Desc,
+            },
         ];
         assert_one_error(
             validate_embed_overrides(
                 &base,
-                EmbedOverrides { filter: None, sort: Some(&duplicate_property), limit: None },
+                EmbedOverrides {
+                    filter: None,
+                    sort: Some(&duplicate_property),
+                    limit: None,
+                },
             ),
             Some("rating"),
             None,
@@ -822,11 +837,18 @@ mod tests {
             ("encryption", "encryption"),
             ("sys.encryption", "encryption"),
         ] {
-            let sort = [SortKey { field: field.into(), dir: SortDir::Asc }];
+            let sort = [SortKey {
+                field: field.into(),
+                dir: SortDir::Asc,
+            }];
             assert_one_error(
                 validate_embed_overrides(
                     &base,
-                    EmbedOverrides { filter: None, sort: Some(&sort), limit: None },
+                    EmbedOverrides {
+                        filter: None,
+                        sort: Some(&sort),
+                        limit: None,
+                    },
                 ),
                 Some(canonical),
                 None,
@@ -978,7 +1000,11 @@ mod tests {
     fn filter_with_nodes(leaf_count: usize) -> Filter {
         let left = leaf_count / 2;
         Filter::All(vec![
-            Filter::All((0..left).map(|_| cmp("title", Op::Eq, json!("x"))).collect()),
+            Filter::All(
+                (0..left)
+                    .map(|_| cmp("title", Op::Eq, json!("x")))
+                    .collect(),
+            ),
             Filter::Any(
                 (left..leaf_count)
                     .map(|_| cmp("title", Op::Eq, json!("x")))
@@ -1040,24 +1066,42 @@ mod tests {
     fn enforces_sort_key_limit() {
         let base = base();
         let fields = [
-            "id", "path", "title", "kind", "project", "created_at", "updated_at",
-            "journal_date", "word_count",
+            "id",
+            "path",
+            "title",
+            "kind",
+            "project",
+            "created_at",
+            "updated_at",
+            "journal_date",
+            "word_count",
         ];
         let sort = fields
             .iter()
-            .map(|field| SortKey { field: (*field).into(), dir: SortDir::Asc })
+            .map(|field| SortKey {
+                field: (*field).into(),
+                dir: SortDir::Asc,
+            })
             .collect::<Vec<_>>();
         assert!(
             validate_embed_overrides(
                 &base,
-                EmbedOverrides { filter: None, sort: Some(&sort[..8]), limit: None },
+                EmbedOverrides {
+                    filter: None,
+                    sort: Some(&sort[..8]),
+                    limit: None
+                },
             )
             .is_ok()
         );
         assert_one_error(
             validate_embed_overrides(
                 &base,
-                EmbedOverrides { filter: None, sort: Some(&sort), limit: None },
+                EmbedOverrides {
+                    filter: None,
+                    sort: Some(&sort),
+                    limit: None,
+                },
             ),
             Some("sort"),
             None,
@@ -1069,13 +1113,8 @@ mod tests {
     fn measures_field_identifiers_in_utf8_bytes() {
         let field_256 = "é".repeat(128);
         let field_257 = format!("{field_256}a");
-        let base = base_with_properties(vec![(
-            field_256.clone(),
-            property(PropertyType::Text),
-        )]);
-        assert!(
-            validate_filter(&base, &cmp(&field_256, Op::Eq, json!("x"))).is_ok()
-        );
+        let base = base_with_properties(vec![(field_256.clone(), property(PropertyType::Text))]);
+        assert!(validate_filter(&base, &cmp(&field_256, Op::Eq, json!("x"))).is_ok());
         assert_one_error(
             validate_filter(&base, &cmp(&field_257, Op::Eq, json!("x"))),
             Some(&field_257),
@@ -1089,9 +1128,7 @@ mod tests {
         let base = base();
         let value_4096 = "é".repeat(2048);
         let value_4097 = format!("{value_4096}a");
-        assert!(
-            validate_filter(&base, &cmp("text", Op::Eq, json!(value_4096))).is_ok()
-        );
+        assert!(validate_filter(&base, &cmp("text", Op::Eq, json!(value_4096))).is_ok());
         assert_one_error(
             validate_filter(&base, &cmp("text", Op::Eq, json!(value_4097))),
             Some("text"),
@@ -1107,7 +1144,11 @@ mod tests {
             assert!(
                 validate_embed_overrides(
                     &base,
-                    EmbedOverrides { filter: None, sort: None, limit: Some(limit) },
+                    EmbedOverrides {
+                        filter: None,
+                        sort: None,
+                        limit: Some(limit)
+                    },
                 )
                 .is_ok()
             );
@@ -1116,7 +1157,11 @@ mod tests {
             assert_one_error(
                 validate_embed_overrides(
                     &base,
-                    EmbedOverrides { filter: None, sort: None, limit: Some(limit) },
+                    EmbedOverrides {
+                        filter: None,
+                        sort: None,
+                        limit: Some(limit),
+                    },
                 ),
                 Some("limit"),
                 None,

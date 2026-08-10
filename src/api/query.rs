@@ -15,9 +15,7 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use crate::vault::base::{Aggregate, Filter, PropertyType, SortKey};
-use crate::vault::query::{
-    GroupRowLimit, QueryContext, QueryOutput, QuerySpec, evaluate,
-};
+use crate::vault::query::{GroupRowLimit, QueryContext, QueryOutput, QuerySpec, evaluate};
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct QueryRequest {
