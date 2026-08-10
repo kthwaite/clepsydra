@@ -499,12 +499,8 @@ async fn concurrent_first_captures_for_identity_do_not_duplicate() {
         "concurrent responses: {:?} {:?}, ops {:?}",
         first.1, second.1, operations
     );
-    assert!(operations.iter().any(|operation| *operation == "created"));
-    assert!(
-        operations
-            .iter()
-            .any(|operation| *operation == "unchanged" || *operation == "appended")
-    );
+    assert!(operations.contains(&"created"));
+    assert!(operations.contains(&"unchanged") || operations.contains(&"appended"));
     assert_eq!(
         files_under(&tmp.path().join("vault"), "conversations").len(),
         1
