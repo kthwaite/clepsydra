@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BaseFilter, BaseSummary, SortKey } from "#/api/bases";
+import type {
+  BaseDetailResponse,
+  BaseFilter,
+  BaseSummary,
+  SortKey,
+} from "#/api/bases";
 import { useBase, useBases } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -14,9 +19,10 @@ import type {
 } from "#/editor/schema/types";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
-import { CANONICAL_FILTER_FIELDS } from "./FilterComparisonEditor";
+import { validateBaseEmbedSemantics } from "./embed-semantic-validation";
+import { asciiCaseFold } from "./local-validation";
 import { MembershipEditor } from "./MembershipEditor";
-import { OrderedSortEditor, sortableFieldKeys } from "./OrderedSortEditor";
+import { OrderedSortEditor } from "./OrderedSortEditor";
 
 interface StructuredDraft {
   base: string;
@@ -53,7 +59,7 @@ function draftFromNode(
       filter:
         node.filter === undefined ? undefined : structuredClone(node.filter),
       sort:
-        node.sort === undefined || node.sort.length === 0
+        node.sort === undefined
           ? undefined
           : node.sort.map((sort) => ({ ...sort })),
       limit: node.limit ?? 50,
@@ -92,103 +98,32 @@ function configuredNode(config: {
   };
 }
 
-function filterFieldDiagnostics(
-  filter: BaseFilter,
-  declared: ReadonlySet<string>,
-  baseName: string,
-  path = "filter",
-): BaseDiagnostic[] {
-  if ("all" in filter) {
-    return filter.all.flatMap((child, index) =>
-      filterFieldDiagnostics(
-        child,
-        declared,
-        baseName,
-        `${path}.all[${index}]`,
-      ),
-    );
-  }
-  if ("any" in filter) {
-    return filter.any.flatMap((child, index) =>
-      filterFieldDiagnostics(
-        child,
-        declared,
-        baseName,
-        `${path}.any[${index}]`,
-      ),
-    );
-  }
-  if ("not" in filter) {
-    return filterFieldDiagnostics(
-      filter.not,
-      declared,
-      baseName,
-      `${path}.not`,
-    );
-  }
-  return declared.has(filter.field)
-    ? []
-    : [
-        {
-          slug: baseName,
-          path: `${path}.field`,
-          severity: "error",
-          message: `Field “${filter.field}” is not declared by ${baseName}.`,
-        },
-      ];
-}
-
 function referenceAndFieldDiagnostics(
   config: { base: string; view: string; filter?: BaseFilter; sort?: SortKey[] },
   bases: readonly BaseSummary[],
-  properties: readonly DraftProperty[],
-  detailName: string | undefined,
+  detail: BaseDetailResponse | undefined,
   registryReady: boolean,
   detailReady: boolean,
 ): BaseDiagnostic[] {
-  const diagnostics: BaseDiagnostic[] = [];
   const summary = bases.find((base) => base.slug === config.base);
   if (registryReady && !summary) {
-    diagnostics.push({
-      slug: config.base,
-      path: "base",
-      severity: "error",
-      message: `Base “${config.base}” was not found in the registry.`,
-    });
-    return diagnostics;
-  }
-  if (summary && !summary.views.includes(config.view)) {
-    diagnostics.push({
-      slug: config.base,
-      path: "view",
-      severity: "error",
-      message: `Saved view “${config.view}” was not found in ${summary.name}.`,
-    });
-  }
-  if (!summary || !detailReady) return diagnostics;
-
-  const baseName = detailName ?? summary.name;
-  const declaredFilterFields = new Set([
-    ...CANONICAL_FILTER_FIELDS,
-    ...properties.map((property) => property.key),
-  ]);
-  if (config.filter) {
-    diagnostics.push(
-      ...filterFieldDiagnostics(config.filter, declaredFilterFields, baseName),
-    );
-  }
-  const sortable = new Set(sortableFieldKeys(properties));
-  config.sort?.forEach((sort, index) => {
-    if (!sortable.has(sort.field)) {
-      diagnostics.push({
+    return [
+      {
         slug: config.base,
-        path: `sort[${index}].field`,
+        path: "base",
         severity: "error",
-        message: `Field “${sort.field}” is not declared as sortable by ${baseName}.`,
-      });
-    }
-  });
-  return diagnostics;
+        message: `Base “${config.base}” was not found in the registry.`,
+      },
+    ];
+  }
+  if (!summary || !detailReady || detail?.slug !== config.base) return [];
+
+  return validateBaseEmbedSemantics(config, detail).map((diagnostic) => ({
+    slug: config.base,
+    path: diagnostic.path,
+    severity: "error",
+    message: diagnostic.message,
+  }));
 }
 
 export function BaseEmbedInspector({
@@ -229,6 +164,9 @@ export function BaseEmbedInspector({
     : draft.base;
   const detail = useBase(selectedSlug);
   const selectedSummary = bases.find((base) => base.slug === selectedSlug);
+  const selectedViewName = selectedSummary?.views.find(
+    (view) => asciiCaseFold(view) === asciiCaseFold(draft.view),
+  );
   const detailMatchesSelection = detail.data?.slug === selectedSlug;
   const properties: DraftProperty[] = detailMatchesSelection
     ? Object.entries(detail.data?.properties ?? {}).map(
@@ -267,8 +205,7 @@ export function BaseEmbedInspector({
     ? referenceAndFieldDiagnostics(
         candidate,
         bases,
-        properties,
-        detail.data?.name,
+        detail.data,
         registryReady,
         detailReady,
       )
@@ -465,7 +402,7 @@ export function BaseEmbedInspector({
               <select
                 id="base-embed-view"
                 className={controlClass}
-                value={draft.view}
+                value={selectedViewName ?? draft.view}
                 aria-invalid={viewDiagnostics.length > 0}
                 aria-describedby="base-embed-view-description base-embed-view-diagnostics"
                 disabled={!selectedSummary || registryRefreshing}
@@ -477,9 +414,7 @@ export function BaseEmbedInspector({
                   }))
                 }
               >
-                {draft.view &&
-                selectedSummary &&
-                !selectedSummary.views.includes(draft.view) ? (
+                {draft.view && selectedSummary && !selectedViewName ? (
                   <option value={draft.view}>{draft.view} (missing)</option>
                 ) : null}
                 {!draft.view ? (
@@ -562,24 +497,57 @@ export function BaseEmbedInspector({
             <h3 id="base-embed-sort-heading" className={labelClass}>
               Sort order
             </h3>
+            <fieldset className="mt-3">
+              <legend className={labelClass}>Sort behavior</legend>
+              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="base-embed-sort-behavior"
+                    checked={draft.sort === undefined}
+                    onChange={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        sort: undefined,
+                      }))
+                    }
+                  />
+                  Inherit saved view sorting
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="base-embed-sort-behavior"
+                    checked={draft.sort !== undefined}
+                    onChange={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        sort: current.sort ?? [],
+                      }))
+                    }
+                  />
+                  Override saved view sorting
+                </label>
+              </div>
+            </fieldset>
             <p className={descriptionClass}>
-              Leave empty to inherit the saved view sort. Earlier keys take
+              Inherit uses the saved view sort. An override with no keys
+              explicitly removes saved-view sorting; earlier keys take
               precedence.
             </p>
-            <OrderedSortEditor
-              value={draft.sort ?? []}
-              properties={properties}
-              diagnostics={diagnostics}
-              diagnosticRoot="sort"
-              idPrefix="base-embed"
-              onChange={(sort) =>
-                setDraft((current) => ({
-                  ...current,
-                  sort: sort.length === 0 ? undefined : sort,
-                }))
-              }
-              registerFocus={() => {}}
-            />
+            {draft.sort === undefined ? null : (
+              <OrderedSortEditor
+                value={draft.sort}
+                properties={properties}
+                diagnostics={diagnostics}
+                diagnosticRoot="sort"
+                idPrefix="base-embed"
+                onChange={(sort) =>
+                  setDraft((current) => ({ ...current, sort }))
+                }
+                registerFocus={() => {}}
+              />
+            )}
             {sortSectionDiagnostics.length > 0 ? (
               <div
                 id="base-embed-sort-diagnostics"

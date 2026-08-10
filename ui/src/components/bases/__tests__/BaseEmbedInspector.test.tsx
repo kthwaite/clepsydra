@@ -252,7 +252,35 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(screen.queryByRole("combobox", { name: "Sort field 1" })).toBeNull();
   });
 
-  it("treats an empty inspector sort as inherited and omits it on Save", async () => {
+  it.each([
+    ["inherited", undefined],
+    ["explicit no-sort", []],
+    ["replacement", [{ field: "rating", dir: "desc" }]],
+  ] as const)(
+    "round-trips %s sort after an unrelated edit",
+    async (_name, sort) => {
+      const user = userEvent.setup();
+      const callbacks = renderInspector(
+        configured({
+          sort:
+            sort === undefined
+              ? undefined
+              : sort.map((key) => ({ ...key })),
+        }),
+      );
+
+      const limit = screen.getByRole("spinbutton", { name: "Limit" });
+      await user.clear(limit);
+      await user.type(limit, "26");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      const saved = callbacks.onSave.mock.calls[0]?.[0];
+      if (sort === undefined) expect(saved).not.toHaveProperty("sort");
+      else expect(saved?.sort).toEqual(sort);
+    },
+  );
+
+  it("keeps removing the final sort key as explicit no-sort", async () => {
     const user = userEvent.setup();
     const callbacks = renderInspector(
       configured({ sort: [{ field: "rating", dir: "desc" }] }),
@@ -261,7 +289,24 @@ describe("BaseEmbedInspector structured mode", () => {
     await user.click(screen.getByRole("button", { name: "Remove sort 1" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(callbacks.onSave).toHaveBeenCalledTimes(1);
+    expect(callbacks.onSave.mock.calls[0]?.[0]).toHaveProperty("sort", []);
+  });
+
+  it("offers an explicit accessible control to restore inherited sorting", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderInspector(configured({ sort: [] }));
+    const inherit = screen.getByRole("radio", {
+      name: "Inherit saved view sorting",
+    });
+
+    expect(inherit).not.toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Override saved view sorting" }),
+    ).toBeChecked();
+    await user.click(inherit);
+    expect(inherit).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
     expect(callbacks.onSave.mock.calls[0]?.[0]).not.toHaveProperty("sort");
   });
 
@@ -378,6 +423,15 @@ describe("BaseEmbedInspector structured mode", () => {
 
     await user.selectOptions(view, "Unread");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("accepts case-only saved-view spellings without rewriting them on Save", async () => {
+    const user = userEvent.setup();
+    const callbacks = renderInspector(configured({ view: "aLL" }));
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(callbacks.onSave.mock.calls[0]?.[0]).toMatchObject({ view: "aLL" });
   });
 
   it("disables Save while the selected Base detail is refreshing", () => {
@@ -498,7 +552,24 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(
       screen.getByRole("combobox", { name: "Sort field 1" }),
     ).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getAllByText(/foreign.*not declared/i)).toHaveLength(2);
+    expect(screen.getAllByText(/unknown field.*foreign/i)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("blocks Save for selected-Base operator and value incompatibilities", () => {
+    const { rerenderInspector } = renderInspector(
+      configured({
+        filter: { field: "rating", op: "contains", value: 5 },
+      }),
+    );
+
+    expect(screen.getByText(/op.*contains.*not valid/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    rerenderInspector(
+      configured({ filter: { field: "rating", op: "eq", value: "five" } }),
+    );
+    expect(screen.getByText(/expected a number/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -548,6 +619,17 @@ describe("pure Base embed validation bounds", () => {
     ...overrides,
   });
 
+  const eightSortableFields = [
+    "id",
+    "path",
+    "title",
+    "kind",
+    "project",
+    "created_at",
+    "updated_at",
+    "journal_date",
+  ];
+
   it.each([
     ["depth", valid({ filter: nestedNot(8) }), true, "filter"],
     ["depth", valid({ filter: nestedNot(9) }), false, "filter.not"],
@@ -587,7 +669,7 @@ describe("pure Base embed validation bounds", () => {
     ],
     [
       "sort keys",
-      valid({ sort: Array.from({ length: 8 }, () => ({ field: "title" })) }),
+      valid({ sort: eightSortableFields.map((field) => ({ field })) }),
       true,
       "sort",
     ],
@@ -651,7 +733,7 @@ describe("pure Base embed validation bounds", () => {
     [
       "sort keys",
       valid({
-        sort: Array.from({ length: 8 }, () => ({ field: "title" })),
+        sort: eightSortableFields.map((field) => ({ field })),
       }),
     ],
     ["field bytes", valid({ sort: [{ field: "é".repeat(128) }] })],
@@ -826,6 +908,29 @@ describe("BaseEmbedInspector source repair", () => {
     expect(callbacks.onSave).toHaveBeenCalledTimes(1);
     expect(callbacks.onSave).toHaveBeenCalledWith(configured({ limit: 40 }));
     expect(callbacks.onRestoreFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies selected-Base semantics to repaired source before Save", async () => {
+    const user = userEvent.setup();
+    const validCallbacks = renderInspector(
+      invalid(
+        '```base\nbase = "reading"\nview = "aLL"\nfilter = { field = "sys.kind", op = "eq", value = "NOTE" }\nsort = [{ field = "prop.rating" }]\n```\n',
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(validCallbacks.onSave).toHaveBeenCalledTimes(1);
+
+    validCallbacks.rerenderInspector(
+      invalid(
+        '```base\nbase = "reading"\nview = "All"\nsort = [{ field = "title" }, { field = "sys.title" }]\n```\n',
+      ),
+    );
+    expect(
+      await screen.findByText(/duplicate canonical sort field/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("applies canonical representation size validation before source-repair Save", () => {
