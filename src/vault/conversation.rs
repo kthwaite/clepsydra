@@ -69,9 +69,7 @@ pub enum ConversationError {
     InvalidHostIdHash,
     #[error("turn {sequence} content must not be blank")]
     BlankTurnContent { sequence: u64 },
-    #[error(
-        "source turn ID at sequence {duplicate_sequence} repeats sequence {first_sequence}"
-    )]
+    #[error("source turn ID at sequence {duplicate_sequence} repeats sequence {first_sequence}")]
     DuplicateSourceTurnId {
         first_sequence: u64,
         duplicate_sequence: u64,
@@ -155,8 +153,7 @@ pub fn prepare_transcript(
             .as_deref()
             .filter(|source_turn_id| !source_turn_id.trim().is_empty());
         if let Some(source_turn_id) = source_turn_id
-            && let Some(first_sequence) =
-                seen_source_ids.insert(source_turn_id, source_sequence)
+            && let Some(first_sequence) = seen_source_ids.insert(source_turn_id, source_sequence)
         {
             return Err(ConversationError::DuplicateSourceTurnId {
                 first_sequence,
