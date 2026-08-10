@@ -1,19 +1,38 @@
 import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
 
-export function BoolCell({ value, onCommit, onCancel }: CellEditorProps) {
+export function BoolCell({
+  value,
+  onCommit,
+  onCommitNext,
+  onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
+}: CellEditorProps) {
+  const current = value === true ? "true" : value === false ? "false" : "";
   return (
     <select
       autoFocus
-      aria-label="Edit boolean"
+      aria-label={ariaLabel ?? "Edit boolean"}
+      aria-describedby={ariaDescribedBy}
       className={CELL_INPUT_CLASS}
-      value={value === true ? "true" : value === false ? "false" : ""}
+      value={current}
       onChange={(e) => {
         const v = e.target.value;
         onCommit(v === "" ? null : v === "true");
       }}
       onBlur={onCancel}
       onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          onCommitNext(current === "" ? null : current === "true");
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     >
       <option value="">—</option>

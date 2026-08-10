@@ -4,10 +4,12 @@ import {
   Editor,
   Node,
   Element as SlateElement,
+  Text,
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
+import { slateToMdast } from "../../../convert/slate-to-mdast";
 import { withSchema } from "../../../schema/withSchema";
 import { withOutliner } from "../../withOutliner";
 import { withAutoformat } from "../withAutoformat";
@@ -86,6 +88,456 @@ describe("withAutoformat integration", () => {
       const editor = makeEditor();
       type(editor, "1. ");
       expect((editor.children[0] as any).type).toBe("numbered-list");
+    });
+  });
+
+  describe("typed math", () => {
+    it("converts typed dollar syntax and selects the text after the inline void", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText("$");
+      editor.insertText("x");
+      editor.insertText("$");
+
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "" },
+        {
+          type: "inline-math",
+          tex: "x",
+          delimiter: "$",
+          children: [{ text: "" }],
+        },
+        { text: "" },
+      ]);
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 2], offset: 0 },
+        focus: { path: [0, 2], offset: 0 },
+      });
+    });
+
+    it("converts typed backslash-parenthesis syntax", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, String.raw`\(x\)`);
+
+      expect(elementChildren(editor.children[0])).toContainEqual(
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "x",
+          delimiter: "\\(",
+        }),
+      );
+    });
+
+    it("converts a backslash-parenthesis closer consumed by overtype", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "paragraph",
+          children: [{ text: String.raw`\(x\)` }],
+        },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: 4 });
+
+      editor.insertText(")");
+
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "" },
+        {
+          type: "inline-math",
+          tex: "x",
+          delimiter: "\\(",
+          children: [{ text: "" }],
+        },
+        { text: "" },
+      ]);
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 2], offset: 0 },
+        focus: { path: [0, 2], offset: 0 },
+      });
+    });
+
+    it.each([
+      ["$$x$$", "$$", "x"],
+      [String.raw`\[x\]`, "\\[", "x"],
+    ])(
+      "converts standalone display syntax %s and selects a following paragraph",
+      (source, delimiter, tex) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(editor.children).toEqual([
+          {
+            type: "math-block",
+            tex,
+            delimiter,
+            children: [{ text: "" }],
+          },
+          { type: "paragraph", children: [{ text: "" }] },
+        ]);
+        expect(editor.selection).toEqual({
+          anchor: { path: [1, 0], offset: 0 },
+          focus: { path: [1, 0], offset: 0 },
+        });
+      },
+    );
+
+    it.each([
+      ["$$", "$$", "$$"],
+      [String.raw`\[`, "\\[", String.raw`\]`],
+    ])(
+      "keeps Enter literal inside an unmatched %s display and converts multiline source",
+      (opener, delimiter, closer) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, `${opener}first`);
+        editor.insertBreak();
+        type(editor, `second${closer}`);
+
+        expect(editor.children).toEqual([
+          {
+            type: "math-block",
+            tex: "first\nsecond",
+            delimiter,
+            children: [{ text: "" }],
+          },
+          { type: "paragraph", children: [{ text: "" }] },
+        ]);
+        expect(editor.selection).toEqual({
+          anchor: { path: [1, 0], offset: 0 },
+          focus: { path: [1, 0], offset: 0 },
+        });
+      },
+    );
+
+    it.each([
+      [
+        "blockquote",
+        "$$nested$$",
+        "$$",
+        [
+          {
+            type: "blockquote",
+            children: [{ type: "paragraph", children: [{ text: "" }] }],
+          },
+        ],
+        [0],
+        [0, 1, 0],
+      ],
+      [
+        "blockquote",
+        String.raw`\[nested\]`,
+        "\\[",
+        [
+          {
+            type: "blockquote",
+            children: [{ type: "paragraph", children: [{ text: "" }] }],
+          },
+        ],
+        [0],
+        [0, 1, 0],
+      ],
+      [
+        "list item",
+        "$$nested$$",
+        "$$",
+        [
+          {
+            type: "bulleted-list",
+            children: [
+              {
+                type: "list-item",
+                children: [
+                  { type: "paragraph", children: [{ text: "" }] },
+                ],
+              },
+            ],
+          },
+        ],
+        [0, 0],
+        [0, 0, 1, 0],
+      ],
+      [
+        "list item",
+        String.raw`\[nested\]`,
+        "\\[",
+        [
+          {
+            type: "bulleted-list",
+            children: [
+              {
+                type: "list-item",
+                children: [
+                  { type: "paragraph", children: [{ text: "" }] },
+                ],
+              },
+            ],
+          },
+        ],
+        [0, 0],
+        [0, 0, 1, 0],
+      ],
+    ])(
+      "converts standalone %s display source %s at its nested paragraph path",
+      (_containerName, source, delimiter, value, containerPath, caretPath) => {
+        const editor = makeSchemaEditor(value as Descendant[]);
+
+        type(editor, source);
+
+        const [container] = Editor.node(editor, containerPath);
+        if (!SlateElement.isElement(container)) {
+          throw new Error("Expected a nested display container");
+        }
+        expect(container.children).toEqual([
+          {
+            type: "math-block",
+            tex: "nested",
+            delimiter,
+            children: [{ text: "" }],
+          },
+          { type: "paragraph", children: [{ text: "" }] },
+        ]);
+        expect(editor.selection).toEqual({
+          anchor: { path: caretPath, offset: 0 },
+          focus: { path: caretPath, offset: 0 },
+        });
+      },
+    );
+
+    it.each(["before $$x$$", String.raw`before \[x\]`])(
+      "leaves non-standalone display syntax as text: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+        expect(
+          elementChildren(editor.children[0]).some(
+            (child) =>
+              SlateElement.isElement(child) &&
+              (child.type === "inline-math" || child.type === "math-block"),
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it("leaves unsupported longer display-dollar fences as text", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, "$$$x$$");
+
+      expect(Node.string(editor.children[0])).toBe("$$$x$$");
+      expect(
+        elementChildren(editor.children[0]).some((child) =>
+          SlateElement.isElement(child),
+        ),
+      ).toBe(false);
+    });
+
+    it.each([
+      ["$[x]$", "inline-math", "$", "[x]"],
+      [String.raw`\([x]\)`, "inline-math", "\\(", "[x]"],
+      ["$$[x]$$", "math-block", "$$", "[x]"],
+      [String.raw`\[[x]\]`, "math-block", "\\[", "[x]"],
+    ])(
+      "keeps bracket groups literal inside typed math source: %s",
+      (source, elementType, delimiter, tex) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        const math = editor.children
+          .flatMap((node) =>
+            SlateElement.isElement(node) ? node.children : [],
+          )
+          .find(
+            (child) =>
+              SlateElement.isElement(child) && child.type === elementType,
+          );
+        const block =
+          SlateElement.isElement(editor.children[0]) &&
+          editor.children[0].type === elementType
+            ? editor.children[0]
+            : math;
+        expect(block).toMatchObject({ type: elementType, delimiter, tex });
+      },
+    );
+
+    it.each([
+      ["$*x*$", "*x*"],
+      ["$_x_$", "_x_"],
+      ["$ *x$", " *x"],
+    ])("keeps mark syntax literal inside typed math source: %s", (source, tex) => {
+      const editor = makeSchemaEditor();
+
+      type(editor, source);
+
+      expect(elementChildren(editor.children[0])).toContainEqual(
+        expect.objectContaining({
+          type: "inline-math",
+          delimiter: "$",
+          tex,
+        }),
+      );
+    });
+
+    it("overtypes a bracket inside an unmatched math candidate literally", () => {
+      const editor = makeSchemaEditor([
+        { type: "paragraph", children: [{ text: "$[x]" }] },
+      ]);
+      Transforms.select(editor, { path: [0, 0], offset: 3 });
+
+      editor.insertText("]");
+
+      expect(Node.string(editor.children[0])).toBe("$[x]");
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 0], offset: 4 },
+        focus: { path: [0, 0], offset: 4 },
+      });
+    });
+
+    it.each(["$[x]", "$*x*"])(
+      "keeps generic Markdown syntax literal in an unmatched composed math candidate: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        editor.insertText(source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+        expect(
+          elementChildren(editor.children[0]).some((child) =>
+            SlateElement.isElement(child),
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it.each(["$x", String.raw`\(x`, "$$x", String.raw`\[x`])(
+      "leaves unmatched math syntax as text: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+      },
+    );
+
+    it.each(["$$", String.raw`\(\)`, "$$$$", String.raw`\[\]`])(
+      "leaves empty math syntax as text: %s",
+      (source) => {
+        const editor = makeSchemaEditor();
+
+        type(editor, source);
+
+        expect(Node.string(editor.children[0])).toBe(source);
+      },
+    );
+
+    it("does not convert math syntax in a code leaf", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "paragraph",
+          children: [{ text: "", code: true }],
+        },
+      ]);
+
+      type(editor, String.raw`$x$ \(y\)`);
+
+      expect(Node.string(editor.children[0])).toBe(String.raw`$x$ \(y\)`);
+      expect(
+        elementChildren(editor.children[0]).some((child) =>
+          SlateElement.isElement(child),
+        ),
+      ).toBe(false);
+    });
+
+    it("does not convert math syntax in a code block", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "code-block",
+          language: "",
+          children: [{ text: "" }],
+        },
+      ]);
+
+      type(editor, String.raw`$x$ \(y\) $$z$$ \[w\]`);
+
+      expect(Node.string(editor.children[0])).toBe(
+        String.raw`$x$ \(y\) $$z$$ \[w\]`,
+      );
+      expect(editor.children[0]).toMatchObject({ type: "code-block" });
+    });
+
+    it("resolves multiple math expressions in one composed insertion", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText(String.raw`$x$ and \(y\)`);
+
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "" },
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "x",
+          delimiter: "$",
+        }),
+        { text: " and " },
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "y",
+          delimiter: "\\(",
+        }),
+        { text: "" },
+      ]);
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 4], offset: 0 },
+        focus: { path: [0, 4], offset: 0 },
+      });
+    });
+
+    it("resolves math before a later link scaffold in one composed insertion", () => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText("$x$ and [label]");
+
+      const children = elementChildren(editor.children[0]);
+      expect(children).toEqual([
+        { text: "" },
+        expect.objectContaining({
+          type: "inline-math",
+          tex: "x",
+          delimiter: "$",
+        }),
+        { text: " and [label]()" },
+      ]);
+      const selection = editor.selection;
+      expect(selection).not.toBeNull();
+      if (!selection) throw new Error("Expected a composed endpoint selection");
+      const [selected] = Editor.node(editor, selection.anchor.path);
+      expect(Text.isText(selected) ? selected.text : null).toBe(
+        " and [label]()",
+      );
+      expect(selection).toEqual({
+        anchor: { path: [0, 2], offset: " and [label](".length },
+        focus: { path: [0, 2], offset: " and [label](".length },
+      });
+    });
+
+    it.each([
+      ["$$x$$", "$$"],
+      [String.raw`\[x\]`, "\\["],
+    ])("resolves composed standalone display syntax %s", (source, delimiter) => {
+      const editor = makeSchemaEditor();
+
+      editor.insertText(source);
+
+      expect(editor.children[0]).toMatchObject({
+        type: "math-block",
+        tex: "x",
+        delimiter,
+      });
+      expect(editor.selection?.anchor.path).toEqual([1, 0]);
     });
   });
 
@@ -507,6 +959,262 @@ describe("withAutoformat integration", () => {
         ).toBe(false);
         expect(editor.children).toHaveLength(1);
       }
+    });
+  });
+
+  describe("prefixed external links", () => {
+    it("expands a quoted multi-word Wikipedia shorthand on closing quote", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, 'wiki:"Vichy Catalán"');
+
+      expect(elementChildren(editor.children[0])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "link",
+            url: "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n",
+            children: [{ text: "Vichy Catalán" }],
+          }),
+        ]),
+      );
+    });
+
+    it("expands a bare arXiv shorthand on Space and continues in plain text", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, "arxiv:2401.00001 after");
+
+      expect(Node.string(editor.children[0])).toBe("arXiv: 2401.00001 after");
+      const children = elementChildren(editor.children[0]);
+      const linkIndex = children.findIndex(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
+      expect(linkIndex).toBeGreaterThanOrEqual(0);
+      expect(children[linkIndex]).toMatchObject({ type: "link" });
+      expect(children[linkIndex + 1]).toEqual({ text: " after" });
+    });
+
+    it("expands a bare YouTube shorthand before Enter", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "youtube:dQw4w9WgXcQ");
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(2);
+      expect(Node.string(editor.children[0])).toBe(
+        "YouTube: dQw4w9WgXcQ",
+      );
+      expect(editor.selection).toEqual({
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: 0 },
+      });
+    });
+
+    it("expands at the end of a heading, exits to a paragraph, and undoes once", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ text: "arxiv:2401.00001" }],
+        },
+      ]);
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(2);
+      expect(editor.children[0]).toMatchObject({
+        type: "heading",
+        level: 2,
+        children: expect.arrayContaining([
+          expect.objectContaining({
+            type: "link",
+            url: "https://arxiv.org/abs/2401.00001",
+          }),
+        ]),
+      });
+      expect(editor.children[1]).toEqual({
+        type: "paragraph",
+        children: [{ text: "" }],
+      });
+      expect(editor.selection).toEqual({
+        anchor: { path: [1, 0], offset: 0 },
+        focus: { path: [1, 0], offset: 0 },
+      });
+
+      editor.undo();
+
+      expect(editor.children).toEqual([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ text: "arxiv:2401.00001" }],
+        },
+      ]);
+    });
+
+    it("expands at the end of a list item, continues the list, and undoes once", () => {
+      const editor = makeSchemaEditor([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [{ text: "youtube:dQw4w9WgXcQ" }],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+
+      editor.insertBreak();
+
+      expect(editor.children).toHaveLength(1);
+      expect(editor.children[0]).toMatchObject({
+        type: "bulleted-list",
+        children: [
+          {
+            type: "list-item",
+            children: [
+              {
+                type: "paragraph",
+                children: expect.arrayContaining([
+                  expect.objectContaining({
+                    type: "link",
+                    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                  }),
+                ]),
+              },
+            ],
+          },
+          {
+            type: "list-item",
+            children: [
+              {
+                type: "paragraph",
+                children: [{ text: "" }],
+              },
+            ],
+          },
+        ],
+      });
+      expect(editor.selection).toEqual({
+        anchor: { path: [0, 1, 0, 0], offset: 0 },
+        focus: { path: [0, 1, 0, 0], offset: 0 },
+      });
+
+      editor.undo();
+
+      expect(editor.children).toEqual([
+        {
+          type: "bulleted-list",
+          children: [
+            {
+              type: "list-item",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [{ text: "youtube:dQw4w9WgXcQ" }],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("restores the pre-trigger quoted shorthand with one undo", () => {
+      const editor = makeSchemaEditor();
+      type(editor, 'wiki:"Vichy Catalán"');
+
+      editor.undo();
+
+      expect(Node.string(editor.children[0])).toBe('wiki:"Vichy Catalán');
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: 'wiki:"Vichy Catalán' },
+      ]);
+    });
+
+    it("restores a bare shorthand without its trigger Space with one undo", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "arxiv:2401.00001 ");
+
+      editor.undo();
+
+      expect(Node.string(editor.children[0])).toBe("arxiv:2401.00001");
+      expect(elementChildren(editor.children[0])).toEqual([
+        { text: "arxiv:2401.00001" },
+      ]);
+    });
+
+    it("leaves comma-terminated bare shorthand literal", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, "arxiv:2401.00001,");
+
+      expect(Node.string(editor.children[0])).toBe("arxiv:2401.00001,");
+      expect(
+        elementChildren(editor.children[0]).some(
+          (child) => SlateElement.isElement(child) && child.type === "link",
+        ),
+      ).toBe(false);
+    });
+
+    it.each(["\ud800", "\udc00"])(
+      "keeps ill-formed UTF-16 Wikipedia shorthand literal on Space",
+      (surrogate) => {
+        const shorthand = `wiki:${surrogate}`;
+        const editor = makeSchemaEditor();
+
+        type(editor, `${shorthand} `);
+
+        expect(Node.string(editor.children[0])).toBe(`${shorthand} `);
+        expect(
+          elementChildren(editor.children[0]).some(
+            (child) => SlateElement.isElement(child) && child.type === "link",
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it("places punctuation after a quoted shorthand in plain text", () => {
+      const editor = makeSchemaEditor();
+
+      type(editor, 'wiki:"Vichy Catalán",');
+      const children = elementChildren(editor.children[0]);
+
+      const linkIndex = children.findIndex(
+        (child) => SlateElement.isElement(child) && child.type === "link",
+      );
+      expect(linkIndex).toBeGreaterThanOrEqual(0);
+      expect(children[linkIndex]).toMatchObject({
+        type: "link",
+        url: "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n",
+        children: [{ text: "Vichy Catalán" }],
+      });
+      expect(children[linkIndex + 1]).toEqual({ text: "," });
+    });
+
+    it("serializes a typed Wikipedia shorthand as a standard Markdown link", () => {
+      const editor = makeSchemaEditor();
+      type(editor, 'wiki:"Vichy Catalán"');
+
+      expect(slateToMdast(editor.children).trim()).toBe(
+        "[Vichy Catalán](https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n)",
+      );
+    });
+
+    it("serializes a typed YouTube shorthand as a standard Markdown link", () => {
+      const editor = makeSchemaEditor();
+      type(editor, "youtube:dQw4w9WgXcQ");
+      editor.insertBreak();
+
+      expect(slateToMdast(editor.children).trim()).toBe(
+        "[YouTube: dQw4w9WgXcQ](https://www.youtube.com/watch?v=dQw4w9WgXcQ)",
+      );
     });
   });
 

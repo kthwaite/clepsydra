@@ -6,6 +6,7 @@ interface PageEditorHeaderProps {
   title: string;
   onTitleChange: (title: string) => void;
   tags: string[];
+  tagSuggestions: string[];
   derivedTags?: string[];
   onTagsChange: (tags: string[]) => void;
   aliases: string[];
@@ -29,6 +30,7 @@ export function PageEditorHeader({
   title,
   onTitleChange,
   tags,
+  tagSuggestions,
   derivedTags = [],
   onTagsChange,
   aliases,
@@ -103,6 +105,7 @@ export function PageEditorHeader({
         label="Tags"
         values={tags}
         readOnlyValues={derivedTags}
+        suggestions={tagSuggestions}
         onChange={onTagsChange}
         onBlur={flush}
         placeholder="Add tag..."

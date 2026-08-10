@@ -2,6 +2,70 @@ use crate::vault::academic::WorkType;
 use crate::vault::import::BibImportEntry;
 use crate::vault::import_doi::generate_cite_key;
 
+/// Normalize an ISBN-10 or ISBN-13 to canonical ISBN-13 digits.
+///
+/// ASCII spaces and hyphens are accepted as display separators. Both source
+/// formats must carry a valid check digit; ISBN-10 values are converted with
+/// the standard `978` book prefix.
+pub fn normalize_isbn(input: &str) -> Result<String, String> {
+    let compact: String = input
+        .chars()
+        .filter(|ch| !matches!(ch, ' ' | '-'))
+        .collect();
+
+    match compact.len() {
+        10 => normalize_isbn_10(&compact),
+        13 => normalize_isbn_13(&compact),
+        _ => Err("ISBN must contain 10 or 13 characters".to_string()),
+    }
+}
+
+fn normalize_isbn_10(compact: &str) -> Result<String, String> {
+    let bytes = compact.as_bytes();
+    let mut checksum = 0_u32;
+
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        let value = match (index, byte) {
+            (9, b'X' | b'x') => 10,
+            (_, b'0'..=b'9') => u32::from(byte - b'0'),
+            _ => return Err("ISBN contains an invalid character".to_string()),
+        };
+        checksum += value * (10 - index as u32);
+    }
+
+    if !checksum.is_multiple_of(11) {
+        return Err("ISBN-10 check digit is invalid".to_string());
+    }
+
+    let stem = format!("978{}", &compact[..9]);
+    Ok(format!("{stem}{}", isbn_13_check_digit(&stem)))
+}
+
+fn normalize_isbn_13(compact: &str) -> Result<String, String> {
+    if !compact.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("ISBN contains an invalid character".to_string());
+    }
+    if !compact.starts_with("978") && !compact.starts_with("979") {
+        return Err("ISBN-13 must start with 978 or 979".to_string());
+    }
+
+    let expected = isbn_13_check_digit(&compact[..12]);
+    let actual = compact.as_bytes()[12] - b'0';
+    if expected != actual {
+        return Err("ISBN-13 check digit is invalid".to_string());
+    }
+
+    Ok(compact.to_string())
+}
+
+fn isbn_13_check_digit(stem: &str) -> u8 {
+    let sum = stem.bytes().enumerate().fold(0_u32, |sum, (index, byte)| {
+        let weight = if index % 2 == 0 { 1 } else { 3 };
+        sum + u32::from(byte - b'0') * weight
+    });
+    ((10 - (sum % 10)) % 10) as u8
+}
+
 /// Parse an Open Library edition JSON response into a `BibImportEntry`.
 ///
 /// Open Library `/isbn/{isbn}.json` returns an edition object with fields:

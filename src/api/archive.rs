@@ -14,12 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::error::ApiError;
-use super::events::SyncNotification;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_policy::IndexMutation;
-use crate::vault::mutation_coordinator::{
-    CreatePageCommand, MutationCoordinator, MutationGuard, MutationNotification,
-};
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
 use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
 
@@ -534,12 +531,7 @@ async fn ingest_archive(
     let meta = build_archive_meta(&req, &decoded_blobs);
     let page_id = meta.id.to_string();
     let expected_page_content = write_page_content(&meta, &req.markdown_body);
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(state.as_ref());
     if let Err(error) = state
         .mutation_coordinator
         .create_page(
@@ -550,7 +542,7 @@ async fn ingest_archive(
                 meta,
                 body: req.markdown_body,
             },
-            &notify,
+            notify,
         )
         .await
     {

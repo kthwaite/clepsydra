@@ -17,7 +17,7 @@ use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
-use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::mutation_coordinator::CreatePageCommand;
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
@@ -803,12 +803,7 @@ pub async fn create_from_link(
 
     let page_body = body.body.unwrap_or_default();
 
-    let notify = |notification: MutationNotification| {
-        let _ = state.change_tx.send(SyncNotification::IndexChanged {
-            upserted: notification.upserted,
-            removed: notification.removed,
-        });
-    };
+    let notify = super::mutation_notifier(state.as_ref());
     let result = state
         .mutation_coordinator
         .create_page(
@@ -819,7 +814,7 @@ pub async fn create_from_link(
                 meta,
                 body: page_body,
             },
-            &notify,
+            notify,
         )
         .await
         .map_err(super::mutation_error)?;

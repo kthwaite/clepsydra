@@ -207,6 +207,14 @@ Open `/bases` to discover, create, configure, open, or delete bases. Open `/base
 
 System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. For a page that already uses TOML `+++` frontmatter, a successful edit surgically patches the frontmatter and updates `updated_at`, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision.
 
+### Add members inline
+
+Choose **Add member** in a saved table view to open one temporary row. This creates a new page; it does not enroll an existing page in the base. Enter a title and the visible or filter-required properties, then choose **Save** or press <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Enter</kbd>. Clepsydra creates the Markdown page only when its metadata matches both the base membership filter and the active view filter. A rejected row remains editable and creates no file.
+
+After a successful save, the new title link receives focus and the row moves from its temporary position to its authoritative sort and group position.
+
+Press <kbd>Escape</kbd> to cancel after any open field editor has closed. Derived filters that an empty page cannot satisfy—for example, `word_count > 0`—disable **Add member** and explain the blocking constraint. Create the page in Folio when initial body content is required.
+
 Renaming or removing a property declaration changes only the base schema. It does not rename or remove that key in existing page frontmatter. Deleting a base removes only its `.base.toml` definition: all matching Markdown pages and all of their properties remain.
 
 The structured editor is the normal authoring path, but the TOML format remains public and editable. Manual TOML is useful for advanced changes or recovery. If a definition cannot be parsed, `/bases` reports it under **Base files needing repair** and provides its path. Repair that file in a text editor, then reload; Clepsydra never fabricates a replacement draft over an unparseable file.

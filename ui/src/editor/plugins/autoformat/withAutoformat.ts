@@ -16,7 +16,16 @@ import {
   tryThematicBreak,
 } from "./blockTransforms";
 import { tryInlineTransform } from "./inlineTransforms";
+import {
+  isInMathCandidate,
+  tryDisplayMathNewline,
+  tryMathTransform,
+} from "./mathTransforms";
 import { tryListContinuation } from "./listContinuation";
+import {
+  tryPrefixedLinkBreakTransform,
+  tryPrefixedLinkTextTransform,
+} from "./prefixedLinkTransform";
 
 const INLINE_CLOSERS: Record<string, true> = {
   "`": true,
@@ -25,6 +34,7 @@ const INLINE_CLOSERS: Record<string, true> = {
   _: true,
   ")": true,
   "]": true,
+  $: true,
 };
 
 export function withAutoformat(editor: Editor): Editor {
@@ -47,22 +57,39 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
 
-    // Step 1: overtype -> inline transform -> return
+    // Step 1: overtype -> math -> prefixed link -> inline transform -> return
     // After overtype the closer is already in the text, so pass closerConsumed.
     if (tryOvertype(editor, ch)) {
+      if (tryMathTransform(editor, ch, /* closerConsumed */ true)) return;
+      if (isInMathCandidate(editor)) return;
+      if (
+        ch === '"' &&
+        tryPrefixedLinkTextTransform(editor, ch, /* closerConsumed */ true)
+      )
+        return;
       tryInlineTransform(editor, ch, /* closerConsumed */ true);
+      return;
+    }
+    // A complete closer converts first. Otherwise, an unmatched supported
+    // opener owns every body character and bypasses Markdown autoformat.
+    if (tryMathTransform(editor, ch)) return;
+    if (isInMathCandidate(editor)) {
+      insertText(ch);
       return;
     }
     // Step 2: thematic break
     if (ch === "-" && tryThematicBreak(editor)) return;
-    // Step 3: block transforms
+    // Step 3: prefixed link on Space
+    if (ch === " " && tryPrefixedLinkTextTransform(editor, ch)) return;
+    // Step 4: block transforms
     if (ch === " " && Range.isCollapsed(selection) && tryBlockTransform(editor))
       return;
-    // Step 4: inline transform
+    // Step 5: generic mark/link transforms
     if (tryInlineTransform(editor, ch)) return;
-    // Step 5: auto-pair
+    if (ch === '"' && tryPrefixedLinkTextTransform(editor, ch)) return;
+    // Step 7: auto-pair
     if (tryAutoPair(editor, ch)) return;
-    // Step 6: fallback
+    // Step 8: fallback
     insertText(ch);
   };
 
@@ -73,14 +100,26 @@ export function withAutoformat(editor: Editor): Editor {
       return;
     }
     if (tryCodeBlockNewline(editor)) return;
-    if (tryListContinuation(editor)) return;
-    if (tryBlockquoteContinuation(editor)) return;
-    if (tryHeadingExit(editor)) return;
-    if (tryCodeFence(editor)) return;
+    if (tryDisplayMathNewline(editor)) return;
+    if (
+      tryPrefixedLinkBreakTransform(editor, () => {
+        if (!trySemanticBreak(editor, false)) insertBreak();
+      })
+    )
+      return;
+    if (trySemanticBreak(editor)) return;
     insertBreak();
   };
 
   return editor;
+}
+
+function trySemanticBreak(editor: Editor, historyBatch = true): boolean {
+  if (tryListContinuation(editor, { historyBatch })) return true;
+  if (tryBlockquoteContinuation(editor)) return true;
+  if (tryHeadingExit(editor, historyBatch)) return true;
+  if (tryCodeFence(editor)) return true;
+  return false;
 }
 
 /**
@@ -102,56 +141,71 @@ function tryCodeBlockNewline(editor: Editor): boolean {
 }
 
 function resolveComposedInline(editor: Editor): void {
-  let transformed = true;
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return;
 
-  while (transformed) {
-    transformed = false;
-    const { selection } = editor;
-    if (!selection || !Range.isCollapsed(selection)) return;
+  const { anchor } = selection;
+  const [initialNode] = Editor.node(editor, anchor.path);
+  if (!Text.isText(initialNode)) return;
 
-    const { anchor } = selection;
-    const [node] = Editor.node(editor, anchor.path);
-    if (!Text.isText(node)) return;
+  const textBefore = initialNode.text.slice(0, anchor.offset);
+  let endpointRef = Editor.pointRef(editor, anchor, { affinity: "forward" });
+  let bracketRejected = false;
 
-    const textBefore = node.text.slice(0, anchor.offset);
-    let bracketRejected = false;
-    for (let offset = textBefore.length; offset > 0; offset--) {
-      const ch = textBefore[offset - 1];
-      if (!(ch in INLINE_CLOSERS)) continue;
-      if (ch === "]" && bracketRejected) continue;
-      if (ch === "]" && textBefore[offset] === "(") {
-        const openBracket = textBefore.lastIndexOf("[", offset - 2);
-        if (openBracket === -1 || textBefore[openBracket + 1] !== "^") continue;
-      }
-
-      const hasTrailingContent = offset < textBefore.length;
-      const endpointRef = Editor.pointRef(editor, anchor, {
-        affinity: "forward",
-      });
-      const beforeCloser = { path: anchor.path, offset: offset - 1 };
-      const afterCloser = { path: anchor.path, offset };
-      Transforms.select(editor, {
-        anchor: beforeCloser,
-        focus: afterCloser,
-      });
-      Transforms.delete(editor);
-
-      if (tryInlineTransform(editor, ch)) {
-        const mappedEndpoint = endpointRef.unref();
-        if (hasTrailingContent && mappedEndpoint) {
-          Transforms.select(editor, mappedEndpoint);
-        }
-        if (ch === "]") return;
-        transformed = true;
-        break;
-      }
-
-      endpointRef.unref();
-      Transforms.insertText(editor, ch);
-      if (ch === "]") bracketRejected = true;
+  // The original leaf's closer offsets are stable while transforms to their
+  // right split the leaf, so process this committed run deterministically from
+  // right to left. The endpoint ref preserves any trailing composed text.
+  for (let offset = textBefore.length; offset > 0; offset--) {
+    const ch = textBefore[offset - 1];
+    if (!(ch in INLINE_CLOSERS)) continue;
+    if (ch === "]" && bracketRejected) continue;
+    if (ch === "]" && textBefore[offset] === "(") {
+      const openBracket = textBefore.lastIndexOf("[", offset - 2);
+      if (openBracket === -1 || textBefore[openBracket + 1] !== "^") continue;
     }
-    if (!transformed) Transforms.select(editor, selection);
+
+    if (!Editor.hasPath(editor, anchor.path)) break;
+    const [currentNode] = Editor.node(editor, anchor.path);
+    if (
+      !Text.isText(currentNode) ||
+      currentNode.text.length < offset ||
+      currentNode.text[offset - 1] !== ch
+    ) {
+      continue;
+    }
+
+    const beforeCloser = { path: anchor.path, offset: offset - 1 };
+    const afterCloser = { path: anchor.path, offset };
+    Transforms.select(editor, {
+      anchor: beforeCloser,
+      focus: afterCloser,
+    });
+    Transforms.delete(editor);
+
+    const mathApplied = tryMathTransform(editor, ch);
+    if (!mathApplied && isInMathCandidate(editor)) {
+      Transforms.insertText(editor, ch);
+      continue;
+    }
+    const inlineApplied = mathApplied || tryInlineTransform(editor, ch);
+    if (inlineApplied) {
+      // If the transformed closer ended the composed run, preserve the exact
+      // post-void selection while earlier closers are resolved.
+      if (offset === textBefore.length && editor.selection) {
+        endpointRef.unref();
+        endpointRef = Editor.pointRef(editor, editor.selection.anchor, {
+          affinity: "forward",
+        });
+      }
+      continue;
+    }
+
+    Transforms.insertText(editor, ch);
+    if (ch === "]") bracketRejected = true;
   }
+
+  const mappedEndpoint = endpointRef.unref();
+  if (mappedEndpoint) Transforms.select(editor, mappedEndpoint);
 }
 
 /**
@@ -159,7 +213,7 @@ function resolveComposedInline(editor: Editor): void {
  * of carrying the heading style onto the next line. A mid-heading Enter is left
  * to Slate's default split (which keeps both halves as headings).
  */
-function tryHeadingExit(editor: Editor): boolean {
+function tryHeadingExit(editor: Editor, historyBatch = true): boolean {
   const { selection } = editor;
   if (!selection || !Range.isCollapsed(selection)) return false;
 
@@ -172,21 +226,27 @@ function tryHeadingExit(editor: Editor): boolean {
   const [, headingPath] = headingEntry;
   if (!Editor.isEnd(editor, selection.anchor, headingPath)) return false;
 
-  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+  const exitHeading = () => {
     const afterPath = Path.next(headingPath);
     Transforms.insertNodes(
       editor,
       {
         type: "paragraph",
         children: [{ text: "" }],
-      } as any,
+      } as CustomElement,
       { at: afterPath },
     );
     Transforms.select(editor, {
       anchor: { path: [...afterPath, 0], offset: 0 },
       focus: { path: [...afterPath, 0], offset: 0 },
     });
-  });
+  };
+
+  if (historyBatch) {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, exitHeading);
+  } else {
+    exitHeading();
+  }
   return true;
 }
 function tryBlockquoteContinuation(editor: Editor): boolean {

@@ -1,0 +1,104 @@
+export const meta = {
+  slug: "books-and-reading",
+  title: "Books and Reading",
+  description: "Add books from an ISBN or camera barcode and understand imported metadata."
+}
+
+Clepsydra can create a book folio from an ISBN and retrieve its bibliographic
+metadata from Open Library. You can type the ISBN or scan the barcode printed on
+the book. Both routes use the same importer and require the Clepsydra server to
+be online.
+
+## Add a book by ISBN
+
+1. Open the command palette with `Command+K` on macOS or `Ctrl+K` elsewhere.
+2. Run **Add book by ISBN**.
+3. Enter a valid ISBN-10 or ISBN-13. Spaces and hyphens are optional.
+4. Choose **Add book**.
+
+ISBN-10 values are converted to their equivalent ISBN-13. Clepsydra validates
+the check digit before contacting Open Library.
+
+After a successful lookup, Clepsydra opens the created book folio. If the same
+canonical ISBN already exists, the importer opens that folio instead of creating
+a duplicate.
+
+## Scan a book barcode
+
+Open **Add book by ISBN**, then choose **Scan barcode**. Allow camera access when
+the browser asks and point the rear camera at the EAN-13 barcode on the back of
+the book.
+
+A successful scan fills the ISBN field and stops the camera. It does **not**
+import immediately: check the detected number, then choose **Add book**. You can
+cancel scanning at any time and continue with manual entry.
+
+Camera access is available only in a secure browser context. HTTPS deployments
+qualify, as do loopback development addresses such as `http://localhost`. If
+the browser has no usable camera or permission is denied, manual ISBN entry
+remains available.
+
+Barcode decoding happens locally in the browser. Only the detected ISBN is sent
+to the Clepsydra server for the metadata lookup.
+
+## Imported metadata
+
+The Open Library edition lookup currently supplies:
+
+- title;
+- authors;
+- publication year;
+- publisher;
+- canonical ISBN-13;
+- a generated citation key;
+- work type `book`.
+
+The importer does not currently add a cover, description, subjects, page count,
+or reading status. Review the new folio after import and add your own status,
+rating, tags, or notes.
+
+## Book location
+
+Books are written to `library/books` by default. Change the destination with the
+vault configuration key `academic.books_folder`:
+
+```toml
+[academic]
+books_folder = "books"
+```
+
+The destination is resolved by the server. The ISBN dialog does not choose or
+override a folder.
+
+## Current library workflow
+
+There is not yet a dedicated Library screen. Use the command palette whenever
+you want to add a book, then organize and query book folios with normal metadata
+and Bases. A dedicated Library screen is planned as a separate feature and will
+reuse this importer rather than introduce another book format.
+
+## Troubleshooting
+
+### The camera does not start
+
+Confirm that the page is served over HTTPS or from a loopback address, then
+check the browser's camera permission for Clepsydra. Another application may
+also be using the camera. Cancel scanning and use manual entry if camera access
+is unavailable.
+
+### No barcode is detected
+
+Use the main EAN-13 barcode, hold the book steady in even light, and keep the
+whole barcode inside the preview. Small five-digit price-code extensions are not
+ISBNs and are ignored.
+
+### The ISBN is rejected
+
+Check all digits, including the final check digit. The form accepts ISBN-10 and
+ISBN-13 only; a different product barcode is not a book ISBN.
+
+### Open Library cannot find the book
+
+The ISBN can be valid while the corresponding edition is absent from Open
+Library. Confirm the edition's ISBN and try again later. You can still create a
+normal folio and enter its metadata manually.

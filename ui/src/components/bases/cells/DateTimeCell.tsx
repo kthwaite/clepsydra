@@ -19,34 +19,54 @@ export function DateTimeCell({
   value,
   definition,
   onCommit,
+  onCommitNext,
   onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
 }: CellEditorProps) {
   const initial = typeof value === "string" ? splitIso(value) : null;
   const [draft, setDraft] = useState(initial?.local ?? "");
   const suffix = initial?.suffix ?? "";
 
-  const commit = () => {
+  const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
     if (draft === "") {
-      onCommit(null);
+      submit(null);
       return;
     }
     // Reattach the value's original zone suffix (none for local date-times).
-    onCommit(`${draft}${suffix}`, definition.type);
+    submit(`${draft}${suffix}`, definition.type);
   };
 
   return (
     <input
       autoFocus
-      aria-label="Edit datetime"
+      aria-label={ariaLabel ?? "Edit datetime"}
+      aria-describedby={ariaDescribedBy}
       type="datetime-local"
       step={1}
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={() => {
+        if (commitOnBlur) commit();
+        else onCancel();
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") onCancel();
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          commit(onCommitNext);
+          return;
+        }
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     />
   );

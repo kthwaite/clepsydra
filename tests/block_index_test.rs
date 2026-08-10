@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 
 use clepsydra::vault::Vault;
@@ -129,4 +130,28 @@ fn encrypted_page_suppresses_blocks_and_word_count_even_when_armor_is_invalid() 
         .query_row("SELECT COUNT(*) FROM blocks", [], |row| row.get(0))
         .unwrap();
     assert_eq!(block_count, 0);
+}
+
+#[test]
+fn indexes_blockquote_paragraphs_and_list_items() {
+    let page = "---\nid: 00000000-0000-0000-0000-000000000004\ntitle: Quoted cases\n---\n> Summary\n>\n> - Option A\n> - Option B\n>\n> Outcome\n";
+    let (_tmp, vault) = setup_vault(&[("quoted.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+
+    index.build(&vault).unwrap();
+
+    let rows: Vec<(String, i64)> = {
+        let mut stmt = index
+            .connection()
+            .prepare("SELECT content, span_start FROM blocks ORDER BY order_index")
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let span_starts: HashSet<_> = rows.iter().map(|(_, span_start)| *span_start).collect();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(span_starts.len(), rows.len());
 }

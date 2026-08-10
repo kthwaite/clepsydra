@@ -6,6 +6,7 @@ import { ThemeProvider } from "#/components/ThemeProvider";
 import { EncryptionProvider } from "#/crypto/EncryptionProvider";
 import { queryClient } from "#/lib/queryClient";
 import { routeTree } from "./routeTree.gen";
+import "katex/dist/katex.min.css";
 import "./main.css";
 
 const router = createRouter({

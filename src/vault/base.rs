@@ -6,14 +6,14 @@
 //! the registry — a broken base is listed with its diagnostics and excluded
 //! from evaluation.
 
-use std::path::Path;
+use std::{borrow::Cow, collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// System fields addressable in filters/sorts/columns without declaration.
-/// Bases may not declare properties with these names; resolution is
-/// system-first for bare names (escape with `prop.<name>` / `sys.<name>`).
+/// Bare references resolve system-first; a declared property with the same
+/// name remains addressable through `prop.<name>`.
 pub const SYSTEM_FIELDS: &[&str] = &[
     "id",
     "path",
@@ -66,6 +66,17 @@ impl PropertyType {
             self,
             PropertyType::Number | PropertyType::Date | PropertyType::Datetime
         )
+    }
+
+    /// Whether `contains` is defined for the type. Text-like values use
+    /// literal substring matching; categorical values use exact membership.
+    pub fn supports_contains(self) -> bool {
+        !matches!(self, PropertyType::Number | PropertyType::Bool)
+    }
+
+    /// Whether `links_to` can be evaluated through the links index.
+    pub fn supports_links_to(self) -> bool {
+        self == PropertyType::Relation
     }
 
     /// Whether saved-view evaluation can order this property as one scalar
@@ -351,6 +362,64 @@ pub fn validate_definition(slug: &str, file: BaseFile) -> ValidationResult {
 // In-memory filter matching (LSP path: cheap, no SQL)
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CandidateLinkTarget {
+    target_canonical: String,
+    target_id: Option<String>,
+}
+
+pub(crate) type CandidateLinkTargets = HashMap<String, Vec<CandidateLinkTarget>>;
+
+pub(crate) fn candidate_link_targets<E>(
+    base: &BaseDefinition,
+    meta: &crate::vault::page::PageMeta,
+    mut resolve_target_id: impl FnMut(&str) -> Result<Option<String>, E>,
+) -> Result<CandidateLinkTargets, E> {
+    let mut targets = CandidateLinkTargets::new();
+    for (field, definition) in &base.file.properties {
+        if !definition.property_type.supports_links_to() {
+            continue;
+        }
+        let Some(value) = meta.extra.get(field) else {
+            continue;
+        };
+        let values = match value {
+            toml::Value::String(value) => vec![value.clone()],
+            toml::Value::Array(values) => values
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let links = crate::vault::link::extract_property_refs(field, &values)
+            .into_iter()
+            .map(|link| {
+                let target_canonical =
+                    crate::vault::canonical::CanonicalName::new(&link.target_raw)
+                        .as_str()
+                        .to_owned();
+                let target_id = resolve_target_id(&target_canonical)?;
+                Ok(CandidateLinkTarget {
+                    target_canonical,
+                    target_id,
+                })
+            })
+            .collect::<Result<Vec<_>, E>>()?;
+        targets.insert(field.clone(), links);
+    }
+    Ok(targets)
+}
+
+pub(crate) struct MetaFilterContext<'a> {
+    pub base: &'a BaseDefinition,
+    pub meta: &'a crate::vault::page::PageMeta,
+    pub path: &'a str,
+    pub word_count: Option<u32>,
+    pub journal_date: Option<chrono::NaiveDate>,
+    pub link_targets: Option<&'a CandidateLinkTargets>,
+}
+
 /// Evaluate a base's membership filter against a parsed page's metadata —
 /// the completion/diagnostics path, where hitting SQLite per keystroke is
 /// not warranted. Semantics mirror the SQL compilation for the common ops;
@@ -360,18 +429,69 @@ pub fn base_matches_meta(
     meta: &crate::vault::page::PageMeta,
     path: &str,
 ) -> bool {
+    let context = MetaFilterContext {
+        base,
+        meta,
+        path,
+        word_count: None,
+        journal_date: None,
+        link_targets: None,
+    };
     match &base.file.filter {
-        Some(filter) => filter_matches_meta(filter, meta, path),
+        Some(filter) => filter_matches_meta(filter, &context),
         None => true,
     }
 }
 
-fn filter_matches_meta(filter: &Filter, meta: &crate::vault::page::PageMeta, path: &str) -> bool {
+pub(crate) fn filter_matches_meta(filter: &Filter, context: &MetaFilterContext<'_>) -> bool {
     match filter {
-        Filter::All(children) => children.iter().all(|c| filter_matches_meta(c, meta, path)),
-        Filter::Any(children) => children.iter().any(|c| filter_matches_meta(c, meta, path)),
-        Filter::Not(child) => !filter_matches_meta(child, meta, path),
-        Filter::Cmp { field, op, value } => cmp_matches_meta(field, *op, value, meta, path),
+        Filter::All(children) => children
+            .iter()
+            .all(|child| filter_matches_meta(child, context)),
+        Filter::Any(children) => children
+            .iter()
+            .any(|child| filter_matches_meta(child, context)),
+        Filter::Not(child) => !filter_matches_meta(child, context),
+        Filter::Cmp { field, op, value } => cmp_matches_meta(field, *op, value, context),
+    }
+}
+
+pub(crate) fn fixed_candidate_comparison_matches(
+    base: &BaseDefinition,
+    field: &str,
+    op: Op,
+    value: &serde_json::Value,
+) -> Option<bool> {
+    use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
+
+    let context = QueryContext::for_base(base);
+    let resolved = resolve_field(field, &context).ok()?;
+    if op == Op::LinksTo
+        && (!matches!(
+            &resolved,
+            ResolvedField::Prop { ty, .. } if ty.supports_links_to()
+        ) || !value.is_string())
+    {
+        return Some(false);
+    }
+    match resolved {
+        ResolvedField::Sys(SysField::WordCount) => Some(scalar_matches(
+            Some(Comparable::Number(0.0)),
+            PropertyType::Number,
+            op,
+            value,
+            false,
+        )),
+        ResolvedField::Sys(SysField::JournalDate) => {
+            Some(scalar_matches(None, PropertyType::Date, op, value, false))
+        }
+        ResolvedField::Prop { ty, .. } if op == Op::Contains && !ty.supports_contains() => {
+            Some(false)
+        }
+        ResolvedField::Prop { key, ty } if base.property(&key).is_none() => {
+            Some(property_matches(None, ty, op, value, None))
+        }
+        _ => None,
     }
 }
 
@@ -379,171 +499,320 @@ fn cmp_matches_meta(
     field: &str,
     op: Op,
     value: &serde_json::Value,
-    meta: &crate::vault::page::PageMeta,
-    path: &str,
+    context: &MetaFilterContext<'_>,
 ) -> bool {
-    let bare = field
-        .strip_prefix("sys.")
-        .or_else(|| field.strip_prefix("prop."))
-        .unwrap_or(field);
-    let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
+    use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
-    if is_system {
-        // Multi-valued system fields: membership semantics.
-        let list: Option<Vec<String>> = match bare {
-            "tags" => Some(meta.tags.clone()),
-            "aliases" => Some(meta.aliases.clone()),
-            _ => None,
-        };
-        if let Some(items) = list {
-            return match op {
-                Op::Eq | Op::Contains => {
-                    value.as_str().is_some_and(|v| items.iter().any(|i| i == v))
-                }
-                Op::Ne => value.as_str().is_none_or(|v| !items.iter().any(|i| i == v)),
-                Op::In => value.as_array().is_some_and(|vs| {
-                    vs.iter()
-                        .filter_map(|v| v.as_str())
-                        .any(|v| items.iter().any(|i| i == v))
-                }),
-                Op::IsEmpty => items.is_empty(),
-                Op::NotEmpty => !items.is_empty(),
-                _ => false,
-            };
+    let query_context = QueryContext::for_base(context.base);
+    let Ok(resolved) = resolve_field(field, &query_context) else {
+        return false;
+    };
+    match resolved {
+        ResolvedField::Sys(SysField::Tags) => {
+            membership_matches(&context.meta.tags, op, value, false)
         }
-
-        let scalar: Option<String> = match bare {
-            "id" => Some(meta.id.to_string()),
-            "path" => Some(path.to_string()),
-            "title" => meta.title.clone(),
-            "kind" => Some(
-                crate::vault::kind::resolve(path, meta.kind)
-                    .0
-                    .as_str()
-                    .to_string(),
-            ),
-            "project" => meta.project.clone(),
-            "created_at" => meta.created_at.map(|dt| dt.to_rfc3339()),
-            "updated_at" => meta.updated_at.map(|dt| dt.to_rfc3339()),
-            // journal_date / word_count are index-derived; unknowable here.
-            _ => None,
-        };
-        return scalar_matches(scalar.as_deref(), op, value);
-    }
-
-    // Property: native TOML value from extras.
-    let current = meta.extra.get(bare);
-    match op {
-        Op::IsEmpty => current.is_none_or(toml_value_is_empty),
-        Op::NotEmpty => current.is_some_and(|v| !toml_value_is_empty(v)),
-        _ => current.is_some_and(|v| toml_value_matches(v, op, value)),
+        ResolvedField::Sys(SysField::Aliases) => {
+            membership_matches(&context.meta.aliases, op, value, true)
+        }
+        ResolvedField::Sys(sys) => scalar_matches(
+            system_scalar(sys, context),
+            system_property_type(sys),
+            op,
+            value,
+            false,
+        ),
+        ResolvedField::Prop { key, ty } => property_matches(
+            context.meta.extra.get(&key),
+            ty,
+            op,
+            value,
+            context
+                .link_targets
+                .and_then(|targets| targets.get(&key).map(Vec::as_slice)),
+        ),
     }
 }
 
-fn toml_value_is_empty(value: &toml::Value) -> bool {
-    match value {
-        toml::Value::String(s) => s.is_empty(),
-        toml::Value::Array(items) => items.is_empty(),
+fn system_property_type(sys: crate::vault::query::SysField) -> PropertyType {
+    match sys {
+        crate::vault::query::SysField::WordCount => PropertyType::Number,
+        crate::vault::query::SysField::JournalDate => PropertyType::Date,
+        _ => PropertyType::Text,
+    }
+}
+
+fn system_scalar<'a>(
+    sys: crate::vault::query::SysField,
+    context: &'a MetaFilterContext<'_>,
+) -> Option<Comparable<'a>> {
+    use crate::vault::query::SysField;
+
+    match sys {
+        SysField::Id => Some(Comparable::Text(Cow::Owned(context.meta.id.to_string()))),
+        SysField::Path => Some(Comparable::Text(Cow::Borrowed(context.path))),
+        SysField::Title => context
+            .meta
+            .title
+            .as_deref()
+            .map(|value| Comparable::Text(Cow::Borrowed(value))),
+        SysField::Kind => Some(Comparable::Text(Cow::Owned(
+            crate::vault::kind::resolve(context.path, context.meta.kind)
+                .0
+                .as_str()
+                .to_string(),
+        ))),
+        SysField::Project => context
+            .meta
+            .project
+            .as_deref()
+            .map(|value| Comparable::Text(Cow::Borrowed(value))),
+        SysField::CreatedAt => context
+            .meta
+            .created_at
+            .map(|value| Comparable::Text(Cow::Owned(value.to_rfc3339()))),
+        SysField::UpdatedAt => context
+            .meta
+            .updated_at
+            .map(|value| Comparable::Text(Cow::Owned(value.to_rfc3339()))),
+        SysField::JournalDate => context
+            .journal_date
+            .map(|value| Comparable::Text(Cow::Owned(value.to_string()))),
+        SysField::WordCount => context
+            .word_count
+            .map(|value| Comparable::Number(f64::from(value))),
+        SysField::Tags | SysField::Aliases => None,
+    }
+}
+
+fn membership_matches(
+    current: &[String],
+    op: Op,
+    value: &serde_json::Value,
+    canonicalize: bool,
+) -> bool {
+    let contains = |expected: &str| membership_contains(current, expected, canonicalize);
+    match op {
+        Op::Eq | Op::Contains => value.as_str().is_some_and(contains),
+        Op::Ne => value.as_str().is_some_and(|expected| !contains(expected)),
+        Op::In => value.as_array().is_some_and(|values| {
+            values.iter().all(serde_json::Value::is_string)
+                && values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .any(contains)
+        }),
+        Op::IsEmpty => current.is_empty(),
+        Op::NotEmpty => !current.is_empty(),
         _ => false,
     }
 }
 
-fn scalar_matches(current: Option<&str>, op: Op, value: &serde_json::Value) -> bool {
+fn membership_contains(current: &[String], expected: &str, canonicalize: bool) -> bool {
+    if !canonicalize {
+        return current.iter().any(|item| item == expected);
+    }
+    let expected = crate::vault::canonical::CanonicalName::from_title(expected);
+    current.iter().any(|item| {
+        crate::vault::canonical::CanonicalName::from_title(item).as_str() == expected.as_str()
+    })
+}
+
+#[derive(Debug)]
+enum Comparable<'a> {
+    Text(Cow<'a, str>),
+    Number(f64),
+    Bool(bool),
+}
+
+fn property_matches(
+    current: Option<&toml::Value>,
+    property_type: PropertyType,
+    op: Op,
+    value: &serde_json::Value,
+    link_targets: Option<&[CandidateLinkTarget]>,
+) -> bool {
+    let present = current.is_some_and(|current| !toml_value_is_empty(current));
     match op {
-        Op::IsEmpty => current.is_none(),
-        Op::NotEmpty => current.is_some(),
-        Op::In => match (current, value.as_array()) {
-            (Some(c), Some(items)) => items.iter().filter_map(|v| v.as_str()).any(|v| v == c),
-            _ => false,
+        Op::IsEmpty => return !present,
+        Op::NotEmpty => return present,
+        _ => {}
+    }
+    if op == Op::LinksTo {
+        if !property_type.supports_links_to() {
+            return false;
+        }
+        let Some(expected) = value.as_str() else {
+            return false;
+        };
+        let expected = crate::vault::link::normalize_links_to_target(expected);
+        return link_targets.is_some_and(|targets| {
+            targets.iter().any(|target| {
+                target.target_id.as_deref() == Some(expected.target_id.as_str())
+                    || target.target_canonical == expected.target_canonical
+            })
+        });
+    }
+    let Some(current) = current.filter(|current| !toml_value_is_empty(current)) else {
+        return op == Op::Ne && expected_scalar(property_type, value).is_some();
+    };
+    if let toml::Value::Array(items) = current {
+        return match op {
+            Op::Ne => items
+                .iter()
+                .all(|item| !property_scalar_matches(item, property_type, Op::Eq, value)),
+            _ => items
+                .iter()
+                .any(|item| property_scalar_matches(item, property_type, op, value)),
+        };
+    }
+    property_scalar_matches(current, property_type, op, value)
+}
+
+fn property_scalar_matches(
+    current: &toml::Value,
+    property_type: PropertyType,
+    op: Op,
+    value: &serde_json::Value,
+) -> bool {
+    if op == Op::LinksTo {
+        return false;
+    }
+    scalar_matches(
+        current_scalar(current, property_type),
+        property_type,
+        op,
+        value,
+        matches!(
+            property_type,
+            PropertyType::Select | PropertyType::MultiSelect | PropertyType::Relation
+        ),
+    )
+}
+
+fn toml_value_is_empty(value: &toml::Value) -> bool {
+    match value {
+        toml::Value::String(value) => value.is_empty(),
+        toml::Value::Array(values) => values.is_empty(),
+        _ => false,
+    }
+}
+
+fn current_scalar(current: &toml::Value, property_type: PropertyType) -> Option<Comparable<'_>> {
+    match property_type {
+        PropertyType::Number => match current {
+            toml::Value::Integer(value) => Some(Comparable::Number(*value as f64)),
+            toml::Value::Float(value) => Some(Comparable::Number(*value)),
+            _ => None,
         },
-        Op::Contains => match (current, value.as_str()) {
-            (Some(c), Some(v)) => c.contains(v),
-            _ => false,
+        PropertyType::Bool => current.as_bool().map(Comparable::Bool),
+        PropertyType::Date | PropertyType::Datetime => match current {
+            toml::Value::Datetime(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            _ => None,
         },
-        Op::Ne => match (current, value.as_str()) {
-            (Some(c), Some(v)) => c != v,
-            (None, _) => true,
-            _ => false,
-        },
-        _ => match (current, value.as_str()) {
-            (Some(c), Some(v)) => match op {
-                Op::Eq => c == v,
-                Op::Lt => c < v,
-                Op::Lte => c <= v,
-                Op::Gt => c > v,
-                Op::Gte => c >= v,
-                _ => false,
-            },
-            _ => false,
+        _ => current
+            .as_str()
+            .map(|value| Comparable::Text(Cow::Borrowed(value))),
+    }
+}
+
+fn expected_scalar(
+    property_type: PropertyType,
+    value: &serde_json::Value,
+) -> Option<Comparable<'_>> {
+    match property_type {
+        PropertyType::Number => value.as_f64().map(Comparable::Number),
+        PropertyType::Bool => value.as_bool().map(Comparable::Bool),
+        _ => match value {
+            serde_json::Value::String(value) => Some(Comparable::Text(Cow::Borrowed(value))),
+            serde_json::Value::Number(value) => {
+                Some(Comparable::Text(Cow::Owned(value.to_string())))
+            }
+            serde_json::Value::Bool(value) => Some(Comparable::Text(Cow::Owned(value.to_string()))),
+            _ => None,
         },
     }
 }
 
-/// Compare a native TOML value (any element for arrays) against a JSON
-/// literal under `op`.
-fn toml_value_matches(current: &toml::Value, op: Op, value: &serde_json::Value) -> bool {
-    if let toml::Value::Array(items) = current {
-        return match op {
-            // "No element equals" for ne.
-            Op::Ne => !items
-                .iter()
-                .any(|item| toml_value_matches(item, Op::Eq, value)),
-            _ => items.iter().any(|item| toml_value_matches(item, op, value)),
-        };
+fn scalar_matches(
+    current: Option<Comparable<'_>>,
+    property_type: PropertyType,
+    op: Op,
+    value: &serde_json::Value,
+    contains_is_membership: bool,
+) -> bool {
+    match op {
+        Op::IsEmpty => return current.is_none(),
+        Op::NotEmpty => return current.is_some(),
+        _ => {}
     }
+    let Some(current) = current else {
+        return op == Op::Ne && expected_scalar(property_type, value).is_some();
+    };
     match op {
         Op::In => value
             .as_array()
-            .is_some_and(|vs| vs.iter().any(|v| toml_value_matches(current, Op::Eq, v))),
-        Op::Contains => match (current, value.as_str()) {
-            (toml::Value::String(s), Some(v)) => s.contains(v),
-            _ => false,
-        },
-        Op::LinksTo => match (current, value.as_str()) {
-            (toml::Value::String(s), Some(target)) => {
-                let bare = s
-                    .trim()
-                    .strip_prefix("[[")
-                    .and_then(|x| x.strip_suffix("]]"))
-                    .map(|inner| inner.split_once('|').map(|(t, _)| t).unwrap_or(inner))
-                    .unwrap_or(s.trim());
-                crate::vault::canonical::CanonicalName::from_title(bare).as_str()
-                    == crate::vault::canonical::CanonicalName::from_title(target).as_str()
+            .and_then(|values| {
+                values.iter().try_fold(false, |matched, value| {
+                    expected_scalar(property_type, value)
+                        .map(|expected| matched || scalar_equal(&current, &expected))
+                })
+            })
+            .unwrap_or(false),
+        Op::Contains if !property_type.supports_contains() => false,
+        Op::Contains => expected_scalar(property_type, value).is_some_and(|expected| {
+            if contains_is_membership {
+                scalar_equal(&current, &expected)
+            } else {
+                sql_contains(&current, &expected)
             }
-            _ => false,
-        },
-        _ => {
-            let ordering = toml_json_ordering(current, value);
+        }),
+        Op::LinksTo => false,
+        _ => expected_scalar(property_type, value).is_some_and(|expected| {
+            let ordering = scalar_ordering(&current, &expected);
             match (op, ordering) {
                 (Op::Eq, Some(std::cmp::Ordering::Equal)) => true,
-                (Op::Ne, Some(o)) => o != std::cmp::Ordering::Equal,
+                (Op::Ne, Some(ordering)) => ordering != std::cmp::Ordering::Equal,
                 (Op::Ne, None) => true,
                 (Op::Lt, Some(std::cmp::Ordering::Less)) => true,
-                (Op::Lte, Some(o)) => o != std::cmp::Ordering::Greater,
+                (Op::Lte, Some(ordering)) => ordering != std::cmp::Ordering::Greater,
                 (Op::Gt, Some(std::cmp::Ordering::Greater)) => true,
-                (Op::Gte, Some(o)) => o != std::cmp::Ordering::Less,
+                (Op::Gte, Some(ordering)) => ordering != std::cmp::Ordering::Less,
                 _ => false,
             }
-        }
+        }),
     }
 }
 
-fn toml_json_ordering(
-    current: &toml::Value,
-    value: &serde_json::Value,
-) -> Option<std::cmp::Ordering> {
-    match (current, value) {
-        (toml::Value::Integer(i), serde_json::Value::Number(n)) => {
-            (*i as f64).partial_cmp(&n.as_f64()?)
-        }
-        (toml::Value::Float(f), serde_json::Value::Number(n)) => f.partial_cmp(&n.as_f64()?),
-        (toml::Value::Boolean(b), serde_json::Value::Bool(v)) => Some(b.cmp(v)),
-        (toml::Value::String(s), serde_json::Value::String(v)) => Some(s.as_str().cmp(v.as_str())),
-        // ISO 8601 collates correctly as text.
-        (toml::Value::Datetime(dt), serde_json::Value::String(v)) => {
-            Some(dt.to_string().as_str().cmp(v.as_str()))
-        }
+fn scalar_equal(left: &Comparable<'_>, right: &Comparable<'_>) -> bool {
+    scalar_ordering(left, right) == Some(std::cmp::Ordering::Equal)
+}
+
+fn scalar_ordering(left: &Comparable<'_>, right: &Comparable<'_>) -> Option<std::cmp::Ordering> {
+    match (left, right) {
+        (Comparable::Text(left), Comparable::Text(right)) => Some(left.cmp(right)),
+        (Comparable::Number(left), Comparable::Number(right)) => left.partial_cmp(right),
+        (Comparable::Bool(left), Comparable::Bool(right)) => Some(left.cmp(right)),
         _ => None,
+    }
+}
+
+fn sql_contains(current: &Comparable<'_>, expected: &Comparable<'_>) -> bool {
+    let current = comparable_sql_text(current);
+    let expected = comparable_sql_text(expected);
+    if expected.is_empty() {
+        return true;
+    }
+    current
+        .as_bytes()
+        .windows(expected.len())
+        .any(|window| window.eq_ignore_ascii_case(expected.as_bytes()))
+}
+
+fn comparable_sql_text<'a>(value: &'a Comparable<'_>) -> Cow<'a, str> {
+    match value {
+        Comparable::Text(value) => Cow::Borrowed(value.as_ref()),
+        Comparable::Number(value) => Cow::Owned(value.to_string()),
+        Comparable::Bool(value) => Cow::Borrowed(if *value { "1" } else { "0" }),
     }
 }
 
@@ -732,17 +1001,6 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         );
     }
 
-    // Properties may not shadow system fields.
-    for (key, _) in &base.file.properties {
-        if SYSTEM_FIELDS.contains(&key.as_str()) {
-            push(
-                BaseDiagnosticSeverity::Warning,
-                Some(format!("properties.{key}")),
-                format!("property `{key}` shadows a system field and cannot be declared"),
-            );
-        }
-    }
-
     // Filter fields referencing undeclared properties are a warning (the
     // vault may legitimately carry keys the base doesn't declare); op/type
     // mismatches are hard facts.
@@ -914,11 +1172,59 @@ fn validate_filter(
         Filter::Not(child) => {
             validate_filter(base, child, &format!("{path}.not"), context, push);
         }
-        Filter::Cmp { field, op, .. } => {
+        Filter::Cmp { field, op, value } => {
+            if *op == Op::Contains {
+                use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
+
+                let query_context = QueryContext::for_base(base);
+                let supported = match resolve_field(field, &query_context) {
+                    Ok(ResolvedField::Sys(SysField::WordCount)) => false,
+                    Ok(ResolvedField::Sys(_)) => true,
+                    Ok(ResolvedField::Prop { ty, .. }) => ty.supports_contains(),
+                    Err(_) => false,
+                };
+                if !supported {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.op")),
+                        format!(
+                            "{context}: op `contains` is not valid for non-text field `{field}`"
+                        ),
+                    );
+                    return;
+                }
+            }
             let bare = field
                 .strip_prefix("prop.")
                 .or_else(|| field.strip_prefix("sys."))
                 .unwrap_or(field);
+            if *op == Op::LinksTo {
+                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+
+                let query_context = QueryContext::for_base(base);
+                let supported = matches!(
+                    resolve_field(field, &query_context),
+                    Ok(ResolvedField::Prop { ty, .. }) if ty.supports_links_to()
+                );
+                if !supported {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.op")),
+                        format!(
+                            "{context}: op `links_to` is only valid for relation field `{field}`"
+                        ),
+                    );
+                    return;
+                }
+                if !value.is_string() {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.value")),
+                        format!("{context}: op `links_to` expects a string target"),
+                    );
+                    return;
+                }
+            }
             let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
             if !is_system {
                 match base.property(bare) {
@@ -1189,27 +1495,154 @@ value = "BOOK"
     }
 
     #[test]
-    fn system_field_property_declaration_is_rejected() {
+    fn system_field_property_declaration_is_allowed_with_prop_escape() {
         let content = "name = \"X\"\n\n[properties]\ntitle = { type = \"text\" }\nkind = { type = \"text\" }\nencryption = { type = \"text\" }\n";
         let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let base = base.expect("valid base");
+
+        assert!(diagnostics.is_empty());
+        assert!(base.property("title").is_some());
+        assert!(base.property("kind").is_some());
+        assert!(base.property("encryption").is_some());
+    }
+
+    #[test]
+    fn contains_validation_rejects_non_text_system_and_property_fields() {
+        let content = r#"
+name = "Invalid contains"
+[filter]
+all = [
+  { field = "word_count", op = "contains", value = 0 },
+  { field = "rating", op = "contains", value = 1.5 },
+  { field = "done", op = "contains", value = true }
+]
+[properties]
+rating = { type = "number" }
+done = { type = "bool" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("filter.all[0].op"),
+                Some("filter.all[1].op"),
+                Some("filter.all[2].op"),
+            ]
+        );
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic
+                .message
+                .contains("op `contains` is not valid for non-text field")
+        }));
+    }
+
+    #[test]
+    fn links_to_validation_rejects_unsupported_field_and_value_pairs() {
+        let content = r#"
+name = "Invalid links"
+[filter]
+all = [
+  { field = "author", op = "links_to", value = "Target" },
+  { field = "rating", op = "links_to", value = "Target" },
+  { field = "series", op = "links_to", value = 42 }
+]
+[properties]
+author = { type = "text" }
+rating = { type = "number" }
+series = { type = "relation" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("filter.all[0].op"),
+                Some("filter.all[1].op"),
+                Some("filter.all[2].value"),
+            ]
+        );
+    }
+
+    #[test]
+    fn contains_validation_accepts_text_like_and_membership_fields() {
+        let content = r#"
+name = "Valid contains"
+[filter]
+all = [
+  { field = "text", op = "contains", value = "x" },
+  { field = "url", op = "contains", value = "x" },
+  { field = "date", op = "contains", value = "2026" },
+  { field = "datetime", op = "contains", value = "2026" },
+  { field = "select", op = "contains", value = "x" },
+  { field = "multi", op = "contains", value = "x" },
+  { field = "relation", op = "contains", value = "[[X]]" }
+]
+[properties]
+text = { type = "text" }
+url = { type = "url" }
+date = { type = "date" }
+datetime = { type = "datetime" }
+select = { type = "select", options = ["x"] }
+multi = { type = "multi_select", options = ["x"] }
+relation = { type = "relation" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
         assert!(base.is_some());
         assert!(
             diagnostics
                 .iter()
-                .all(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Warning)
+                .all(|diagnostic| diagnostic.severity != BaseDiagnosticSeverity::Error)
         );
+    }
+
+    #[test]
+    fn links_to_validation_rejects_non_relation_properties() {
+        let content = r#"
+name = "Invalid links"
+[filter]
+all = [
+  { field = "author", op = "links_to", value = "Target" },
+  { field = "rating", op = "links_to", value = "Target" }
+]
+[properties]
+author = { type = "text" }
+rating = { type = "number" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(diagnostics.len(), 2);
         assert_eq!(
             diagnostics
                 .iter()
-                .filter_map(|diagnostic| diagnostic.path.as_deref())
+                .map(|diagnostic| diagnostic.path.as_deref())
                 .collect::<Vec<_>>(),
-            vec![
-                "properties.title",
-                "properties.kind",
-                "properties.encryption"
-            ]
+            vec![Some("filter.all[0].op"), Some("filter.all[1].op")]
         );
-        assert!(diagnostics[0].message.contains("shadows a system field"));
     }
 
     #[test]

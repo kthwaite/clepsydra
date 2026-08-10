@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
 import { withSchema } from "#/editor/schema/withSchema";
 import { withAutoformat } from "../autoformat/withAutoformat";
+import { withMathClipboard } from "../withMathClipboard";
 import { withMarkdownPaste } from "../withMarkdownPaste";
 
 /**
@@ -29,6 +30,16 @@ function makeAutoformatEditor() {
 function fakeData(parts: Record<string, string>): DataTransfer {
   return {
     getData: (type: string) => parts[type] ?? "",
+  } as unknown as DataTransfer;
+}
+
+function mutableData(): DataTransfer {
+  const parts = new Map<string, string>();
+  return {
+    getData: (type: string) => parts.get(type) ?? "",
+    setData: (type: string, value: string) => {
+      parts.set(type, value);
+    },
   } as unknown as DataTransfer;
 }
 
@@ -89,6 +100,44 @@ describe("withMarkdownPaste", () => {
     expect(base).toHaveBeenCalledTimes(1);
     // markdown path did NOT run: still a single empty paragraph
     expect((editor.children[0] as any).type).toBe("paragraph");
+  });
+
+  it("MP-04b: a copied math fragment keeps the internal paste fast path", () => {
+    const source = withSchema(createEditor());
+    source.children = [
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "inline-math",
+            tex: "x",
+            delimiter: "\\(",
+            children: [{ text: "" }],
+          },
+        ],
+      },
+    ];
+    source.selection = {
+      anchor: { path: [0, 0, 0], offset: 0 },
+      focus: { path: [0, 0, 0], offset: 0 },
+    };
+    source.setFragmentData = (data) => {
+      data.setData("application/x-slate-fragment", "encoded-math-fragment");
+      data.setData("text/plain", "");
+    };
+    withMathClipboard(source);
+    const data = mutableData();
+    source.setFragmentData(data, "copy");
+
+    const { editor, base } = makeEditor();
+    emptyParagraph(editor);
+    editor.insertData(data);
+
+    expect(data.getData("text/plain")).toBe(String.raw`\(x\)`);
+    expect(base).toHaveBeenCalledWith(data);
+    expect(editor.children).toEqual([
+      { type: "paragraph", children: [{ text: "" }] },
+    ]);
   });
 
   it("MP-05: pasting inside a code-block inserts the text literally", () => {

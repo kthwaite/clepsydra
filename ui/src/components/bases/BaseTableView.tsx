@@ -1,3 +1,11 @@
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import {
@@ -10,18 +18,25 @@ import {
 } from "react-aria-components";
 import type {
   BaseDetailResponse,
+  BaseMemberCapability,
+  BaseMemberDiagnostic,
   GroupResult,
   PropertyType,
   QueryOutput,
   QueryRow,
   ViewOverrides,
 } from "#/api/bases";
-import { buttonStyles } from "#/components/ui/button";
+import { Button, buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
+import { BaseMemberDraft } from "./BaseMemberDraft";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import { asciiCaseFold } from "./local-validation";
+import type {
+  BaseMemberDraftField,
+  BaseMemberDraftValue,
+} from "./member-draft";
 
 interface BaseTableViewProps {
   definition: BaseDetailResponse;
@@ -42,7 +57,35 @@ interface BaseTableViewProps {
     hint?: PropertyType,
   ) => void;
   readOnly?: boolean;
+  memberCapability?: BaseMemberCapability;
+  memberDraftFields?: BaseMemberDraftField[];
+  memberDraftOpen?: boolean;
+  memberSaving?: boolean;
+  memberDiagnostics?: BaseMemberDiagnostic[];
+  memberError?: string;
+  memberNotice?: string;
+  projects?: string[];
+  onAddMember?: () => void;
+  onSaveMember?: (value: BaseMemberDraftValue) => void;
+  onCancelMember?: () => void;
+  onMemberEdit?: () => void;
+  focusCreatedId?: string;
+  onCreatedRowFocused?: (createdId: string) => void;
 }
+
+interface ActiveCell {
+  rowId: string;
+  column: string;
+  view: string;
+}
+interface ForwardFocusRequest {
+  token: number;
+  view: string;
+  rowId: string;
+  node: HTMLButtonElement | null;
+  ref: (node: HTMLButtonElement | null) => void;
+}
+
 
 /**
  * System fields render read-only — the complete contract, mirroring
@@ -98,6 +141,20 @@ export function BaseTableView({
   configureSlug,
   onCommitCell,
   readOnly = false,
+  memberCapability,
+  memberDraftFields = [],
+  memberDraftOpen = false,
+  memberSaving = false,
+  memberDiagnostics = [],
+  memberError,
+  memberNotice,
+  projects = [],
+  onAddMember,
+  onSaveMember,
+  onCancelMember,
+  onMemberEdit,
+  focusCreatedId,
+  onCreatedRowFocused,
 }: BaseTableViewProps) {
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
@@ -106,6 +163,211 @@ export function BaseTableView({
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
   const properties = definition.properties ?? EMPTY_PROPERTIES;
+  const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
+  const activeViewIdentityRef = useRef(equivalentActiveView);
+  const nextForwardFocusToken = useRef(0);
+  const pendingForwardFocus = useRef<ForwardFocusRequest | undefined>(
+    undefined,
+  );
+  const [forwardFocusRequest, setForwardFocusRequest] = useState<
+    ForwardFocusRequest | undefined
+  >(undefined);
+  const editableColumns = columns.filter(
+    (column) =>
+      SYSTEM_COLUMNS[column] === undefined && properties[column] !== undefined,
+  );
+  const nextEditableColumn = (column: string): string | undefined => {
+    const index = editableColumns.indexOf(column);
+    return index < 0 ? undefined : editableColumns[index + 1];
+  };
+  const activeRowId = activeCell?.rowId;
+  const activeCellIsRendered =
+    activeCell !== null &&
+    asciiCaseFold(activeCell.view) === equivalentActiveView &&
+    !readOnly &&
+    !memberDraftOpen &&
+    !viewError &&
+    !viewLoading &&
+    editableColumns.includes(activeCell.column) &&
+    (output?.shape === "flat"
+      ? output.rows.some((row) => String(row.id) === activeRowId)
+      : output?.shape === "grouped" &&
+        output.groups.some((group) =>
+          group.rows.some((row) => String(row.id) === activeRowId),
+        ));
+
+
+  useEffect(() => {
+    if (activeCell && !activeCellIsRendered) {
+      setActiveCell(null);
+    }
+  }, [activeCell, activeCellIsRendered]);
+  const memberBlockerId = useId();
+  const createdTitleRef = useRef<HTMLButtonElement | null>(null);
+  const focusedCreatedId = useRef<string | undefined>(undefined);
+  const createdFocusTimer = useRef<number | undefined>(undefined);
+  const viewRootRef = useRef<HTMLDivElement | null>(null);
+  const setCreatedTitleRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      createdTitleRef.current = node;
+      if (!node) {
+        if (createdFocusTimer.current !== undefined) {
+          window.clearTimeout(createdFocusTimer.current);
+          createdFocusTimer.current = undefined;
+        }
+        return;
+      }
+      if (
+        !focusCreatedId ||
+        focusedCreatedId.current === focusCreatedId ||
+        createdFocusTimer.current !== undefined
+      ) {
+        return;
+      }
+
+      // Entering a React Aria Table initializes its selection manager, whose
+      // pending effect focuses the row. Prime that state, then restore the
+      // requested descendant focus after the row effect has settled.
+      node.focus();
+      const createdId = focusCreatedId;
+      createdFocusTimer.current = window.setTimeout(() => {
+        createdFocusTimer.current = undefined;
+        if (createdTitleRef.current !== node) return;
+        node.focus();
+        queueMicrotask(() => {
+          if (
+            createdTitleRef.current === node &&
+            document.activeElement === node
+          ) {
+            focusedCreatedId.current = createdId;
+            onCreatedRowFocused?.(createdId);
+          }
+        });
+      }, 0);
+    },
+    [focusCreatedId, onCreatedRowFocused],
+  );
+  const setForwardTitleRef = useCallback(
+    (token: number, node: HTMLButtonElement | null) => {
+      const request = pendingForwardFocus.current;
+      if (!request || request.token !== token) return;
+      if (!node) {
+        request.node = null;
+        return;
+      }
+      request.node = node;
+      const { rowId, view: requestView } = request;
+      queueMicrotask(() => {
+        const current = pendingForwardFocus.current;
+        if (
+          !current ||
+          current.token !== token ||
+          current.rowId !== rowId ||
+          current.view !== requestView ||
+          current.node !== node ||
+          activeViewIdentityRef.current !== requestView ||
+          !node.isConnected
+        ) {
+          return;
+        }
+        pendingForwardFocus.current = undefined;
+        setForwardFocusRequest((requestState) =>
+          requestState?.token === token ? undefined : requestState,
+        );
+        node.focus();
+      });
+    },
+    [],
+  );
+  useLayoutEffect(() => {
+    activeViewIdentityRef.current = equivalentActiveView;
+    const request = pendingForwardFocus.current;
+    if (!request) return;
+
+    const requestRowIsRendered =
+      output?.shape === "flat"
+        ? output.rows.some((row) => String(row.id) === request.rowId)
+        : output?.shape === "grouped" &&
+          output.groups.some((group) =>
+            group.rows.some((row) => String(row.id) === request.rowId),
+          );
+    const titleCanRender =
+      columns.includes("title") &&
+      !readOnly &&
+      !memberDraftOpen &&
+      !viewError &&
+      !viewLoading;
+    const createdTitleIsRendered =
+      titleCanRender &&
+      focusCreatedId !== undefined &&
+      (output?.shape === "flat"
+        ? output.rows.some((row) => String(row.id) === focusCreatedId)
+        : output?.shape === "grouped" &&
+          output.groups.some((group) =>
+            group.rows.some((row) => String(row.id) === focusCreatedId),
+          ));
+
+    const fallbackNode = createdTitleIsRendered
+      ? createdTitleRef.current
+      : request.view === equivalentActiveView &&
+          requestRowIsRendered &&
+          titleCanRender
+        ? undefined
+        : viewRootRef.current;
+    if (fallbackNode === undefined) return;
+
+    pendingForwardFocus.current = undefined;
+    setForwardFocusRequest((current) =>
+      current?.token === request.token ? undefined : current,
+    );
+    if (!fallbackNode) return;
+    const committedView = equivalentActiveView;
+    queueMicrotask(() => {
+      if (
+        nextForwardFocusToken.current === request.token &&
+        activeViewIdentityRef.current === committedView &&
+        fallbackNode.isConnected
+      ) {
+        fallbackNode.focus();
+      }
+    });
+  }, [
+    columns,
+    equivalentActiveView,
+    forwardFocusRequest,
+    focusCreatedId,
+    memberDraftOpen,
+    output,
+    readOnly,
+    viewError,
+    viewLoading,
+  ]);
+  const memberBlocker =
+    memberCapability?.enabled === true
+      ? undefined
+      : (memberCapability?.blockers?.[0]?.message ??
+        "Member creation is unavailable for this view.");
+  const memberAddDisabled =
+    memberDraftOpen ||
+    memberSaving ||
+    memberCapability?.enabled !== true;
+
+  useEffect(() => {
+    if (!focusCreatedId) {
+      focusedCreatedId.current = undefined;
+      return;
+    }
+    setCreatedTitleRef(createdTitleRef.current);
+  }, [focusCreatedId, output, setCreatedTitleRef]);
+
+  useEffect(
+    () => () => {
+      if (createdFocusTimer.current !== undefined) {
+        window.clearTimeout(createdFocusTimer.current);
+      }
+    },
+    [],
+  );
 
   const sortDescriptor = sortOverride.sort
     ? {
@@ -163,7 +425,11 @@ export function BaseTableView({
           );
         })}
       </TableHeader>
-      <TableBody items={rows.map((row) => ({ ...row, key: row.id }))}>
+      <TableBody
+        key={`${activeView}:${memberDraftOpen ? "draft" : "active"}`}
+        dependencies={[activeCell]}
+        items={rows}
+      >
         {(row) => (
           <Row
             id={row.id}
@@ -172,12 +438,21 @@ export function BaseTableView({
             {columns.map((column) => (
               <Cell key={column} className="px-1 py-0.5 align-top">
                 {column === "title" ? (
-                  readOnly ? (
+                  readOnly || memberDraftOpen ? (
                     <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
                       {row.title ?? row.path}
                     </span>
                   ) : (
                     <button
+                      ref={
+                        row.id === focusCreatedId
+                          ? setCreatedTitleRef
+                          : forwardFocusRequest?.view ===
+                                equivalentActiveView &&
+                              String(row.id) === forwardFocusRequest.rowId
+                            ? forwardFocusRequest.ref
+                            : undefined
+                      }
                       type="button"
                       className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
                       onClick={() => onOpenPage(row.path)}
@@ -186,6 +461,7 @@ export function BaseTableView({
                     </button>
                   )
                 ) : !readOnly &&
+                  !memberDraftOpen &&
                   SYSTEM_COLUMNS[column] === undefined &&
                   properties[column] ? (
                   <EditableCell
@@ -193,9 +469,66 @@ export function BaseTableView({
                       (row.columns as Record<string, CellValue>)[column] ?? null
                     }
                     definition={properties[column]}
-                    onCommit={(value, hint) =>
-                      onCommitCell(row, column, value, hint)
+                    isEditing={
+                      activeCell?.rowId === String(row.id) &&
+                      activeCell.column === column &&
+                      asciiCaseFold(activeCell.view) === equivalentActiveView
                     }
+                    onEdit={() => {
+                      pendingForwardFocus.current = undefined;
+                      nextForwardFocusToken.current += 1;
+                      setForwardFocusRequest(undefined);
+                      setActiveCell({
+                        rowId: String(row.id),
+                        column,
+                        view: activeView,
+                      });
+                    }}
+                    onCancel={() => {
+                      if (pendingForwardFocus.current) return;
+                      pendingForwardFocus.current = undefined;
+                      setForwardFocusRequest(undefined);
+                      setActiveCell(null);
+                    }}
+                    onCommit={(value, hint) => {
+                      pendingForwardFocus.current = undefined;
+                      nextForwardFocusToken.current += 1;
+                      setForwardFocusRequest(undefined);
+                      setActiveCell(null);
+                      onCommitCell(row, column, value, hint);
+                    }}
+                    onCommitNext={(value, hint) => {
+                      const token = nextForwardFocusToken.current + 1;
+                      nextForwardFocusToken.current = token;
+                      pendingForwardFocus.current = undefined;
+                      setForwardFocusRequest(undefined);
+                      onCommitCell(row, column, value, hint);
+                      const nextColumn = nextEditableColumn(column);
+                      if (nextColumn) {
+                        setActiveCell({
+                          rowId: String(row.id),
+                          column: nextColumn,
+                          view: activeView,
+                        });
+                        return;
+                      }
+                      const rowIndex = rows.findIndex(
+                        (candidate) => String(candidate.id) === String(row.id),
+                      );
+                      const targetRowId = String(
+                        rows[rowIndex + 1]?.id ?? row.id,
+                      );
+                      const request: ForwardFocusRequest = {
+                        token,
+                        view: equivalentActiveView,
+                        rowId: targetRowId,
+                        node: null,
+                        ref: (node) => setForwardTitleRef(token, node),
+                      };
+                      pendingForwardFocus.current = request;
+                      setForwardFocusRequest(request);
+                      setActiveCell(null);
+                    }}
                   />
                 ) : (
                   // System fields and undeclared keys are read-only.
@@ -218,7 +551,13 @@ export function BaseTableView({
     output?.shape === "grouped" ? output.groups : null;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div
+      ref={viewRootRef}
+      role="region"
+      aria-label={`${definition.name} table view`}
+      tabIndex={-1}
+      className="flex flex-col gap-3"
+    >
       <div className="flex flex-wrap items-center gap-3 border-b border-rule pb-2">
         <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
           {definition.name}
@@ -270,7 +609,48 @@ export function BaseTableView({
             Configure
           </Link>
         )}
+        {!readOnly ? (
+          <>
+            {/* Reset React Aria's press responder after an in-flight operation. */}
+            <Button key={memberSaving ? "add-busy" : "add-ready"}
+              variant="secondary"
+              size="sm"
+              className={configureSlug ? undefined : "ml-auto"}
+              isDisabled={memberAddDisabled}
+              aria-describedby={memberBlocker ? memberBlockerId : undefined}
+              onPress={onAddMember}
+            >
+              Add member
+            </Button>
+            {memberBlocker ? (
+              <span id={memberBlockerId} className="sr-only">
+                {memberBlocker}
+              </span>
+            ) : null}
+          </>
+        ) : null}
       </div>
+      {memberDraftOpen && onSaveMember && onCancelMember ? (
+        <BaseMemberDraft
+          fields={memberDraftFields}
+          projects={projects}
+          isSaving={memberSaving}
+          diagnostics={memberDiagnostics}
+          summaryError={memberError}
+          onSave={onSaveMember}
+          onCancel={onCancelMember}
+          onChange={onMemberEdit}
+        />
+      ) : null}
+
+      {memberNotice ? (
+        <p
+          role="status"
+          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+        >
+          {memberNotice}
+        </p>
+      ) : null}
 
       {viewError ? (
         <p

@@ -1,31 +1,65 @@
 import { useState } from "react";
 import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
 
-export function NumberCell({ value, onCommit, onCancel }: CellEditorProps) {
+export function NumberCell({
+  value,
+  onCommit,
+  onCommitNext,
+  onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
+}: CellEditorProps) {
   const [draft, setDraft] = useState(
     typeof value === "number" ? String(value) : "",
   );
-  const commit = () => {
+  const commit = (
+    submit: CellEditorProps["onCommit"] = onCommit,
+  ): boolean => {
     if (draft === "") {
-      onCommit(null);
-      return;
+      submit(null);
+      return true;
     }
     const parsed = Number(draft);
-    // Reject a non-numeric commit: stay in the editor.
-    if (Number.isFinite(parsed)) onCommit(parsed);
+    // Reject a non-numeric commit without coercing it to a clear.
+    if (!Number.isFinite(parsed)) return false;
+    submit(parsed);
+    return true;
   };
   return (
     <input
       autoFocus
-      aria-label="Edit number"
+      aria-label={ariaLabel ?? "Edit number"}
+      aria-describedby={ariaDescribedBy}
+      type="number"
+      step="any"
       inputMode="decimal"
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={(event) => {
+        if (commitOnBlur) {
+          if (!event.currentTarget.validity.valid || !commit()) onCancel();
+        } else {
+          onCancel();
+        }
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") onCancel();
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!e.currentTarget.validity.valid) return;
+          commit(onCommitNext);
+          return;
+        }
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     />
   );

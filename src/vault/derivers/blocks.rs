@@ -1,4 +1,6 @@
-use rusqlite::{Transaction, params};
+use std::collections::HashSet;
+
+use rusqlite::{Connection, params};
 
 use crate::vault::block::BlockType;
 use crate::vault::derivation::{Deriver, IndexedPage};
@@ -12,12 +14,17 @@ impl Deriver for BlockDeriver {
         "blocks"
     }
 
-    fn derive(
-        &self,
-        page: &IndexedPage,
-        page_id: &str,
-        tx: &Transaction,
-    ) -> Result<(), IndexError> {
+    fn derive(&self, page: &IndexedPage, page_id: &str, tx: &Connection) -> Result<(), IndexError> {
+        let mut span_starts = HashSet::with_capacity(page.blocks.len());
+        for block in &page.blocks {
+            if !span_starts.insert(block.span.start) {
+                return Err(IndexError::Other(format!(
+                    "duplicate block span_start {} while indexing {}",
+                    block.span.start,
+                    page.vault_path.as_str()
+                )));
+            }
+        }
         for block in &page.blocks {
             let parent_id = block
                 .parent_index
@@ -56,5 +63,92 @@ impl Deriver for BlockDeriver {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use rusqlite::Connection;
+
+    use super::*;
+    use crate::vault::block::Block;
+    use crate::vault::canonical::CanonicalName;
+    use crate::vault::page::PageMeta;
+    use crate::vault::path::VaultPath;
+
+    #[test]
+    fn duplicate_span_starts_return_a_domain_error() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE blocks (
+                    block_id TEXT,
+                    page_id TEXT NOT NULL,
+                    block_type TEXT NOT NULL,
+                    parent_id TEXT,
+                    order_index INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    depth INTEGER NOT NULL,
+                    span_start INTEGER NOT NULL,
+                    span_end INTEGER NOT NULL,
+                    PRIMARY KEY (page_id, span_start)
+                );
+                CREATE TABLE block_properties (
+                    page_id TEXT NOT NULL,
+                    span_start INTEGER NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    PRIMARY KEY (page_id, span_start, key)
+                );",
+            )
+            .unwrap();
+        let duplicate = |content: &str| Block {
+            block_type: BlockType::Paragraph,
+            content: content.to_string(),
+            block_id: None,
+            properties: HashMap::new(),
+            checkbox: None,
+            depth: 0,
+            parent_index: None,
+            order_index: 0,
+            span: 7..12,
+        };
+        let page = IndexedPage {
+            vault_path: VaultPath::new("duplicate.md").unwrap(),
+            abs_path: PathBuf::from("duplicate.md"),
+            meta: PageMeta::default(),
+            body: "first\nsecond\n".to_string(),
+            encrypted: false,
+            raw_body: "first\nsecond\n".to_string(),
+            content_hash: String::new(),
+            body_links: Vec::new(),
+            prop_links: Vec::new(),
+            canonical: CanonicalName::new("duplicate"),
+            blocks: vec![duplicate("first"), duplicate("second")],
+        };
+        let transaction = connection.transaction().unwrap();
+
+        let error = BlockDeriver
+            .derive(&page, "page-id", &transaction)
+            .unwrap_err();
+
+        let IndexError::Other(message) = error else {
+            panic!("expected duplicate-span domain error");
+        };
+        assert!(message.contains("duplicate block span_start 7"));
+        assert!(message.contains("duplicate.md"));
+        let block_count: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM blocks", [], |row| row.get(0))
+            .unwrap();
+        let property_count: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM block_properties", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(block_count, 0);
+        assert_eq!(property_count, 0);
     }
 }

@@ -1,19 +1,46 @@
 import { useState } from "react";
 import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
 
-export function TextCell({ value, onCommit, onCancel }: CellEditorProps) {
+export function TextCell({
+  value,
+  onCommit,
+  onCommitNext,
+  onCancel,
+  ariaLabel,
+  ariaDescribedBy,
+  commitOnBlur,
+}: CellEditorProps) {
   const [draft, setDraft] = useState(typeof value === "string" ? value : "");
+  const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
+    submit(draft === "" ? null : draft);
+  };
   return (
     <input
       autoFocus
-      aria-label="Edit text"
+      aria-label={ariaLabel ?? "Edit text"}
+      aria-describedby={ariaDescribedBy}
       className={CELL_INPUT_CLASS}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={onCancel}
+      onBlur={() => {
+        if (commitOnBlur) onCommit(draft === "" ? null : draft);
+        else onCancel();
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onCommit(draft === "" ? null : draft);
-        if (e.key === "Escape") onCancel();
+        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          commit(onCommitNext);
+          return;
+        }
+        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
       }}
     />
   );

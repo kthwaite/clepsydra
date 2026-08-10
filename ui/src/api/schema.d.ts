@@ -215,6 +215,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/bases/{slug}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_base_member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/bases/{slug}/views/{view}": {
         parameters: {
             query?: never;
@@ -1136,6 +1152,7 @@ export interface components {
         };
         BaseDetailResponse: components["schemas"]["BaseDefinition"] & {
             diagnostics: components["schemas"]["BaseDiagnostic"][];
+            member_creation: components["schemas"]["BaseMemberCapability"][];
             revision: string;
         };
         /** @description A validation diagnostic for a base file. Never fatal to the registry. */
@@ -1169,6 +1186,42 @@ export interface components {
              *     reaches the `bases` list).
              */
             diagnostics: components["schemas"]["BaseDiagnostic"][];
+        };
+        BaseMemberCapability: {
+            blockers: components["schemas"]["BaseMemberDiagnostic"][];
+            enabled: boolean;
+            fields: components["schemas"]["BaseMemberFieldRequirement"][];
+            view: string;
+        };
+        BaseMemberCreateRequest: {
+            base_revision: string;
+            fields?: {
+                [key: string]: unknown;
+            };
+            title: string;
+            view: string;
+        };
+        BaseMemberCreateResponse: {
+            id: string;
+            path: string;
+            revision: string;
+            title: string;
+        };
+        BaseMemberDiagnostic: {
+            field?: string | null;
+            filter_path?: string | null;
+            message: string;
+            scope: components["schemas"]["BaseMemberScope"];
+        };
+        BaseMemberFieldRequirement: {
+            field: string;
+            membership: boolean;
+            view: boolean;
+        };
+        /** @enum {string} */
+        BaseMemberScope: "membership" | "view" | "field";
+        BaseMemberValidationDetail: {
+            diagnostics: components["schemas"]["BaseMemberDiagnostic"][];
         };
         BaseMutationResponse: components["schemas"]["BaseDefinition"] & {
             diagnostics: components["schemas"]["BaseDiagnostic"][];
@@ -3055,6 +3108,78 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    create_base_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Base slug */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaseMemberCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Base member created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseMemberCreateResponse"];
+                };
+            };
+            /** @description Malformed or unsupported input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Base or view not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Stale Base revision or exhausted path retries */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidate does not match Base membership or selected view */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -1,6 +1,7 @@
 import type { BaseEditor, Descendant } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { ReactEditor } from "slate-react";
+import type { MathDelimiter } from "#/lib/markdown/folioMath";
 
 // --- Element types ---
 
@@ -95,6 +96,20 @@ export interface FootnoteDefElement {
   children: Descendant[];
 }
 
+export interface InlineMathElement {
+  type: "inline-math";
+  tex: string;
+  delimiter: Extract<MathDelimiter, "$" | "\\(">;
+  children: CustomText[];
+}
+
+export interface MathBlockElement {
+  type: "math-block";
+  tex: string;
+  delimiter: Extract<MathDelimiter, "$$" | "\\[">;
+  children: CustomText[];
+}
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -109,6 +124,8 @@ export type CustomElement =
   | LinkElement
   | BlockRefElement
   | FootnoteRefElement
+  | InlineMathElement
+  | MathBlockElement
   | FootnoteDefElement;
 
 export type ElementType = CustomElement["type"];

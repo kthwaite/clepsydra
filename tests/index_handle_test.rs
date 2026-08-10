@@ -877,6 +877,98 @@ Content.
 }
 
 #[tokio::test]
+async fn created_index_failure_is_transactional_even_when_delete_compensation_would_fail() {
+    const CREATED_ID: &str = "00000000-0000-7000-8000-000000000219";
+    let target = r#"+++
+id = "00000000-0000-7000-8000-000000000218"
+title = "Missing target"
++++
+Target.
+"#;
+    let page = r#"+++
+id = "00000000-0000-7000-8000-000000000219"
+title = "Transactional create"
++++
+[[Missing target]]
+"#;
+    let (_tmp, vault) = setup_vault(&[("target.md", target), ("transactional.md", page)]);
+    let handle = build_handle(&vault);
+    handle
+        .with_index(|index, vault| {
+            index
+                .index_page(vault, &VaultPath::new("target.md").unwrap())
+                .unwrap();
+            index
+                .connection()
+                .execute_batch(
+                    "CREATE TRIGGER reject_page_delete
+                     BEFORE DELETE ON pages
+                     BEGIN
+                       SELECT RAISE(FAIL, 'delete compensation must not run');
+                     END;
+                     CREATE TRIGGER reject_created_link_resolution
+                     BEFORE UPDATE OF target_id ON links
+                     WHEN OLD.source_id = '00000000-0000-7000-8000-000000000219'
+                     BEGIN
+                       SELECT RAISE(FAIL, 'injected failure after IndexPage');
+                     END;",
+                )
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
+    let path = VaultPath::new("transactional.md").unwrap();
+    let error = handle
+        .apply_mutation(path, IndexMutation::Created)
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("injected failure after IndexPage"),
+        "{error}"
+    );
+
+    let indexed_artifacts: i64 = handle
+        .with_index(|index, _vault| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT
+                       (SELECT COUNT(*) FROM pages WHERE id = ?1) +
+                       (SELECT COUNT(*) FROM pages_fts WHERE page_id = ?1) +
+                       (SELECT COUNT(*) FROM canonical_names WHERE page_id = ?1) +
+                       (SELECT COUNT(*) FROM links WHERE source_id = ?1)",
+                    [CREATED_ID],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(indexed_artifacts, 0);
+}
+
+#[test]
+fn created_transaction_rollback_preserves_primary_error_as_source() {
+    let path = VaultPath::new("transactional.md").unwrap();
+    let error = IndexPolicyError::TransactionRollback {
+        path: path.clone(),
+        primary: Box::new(IndexPolicyError::Operation {
+            operation: IndexPolicyOperation::ResolvePageLinks,
+            path,
+            source: IndexError::Other("primary resolve failure".to_owned()),
+        }),
+        rollback: IndexError::Other("secondary rollback failure".to_owned()),
+    };
+
+    let source = std::error::Error::source(&error).unwrap();
+    assert!(source.to_string().contains("primary resolve failure"));
+    assert!(error.to_string().contains("secondary rollback failure"));
+}
+
+#[tokio::test]
 async fn scrub_runs_on_index_thread_after_protection_reindex() {
     const MARKER: &str = "HANDLE_SCRUB_SECRET_019FDD0F15DB72A2";
     let plaintext = format!(

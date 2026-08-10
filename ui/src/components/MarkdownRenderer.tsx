@@ -3,12 +3,21 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
+import { MathExpression } from "#/components/MathExpression";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
+import {
+  remarkFolioMath,
+  type MathDelimiter,
+} from "#/lib/markdown/folioMath";
 
 interface MarkdownRendererProps {
   content: string;
+}
+
+function isMathDelimiter(value: unknown): value is MathDelimiter {
+  return value === "$" || value === "$$" || value === "\\(" || value === "\\[";
 }
 
 /**
@@ -36,6 +45,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
 }
 
 const remarkPlugins: PluggableList = [
+  remarkFolioMath,
   remarkGfm,
   [
     wikiLinkPlugin,
@@ -53,6 +63,32 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
     <Markdown
       remarkPlugins={remarkPlugins}
       components={{
+        span: ({ children, node, ...props }) => {
+          const tex = node?.properties["data-tex"];
+          const delimiter = node?.properties["data-delimiter"];
+          if (
+            node?.properties["data-folio-math"] === true &&
+            typeof tex === "string" &&
+            isMathDelimiter(delimiter)
+          ) {
+            return (
+              <MathExpression tex={tex} delimiter={delimiter} display={false} />
+            );
+          }
+          return <span {...props}>{children}</span>;
+        },
+        div: ({ children, node, ...props }) => {
+          const tex = node?.properties["data-tex"];
+          const delimiter = node?.properties["data-delimiter"];
+          if (
+            node?.properties["data-folio-math"] === true &&
+            typeof tex === "string" &&
+            isMathDelimiter(delimiter)
+          ) {
+            return <MathExpression tex={tex} delimiter={delimiter} display />;
+          }
+          return <div {...props}>{children}</div>;
+        },
         a: ({ href, children, ...props }) => {
           const resource = href ? classifyLinkResource(href) : null;
           if (href?.startsWith("/pages/")) {

@@ -144,10 +144,11 @@ async fn import_isbn_skips_when_work_already_exists() {
     let created: serde_json::Value = create_res.json();
     let existing_path = created["path"].as_str().expect("path in response");
 
-    // 2. POST /import/isbn with the same ISBN — dedup should short-circuit.
+    // 2. POST /import/isbn with the equivalent separated ISBN-10 — canonical
+    // dedup should short-circuit before any Open Library request.
     let import_res = server
         .post("/api/vault/academic/import/isbn")
-        .json(&serde_json::json!({ "isbn": isbn }))
+        .json(&serde_json::json!({ "isbn": "0-262-01153-0" }))
         .await;
 
     // 3. Assert 200 OK and status == "skipped".
@@ -163,5 +164,22 @@ async fn import_isbn_skips_when_work_already_exists() {
         body["page_path"].as_str(),
         Some(existing_path),
         "page_path should be the existing work path, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn import_isbn_rejects_invalid_input_before_lookup() {
+    let (server, _tmp) = setup_server();
+
+    let response = server
+        .post("/api/vault/academic/import/isbn")
+        .json(&serde_json::json!({ "isbn": "not-an-isbn" }))
+        .await;
+
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["error"].as_str(),
+        Some("ISBN must contain 10 or 13 characters")
     );
 }

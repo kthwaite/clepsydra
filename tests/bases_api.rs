@@ -2,8 +2,12 @@ mod support;
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
 
 use axum::http::StatusCode;
+use clepsydra::api::Clock;
 use clepsydra::api::events::SyncNotification;
 use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::base_document;
@@ -46,6 +50,78 @@ layout = "table"
 plugin_view = "for-b"
 "#;
 
+#[derive(Debug)]
+struct FixedClock(DateTime<Utc>);
+
+impl Clock for FixedClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.0
+    }
+}
+
+fn fixed_now() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-08-09T12:34:56Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+fn member_fixture(seed_fn: impl FnOnce(&Path) + 'static) -> ApiFixture {
+    ApiFixture::builder()
+        .clock(Arc::new(FixedClock(fixed_now())))
+        .pre_index_seed(seed_fn)
+        .build()
+}
+
+fn collect_page_paths(root: &Path, current: &Path, paths: &mut Vec<String>) {
+    for entry in fs::read_dir(current).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().is_some_and(|name| name == ".clepsydra") {
+                continue;
+            }
+            collect_page_paths(root, &path, paths);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            paths.push(
+                path.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+}
+
+fn page_paths(root: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    collect_page_paths(root, root, &mut paths);
+    paths.sort();
+    paths
+}
+
+async fn current_base_revision(fixture: &ApiFixture, slug: &str) -> String {
+    let detail: serde_json::Value = fixture
+        .server
+        .get(&format!("/api/vault/bases/{slug}"))
+        .await
+        .json();
+    detail["revision"].as_str().unwrap().to_owned()
+}
+
+async fn indexed_page_count(fixture: &ApiFixture) -> i64 {
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+                .unwrap()
+        })
+        .await
+        .unwrap()
+}
+
 fn seed_identity_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
     fs::write(root.join("bases/identity.base.toml"), IDENTITY_BASE).unwrap();
@@ -83,6 +159,54 @@ fn seed(root: &Path) {
             "0190f8a0-0000-7000-8000-0000000000c1",
             "Book C",
             "author = \"Borges\"\nstatus = \"queued\"\n",
+        ),
+    )
+    .unwrap();
+}
+
+const LINK_TARGET_ID: &str = "0190f8a0-0000-7000-8000-0000000000d1";
+const LINK_TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000D1";
+const MISSING_LINK_TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000E1";
+
+fn seed_relation_member_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/relations.base.toml"),
+        format!(
+            r#"
+name = "Relations"
+filter = {{ field = "kind", op = "eq", value = "BOOK" }}
+[properties]
+series = {{ type = "relation" }}
+author = {{ type = "text" }}
+[[views]]
+name = "Canonical"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "Solar Cycle" }}
+[[views]]
+name = "Alias"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "Science Fiction" }}
+[[views]]
+name = "Uuid"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "{LINK_TARGET_ID}" }}
+[[views]]
+name = "MixedUuid"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "{LINK_TARGET_MIXED_ID}" }}
+[[views]]
+name = "MissingUuid"
+layout = "table"
+filter = {{ field = "series", op = "links_to", value = "{MISSING_LINK_TARGET_MIXED_ID}" }}
+"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("solar-cycle.md"),
+        format!(
+            "+++\nid = \"{LINK_TARGET_ID}\"\ntitle = \"Solar Cycle\"\naliases = [\"Science Fiction\"]\ntype = \"NOTE\"\n+++\n"
         ),
     )
     .unwrap();
@@ -378,11 +502,159 @@ async fn get_base_returns_definition_and_unknown_is_404() {
             &fs::read_to_string(tmp.path().join("vault/bases/reading.base.toml")).unwrap()
         )
     );
+    assert_eq!(body["member_creation"][0]["view"], "Continues");
+    assert_eq!(body["member_creation"][0]["enabled"], true);
+    assert!(
+        body["member_creation"][0]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field["field"] == "status"
+                && field["membership"] == false
+                && field["view"] == true)
+    );
 
     server
         .get("/api/vault/bases/nonexistent")
         .await
         .assert_status_not_found();
+}
+
+fn seed_resolved_capability_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/resolved.base.toml"),
+        r#"
+name = "Resolved capability"
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+journal_date = { type = "date" }
+status = { type = "select", options = ["reading"] }
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "sys.kind", op = "eq", value = "BOOK" },
+  { field = "prop.kind", op = "eq", value = "genre" },
+  { field = "word_count", op = "eq", value = 0 },
+  { field = "prop.word_count", op = "eq", value = 7 },
+  { field = "prop.journal_date", op = "is_empty" },
+  { field = "status", op = "eq", value = "reading" },
+  { field = "prop.status", op = "eq", value = "reading" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn get_base_emits_resolved_member_creation_request_keys() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_resolved_capability_base)
+        .build();
+
+    let body = fixture
+        .server
+        .get("/api/vault/bases/resolved")
+        .await
+        .json::<serde_json::Value>();
+
+    assert_eq!(body["diagnostics"], serde_json::json!([]));
+
+    assert_eq!(
+        body["member_creation"][0]["fields"],
+        serde_json::json!([
+            { "field": "kind", "membership": true, "view": false },
+            { "field": "prop.kind", "membership": true, "view": false },
+            { "field": "word_count", "membership": true, "view": false },
+            { "field": "prop.word_count", "membership": true, "view": false },
+            { "field": "prop.journal_date", "membership": true, "view": false },
+            { "field": "status", "membership": true, "view": false }
+        ])
+    );
+}
+
+fn seed_diagnostic_key_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/diagnostic-keys.base.toml"),
+        r#"
+name = "Diagnostic keys"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+journal_date = { type = "date" }
+[[views]]
+name = "PropKind"
+layout = "table"
+filter = { field = "prop.kind", op = "eq", value = "genre" }
+[[views]]
+name = "PropWord"
+layout = "table"
+filter = { field = "prop.word_count", op = "eq", value = 7 }
+[[views]]
+name = "PropJournal"
+layout = "table"
+filter = { field = "prop.journal_date", op = "eq", value = "2026-08-09" }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn member_rejection_diagnostics_emit_resolved_request_keys() {
+    let fixture = member_fixture(seed_diagnostic_key_base);
+    let revision = current_base_revision(&fixture, "diagnostic-keys").await;
+    let cases = [
+        (
+            "PropKind",
+            serde_json::json!({ "kind": "NOTE", "prop.kind": "genre" }),
+            "membership",
+            "kind",
+        ),
+        (
+            "PropKind",
+            serde_json::json!({ "kind": "BOOK", "prop.kind": "wrong" }),
+            "view",
+            "prop.kind",
+        ),
+        (
+            "PropWord",
+            serde_json::json!({ "kind": "BOOK", "prop.word_count": 8 }),
+            "view",
+            "prop.word_count",
+        ),
+        (
+            "PropJournal",
+            serde_json::json!({ "kind": "BOOK", "prop.journal_date": "2026-08-08" }),
+            "view",
+            "prop.journal_date",
+        ),
+    ];
+
+    for (view, fields, expected_scope, expected_field) in cases {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/diagnostic-keys/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": view,
+                "title": format!("Wrong {view}"),
+                "fields": fields
+            }))
+            .await;
+        response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let error: serde_json::Value = response.json();
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+
+        assert_eq!(diagnostics.len(), 1, "{error}");
+        assert_eq!(diagnostics[0]["scope"], expected_scope);
+        assert_eq!(diagnostics[0]["field"], expected_field);
+    }
 }
 
 #[tokio::test]
@@ -742,6 +1014,77 @@ async fn blocking_diagnostics_are_bad_request_detail_without_notification() {
 }
 
 #[tokio::test]
+async fn non_text_contains_definition_is_rejected_with_stable_diagnostics() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "invalid-contains",
+            "definition": {
+                "name": "Invalid contains",
+                "filter": {
+                    "all": [
+                        { "field": "word_count", "op": "contains", "value": 0 },
+                        { "field": "rating", "op": "contains", "value": 1.5 },
+                        { "field": "done", "op": "contains", "value": true }
+                    ]
+                },
+                "properties": {
+                    "rating": { "type": "number" },
+                    "done": { "type": "bool" }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic["path"].as_str(),
+                    diagnostic["severity"].as_str(),
+                    diagnostic["message"].as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                Some("filter.all[0].op"),
+                Some("error"),
+                Some("filter: op `contains` is not valid for non-text field `word_count`"),
+            ),
+            (
+                Some("filter.all[1].op"),
+                Some("error"),
+                Some("filter: op `contains` is not valid for non-text field `rating`"),
+            ),
+            (
+                Some("filter.all[2].op"),
+                Some("error"),
+                Some("filter: op `contains` is not valid for non-text field `done`"),
+            ),
+        ]
+    );
+    assert_no_notification(&mut notifications);
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/invalid-contains.base.toml")
+            .exists()
+    );
+}
+
+#[tokio::test]
 async fn case_only_duplicate_view_names_are_rejected_before_publication() {
     let fixture = ApiFixture::builder().pre_index_seed(seed).build();
     let mut notifications = fixture.state.change_tx.subscribe();
@@ -829,4 +1172,716 @@ async fn non_scalar_system_view_sorts_are_rejected_before_publication() {
             .join("bases/invalid-sorts.base.toml")
             .exists()
     );
+}
+
+#[tokio::test]
+async fn create_base_member_writes_one_matching_typed_page() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "The Left Hand of Darkness",
+            "fields": {
+                "kind": "BOOK",
+                "author": "Le Guin",
+                "status": "reading",
+                "rating": 10,
+                "started": "2026-08-09"
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = body["path"].as_str().unwrap();
+    assert!(path.starts_with("books/20260809.the-left-hand-of-darkness."));
+    assert_eq!(body["title"], "The Left Hand of Darkness");
+
+    let vault_path = clepsydra::vault::path::VaultPath::new(path).unwrap();
+    let page = clepsydra::vault::page::Page::from_file(
+        &fixture.state.vault.resolve(&vault_path),
+        vault_path,
+    )
+    .unwrap();
+    assert_eq!(body["id"], page.meta.id.to_string());
+    assert_eq!(
+        body["revision"],
+        clepsydra::vault::page::page_revision(&page.raw_content)
+    );
+    assert_eq!(page.meta.kind, Some(clepsydra::vault::kind::Kind::Book));
+    assert_eq!(page.meta.extra["rating"], toml::Value::Integer(10));
+    assert!(matches!(
+        page.meta.extra["started"],
+        toml::Value::Datetime(_)
+    ));
+    assert!(page.body.is_empty());
+
+    let view: serde_json::Value = fixture
+        .server
+        .get("/api/vault/bases/reading/views/continues")
+        .await
+        .json();
+    assert!(
+        view["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == body["id"])
+    );
+    match notifications.try_recv().unwrap() {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(upserted, vec![path]);
+            assert!(removed.is_empty());
+        }
+        other => panic!("unexpected notification: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn member_rejections_leave_no_file_or_index_row() {
+    let fixture = member_fixture(seed);
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let revision = current_base_revision(&fixture, "reading").await;
+
+    for request in [
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Queued", "fields": { "kind": "BOOK", "status": "queued" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Wrong kind", "fields": { "kind": "NOTE", "status": "reading" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad rating", "fields": { "kind": "BOOK", "status": "reading", "rating": "five" } }),
+    ] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/reading/members")
+            .json(&request)
+            .await;
+        response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let error: serde_json::Value = response.json();
+        assert!(error["detail"]["diagnostics"].is_array(), "{error}");
+        assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+        assert_eq!(indexed_page_count(&fixture).await, before_rows);
+    }
+}
+
+#[tokio::test]
+async fn member_revision_and_lookup_errors_have_exact_statuses_without_artifacts() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    let stale = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": "stale",
+            "view": "Continues",
+            "title": "Stale",
+            "fields": {}
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    let error: serde_json::Value = stale.json();
+    assert_eq!(error["detail"]["code"], "base_revision_conflict");
+    assert_eq!(error["detail"]["current_revision"], revision);
+
+    fixture
+        .server
+        .post("/api/vault/bases/missing/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Missing",
+            "fields": {}
+        }))
+        .await
+        .assert_status_not_found();
+    fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": current_base_revision(&fixture, "reading").await,
+            "view": "Missing",
+            "title": "Missing view",
+            "fields": {}
+        }))
+        .await
+        .assert_status_not_found();
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn member_malformed_and_unsupported_fields_are_bad_requests() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    for request in [
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "  ", "fields": {} }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Unknown", "fields": { "missing": "value" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Reserved", "fields": { "id": "client-id" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad tags", "fields": { "tags": "not-an-array" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad kind", "fields": { "kind": "MISSING" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Bad project", "fields": { "project": "../escape" } }),
+        serde_json::json!({ "base_revision": revision.clone(), "view": "Continues", "title": "Malformed", "fields": [] }),
+    ] {
+        fixture
+            .server
+            .post("/api/vault/bases/reading/members")
+            .json(&request)
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(page_paths(fixture.state.vault.root()), before);
+    }
+}
+
+fn seed_property_types(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/types.base.toml"),
+        r#"
+name = "Typed"
+filter = { field = "kind", op = "eq", value = "NOTE" }
+
+[properties]
+text = { type = "text" }
+url = { type = "url" }
+relation = { type = "relation", many = false }
+select = { type = "select", options = ["one", "two"] }
+multi = { type = "multi_select", options = ["red", "blue"] }
+number = { type = "number" }
+bool = { type = "bool" }
+date = { type = "date" }
+datetime = { type = "datetime" }
+
+[[views]]
+name = "Compound"
+filter = { all = [
+  { any = [
+    { field = "select", op = "eq", value = "one" },
+    { field = "number", op = "gt", value = 100 }
+  ] },
+  { not = { field = "bool", op = "eq", value = false } }
+] }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn member_creation_coerces_every_custom_property_type_and_compound_filters() {
+    let fixture = member_fixture(seed_property_types);
+    let revision = current_base_revision(&fixture, "types").await;
+    let response = fixture
+        .server
+        .post("/api/vault/bases/types/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "compound",
+            "title": "Typed values",
+            "fields": {
+                "text": "hello",
+                "prop.url": "https://example.com",
+                "relation": ["alpha", "beta"],
+                "select": "one",
+                "multi": ["red", "blue"],
+                "number": 2.5,
+                "bool": true,
+                "date": "2026-08-09",
+                "datetime": "2026-08-09T12:34:56Z",
+                "tags": ["typed"],
+                "aliases": ["Types"]
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = clepsydra::vault::path::VaultPath::new(body["path"].as_str().unwrap()).unwrap();
+    let page =
+        clepsydra::vault::page::Page::from_file(&fixture.state.vault.resolve(&path), path).unwrap();
+    assert_eq!(
+        page.meta.kind,
+        Some(clepsydra::vault::kind::Kind::Note),
+        "missing kind must persist the NOTE declaration"
+    );
+    assert_eq!(page.meta.tags, vec!["typed"]);
+    assert_eq!(page.meta.aliases, vec!["Types"]);
+    assert_eq!(page.meta.extra["text"], toml::Value::String("hello".into()));
+    assert_eq!(
+        page.meta.extra["url"],
+        toml::Value::String("https://example.com".into())
+    );
+    assert_eq!(
+        page.meta.extra["relation"],
+        toml::Value::Array(vec![
+            toml::Value::String("alpha".into()),
+            toml::Value::String("beta".into())
+        ])
+    );
+    assert_eq!(page.meta.extra["select"], toml::Value::String("one".into()));
+    assert_eq!(
+        page.meta.extra["multi"],
+        toml::Value::Array(vec![
+            toml::Value::String("red".into()),
+            toml::Value::String("blue".into())
+        ])
+    );
+    assert!(matches!(page.meta.extra["number"], toml::Value::Float(_)));
+    assert!(matches!(
+        page.meta.extra["bool"],
+        toml::Value::Boolean(true)
+    ));
+    assert!(matches!(page.meta.extra["date"], toml::Value::Datetime(_)));
+    assert!(matches!(
+        page.meta.extra["datetime"],
+        toml::Value::Datetime(_)
+    ));
+}
+
+fn seed_shadowed_title_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/shadow.base.toml"),
+        r#"
+name = "Shadow"
+
+[properties]
+title = { type = "text" }
+
+[[views]]
+name = "All"
+filter = { field = "prop.title", op = "eq", value = "shadow value" }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn forbidden_fields_are_rejected_through_prop_aliases_before_candidate_validation() {
+    let fixture = member_fixture(seed_shadowed_title_base);
+    let revision = current_base_revision(&fixture, "shadow").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    fixture
+        .server
+        .post("/api/vault/bases/shadow/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "All",
+            "title": "Visible title",
+            "fields": { "prop.title": "shadow value" }
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn duplicate_bare_and_prop_field_aliases_are_bad_request_without_artifacts() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Duplicate status",
+            "fields": {
+                "kind": "BOOK",
+                "status": "reading",
+                "prop.status": "reading"
+            }
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+fn seed_persistable_shadow_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/persistable-shadow.base.toml"),
+        r#"
+name = "Persistable shadow"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+
+[properties]
+kind = { type = "text" }
+word_count = { type = "number" }
+project = { type = "text" }
+tags = { type = "text" }
+aliases = { type = "text" }
+
+[[views]]
+name = "Escaped"
+filter = { all = [
+  { field = "prop.kind", op = "eq", value = "genre" },
+  { field = "prop.word_count", op = "eq", value = 7 }
+] }
+"#,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn bare_system_and_persistable_prop_shadow_fields_coexist() {
+    let fixture = member_fixture(seed_persistable_shadow_base);
+    let revision = current_base_revision(&fixture, "persistable-shadow").await;
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/persistable-shadow/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Escaped",
+            "title": "Shadow fields",
+            "fields": {
+                "kind": "BOOK",
+                "prop.kind": "genre",
+                "prop.word_count": 7
+            }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = clepsydra::vault::path::VaultPath::new(body["path"].as_str().unwrap()).unwrap();
+    let page =
+        clepsydra::vault::page::Page::from_file(&fixture.state.vault.resolve(&path), path).unwrap();
+    assert_eq!(page.meta.kind, Some(clepsydra::vault::kind::Kind::Book));
+    assert_eq!(page.meta.extra["kind"], toml::Value::String("genre".into()));
+    assert_eq!(page.meta.extra["word_count"], toml::Value::Integer(7));
+}
+
+#[tokio::test]
+async fn invalid_shadow_property_value_reports_canonical_request_key() {
+    let fixture = member_fixture(seed_persistable_shadow_base);
+    let revision = current_base_revision(&fixture, "persistable-shadow").await;
+    let before = page_paths(fixture.state.vault.root());
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/persistable-shadow/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Escaped",
+            "title": "Invalid shadow",
+            "fields": {
+                "kind": "BOOK",
+                "prop.kind": 42,
+                "prop.word_count": 7
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let error: serde_json::Value = response.json();
+    assert_eq!(
+        error["detail"]["diagnostics"][0]["field"], "prop.kind",
+        "{error}"
+    );
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn unpersistable_prop_system_shadows_are_bad_request_without_artifacts() {
+    for field in ["project", "tags", "aliases"] {
+        let fixture = member_fixture(seed_persistable_shadow_base);
+        let revision = current_base_revision(&fixture, "persistable-shadow").await;
+        let before = page_paths(fixture.state.vault.root());
+        let prop_field = format!("prop.{field}");
+
+        fixture
+            .server
+            .post("/api/vault/bases/persistable-shadow/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": "Escaped",
+                "title": "Unpersistable shadow",
+                "fields": {
+                    "kind": "BOOK",
+                    (prop_field): "custom"
+                }
+            }))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(page_paths(fixture.state.vault.root()), before);
+    }
+}
+
+#[tokio::test]
+async fn member_index_failure_rolls_back_generated_page_without_notification() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before = page_paths(fixture.state.vault.root());
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let _ = fixture
+        .state
+        .index
+        .with_index(|_, _| -> () { panic!("terminate index thread for failure test") })
+        .await;
+
+    fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Rollback",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await
+        .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_member_request_still_emits_one_event_after_commit() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let (publication_entered_tx, publication_entered_rx) = tokio::sync::oneshot::channel();
+    let publication_entered_tx = Arc::new(parking_lot::Mutex::new(Some(publication_entered_tx)));
+    let (publication_release_tx, publication_release_rx) = std::sync::mpsc::channel();
+    let publication_release_rx = Arc::new(parking_lot::Mutex::new(publication_release_rx));
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new({
+            let publication_entered_tx = Arc::clone(&publication_entered_tx);
+            let publication_release_rx = Arc::clone(&publication_release_rx);
+            move |path, content| {
+                if let Some(entered) = publication_entered_tx.lock().take() {
+                    let _ = entered.send(());
+                }
+                publication_release_rx.lock().recv().unwrap();
+                clepsydra::vault::atomic_file::atomic_create(path, content)
+            }
+        })));
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let (server, _temp_dir, state) = fixture.into_parts();
+    let server = Arc::new(server);
+    let request = tokio::spawn(async move {
+        server
+            .post("/api/vault/bases/reading/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": "Continues",
+                "title": "Cancelled caller",
+                "fields": { "kind": "BOOK", "status": "reading" }
+            }))
+            .await
+    });
+
+    publication_entered_rx.await.unwrap();
+    request.abort();
+    let _ = request.await;
+    publication_release_tx.send(()).unwrap();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), notifications.recv())
+        .await
+        .expect("committed member did not emit an event after request cancellation")
+        .unwrap();
+    let upserted = match event {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert!(removed.is_empty());
+            upserted
+        }
+        other => panic!("unexpected notification: {other:?}"),
+    };
+    assert_eq!(upserted.len(), 1);
+    let created_path = clepsydra::vault::path::VaultPath::new(&upserted[0]).unwrap();
+    assert!(state.vault.resolve(&created_path).exists());
+    let indexed: i64 = state
+        .index
+        .with_index(move |index, _| {
+            index
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM pages WHERE path = ?1",
+                    [created_path.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .await
+        .unwrap();
+    assert_eq!(indexed, 1);
+}
+
+#[tokio::test]
+async fn member_base_load_io_failure_is_generic_and_writes_nothing() {
+    let fixture = member_fixture(seed);
+    let before_paths = page_paths(fixture.state.vault.root());
+    let root = fixture.state.vault.root().to_string_lossy().into_owned();
+    let base_path = fixture.state.vault.root().join("bases/reading.base.toml");
+    fs::remove_file(&base_path).unwrap();
+    fs::create_dir(&base_path).unwrap();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": "unreachable",
+            "view": "Continues",
+            "title": "Unreadable Base",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let response_text = response.text();
+    let error: serde_json::Value = serde_json::from_str(&response_text).unwrap();
+    assert_eq!(error["error"], "Base member creation failed");
+    assert_eq!(error["detail"]["code"], "base_member_creation_failed");
+    assert!(!response_text.contains(&root), "{response_text}");
+    assert!(!response_text.contains("directory"), "{response_text}");
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
+async fn member_internal_failure_is_generic_and_leaves_no_artifact_or_event() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let root = fixture.state.vault.root().to_string_lossy().into_owned();
+    let trigger_sql = format!(
+        "CREATE TRIGGER reject_member_status_property
+         BEFORE INSERT ON page_properties
+         WHEN NEW.key = 'status'
+         BEGIN
+           SELECT RAISE(FAIL, 'injected index failure at {root}');
+         END;
+         CREATE TRIGGER reject_member_page_delete
+         BEFORE DELETE ON pages
+         BEGIN
+           SELECT RAISE(FAIL, 'delete compensation must not run');
+         END;"
+    );
+    fixture
+        .state
+        .index
+        .with_index(move |index, _| {
+            index.connection().execute_batch(&trigger_sql).unwrap();
+        })
+        .await
+        .unwrap();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_rollback_sync_hook(Some(Arc::new(|parent| {
+            Err(std::io::Error::other(format!(
+                "injected rollback sync failure at {}",
+                parent.display()
+            )))
+        })));
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "title": "Private failure",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let response_text = response.text();
+    let error: serde_json::Value = serde_json::from_str(&response_text).unwrap();
+    assert_eq!(error["error"], "Base member creation failed");
+    assert_eq!(error["detail"]["code"], "base_member_creation_failed");
+    assert!(!response_text.contains(&root), "{response_text}");
+    assert!(!response_text.contains("injected"), "{response_text}");
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_eq!(indexed_page_count(&fixture).await, before_rows);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
+async fn openapi_registers_base_member_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    assert!(document["paths"]["/api/vault/bases/{slug}/members"]["post"].is_object());
+    for schema in [
+        "BaseMemberCreateRequest",
+        "BaseMemberCreateResponse",
+        "BaseMemberValidationDetail",
+        "BaseMemberCapability",
+        "BaseMemberDiagnostic",
+    ] {
+        assert!(
+            document["components"]["schemas"][schema].is_object(),
+            "missing {schema}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and_uuid() {
+    let fixture = member_fixture(seed_relation_member_base);
+    let revision = current_base_revision(&fixture, "relations").await;
+
+    for (view, title, target) in [
+        ("Canonical", "Canonical relation", "[[Solar Cycle]]"),
+        ("Alias", "Alias relation", "[[Science Fiction]]"),
+        ("Uuid", "UUID relation", "[[Science Fiction]]"),
+        ("MixedUuid", "Mixed UUID relation", "[[Science Fiction]]"),
+    ] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/relations/members")
+            .json(&serde_json::json!({
+                "base_revision": revision,
+                "view": view,
+                "title": title,
+                "fields": { "kind": "BOOK", "series": target }
+            }))
+            .await;
+        response.assert_status(StatusCode::CREATED);
+        let created: serde_json::Value = response.json();
+
+        let queried: serde_json::Value = fixture
+            .server
+            .get(&format!(
+                "/api/vault/bases/relations/views/{view}?limit=25&offset=0"
+            ))
+            .await
+            .json();
+        assert!(
+            queried["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == created["id"]),
+            "created candidate and indexed SQL disagreed for {view}: {queried}"
+        );
+    }
+
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let response = fixture
+        .server
+        .post("/api/vault/bases/relations/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "MissingUuid",
+            "title": "Mismatched UUID relation",
+            "fields": { "kind": "BOOK", "series": "[[Science Fiction]]" }
+        }))
+        .await;
+    response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_eq!(indexed_page_count(&fixture).await, before_rows);
 }

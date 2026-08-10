@@ -389,6 +389,25 @@ impl VaultIndex {
         &mut self.conn
     }
 
+    pub(crate) fn begin_created_mutation(&mut self) -> Result<(), IndexError> {
+        self.conn.execute_batch("SAVEPOINT created_page_mutation")?;
+        Ok(())
+    }
+
+    pub(crate) fn commit_created_mutation(&mut self) -> Result<(), IndexError> {
+        self.conn
+            .execute_batch("RELEASE SAVEPOINT created_page_mutation")?;
+        Ok(())
+    }
+
+    pub(crate) fn rollback_created_mutation(&mut self) -> Result<(), IndexError> {
+        self.conn.execute_batch(
+            "ROLLBACK TO SAVEPOINT created_page_mutation;
+             RELEASE SAVEPOINT created_page_mutation;",
+        )?;
+        Ok(())
+    }
+
     /// Remove deleted content from SQLite pages and truncate the WAL.
     ///
     /// Call this after replacing plaintext projections with encrypted-page
@@ -461,6 +480,18 @@ impl VaultIndex {
         Ok(stats)
     }
 
+    /// Resolve one canonical link target with the same uniqueness rule used
+    /// when populating `links.target_id`.
+    pub(crate) fn resolve_link_target_id(
+        &self,
+        target_canonical: &str,
+    ) -> Result<Option<String>, IndexError> {
+        Ok(
+            unique_link_target(self.connection(), target_canonical)?
+                .map(|(target_id, _)| target_id),
+        )
+    }
+
     /// Resolve unresolved links by matching `target_canonical` against the
     /// `canonical_names` table.
     ///
@@ -490,24 +521,7 @@ impl VaultIndex {
         drop(stmt);
 
         for (source_id, span_start, target_canonical) in &unresolved {
-            // Look up target_canonical in canonical_names table
-            let mut lookup = tx.prepare(
-                "SELECT cn.page_id, p.path
-                 FROM canonical_names cn
-                 JOIN pages p ON p.id = cn.page_id
-                 WHERE cn.canonical_name = ?1",
-            )?;
-
-            let matches: Vec<(String, String)> = lookup
-                .query_map(params![target_canonical], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-            drop(lookup);
-
-            if matches.len() == 1 {
-                let (target_id, target_path) = &matches[0];
+            if let Some((target_id, target_path)) = unique_link_target(&tx, target_canonical)? {
                 tx.execute(
                     "UPDATE links SET target_id = ?1, target_path = ?2
                      WHERE source_id = ?3 AND span_start = ?4",
@@ -659,7 +673,7 @@ impl VaultIndex {
             blocks,
         };
 
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let page_id = page.meta.id.to_string();
         let meta_json = serde_json::to_string(&page.meta).unwrap_or_else(|_| "{}".to_string());
         let created_at = page.meta.created_at.map(|dt| dt.to_rfc3339());
@@ -793,7 +807,7 @@ impl VaultIndex {
     ///
     /// Returns the number of links resolved.
     pub fn resolve_links_for_page(&mut self, vault_path: &VaultPath) -> Result<usize, IndexError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let mut resolved_count = 0usize;
 
         let page_id: Option<String> = tx
@@ -1349,7 +1363,7 @@ impl VaultIndex {
 
 /// Pass 1: resolve this page's outgoing wikilinks against canonical_names.
 fn resolve_outgoing_wikilinks(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
@@ -1396,7 +1410,7 @@ fn resolve_outgoing_wikilinks(
 
 /// Pass 2: resolve this page's outgoing block-ref links against block IDs.
 fn resolve_outgoing_block_refs(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
@@ -1440,7 +1454,7 @@ fn resolve_outgoing_block_refs(
 /// Pass 3: resolve other pages' incoming wikilinks that target this page's
 /// canonical names (only when the canonical name is unambiguous).
 fn resolve_incoming_wikilinks(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
@@ -1489,7 +1503,7 @@ fn resolve_incoming_wikilinks(
 /// Pass 4: resolve other pages' incoming block-ref links that target block IDs
 /// on this page. `page_path` is prefetched by the caller.
 fn resolve_incoming_block_refs(
-    tx: &rusqlite::Transaction,
+    tx: &rusqlite::Connection,
     page_id: &str,
     page_path: &str,
     count: &mut usize,
@@ -1609,6 +1623,24 @@ fn migrate_links_add_target_block_id(conn: &Connection) -> Result<(), IndexError
     }
 
     Ok(())
+}
+
+fn unique_link_target(
+    conn: &Connection,
+    target_canonical: &str,
+) -> Result<Option<(String, String)>, IndexError> {
+    let mut stmt = conn.prepare(
+        "SELECT cn.page_id, p.path
+         FROM canonical_names cn
+         JOIN pages p ON p.id = cn.page_id
+         WHERE cn.canonical_name = ?1",
+    )?;
+    let matches = stmt
+        .query_map(params![target_canonical], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((matches.len() == 1).then(|| matches.into_iter().next().unwrap()))
 }
 
 /// Migrate the `links` table so that `target_id` carries `ON DELETE SET NULL`.

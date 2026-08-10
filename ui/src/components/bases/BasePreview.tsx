@@ -105,6 +105,7 @@ export function BasePreview({
     slug: "preview",
     revision: "preview",
     diagnostics: [],
+    member_creation: [],
     ...wire,
     properties: wire.properties,
     views: [displayView],

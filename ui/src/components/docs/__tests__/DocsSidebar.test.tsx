@@ -6,7 +6,13 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DocsSidebar } from "#/components/docs/DocsSidebar";
@@ -38,7 +44,7 @@ function renderSidebar(
 }
 
 describe("DocsSidebar", () => {
-  it("renders the eight-page hierarchy, active marker, and collapsible groups", async () => {
+  it("renders the nine-page hierarchy, active marker, and collapsible groups", async () => {
     const user = userEvent.setup();
     renderSidebar({ activeSlug: "getting-started" });
 
@@ -48,13 +54,16 @@ describe("DocsSidebar", () => {
     expect(
       within(navigation).getByRole("link", { name: "Getting Started" }),
     ).toHaveAttribute("aria-current", "page");
-    expect(within(navigation).getAllByRole("link")).toHaveLength(8);
+    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
     expect(
       within(navigation).getByRole("link", { name: "Troubleshooting" }),
     ).toHaveAttribute("href", "/docs/troubleshooting");
     expect(
       within(navigation).getByRole("link", { name: "Browser Extension" }),
     ).toHaveAttribute("href", "/docs/browser-extension");
+    expect(
+      within(navigation).getByRole("link", { name: "Books and Reading" }),
+    ).toHaveAttribute("href", "/docs/books-and-reading");
     const startHere = within(navigation).getByRole("button", {
       name: "Start Here",
     });
@@ -176,10 +185,7 @@ describe("DocsSidebar", () => {
 
   it("marks at most the exact pathname and hash result current", async () => {
     const user = userEvent.setup();
-    renderSidebar(
-      { activeSlug: "lsp" },
-      "/docs/lsp#setup-neovim-011",
-    );
+    renderSidebar({ activeSlug: "lsp" }, "/docs/lsp#setup-neovim-011");
 
     await user.type(
       await screen.findByRole("searchbox", {

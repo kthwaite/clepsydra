@@ -1,7 +1,7 @@
 use clepsydra::vault::Vault;
 use clepsydra::vault::import::{find_existing_work, parse_bibtex};
 use clepsydra::vault::import_doi::parse_crossref_response;
-use clepsydra::vault::import_isbn::parse_openlibrary_response;
+use clepsydra::vault::import_isbn::{normalize_isbn, parse_openlibrary_response};
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
 use rusqlite::Connection;
@@ -239,6 +239,48 @@ fn parse_openlibrary_json_into_import_entry() {
         clepsydra::vault::academic::WorkType::Book
     ));
     assert_eq!(entry.isbn, Some("978-0-387-31073-2".to_string()));
+}
+
+#[test]
+fn normalize_isbn_accepts_valid_isbn_13_and_separators() {
+    assert_eq!(
+        normalize_isbn("9780262011532").as_deref(),
+        Ok("9780262011532")
+    );
+    assert_eq!(
+        normalize_isbn("978-0-262-01153-2").as_deref(),
+        Ok("9780262011532")
+    );
+    assert_eq!(
+        normalize_isbn("978 0 262 01153 2").as_deref(),
+        Ok("9780262011532")
+    );
+}
+
+#[test]
+fn normalize_isbn_converts_valid_isbn_10_to_isbn_13() {
+    assert_eq!(
+        normalize_isbn("0-262-01153-0").as_deref(),
+        Ok("9780262011532")
+    );
+    assert_eq!(
+        normalize_isbn("0-8044-2957-x").as_deref(),
+        Ok("9780804429573")
+    );
+}
+
+#[test]
+fn normalize_isbn_rejects_invalid_input() {
+    for invalid in [
+        "9780262011533",
+        "0262011531",
+        "9780X62011532",
+        "4006381333931",
+        "978026201153",
+        "97802620115322",
+    ] {
+        assert!(normalize_isbn(invalid).is_err(), "accepted {invalid}");
+    }
 }
 
 // ── cite key derivation tests ──────────────────────────────────────────────

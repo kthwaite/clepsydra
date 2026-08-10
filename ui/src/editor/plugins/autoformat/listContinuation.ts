@@ -17,13 +17,7 @@ import { isListElement, isListItem } from "#/editor/plugins/listUtils";
 function getFirstParagraphText(item: SlateElement): string | undefined {
   for (const child of item.children) {
     if (SlateElement.isElement(child) && child.type === "paragraph") {
-      const texts: string[] = [];
-      for (const leaf of child.children) {
-        if (Text.isText(leaf)) {
-          texts.push(leaf.text);
-        }
-      }
-      return texts.join("").trim();
+      return Node.string(child).trim();
     }
   }
   return undefined;
@@ -55,7 +49,10 @@ function isNested(editor: Editor, itemPath: Path): boolean {
  * 3. Empty item + nested -> outdent one level
  * 4. Empty item + top-level -> exit list (unwrap to paragraph)
  */
-export function tryListContinuation(editor: Editor): boolean {
+export function tryListContinuation(
+  editor: Editor,
+  { historyBatch = true }: { historyBatch?: boolean } = {},
+): boolean {
   const { selection } = editor;
   if (!selection || !Range.isCollapsed(selection)) return false;
 
@@ -80,8 +77,8 @@ export function tryListContinuation(editor: Editor): boolean {
   if (!isListElement(parentList)) return false;
 
   const batchOp = (fn: () => void) => {
-    if ("withNewBatch" in HistoryEditor) {
-      (HistoryEditor as any).withNewBatch(editor, fn);
+    if (historyBatch) {
+      HistoryEditor.withNewBatch(editor as HistoryEditor, fn);
     } else {
       fn();
     }
@@ -180,7 +177,7 @@ export function tryListContinuation(editor: Editor): boolean {
   });
   if (!paragraphEntry) return false;
 
-  const [,] = paragraphEntry;
+  const [, paragraphPath] = paragraphEntry;
 
   // Get the text node and offset
   const point = selection.anchor;
@@ -189,12 +186,12 @@ export function tryListContinuation(editor: Editor): boolean {
 
   const fullText = textNode.text;
   const offset = point.offset;
-  const isAtEnd = offset === fullText.length;
+  const isAtEnd = Editor.isEnd(editor, point, paragraphPath);
 
   // Check if this is a task item
   const isTask = itemNode.checked !== undefined && itemNode.checked !== null;
 
-  if (isAtEnd && fullText.length > 0) {
+  if (isAtEnd) {
     // LC-01/LC-02: Cursor at end of non-empty text -> new sibling item
     batchOp(() => {
       Editor.withoutNormalizing(editor, () => {

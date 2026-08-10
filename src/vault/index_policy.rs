@@ -16,6 +16,8 @@ pub enum IndexMutation {
 /// The index operation that failed while applying a mutation policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexPolicyOperation {
+    BeginCreatedTransaction,
+    CommitCreatedTransaction,
     CollectReverseDependencies,
     InvalidateInboundLinks,
     IndexPage,
@@ -26,6 +28,8 @@ pub enum IndexPolicyOperation {
 impl std::fmt::Display for IndexPolicyOperation {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let description = match self {
+            Self::BeginCreatedTransaction => "begin created-page transaction",
+            Self::CommitCreatedTransaction => "commit created-page transaction",
             Self::CollectReverseDependencies => "collect reverse dependencies",
             Self::InvalidateInboundLinks => "invalidate inbound links",
             Self::IndexPage => "index page",
@@ -48,6 +52,15 @@ pub enum IndexPolicyError {
         #[source]
         source: IndexError,
     },
+    #[error(
+        "created-page index transaction rollback failed for {path:?}: primary error: {primary}; rollback error: {rollback}"
+    )]
+    TransactionRollback {
+        path: VaultPath,
+        #[source]
+        primary: Box<IndexPolicyError>,
+        rollback: IndexError,
+    },
 }
 
 pub(crate) fn apply_mutation(
@@ -57,10 +70,7 @@ pub(crate) fn apply_mutation(
     mutation: IndexMutation,
 ) -> Result<(), IndexPolicyError> {
     match mutation {
-        IndexMutation::Created => {
-            index_page(index, vault, path)?;
-            resolve_page_links(index, path)?;
-        }
+        IndexMutation::Created => created_page(index, vault, path)?,
         IndexMutation::ContentChanged => {
             let previous_dependencies = reverse_dependencies(index, path)?;
             invalidate_inbound_links(index, path)?;
@@ -89,6 +99,47 @@ pub(crate) fn apply_mutation(
     }
 
     Ok(())
+}
+
+fn created_page(
+    index: &mut VaultIndex,
+    vault: &Vault,
+    path: &VaultPath,
+) -> Result<(), IndexPolicyError> {
+    index.begin_created_mutation().map_err(|source| {
+        operation_error(IndexPolicyOperation::BeginCreatedTransaction, path, source)
+    })?;
+    let result = (|| {
+        index_page(index, vault, path)?;
+        resolve_page_links(index, path)
+    })();
+
+    match result {
+        Ok(()) => match index.commit_created_mutation() {
+            Ok(()) => Ok(()),
+            Err(source) => rollback_created_transaction(
+                index,
+                path,
+                operation_error(IndexPolicyOperation::CommitCreatedTransaction, path, source),
+            ),
+        },
+        Err(primary) => rollback_created_transaction(index, path, primary),
+    }
+}
+
+fn rollback_created_transaction(
+    index: &mut VaultIndex,
+    path: &VaultPath,
+    primary: IndexPolicyError,
+) -> Result<(), IndexPolicyError> {
+    match index.rollback_created_mutation() {
+        Ok(()) => Err(primary),
+        Err(rollback) => Err(IndexPolicyError::TransactionRollback {
+            path: path.clone(),
+            primary: Box::new(primary),
+            rollback,
+        }),
+    }
 }
 
 fn reverse_dependencies(

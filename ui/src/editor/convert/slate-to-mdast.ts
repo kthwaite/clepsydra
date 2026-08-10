@@ -15,7 +15,12 @@ import { Text as SlateText } from "slate";
 import type { SerializeCtx } from "#/editor/schema/descriptor";
 import { getDescriptor } from "#/editor/schema/registry";
 import type { CustomElement, CustomText } from "#/editor/types";
-import type { WikiLinkMdast } from "./mdastTypes";
+import { folioMathToMarkdown } from "#/lib/markdown/folioMath";
+import type {
+  FolioInlineMathMdast,
+  FolioMathMdast,
+  WikiLinkMdast,
+} from "./mdastTypes";
 
 // ---------------------------------------------------------------------------
 // toMarkdown extension for wikilinks
@@ -130,6 +135,18 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
     } else {
       const el = child as CustomElement;
       switch (el.type) {
+        case "inline-math": {
+          const math: FolioInlineMathMdast = {
+            type: "inlineMath",
+            value: el.tex,
+            data: {
+              folioDelimiter: el.delimiter,
+              folioSourceBody: el.tex,
+            },
+          };
+          result.push(math as PhrasingContent);
+          break;
+        }
         case "link": {
           result.push({
             type: "link",
@@ -174,6 +191,17 @@ function convertInlineChildren(children: Descendant[]): PhrasingContent[] {
 }
 
 function convertElement(node: CustomElement): RootContent {
+  if (node.type === "math-block") {
+    const math: FolioMathMdast = {
+      type: "math",
+      value: node.tex,
+      data: {
+        folioDelimiter: node.delimiter,
+        folioSourceBody: node.tex,
+      },
+    };
+    return math as RootContent;
+  }
   const desc = getDescriptor(node.type);
   if (desc?.toMdast) return desc.toMdast(node as never, ctx);
   // Fallback mirrors the old default: serialize children as a paragraph.
@@ -316,6 +344,7 @@ export function slateToMdast(nodes: Descendant[]): string {
     bullet: "*",
     rule: "-",
     extensions: [
+      folioMathToMarkdown(),
       gfmToMarkdown(),
       wikiLinkToMarkdownExtension(),
       singleTildeStrikethroughExtension(),
