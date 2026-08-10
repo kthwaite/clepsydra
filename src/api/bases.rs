@@ -20,13 +20,14 @@ use super::AppState;
 use super::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
-    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
-    SortDir, SortKey, ViewDefinition, validate_definition,
+    BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, SortDir,
+    SortKey, ViewDefinition, validate_definition,
 };
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
 use crate::vault::base_member::{BaseMemberCapability, creation_capabilities};
-use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use crate::vault::base_embed::composed_query_spec;
+use crate::vault::query::{GroupRowLimit, QueryContext, QueryOutput, QuerySpec, evaluate};
 
 /// One entry in the registry listing.
 #[derive(Debug, Serialize, ToSchema)]
@@ -127,31 +128,31 @@ fn query_spec(
     sort_override: Option<&str>,
     sort_dir: Option<&str>,
 ) -> QuerySpec {
-    let view_filter = view.and_then(|view| view.filter.clone());
-    let filter = match (base.file.filter.clone(), view_filter) {
-        (Some(membership), Some(view)) => Some(Filter::All(vec![membership, view])),
-        (membership, view) => membership.or(view),
-    };
-    let sort = match sort_override {
-        Some(field) => vec![SortKey {
+    let sort = sort_override.map(|field| {
+        vec![SortKey {
             field: field.to_owned(),
             dir: match sort_dir {
                 Some("desc") => SortDir::Desc,
                 _ => SortDir::Asc,
             },
-        }],
-        None => view.map_or_else(Vec::new, |view| view.sort.clone()),
-    };
+        }]
+    });
 
-    QuerySpec {
-        filter,
-        sort,
-        group_by: view.and_then(|view| view.group_by.clone()),
-        aggregates: view.map_or_else(Vec::new, |view| view.aggregates.clone()),
-        columns: view.map_or_else(Vec::new, |view| view.columns.clone()),
-        limit,
-        offset,
-        group_row_limit: None,
+    match view {
+        Some(view) => {
+            let mut spec = composed_query_spec(base, view, None, sort, limit);
+            spec.offset = offset;
+            spec.group_row_limit = GroupRowLimit::Default;
+            spec
+        }
+        None => QuerySpec {
+            filter: base.file.filter.clone(),
+            sort: sort.unwrap_or_default(),
+            limit,
+            offset,
+            group_row_limit: GroupRowLimit::Default,
+            ..Default::default()
+        },
     }
 }
 

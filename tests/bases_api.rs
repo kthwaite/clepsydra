@@ -164,6 +164,38 @@ fn seed(root: &Path) {
     .unwrap();
 }
 
+fn seed_grouped_limit_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/grouped.base.toml"),
+        r#"
+name = "Grouped"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+
+[properties]
+status = { type = "select", options = ["reading"] }
+rating = { type = "number" }
+
+[[views]]
+name = "By Status"
+layout = "table"
+group_by = "status"
+aggregates = [ { fn = "count" }, { fn = "sum", field = "rating" } ]
+columns = ["title", "rating"]
+"#,
+    )
+    .unwrap();
+
+    for index in 0..55 {
+        let id = format!("0190f8a0-0000-7000-8000-{index:012x}");
+        let page = format!(
+            "+++\nid = \"{id}\"\ntitle = \"Book {index:02}\"\ntype = \"BOOK\"\nstatus = \"reading\"\nrating = {}\n+++\nbody\n",
+            index + 1
+        );
+        fs::write(root.join(format!("group-{index:02}.md")), page).unwrap();
+    }
+}
+
 const LINK_TARGET_ID: &str = "0190f8a0-0000-7000-8000-0000000000d1";
 const LINK_TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000D1";
 const MISSING_LINK_TARGET_MIXED_ID: &str = "0190F8A0-0000-7000-8000-0000000000E1";
@@ -697,6 +729,58 @@ async fn view_evaluation_honors_view_filter_and_sort() {
         .get("/api/vault/bases/reading/views/nope")
         .await
         .assert_status_not_found();
+}
+
+#[tokio::test]
+async fn grouped_saved_view_without_limit_keeps_default_fifty_row_cap() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get("/api/vault/bases/grouped/views/by%20status")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let groups = body["groups"].as_array().unwrap();
+
+    assert_eq!(groups.len(), 1, "{body}");
+    assert_eq!(groups[0]["rows"].as_array().unwrap().len(), 50);
+    assert_eq!(groups[0]["total"], 55);
+    assert_eq!(groups[0]["aggregates"], serde_json::json!([55, 1540.0]));
+}
+
+#[tokio::test]
+async fn grouped_generic_query_without_limit_maps_to_default_fifty_row_cap() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .post("/api/vault/query")
+        .json(&serde_json::json!({
+            "filter": { "field": "kind", "op": "eq", "value": "BOOK" },
+            "types": {
+                "status": "select",
+                "rating": "number"
+            },
+            "group_by": "status",
+            "aggregates": [
+                { "fn": "count" },
+                { "fn": "sum", "field": "rating" }
+            ]
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let groups = body["groups"].as_array().unwrap();
+
+    assert_eq!(groups.len(), 1, "{body}");
+    assert_eq!(groups[0]["rows"].as_array().unwrap().len(), 50);
+    assert_eq!(groups[0]["total"], 55);
+    assert_eq!(groups[0]["aggregates"], serde_json::json!([55, 1540.0]));
 }
 
 #[tokio::test]

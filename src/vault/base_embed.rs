@@ -1,5 +1,7 @@
-use super::base::{BaseDefinition, Filter, Op, PropertyType, SortKey};
-use super::query::{QueryContext, ResolvedField, SysField, resolve_field};
+use super::base::{BaseDefinition, Filter, Op, PropertyType, SortKey, ViewDefinition};
+use super::query::{
+    GroupRowLimit, QueryContext, QuerySpec, ResolvedField, SysField, resolve_field,
+};
 
 const MAX_FILTER_DEPTH: usize = 8;
 const MAX_FILTER_NODES: usize = 64;
@@ -23,6 +25,45 @@ pub struct EmbedValidationDiagnostic {
     pub field: Option<String>,
     pub filter_path: Option<String>,
     pub message: String,
+}
+
+/// Build the effective query for an embedded saved view.
+///
+/// Request filters narrow the Base membership and saved view filters in that
+/// order. A present sort replaces the saved sort, including an empty
+/// replacement that deliberately clears it. Embedded requests without a
+/// limit are uncapped for both flat and grouped output.
+pub fn composed_query_spec(
+    base: &BaseDefinition,
+    view: &ViewDefinition,
+    filter: Option<Filter>,
+    sort: Option<Vec<SortKey>>,
+    limit: Option<u32>,
+) -> QuerySpec {
+    let mut filters = [base.file.filter.clone(), view.filter.clone(), filter]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let filter = match filters.len() {
+        0 => None,
+        1 => filters.pop(),
+        _ => Some(Filter::All(filters)),
+    };
+    let group_row_limit = match limit {
+        Some(limit) => GroupRowLimit::Limit(limit),
+        None => GroupRowLimit::Unlimited,
+    };
+
+    QuerySpec {
+        filter,
+        sort: sort.unwrap_or_else(|| view.sort.clone()),
+        group_by: view.group_by.clone(),
+        aggregates: view.aggregates.clone(),
+        columns: view.columns.clone(),
+        limit,
+        offset: 0,
+        group_row_limit,
+    }
 }
 
 /// Validate request-owned additions to a saved Base view.
@@ -482,10 +523,12 @@ fn op_name(op: Op) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmbedOverrides, validate_embed_overrides};
+    use super::{EmbedOverrides, composed_query_spec, validate_embed_overrides};
     use crate::vault::base::{
-        BaseDefinition, BaseFile, Filter, Op, PropertyDefinition, PropertyType, SortDir, SortKey,
+        Aggregate, AggregateFn, BaseDefinition, BaseFile, Filter, Op, PropertyDefinition,
+        PropertyType, SortDir, SortKey, ViewDefinition,
     };
+    use crate::vault::query::GroupRowLimit;
     use serde_json::{Value, json};
 
     fn property(property_type: PropertyType) -> PropertyDefinition {
@@ -530,6 +573,92 @@ mod tests {
             op,
             value,
         }
+    }
+
+    fn view() -> ViewDefinition {
+        ViewDefinition {
+            name: "Continues".into(),
+            layout: "table".into(),
+            filter: Some(cmp("status", Op::Eq, json!("reading"))),
+            sort: vec![SortKey {
+                field: "rating".into(),
+                dir: SortDir::Desc,
+            }],
+            group_by: Some("status".into()),
+            aggregates: vec![Aggregate {
+                function: AggregateFn::Avg,
+                field: Some("rating".into()),
+            }],
+            columns: vec!["title".into(), "rating".into()],
+        }
+    }
+
+    #[test]
+    fn composed_query_orders_filters_and_preserves_authoritative_view_shape() {
+        let mut base = base();
+        base.file.filter = Some(cmp("sys.kind", Op::Eq, json!("BOOK")));
+        let view = view();
+        let embed_filter = cmp("rating", Op::Gte, json!(4));
+
+        let spec = composed_query_spec(&base, &view, Some(embed_filter), None, None);
+
+        let Filter::All(filters) = spec.filter.unwrap() else {
+            panic!("three filters should compose as all");
+        };
+        let fields = filters
+            .iter()
+            .map(|filter| match filter {
+                Filter::Cmp { field, .. } => field.as_str(),
+                _ => panic!("expected comparison filter"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fields, vec!["sys.kind", "status", "rating"]);
+        assert_eq!(spec.columns, vec!["title", "rating"]);
+        assert_eq!(spec.group_by.as_deref(), Some("status"));
+        assert_eq!(spec.aggregates.len(), 1);
+        assert!(matches!(spec.aggregates[0].function, AggregateFn::Avg));
+        assert_eq!(spec.aggregates[0].field.as_deref(), Some("rating"));
+        assert_eq!(spec.limit, None);
+        assert_eq!(spec.group_row_limit, GroupRowLimit::Unlimited);
+    }
+
+    #[test]
+    fn composed_query_distinguishes_absent_empty_and_non_empty_sort_overrides() {
+        let base = base();
+        let view = view();
+
+        let saved = composed_query_spec(&base, &view, None, None, None);
+        assert_eq!(saved.sort.len(), 1);
+        assert_eq!(saved.sort[0].field, "rating");
+        assert_eq!(saved.sort[0].dir, SortDir::Desc);
+
+        let cleared = composed_query_spec(&base, &view, None, Some(Vec::new()), None);
+        assert!(cleared.sort.is_empty());
+
+        let replaced = composed_query_spec(
+            &base,
+            &view,
+            None,
+            Some(vec![SortKey {
+                field: "title".into(),
+                dir: SortDir::Asc,
+            }]),
+            None,
+        );
+        assert_eq!(replaced.sort.len(), 1);
+        assert_eq!(replaced.sort[0].field, "title");
+        assert_eq!(replaced.sort[0].dir, SortDir::Asc);
+    }
+
+    #[test]
+    fn composed_query_maps_explicit_limit_to_flat_and_group_caps() {
+        let base = base();
+        let view = view();
+
+        let spec = composed_query_spec(&base, &view, None, None, Some(17));
+
+        assert_eq!(spec.limit, Some(17));
+        assert_eq!(spec.group_row_limit, GroupRowLimit::Limit(17));
     }
 
     fn validate_filter(base: &BaseDefinition, filter: &Filter) -> Result<(), Vec<super::EmbedValidationDiagnostic>> {

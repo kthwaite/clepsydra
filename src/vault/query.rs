@@ -545,6 +545,14 @@ fn compile_prop(
 
 pub const DEFAULT_GROUP_ROW_LIMIT: u32 = 50;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GroupRowLimit {
+    #[default]
+    Default,
+    Unlimited,
+    Limit(u32),
+}
+
 /// A full query specification (view definition or generic query request).
 #[derive(Debug, Default)]
 pub struct QuerySpec {
@@ -556,7 +564,7 @@ pub struct QuerySpec {
     pub columns: Vec<String>,
     pub limit: Option<u32>,
     pub offset: u32,
-    pub group_row_limit: Option<u32>,
+    pub group_row_limit: GroupRowLimit,
 }
 
 /// One result row: system fields plus materialized columns (`ord = 0`
@@ -821,7 +829,11 @@ fn evaluate_grouped(
         rows.collect::<Result<_, _>>()?
     };
 
-    let row_limit = spec.group_row_limit.unwrap_or(DEFAULT_GROUP_ROW_LIMIT);
+    let row_limit = match spec.group_row_limit {
+        GroupRowLimit::Default => Some(DEFAULT_GROUP_ROW_LIMIT),
+        GroupRowLimit::Unlimited => None,
+        GroupRowLimit::Limit(limit) => Some(limit),
+    };
     let mut groups = Vec::with_capacity(headers.len());
     for (key, total, aggregates) in headers {
         let rows = fetch_rows(
@@ -830,7 +842,7 @@ fn evaluate_grouped(
             ctx,
             &prepared,
             Some((&group_column, key.as_ref())),
-            Some(row_limit),
+            row_limit,
             0,
         )?;
         groups.push(GroupResult {
@@ -1180,6 +1192,60 @@ moment  = { type = "datetime" }
         let registry = crate::vault::base::BaseRegistry::load(tmp.path());
         let base = registry.get("reading").unwrap().clone();
         (tmp, index, base)
+    }
+
+    fn grouped_limit_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        for index in 0..55 {
+            let id = format!("0190f8a0-0000-7000-8000-{index:012x}");
+            std::fs::write(
+                tmp.path().join(format!("group-{index:02}.md")),
+                page(
+                    &id,
+                    "BOOK",
+                    &format!("Book {index:02}"),
+                    &format!("status = \"reading\"\nrating = {}\n", index + 1),
+                ),
+            )
+            .unwrap();
+        }
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    fn grouped_limit_spec(group_row_limit: GroupRowLimit) -> QuerySpec {
+        QuerySpec {
+            filter: book_filter(),
+            group_by: Some("status".into()),
+            aggregates: vec![
+                Aggregate {
+                    function: AggregateFn::Count,
+                    field: None,
+                },
+                Aggregate {
+                    function: AggregateFn::Sum,
+                    field: Some("rating".into()),
+                },
+            ],
+            group_row_limit,
+            ..Default::default()
+        }
+    }
+
+    fn only_group(output: QueryOutput) -> GroupResult {
+        let QueryOutput::Grouped { mut groups } = output else {
+            panic!("expected grouped output");
+        };
+        assert_eq!(groups.len(), 1);
+        groups.pop().unwrap()
     }
 
     fn flat_paths(output: &QueryOutput) -> Vec<String> {
@@ -1558,7 +1624,7 @@ moment  = { type = "datetime" }
     }
 
     #[test]
-    fn grouped_query_returns_null_bucket_aggregates_and_caps_rows() {
+    fn grouped_query_returns_null_bucket_aggregates_and_explicitly_caps_rows() {
         let (_tmp, index, base) = fixture();
         let spec = QuerySpec {
             filter: book_filter(),
@@ -1573,7 +1639,7 @@ moment  = { type = "datetime" }
                     field: Some("rating".into()),
                 },
             ],
-            group_row_limit: Some(1),
+            group_row_limit: GroupRowLimit::Limit(1),
             ..Default::default()
         };
         let out = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
@@ -1605,6 +1671,81 @@ moment  = { type = "datetime" }
         assert_eq!(empty.total, 1, "statusless page lands in the NULL bucket");
         // The NULL bucket sorts last.
         assert_eq!(groups.last().unwrap().key, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn grouped_default_caps_rows_at_fifty_without_capping_totals_or_aggregates() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = grouped_limit_spec(GroupRowLimit::Default);
+
+        let group = only_group(
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap(),
+        );
+
+        assert_eq!(group.rows.len(), 50);
+        assert_eq!(group.total, 55);
+        assert_eq!(group.aggregates, vec![serde_json::json!(55), serde_json::json!(1540.0)]);
+    }
+
+    #[test]
+    fn grouped_unlimited_returns_every_row() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = grouped_limit_spec(GroupRowLimit::Unlimited);
+
+        let group = only_group(
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap(),
+        );
+
+        assert_eq!(group.rows.len(), 55);
+        assert_eq!(group.total, 55);
+    }
+
+    #[test]
+    fn grouped_explicit_limit_caps_rows_without_capping_totals_or_aggregates() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = grouped_limit_spec(GroupRowLimit::Limit(1));
+
+        let group = only_group(
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap(),
+        );
+
+        assert_eq!(group.rows.len(), 1);
+        assert_eq!(group.total, 55);
+        assert_eq!(group.aggregates, vec![serde_json::json!(55), serde_json::json!(1540.0)]);
+    }
+
+    #[test]
+    fn flat_absent_limit_is_uncapped() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            limit: None,
+            ..Default::default()
+        };
+
+        let output =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
+
+        assert_eq!(flat_paths(&output).len(), 55);
+    }
+
+    #[test]
+    fn flat_explicit_limit_caps_rows_without_capping_total() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            limit: Some(1),
+            ..Default::default()
+        };
+
+        let QueryOutput::Flat { rows, total } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("expected flat output");
+        };
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(total, 55);
     }
 
     #[test]
