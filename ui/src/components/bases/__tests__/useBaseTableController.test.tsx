@@ -11,15 +11,17 @@ import type {
   SortKey,
 } from "#/api/bases";
 import { EMBED_DEFAULT_LIMIT } from "#/components/bases/embed-query";
-
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
   createMember: vi.fn(),
   detailRefetch: vi.fn(),
+  savedViewRefetch: vi.fn(),
   evaluationRefetch: vi.fn(),
+  stableEvaluationRefetch: vi.fn(),
   useBase: vi.fn(),
   useBaseView: vi.fn(),
   useBaseViewEvaluation: vi.fn(),
+  currentEvaluationConfig: undefined as unknown,
   evaluationState: {
     data: undefined as BaseViewEvaluateResponse | undefined,
     error: null as unknown,
@@ -73,14 +75,15 @@ vi.mock("#/api/bases", async (importOriginal) => {
         error: null,
         isLoading: false,
         isFetching: false,
-        refetch: vi.fn(),
+        refetch: mocks.savedViewRefetch,
       };
     },
     useBaseViewEvaluation: (config: unknown) => {
       mocks.useBaseViewEvaluation(config);
+      mocks.currentEvaluationConfig = config;
       return {
         ...mocks.evaluationState,
-        refetch: () => mocks.evaluationRefetch(config),
+        refetch: mocks.stableEvaluationRefetch,
       };
     },
     useCreateBaseMember: () => ({
@@ -176,6 +179,10 @@ beforeEach(() => {
   mocks.evaluationState.error = null;
   mocks.evaluationState.isLoading = false;
   mocks.evaluationState.isFetching = false;
+  mocks.currentEvaluationConfig = undefined;
+  mocks.stableEvaluationRefetch.mockImplementation(() =>
+    mocks.evaluationRefetch(mocks.currentEvaluationConfig),
+  );
   mocks.createMember.mockResolvedValue({
     id: "created",
     path: "created.md",
@@ -299,6 +306,100 @@ describe("useBaseTableController embedded mode", () => {
     },
   );
 
+  it.each([
+    {
+      label: "discards conflicting old-key rows",
+      staleResult: { data: evaluation({ output: output([]) }) },
+      currentOutput: output(),
+      expectedFocus: "created",
+      expectedNotice: undefined,
+    },
+    {
+      label: "discards an old-key refresh error",
+      staleResult: { error: { error: "stale A refresh failed" } },
+      currentOutput: output([]),
+      expectedFocus: undefined,
+      expectedNotice:
+        "The member was created, but it is not included in the current view.",
+    },
+  ])(
+    "$label after the old refetch is already in flight",
+    async ({
+      staleResult,
+      currentOutput,
+      expectedFocus,
+      expectedNotice,
+    }) => {
+      type RefreshResult = {
+        data?: BaseViewEvaluateResponse;
+        error?: { error: string };
+      };
+      const oldRefresh = deferred<RefreshResult>();
+      const currentRefresh = deferred<RefreshResult>();
+      const newSort: SortKey[] = [{ field: "title", dir: "desc" }];
+      const current = options();
+      mocks.evaluationRefetch.mockImplementation(
+        (config: { sort?: SortKey[] }) =>
+          config.sort === undefined
+            ? oldRefresh.promise
+            : currentRefresh.promise,
+      );
+      const { result, rerender } = renderHook(
+        ({ value }) => useBaseTableController(value),
+        { initialProps: { value: current } },
+      );
+
+      act(() => result.current.onAddMember());
+      await act(async () => {
+        result.current.onSaveMember({ title: "Created", fields: {} });
+        await Promise.resolve();
+      });
+      await waitFor(() =>
+        expect(mocks.evaluationRefetch).toHaveBeenCalledTimes(1),
+      );
+      expect(mocks.evaluationRefetch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort: undefined }),
+      );
+
+      mocks.evaluationState.data = evaluation({ output: currentOutput });
+      rerender({ value: { ...current, sort: newSort } });
+      oldRefresh.resolve(staleResult);
+      await act(async () => {
+        await oldRefresh.promise;
+        await Promise.resolve();
+      });
+
+      await waitFor(() =>
+        expect(mocks.evaluationRefetch).toHaveBeenCalledTimes(2),
+      );
+      expect(mocks.evaluationRefetch).toHaveBeenLastCalledWith({
+        base: "reading",
+        view: "Continues",
+        filter: readingFilter,
+        sort: newSort,
+        limit: EMBED_DEFAULT_LIMIT,
+      });
+      expect(result.current.memberNotice).toBeUndefined();
+
+      currentRefresh.resolve({
+        data: evaluation({ output: currentOutput }),
+      });
+      await act(async () => {
+        await currentRefresh.promise;
+        await Promise.resolve();
+      });
+      await waitFor(() =>
+        expect(result.current.memberNotice).toBe(expectedNotice),
+      );
+      expect(result.current.focusCreatedId).toBe(expectedFocus);
+      expect(mocks.evaluationRefetch).toHaveBeenCalledTimes(2);
+      if (expectedFocus) {
+        act(() => result.current.onCreatedRowFocused(expectedFocus));
+      }
+      expect(result.current.memberSaving).toBe(false);
+    },
+  );
+
   it("retains same-predicate draft state and capability while a new exact query is pending, but disables Save", async () => {
     const firstSort: SortKey[] = [{ field: "title", dir: "asc" }];
     const current = options();
@@ -334,6 +435,17 @@ describe("useBaseTableController embedded mode", () => {
         body: expect.objectContaining({ base_revision: "evaluation-rev-2" }),
       }),
     );
+  });
+
+  it("keeps onSaveMember strictly stable across controller-local draft state", () => {
+    const current = options();
+    const { result } = renderHook(() => useBaseTableController(current));
+    const onSaveMember = result.current.onSaveMember;
+
+    act(() => result.current.onAddMember());
+
+    expect(result.current.memberDraftOpen).toBe(true);
+    expect(result.current.onSaveMember).toBe(onSaveMember);
   });
 
   it("keeps entered draft values mounted while a same-predicate revision refresh disables Save", async () => {
