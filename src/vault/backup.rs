@@ -6,11 +6,15 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
 
-use crate::feeds::store::FeedStoreError;
 #[cfg(not(unix))]
 use crate::feeds::store::snapshot_database;
+use crate::feeds::store::{
+    FEED_GENERATION_LOCK_FILENAME, FEED_WRITER_LOCK_FILENAME, FeedStoreError,
+};
 #[cfg(unix)]
-use crate::feeds::store::snapshot_database_file;
+use crate::feeds::store::{
+    lock_feed_generation_shared, open_feed_lock_file, snapshot_database_file,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
@@ -69,8 +73,6 @@ pub fn create_backup(
     }
 
     let feed_snapshot = if let Some(live_feed_database) = verified_feed_database(&vault_root)? {
-        #[cfg(test)]
-        pause_after_feed_database_verified(&live_feed_database.path);
         let temporary = snapshot_tempdir(&vault_root, &destination)?;
         let snapshot = temporary.path().join("feeds.db");
         #[cfg(unix)]
@@ -78,6 +80,7 @@ pub fn create_backup(
             &live_feed_database.metadata_directory,
             Path::new("feeds.db").as_os_str(),
             &live_feed_database.database,
+            &live_feed_database.generation_lock,
             &live_feed_database.path,
             &snapshot,
         );
@@ -141,6 +144,8 @@ pub fn create_backup(
             || relative == Path::new(".clepsydra/feeds.db")
             || relative == Path::new(".clepsydra/feeds.db-wal")
             || relative == Path::new(".clepsydra/feeds.db-shm")
+            || relative == Path::new(".clepsydra").join(FEED_WRITER_LOCK_FILENAME)
+            || relative == Path::new(".clepsydra").join(FEED_GENERATION_LOCK_FILENAME)
             || path == final_path
             || path == partial_path
         {
@@ -207,62 +212,14 @@ impl Drop for PartialArchive {
     }
 }
 
-#[cfg(test)]
-type TestPathBarrier = (PathBuf, std::sync::Arc<std::sync::Barrier>);
-
-#[cfg(test)]
-static AFTER_FEED_DATABASE_VERIFIED: std::sync::LazyLock<
-    parking_lot::Mutex<Option<TestPathBarrier>>,
-> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
-
-#[cfg(test)]
-fn normalize_test_barrier_path(path: &Path) -> PathBuf {
-    if let Ok(path) = fs::canonicalize(path) {
-        return path;
-    }
-    let Some(filename) = path.file_name() else {
-        return path.to_path_buf();
-    };
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    fs::canonicalize(parent)
-        .map(|parent| parent.join(filename))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
-#[cfg(test)]
-fn install_after_feed_database_verified_barrier(
-    path: PathBuf,
-    barrier: std::sync::Arc<std::sync::Barrier>,
-) {
-    let path = normalize_test_barrier_path(&path);
-    let prior = AFTER_FEED_DATABASE_VERIFIED.lock().replace((path, barrier));
-    assert!(prior.is_none(), "test path barrier was already installed");
-}
-
-#[cfg(test)]
-fn pause_after_feed_database_verified(path: &Path) {
-    let path = normalize_test_barrier_path(path);
-    let barrier = {
-        let mut slot = AFTER_FEED_DATABASE_VERIFIED.lock();
-        match slot.as_ref() {
-            Some((expected, _)) if expected == &path => slot.take().map(|(_, barrier)| barrier),
-            _ => None,
-        }
-    };
-    if let Some(barrier) = barrier {
-        barrier.wait();
-        barrier.wait();
-    }
-}
 struct VerifiedFeedDatabase {
     path: PathBuf,
     #[cfg(unix)]
     metadata_directory: OwnedFd,
     #[cfg(unix)]
     database: File,
+    #[cfg(unix)]
+    generation_lock: File,
 }
 
 #[cfg(unix)]
@@ -290,6 +247,24 @@ fn verified_feed_database(vault_root: &Path) -> Result<Option<VerifiedFeedDataba
             ));
         }
     };
+    let _writer_lock = open_feed_lock_file(
+        &metadata_directory,
+        Path::new(FEED_WRITER_LOCK_FILENAME).as_os_str(),
+        &metadata_path,
+    )
+    .map_err(|source| BackupError::FeedSnapshot {
+        path: metadata_path.clone(),
+        source,
+    })?;
+    let generation_lock = lock_feed_generation_shared(
+        &metadata_directory,
+        &metadata_path,
+        Path::new("feeds.db").as_os_str(),
+    )
+    .map_err(|source| BackupError::FeedSnapshot {
+        path: metadata_path.clone(),
+        source,
+    })?;
 
     let database_path = metadata_path.join("feeds.db");
     let database = match openat(
@@ -326,6 +301,7 @@ fn verified_feed_database(vault_root: &Path) -> Result<Option<VerifiedFeedDataba
         path: database_path,
         metadata_directory,
         database: database.into(),
+        generation_lock,
     }))
 }
 
@@ -568,7 +544,10 @@ mod tests {
         let destination = temp.path().join("backups");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let verified_database_path = database.canonicalize().unwrap();
-        install_after_feed_database_verified_barrier(verified_database_path, barrier.clone());
+        crate::feeds::store::install_after_snapshot_source_open_path_resolved_barrier(
+            verified_database_path,
+            barrier.clone(),
+        );
         let vault_for_backup = vault.clone();
         let destination_for_backup = destination.clone();
         let backup = std::thread::spawn(move || {

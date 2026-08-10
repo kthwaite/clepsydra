@@ -3,7 +3,7 @@ use std::cell::Cell;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::thread;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
@@ -54,6 +54,8 @@ pub enum FeedStoreError {
     WorkerStopped,
     #[error("start feed store worker: {0}")]
     StartWorker(#[source] std::io::Error),
+    #[error("feed database `{0}` is already open by another writer")]
+    AlreadyOpen(PathBuf),
     #[error("invalid stored timestamp `{0}`")]
     InvalidTimestamp(String),
     #[error("invalid entry cursor `{0}`")]
@@ -77,7 +79,24 @@ pub enum FeedStoreError {
 
 #[derive(Clone)]
 pub struct FeedStoreHandle {
+    inner: Arc<FeedStoreInner>,
+}
+
+struct FeedStoreInner {
     tx: mpsc::Sender<Command>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for FeedStoreInner {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Command::Shutdown);
+        let Some(worker) = self.worker.take() else {
+            return;
+        };
+        if worker.thread().id() != thread::current().id() {
+            let _ = worker.join();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +155,18 @@ enum Command {
         reply: oneshot::Sender<Result<(), FeedStoreError>>,
     },
     #[cfg(test)]
+    SeedEntries {
+        feed_ids: Vec<i64>,
+        entries_per_feed: usize,
+        reply: oneshot::Sender<Result<(), FeedStoreError>>,
+    },
+    #[cfg(test)]
+    ApplyRetentionQuotas {
+        feed_id: i64,
+        limits: RetentionQuotaLimits,
+        reply: oneshot::Sender<Result<(), FeedStoreError>>,
+    },
+    #[cfg(test)]
     ResetObservedQueries {
         reply: oneshot::Sender<Result<(), FeedStoreError>>,
     },
@@ -143,6 +174,7 @@ enum Command {
     ObservedQueries {
         reply: oneshot::Sender<Result<usize, FeedStoreError>>,
     },
+    Shutdown,
 }
 
 impl FeedStoreHandle {
@@ -151,12 +183,12 @@ impl FeedStoreHandle {
         let worker_path = path.clone();
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("clepsydra-feed-store".to_owned())
             .spawn(move || match open_connection(&worker_path) {
                 Ok(mut opened) => {
                     if ready_tx.send(Ok(())).is_ok() {
-                        worker_loop(&mut opened.connection, rx);
+                        worker_loop(&mut opened, rx);
                     }
                 }
                 Err(error) => {
@@ -164,10 +196,24 @@ impl FeedStoreHandle {
                 }
             })
             .map_err(FeedStoreError::StartWorker)?;
-        ready_rx
-            .recv()
-            .map_err(|_| FeedStoreError::WorkerStopped)??;
-        Ok(Self { tx })
+        match ready_rx.recv() {
+            Ok(Ok(())) => Ok(Self {
+                inner: Arc::new(FeedStoreInner {
+                    tx,
+                    worker: Some(worker),
+                }),
+            }),
+            Ok(Err(error)) => {
+                drop(tx);
+                let _ = worker.join();
+                Err(error)
+            }
+            Err(_) => {
+                drop(tx);
+                let _ = worker.join();
+                Err(FeedStoreError::WorkerStopped)
+            }
+        }
     }
 
     pub async fn reconcile(&self, feeds: Vec<ManifestFeed>) -> Result<(), FeedStoreError> {
@@ -249,6 +295,34 @@ impl FeedStoreHandle {
     }
 
     #[cfg(test)]
+    async fn seed_entries(
+        &self,
+        feed_ids: Vec<i64>,
+        entries_per_feed: usize,
+    ) -> Result<(), FeedStoreError> {
+        self.request(|reply| Command::SeedEntries {
+            feed_ids,
+            entries_per_feed,
+            reply,
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    async fn apply_retention_quotas(
+        &self,
+        feed_id: i64,
+        limits: RetentionQuotaLimits,
+    ) -> Result<(), FeedStoreError> {
+        self.request(|reply| Command::ApplyRetentionQuotas {
+            feed_id,
+            limits,
+            reply,
+        })
+        .await
+    }
+
+    #[cfg(test)]
     async fn reset_observed_queries(&self) -> Result<(), FeedStoreError> {
         self.request(|reply| Command::ResetObservedQueries { reply })
             .await
@@ -265,7 +339,8 @@ impl FeedStoreHandle {
         make_command: impl FnOnce(oneshot::Sender<Result<T, FeedStoreError>>) -> Command,
     ) -> Result<T, FeedStoreError> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
+        self.inner
+            .tx
             .send(make_command(reply_tx))
             .map_err(|_| FeedStoreError::WorkerStopped)?;
         reply_rx.await.map_err(|_| FeedStoreError::WorkerStopped)?
@@ -292,43 +367,52 @@ fn observed_query_count() -> usize {
     OBSERVED_LIST_ENTRY_QUERIES.with(Cell::get)
 }
 
-fn worker_loop(connection: &mut Connection, rx: mpsc::Receiver<Command>) {
+fn worker_loop(opened: &mut OpenedConnection, rx: mpsc::Receiver<Command>) {
     while let Ok(command) = rx.recv() {
+        #[cfg(unix)]
+        if opened.poisoned {
+            break;
+        }
         match command {
             Command::Reconcile { feeds, reply } => {
-                let _ = reply.send(reconcile(connection, feeds));
+                let result = reconcile(&mut opened.connection, feeds);
+                let _ = reply.send(publish_mutation(opened, result));
             }
             Command::ListFeeds { reply } => {
-                let _ = reply.send(list_feeds(connection, None));
+                let _ = reply.send(list_feeds(&opened.connection, None));
             }
             Command::EntryCounts { reply } => {
-                let _ = reply.send(entry_counts(connection));
+                let _ = reply.send(entry_counts(&opened.connection));
             }
             Command::DueFeeds { now, reply } => {
-                let _ = reply.send(list_feeds(connection, Some(now)));
+                let _ = reply.send(list_feeds(&opened.connection, Some(now)));
             }
             Command::ApplyFetch {
                 feed_id,
                 outcome,
                 reply,
             } => {
-                let _ = reply.send(apply_fetch(connection, feed_id, outcome));
+                let result = apply_fetch(&mut opened.connection, feed_id, outcome);
+                let _ = reply.send(publish_mutation(opened, result));
             }
             Command::ListEntries { filters, reply } => {
-                let _ = reply.send(list_entries(connection, filters));
+                let _ = reply.send(list_entries(&opened.connection, filters));
             }
             Command::PatchEntry { id, patch, reply } => {
-                let _ = reply.send(patch_entry(connection, id, patch));
+                let result = patch_entry(&mut opened.connection, id, patch);
+                let _ = reply.send(publish_mutation(opened, result));
             }
             Command::MarkRead { scope, reply } => {
-                let _ = reply.send(mark_read(connection, scope));
+                let result = mark_read(&opened.connection, scope);
+                let _ = reply.send(publish_mutation(opened, result));
             }
             Command::ScheduleRefresh {
                 feed_id,
                 now,
                 reply,
             } => {
-                let _ = reply.send(schedule_refresh(connection, feed_id, now));
+                let result = schedule_refresh(&opened.connection, feed_id, now);
+                let _ = reply.send(publish_mutation(opened, result));
             }
             Command::Prune {
                 now,
@@ -336,15 +420,34 @@ fn worker_loop(connection: &mut Connection, rx: mpsc::Receiver<Command>) {
                 unread_retention_days,
                 reply,
             } => {
-                let _ = reply.send(prune(
-                    connection,
+                let result = prune(
+                    &mut opened.connection,
                     now,
                     retention_days,
                     unread_retention_days,
-                ));
+                );
+                let _ = reply.send(publish_mutation(opened, result));
             }
             Command::SnapshotTo { destination, reply } => {
-                let _ = reply.send(snapshot_connection(connection, &destination));
+                let _ = reply.send(snapshot_connection(&opened.connection, &destination));
+            }
+            #[cfg(test)]
+            Command::SeedEntries {
+                feed_ids,
+                entries_per_feed,
+                reply,
+            } => {
+                let result = seed_test_entries(&mut opened.connection, &feed_ids, entries_per_feed);
+                let _ = reply.send(publish_mutation(opened, result));
+            }
+            #[cfg(test)]
+            Command::ApplyRetentionQuotas {
+                feed_id,
+                limits,
+                reply,
+            } => {
+                let result = apply_test_retention_quotas(&mut opened.connection, feed_id, limits);
+                let _ = reply.send(publish_mutation(opened, result));
             }
             #[cfg(test)]
             Command::ResetObservedQueries { reply } => {
@@ -355,6 +458,7 @@ fn worker_loop(connection: &mut Connection, rx: mpsc::Receiver<Command>) {
             Command::ObservedQueries { reply } => {
                 let _ = reply.send(Ok(observed_query_count()));
             }
+            Command::Shutdown => break,
         }
     }
 }
@@ -363,14 +467,36 @@ fn worker_loop(connection: &mut Connection, rx: mpsc::Receiver<Command>) {
 type TestPathBarrier = (PathBuf, std::sync::Arc<std::sync::Barrier>);
 
 #[cfg(test)]
-static AFTER_DATABASE_PATH_PREPARED: std::sync::LazyLock<
+static AFTER_DATABASE_OPEN_PATH_RESOLVED: std::sync::LazyLock<
     parking_lot::Mutex<Option<TestPathBarrier>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
 #[cfg(test)]
-static AFTER_SNAPSHOT_DESTINATION_PREPARED: std::sync::LazyLock<
+static AFTER_SNAPSHOT_SOURCE_OPEN_PATH_RESOLVED: std::sync::LazyLock<
     parking_lot::Mutex<Option<TestPathBarrier>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
+static AFTER_SNAPSHOT_PUBLICATION_PATH_RESOLVED: std::sync::LazyLock<
+    parking_lot::Mutex<Option<TestPathBarrier>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
+static AFTER_SNAPSHOT_GENERATION_SHARED_LOCKED: std::sync::LazyLock<
+    parking_lot::Mutex<Option<TestPathBarrier>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
+static FAIL_AFTER_DURABLE_WAL_APPEND: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(test)]
+static FORCED_WAL_CHECKPOINT_BYTES: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(u64::MAX);
+
+#[cfg(test)]
+static AFTER_CHECKPOINT_MAIN_RENAME_SYNCED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 fn normalize_test_barrier_path(path: &Path) -> PathBuf {
@@ -420,23 +546,38 @@ fn pause_at_test_path_barrier(
 }
 
 #[cfg(test)]
-fn install_after_database_path_prepared_barrier(
+fn install_after_database_open_path_resolved_barrier(
     path: PathBuf,
     barrier: std::sync::Arc<std::sync::Barrier>,
 ) {
-    install_test_path_barrier(&AFTER_DATABASE_PATH_PREPARED, path, barrier);
+    install_test_path_barrier(&AFTER_DATABASE_OPEN_PATH_RESOLVED, path, barrier);
 }
 
 #[cfg(test)]
-fn install_after_snapshot_destination_prepared_barrier(
+pub(crate) fn install_after_snapshot_source_open_path_resolved_barrier(
     path: PathBuf,
     barrier: std::sync::Arc<std::sync::Barrier>,
 ) {
-    install_test_path_barrier(&AFTER_SNAPSHOT_DESTINATION_PREPARED, path, barrier);
+    install_test_path_barrier(&AFTER_SNAPSHOT_SOURCE_OPEN_PATH_RESOLVED, path, barrier);
+}
+
+#[cfg(test)]
+fn install_after_snapshot_publication_path_resolved_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier(&AFTER_SNAPSHOT_PUBLICATION_PATH_RESOLVED, path, barrier);
+}
+
+#[cfg(test)]
+fn install_after_snapshot_generation_shared_locked_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier(&AFTER_SNAPSHOT_GENERATION_SHARED_LOCKED, path, barrier);
 }
 
 struct PreparedDatabase {
-    #[cfg(not(unix))]
     path: PathBuf,
     #[cfg(unix)]
     directory: std::os::fd::OwnedFd,
@@ -444,49 +585,32 @@ struct PreparedDatabase {
     filename: std::ffi::OsString,
     #[cfg(unix)]
     file: std::fs::File,
+    #[cfg(unix)]
+    wal_filename: std::ffi::OsString,
+    #[cfg(unix)]
+    wal: Option<std::fs::File>,
+    #[cfg(unix)]
+    published_wal_len: u64,
+    #[cfg(unix)]
+    wal_header: Option<[u8; 32]>,
+    #[cfg(unix)]
+    created: bool,
+    #[cfg(unix)]
+    _writer_lock: std::fs::File,
+    #[cfg(unix)]
+    generation_lock: std::fs::File,
 }
 
 struct OpenedConnection {
     connection: Connection,
     #[cfg(unix)]
-    _database_directory: std::os::fd::OwnedFd,
+    working_directory: tempfile::TempDir,
     #[cfg(unix)]
-    _database_file: std::fs::File,
-}
-
-#[cfg(all(unix, target_vendor = "apple"))]
-fn descriptor_directory_path(
-    directory: &impl std::os::fd::AsFd,
-    display_path: &Path,
-) -> Result<PathBuf, FeedStoreError> {
-    use std::os::unix::ffi::OsStringExt;
-
-    let path = rustix::fs::getpath(directory).map_err(|source| FeedStoreError::Io {
-        operation: "resolve retained directory descriptor",
-        path: display_path.to_path_buf(),
-        source: source.into(),
-    })?;
-    Ok(PathBuf::from(std::ffi::OsString::from_vec(
-        path.into_bytes(),
-    )))
-}
-
-#[cfg(all(unix, not(target_vendor = "apple")))]
-fn descriptor_directory_path(
-    directory: &impl std::os::fd::AsRawFd,
-    display_path: &Path,
-) -> Result<PathBuf, FeedStoreError> {
-    let alias_root = if cfg!(target_os = "linux") {
-        Path::new("/proc/self/fd")
-    } else {
-        Path::new("/dev/fd")
-    };
-    let alias = alias_root.join(directory.as_raw_fd().to_string());
-    std::fs::canonicalize(&alias).map_err(|source| FeedStoreError::Io {
-        operation: "resolve retained directory descriptor",
-        path: display_path.to_path_buf(),
-        source,
-    })
+    working_path: PathBuf,
+    #[cfg(unix)]
+    backing: PreparedDatabase,
+    #[cfg(unix)]
+    poisoned: bool,
 }
 
 #[cfg(unix)]
@@ -522,6 +646,134 @@ fn verify_retained_file_identity(
         });
     }
     Ok(())
+}
+pub(crate) const FEED_WRITER_LOCK_FILENAME: &str = ".feeds.db.writer.lock";
+pub(crate) const FEED_GENERATION_LOCK_FILENAME: &str = ".feeds.db.generation.lock";
+#[cfg(unix)]
+fn database_lock_filename(database_filename: &std::ffi::OsStr, suffix: &str) -> std::ffi::OsString {
+    let mut filename = std::ffi::OsString::from(".");
+    filename.push(database_filename);
+    filename.push(suffix);
+    filename
+}
+
+#[cfg(unix)]
+pub(crate) fn open_feed_lock_file(
+    directory: &std::os::fd::OwnedFd,
+    filename: &std::ffi::OsStr,
+    directory_path: &Path,
+) -> Result<std::fs::File, FeedStoreError> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, fstat, openat, unlinkat};
+    use rustix::io::Errno;
+
+    let path = directory_path.join(filename);
+    let create_flags = OFlags::RDWR
+        | OFlags::CREATE
+        | OFlags::EXCL
+        | OFlags::CLOEXEC
+        | OFlags::NOFOLLOW
+        | OFlags::NONBLOCK;
+    let existing_flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
+    let (file, created) = match openat(directory, filename, create_flags, Mode::RUSR | Mode::WUSR) {
+        Ok(file) => (file, true),
+        Err(Errno::EXIST) => (
+            openat(directory, filename, existing_flags, Mode::empty()).map_err(|source| {
+                FeedStoreError::Io {
+                    operation: "open existing feed database lock without following links",
+                    path: path.clone(),
+                    source: source.into(),
+                }
+            })?,
+            false,
+        ),
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "create feed database lock without following links",
+                path,
+                source: source.into(),
+            });
+        }
+    };
+    if created {
+        if let Err(source) = fchmod(&file, Mode::RUSR | Mode::WUSR) {
+            let _ = unlinkat(directory, filename, AtFlags::empty());
+            return Err(FeedStoreError::Io {
+                operation: "set owner-only feed database lock mode",
+                path,
+                source: source.into(),
+            });
+        }
+    }
+    let metadata = fstat(&file).map_err(|source| FeedStoreError::Io {
+        operation: "inspect feed database lock",
+        path: path.clone(),
+        source: source.into(),
+    })?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(FeedStoreError::UnsafePath {
+            path,
+            expected: "regular feed database lock file",
+        });
+    }
+    Ok(file.into())
+}
+
+#[cfg(unix)]
+struct FeedGenerationLock {
+    file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl Drop for FeedGenerationLock {
+    fn drop(&mut self) {
+        let _ = rustix::fs::flock(&self.file, rustix::fs::FlockOperation::Unlock);
+    }
+}
+
+#[cfg(unix)]
+fn lock_feed_generation_exclusive(
+    backing: &PreparedDatabase,
+) -> Result<FeedGenerationLock, FeedStoreError> {
+    let file = backing
+        .generation_lock
+        .try_clone()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "clone feed database generation lock",
+            path: backing.path.with_file_name(database_lock_filename(
+                &backing.filename,
+                ".generation.lock",
+            )),
+            source,
+        })?;
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive).map_err(|source| {
+        FeedStoreError::Io {
+            operation: "acquire exclusive feed database generation lock",
+            path: backing.path.with_file_name(database_lock_filename(
+                &backing.filename,
+                ".generation.lock",
+            )),
+            source: source.into(),
+        }
+    })?;
+    Ok(FeedGenerationLock { file })
+}
+
+#[cfg(unix)]
+pub(crate) fn lock_feed_generation_shared(
+    directory: &std::os::fd::OwnedFd,
+    directory_path: &Path,
+    database_filename: &std::ffi::OsStr,
+) -> Result<std::fs::File, FeedStoreError> {
+    let filename = database_lock_filename(database_filename, ".generation.lock");
+    let file = open_feed_lock_file(directory, &filename, directory_path)?;
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::LockShared).map_err(|source| {
+        FeedStoreError::Io {
+            operation: "acquire shared feed database generation lock",
+            path: directory_path.join(&filename),
+            source: source.into(),
+        }
+    })?;
+    Ok(file)
 }
 
 #[cfg(unix)]
@@ -593,6 +845,27 @@ fn prepare_database_path(path: &Path) -> Result<PreparedDatabase, FeedStoreError
         trusted_parent
     };
 
+    let writer_lock_filename = database_lock_filename(filename, ".writer.lock");
+    let writer_lock = open_feed_lock_file(&directory, &writer_lock_filename, &database_parent)?;
+    match rustix::fs::flock(
+        &writer_lock,
+        rustix::fs::FlockOperation::NonBlockingLockExclusive,
+    ) {
+        Ok(()) => {}
+        Err(rustix::io::Errno::WOULDBLOCK) => {
+            return Err(FeedStoreError::AlreadyOpen(database_parent.join(filename)));
+        }
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "acquire exclusive feed database writer ownership",
+                path: database_parent.join(&writer_lock_filename),
+                source: source.into(),
+            });
+        }
+    }
+    let generation_lock_filename = database_lock_filename(filename, ".generation.lock");
+    let generation_lock =
+        open_feed_lock_file(&directory, &generation_lock_filename, &database_parent)?;
     let database_path = database_parent.join(filename);
     let create_flags = OFlags::RDWR
         | OFlags::CREATE
@@ -640,10 +913,60 @@ fn prepare_database_path(path: &Path) -> Result<PreparedDatabase, FeedStoreError
             expected: "regular file",
         });
     }
+    let mut wal_filename = filename.to_os_string();
+    wal_filename.push("-wal");
+    let wal_path = database_path.with_file_name(&wal_filename);
+    let wal = match openat(&directory, &wal_filename, existing_flags, Mode::empty()) {
+        Ok(wal) => {
+            let metadata = fstat(&wal).map_err(|source| FeedStoreError::Io {
+                operation: "inspect opened feed database WAL",
+                path: wal_path.clone(),
+                source: source.into(),
+            })?;
+            if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+                return Err(FeedStoreError::UnsafePath {
+                    path: wal_path,
+                    expected: "regular feed database WAL",
+                });
+            }
+            Some(std::fs::File::from(wal))
+        }
+        Err(Errno::NOENT) => None,
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "open existing feed database WAL without following links",
+                path: wal_path,
+                source: source.into(),
+            });
+        }
+    };
+    let published_wal_len = wal
+        .as_ref()
+        .map(std::fs::File::metadata)
+        .transpose()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "inspect retained feed database WAL length",
+            path: database_path.with_file_name(&wal_filename),
+            source,
+        })?
+        .map_or(0, |metadata| metadata.len());
+    let wal_header = wal
+        .as_ref()
+        .map(|wal| read_wal_header(wal, &database_path.with_file_name(&wal_filename)))
+        .transpose()?
+        .flatten();
     Ok(PreparedDatabase {
+        path: database_path,
         directory,
         filename: filename.to_os_string(),
         file: file.into(),
+        wal_filename,
+        wal,
+        published_wal_len,
+        wal_header,
+        created,
+        _writer_lock: writer_lock,
+        generation_lock,
     })
 }
 
@@ -695,41 +1018,775 @@ fn prepare_database_path(path: &Path) -> Result<PreparedDatabase, FeedStoreError
         })
 }
 
-fn open_connection(path: &Path) -> Result<OpenedConnection, FeedStoreError> {
-    let prepared = prepare_database_path(path)?;
-    #[cfg(test)]
-    pause_at_test_path_barrier(&AFTER_DATABASE_PATH_PREPARED, path);
-    #[cfg(unix)]
-    let (open_path, flags) = {
-        verify_retained_file_identity(
-            &prepared.directory,
-            &prepared.filename,
-            &prepared.file,
-            path,
-        )?;
-        let directory_path = descriptor_directory_path(&prepared.directory, path)?;
-        (
-            directory_path.join(&prepared.filename),
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
+#[cfg(unix)]
+fn copy_file_contents(
+    source: &std::fs::File,
+    destination: &mut std::fs::File,
+    source_path: &Path,
+    destination_path: &Path,
+) -> Result<(), FeedStoreError> {
+    use std::io::{Seek, SeekFrom};
+
+    let mut source = source.try_clone().map_err(|source| FeedStoreError::Io {
+        operation: "clone private database source",
+        path: source_path.to_path_buf(),
+        source,
+    })?;
+    source
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| FeedStoreError::Io {
+            operation: "rewind private database source",
+            path: source_path.to_path_buf(),
+            source,
+        })?;
+    destination
+        .seek(SeekFrom::Start(0))
+        .and_then(|_| destination.set_len(0))
+        .map_err(|source| FeedStoreError::Io {
+            operation: "prepare private database destination",
+            path: destination_path.to_path_buf(),
+            source,
+        })?;
+    std::io::copy(&mut source, &mut *destination).map_err(|source| FeedStoreError::Io {
+        operation: "copy private database contents",
+        path: destination_path.to_path_buf(),
+        source,
+    })?;
+    destination.sync_all().map_err(|source| FeedStoreError::Io {
+        operation: "sync private database contents",
+        path: destination_path.to_path_buf(),
+        source,
+    })
+}
+
+#[cfg(unix)]
+fn read_wal_header(file: &std::fs::File, path: &Path) -> Result<Option<[u8; 32]>, FeedStoreError> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let length = file
+        .metadata()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "inspect feed database WAL",
+            path: path.to_path_buf(),
+            source,
+        })?
+        .len();
+    if length == 0 {
+        return Ok(None);
+    }
+    if length < 32 {
+        return Err(FeedStoreError::UnsafePath {
+            path: path.to_path_buf(),
+            expected: "complete SQLite WAL header",
+        });
+    }
+    let mut file = file.try_clone().map_err(|source| FeedStoreError::Io {
+        operation: "clone feed database WAL",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| {
+            let mut header = [0_u8; 32];
+            file.read_exact(&mut header)?;
+            Ok(header)
+        })
+        .map(Some)
+        .map_err(|source| FeedStoreError::Io {
+            operation: "read feed database WAL header",
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+#[cfg(unix)]
+fn copy_private_wal(
+    source_wal: &std::fs::File,
+    source_wal_path: &Path,
+    private_directory: &Path,
+) -> Result<(), FeedStoreError> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let destination_path = private_directory.join("feeds.db-wal");
+    let mut destination = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&destination_path)
+        .map_err(|source| FeedStoreError::Io {
+            operation: "create private feed database WAL",
+            path: destination_path.clone(),
+            source,
+        })?;
+    copy_file_contents(
+        source_wal,
+        &mut destination,
+        source_wal_path,
+        &destination_path,
+    )
+}
+
+#[cfg(unix)]
+fn create_private_working_copy(
+    source_directory: &std::os::fd::OwnedFd,
+    source_filename: &std::ffi::OsStr,
+    source: &std::fs::File,
+    retained_wal: Option<&std::fs::File>,
+    source_path: &Path,
+) -> Result<(tempfile::TempDir, PathBuf), FeedStoreError> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, openat};
+    use rustix::io::Errno;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let directory = tempfile::tempdir().map_err(|source| FeedStoreError::Io {
+        operation: "create private feed database directory",
+        path: std::env::temp_dir(),
+        source,
+    })?;
+    let private_directory =
+        std::fs::canonicalize(directory.path()).map_err(|source| FeedStoreError::Io {
+            operation: "resolve private feed database directory",
+            path: directory.path().to_path_buf(),
+            source,
+        })?;
+    let path = private_directory.join("feeds.db");
+    let mut destination = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|source| FeedStoreError::Io {
+            operation: "create private feed database",
+            path: path.clone(),
+            source,
+        })?;
+    copy_file_contents(source, &mut destination, source_path, &path)?;
+
+    let mut wal_name = source_filename.to_os_string();
+    wal_name.push("-wal");
+    let wal_path = source_path.with_file_name(&wal_name);
+    if let Some(wal) = retained_wal {
+        copy_private_wal(wal, &wal_path, &private_directory)?;
+    } else {
+        match openat(
+            source_directory,
+            &wal_name,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+            Mode::empty(),
+        ) {
+            Ok(wal) => {
+                let metadata = fstat(&wal).map_err(|source| FeedStoreError::Io {
+                    operation: "inspect retained feed database WAL",
+                    path: wal_path.clone(),
+                    source: source.into(),
+                })?;
+                if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+                    return Err(FeedStoreError::UnsafePath {
+                        path: wal_path,
+                        expected: "regular feed database WAL",
+                    });
+                }
+                copy_private_wal(&std::fs::File::from(wal), &wal_path, &private_directory)?;
+            }
+            Err(Errno::NOENT) => {}
+            Err(source) => {
+                return Err(FeedStoreError::Io {
+                    operation: "open retained feed database WAL",
+                    path: wal_path,
+                    source: source.into(),
+                });
+            }
+        }
+    }
+    Ok((directory, path))
+}
+
+#[cfg(unix)]
+fn create_private_snapshot(
+    connection: &Connection,
+) -> Result<(tempfile::TempDir, PathBuf), FeedStoreError> {
+    let directory = tempfile::tempdir().map_err(|source| FeedStoreError::Io {
+        operation: "create private feed snapshot directory",
+        path: std::env::temp_dir(),
+        source,
+    })?;
+    let private_directory =
+        std::fs::canonicalize(directory.path()).map_err(|source| FeedStoreError::Io {
+            operation: "resolve private feed snapshot directory",
+            path: directory.path().to_path_buf(),
+            source,
+        })?;
+    let path = private_directory.join("feeds.db");
+    let path_text = path
+        .to_str()
+        .ok_or_else(|| FeedStoreError::InvalidPath(path.clone()))?;
+    connection.execute("VACUUM INTO ?1", [path_text])?;
+    Ok((directory, path))
+}
+
+#[cfg(unix)]
+fn publish_checkpointed_main(
+    source_path: &Path,
+    backing: &mut PreparedDatabase,
+) -> Result<(), FeedStoreError> {
+    use rustix::fs::{
+        AtFlags, FileType, Mode, OFlags, fchmod, fstat, fsync, openat, renameat, unlinkat,
     };
-    #[cfg(not(unix))]
-    let (open_path, flags) = (
-        prepared.path.clone(),
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    );
-    let mut connection = Connection::open_with_flags(open_path, flags)?;
-    #[cfg(unix)]
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static PUBLICATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let counter = PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary_name = format!(".feeds.db.publish-{}-{counter}", std::process::id());
+    let temporary = openat(
+        &backing.directory,
+        &temporary_name,
+        OFlags::RDWR
+            | OFlags::CREATE
+            | OFlags::EXCL
+            | OFlags::CLOEXEC
+            | OFlags::NOFOLLOW
+            | OFlags::NONBLOCK,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map_err(|source| FeedStoreError::Io {
+        operation: "create descriptor-bound feed database publication",
+        path: backing.path.clone(),
+        source: source.into(),
+    })?;
+    if let Err(source) = fchmod(&temporary, Mode::RUSR | Mode::WUSR) {
+        let _ = unlinkat(&backing.directory, &temporary_name, AtFlags::empty());
+        return Err(FeedStoreError::Io {
+            operation: "set owner-only feed database publication mode",
+            path: backing.path.clone(),
+            source: source.into(),
+        });
+    }
+    let mut temporary_file = std::fs::File::from(temporary);
+    let source_file = std::fs::File::open(source_path).map_err(|source| FeedStoreError::Io {
+        operation: "open private checkpointed feed database",
+        path: source_path.to_path_buf(),
+        source,
+    })?;
+    source_file
+        .sync_all()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "sync private checkpointed feed database",
+            path: source_path.to_path_buf(),
+            source,
+        })?;
+    if let Err(error) = copy_file_contents(
+        &source_file,
+        &mut temporary_file,
+        source_path,
+        &backing.path,
+    ) {
+        let _ = unlinkat(&backing.directory, &temporary_name, AtFlags::empty());
+        return Err(error);
+    }
+    if let Err(source) = renameat(
+        &backing.directory,
+        &temporary_name,
+        &backing.directory,
+        &backing.filename,
+    ) {
+        let _ = unlinkat(&backing.directory, &temporary_name, AtFlags::empty());
+        return Err(FeedStoreError::Io {
+            operation: "atomically publish checkpointed feed database",
+            path: backing.path.clone(),
+            source: source.into(),
+        });
+    }
+    fsync(&backing.directory).map_err(|source| FeedStoreError::Io {
+        operation: "sync checkpointed feed database directory",
+        path: backing.path.clone(),
+        source: source.into(),
+    })?;
+    let file = openat(
+        &backing.directory,
+        &backing.filename,
+        OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|source| FeedStoreError::Io {
+        operation: "reopen published checkpointed feed database",
+        path: backing.path.clone(),
+        source: source.into(),
+    })?;
+    let metadata = fstat(&file).map_err(|source| FeedStoreError::Io {
+        operation: "inspect published checkpointed feed database",
+        path: backing.path.clone(),
+        source: source.into(),
+    })?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(FeedStoreError::UnsafePath {
+            path: backing.path.clone(),
+            expected: "regular checkpointed feed database",
+        });
+    }
+    backing.file = file.into();
+    Ok(())
+}
+
+#[cfg(unix)]
+fn open_public_wal(backing: &mut PreparedDatabase) -> Result<bool, FeedStoreError> {
+    use rustix::fs::{Mode, OFlags, fchmod, fsync, openat};
+
+    if backing.wal.is_some() {
+        return Ok(false);
+    }
+    let wal_path = backing.path.with_file_name(&backing.wal_filename);
+    let wal = openat(
+        &backing.directory,
+        &backing.wal_filename,
+        OFlags::RDWR
+            | OFlags::CREATE
+            | OFlags::EXCL
+            | OFlags::CLOEXEC
+            | OFlags::NOFOLLOW
+            | OFlags::NONBLOCK,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map_err(|source| FeedStoreError::Io {
+        operation: "create descriptor-bound feed database WAL",
+        path: wal_path.clone(),
+        source: source.into(),
+    })?;
+    fchmod(&wal, Mode::RUSR | Mode::WUSR).map_err(|source| FeedStoreError::Io {
+        operation: "set owner-only feed database WAL mode",
+        path: wal_path,
+        source: source.into(),
+    })?;
+    backing.wal = Some(wal.into());
+    fsync(&backing.directory).map_err(|source| FeedStoreError::Io {
+        operation: "sync newly created feed database WAL entry",
+        path: backing.path.clone(),
+        source: source.into(),
+    })?;
+    Ok(true)
+}
+
+#[cfg(unix)]
+enum WalPublication {
+    Unchanged,
+    Appended,
+    Reset,
+}
+
+#[cfg(unix)]
+fn append_private_wal(opened: &mut OpenedConnection) -> Result<WalPublication, FeedStoreError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let private_wal_path = opened.working_path.with_file_name("feeds.db-wal");
+    let private_wal = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&private_wal_path)
+    {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WalPublication::Unchanged);
+        }
+        Err(source) => {
+            return Err(FeedStoreError::Io {
+                operation: "open private feed database WAL",
+                path: private_wal_path,
+                source,
+            });
+        }
+    };
+    private_wal
+        .sync_all()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "sync private feed database WAL",
+            path: private_wal_path.clone(),
+            source,
+        })?;
+    let private_len = private_wal
+        .metadata()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "inspect private feed database WAL",
+            path: private_wal_path.clone(),
+            source,
+        })?
+        .len();
+    let private_header = read_wal_header(&private_wal, &private_wal_path)?;
+    if private_len == opened.backing.published_wal_len {
+        return if private_header == opened.backing.wal_header {
+            Ok(WalPublication::Unchanged)
+        } else {
+            Ok(WalPublication::Reset)
+        };
+    }
+    if private_len < opened.backing.published_wal_len
+        || (opened.backing.published_wal_len > 0 && private_header != opened.backing.wal_header)
+    {
+        return Ok(WalPublication::Reset);
+    }
+
+    let prior_len = opened.backing.published_wal_len;
+    open_public_wal(&mut opened.backing)?;
+    let wal_path = opened
+        .backing
+        .path
+        .with_file_name(&opened.backing.wal_filename);
+    let public_wal = opened.backing.wal.as_mut().expect("public WAL was opened");
     verify_retained_file_identity(
-        &prepared.directory,
-        &prepared.filename,
-        &prepared.file,
-        path,
+        &opened.backing.directory,
+        &opened.backing.wal_filename,
+        public_wal,
+        &wal_path,
     )?;
+    let public_len = public_wal
+        .metadata()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "inspect public feed database WAL length",
+            path: wal_path.clone(),
+            source,
+        })?
+        .len();
+    if public_len != prior_len {
+        return Err(FeedStoreError::UnsafePath {
+            path: wal_path,
+            expected: "unchanged public feed database WAL length",
+        });
+    }
+
+    let mut source = private_wal
+        .try_clone()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "clone private feed database WAL",
+            path: private_wal_path.clone(),
+            source,
+        })?;
+    source
+        .seek(SeekFrom::Start(prior_len))
+        .map_err(|source| FeedStoreError::Io {
+            operation: "seek private feed database WAL",
+            path: private_wal_path.clone(),
+            source,
+        })?;
+    public_wal
+        .seek(SeekFrom::Start(prior_len))
+        .map_err(|source| FeedStoreError::Io {
+            operation: "seek public feed database WAL",
+            path: wal_path.clone(),
+            source,
+        })?;
+    let mut remaining = private_len - prior_len;
+    let mut buffer = [0_u8; 64 * 1024];
+    while remaining > 0 {
+        let amount = usize::try_from(remaining.min(buffer.len() as u64))
+            .expect("bounded WAL copy amount fits usize");
+        source
+            .read_exact(&mut buffer[..amount])
+            .map_err(|source| FeedStoreError::Io {
+                operation: "read new private feed database WAL bytes",
+                path: private_wal_path.clone(),
+                source,
+            })?;
+        public_wal
+            .write_all(&buffer[..amount])
+            .map_err(|source| FeedStoreError::Io {
+                operation: "append public feed database WAL bytes",
+                path: wal_path.clone(),
+                source,
+            })?;
+        remaining -= amount as u64;
+    }
+    public_wal.sync_all().map_err(|source| FeedStoreError::Io {
+        operation: "sync appended public feed database WAL",
+        path: wal_path.clone(),
+        source,
+    })?;
+    verify_retained_file_identity(
+        &opened.backing.directory,
+        &opened.backing.wal_filename,
+        public_wal,
+        &wal_path,
+    )?;
+    opened.backing.published_wal_len = private_len;
+    opened.backing.wal_header = private_header;
+
+    #[cfg(test)]
+    if FAIL_AFTER_DURABLE_WAL_APPEND.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        return Err(FeedStoreError::Io {
+            operation: "publish feed database WAL",
+            path: wal_path,
+            source: std::io::Error::other("injected failure after durable WAL append"),
+        });
+    }
+    Ok(WalPublication::Appended)
+}
+
+#[cfg(unix)]
+fn restore_last_durable_state(
+    opened: &mut OpenedConnection,
+    wal_existed: bool,
+    wal_len: u64,
+    wal_header: Option<[u8; 32]>,
+) -> Result<(), FeedStoreError> {
+    use rustix::fs::{AtFlags, fsync, unlinkat};
+
+    let wal_path = opened
+        .backing
+        .path
+        .with_file_name(&opened.backing.wal_filename);
+    if wal_existed {
+        let wal = opened
+            .backing
+            .wal
+            .as_mut()
+            .ok_or_else(|| FeedStoreError::UnsafePath {
+                path: wal_path.clone(),
+                expected: "retained durable feed database WAL",
+            })?;
+        wal.set_len(wal_len)
+            .and_then(|()| wal.sync_all())
+            .map_err(|source| FeedStoreError::Io {
+                operation: "restore durable feed database WAL prefix",
+                path: wal_path.clone(),
+                source,
+            })?;
+    } else if opened.backing.wal.take().is_some() {
+        unlinkat(
+            &opened.backing.directory,
+            &opened.backing.wal_filename,
+            AtFlags::empty(),
+        )
+        .map_err(|source| FeedStoreError::Io {
+            operation: "remove failed feed database WAL publication",
+            path: wal_path,
+            source: source.into(),
+        })?;
+        fsync(&opened.backing.directory).map_err(|source| FeedStoreError::Io {
+            operation: "sync failed feed database WAL rollback",
+            path: opened.backing.path.clone(),
+            source: source.into(),
+        })?;
+    }
+    verify_retained_file_identity(
+        &opened.backing.directory,
+        &opened.backing.filename,
+        &opened.backing.file,
+        &opened.backing.path,
+    )?;
+    if let Some(wal) = opened.backing.wal.as_ref() {
+        verify_retained_file_identity(
+            &opened.backing.directory,
+            &opened.backing.wal_filename,
+            wal,
+            &opened
+                .backing
+                .path
+                .with_file_name(&opened.backing.wal_filename),
+        )?;
+    }
+    opened.backing.published_wal_len = wal_len;
+    opened.backing.wal_header = wal_header;
+    rebuild_private_connection(opened)
+}
+#[cfg(unix)]
+fn configure_private_connection(connection: &Connection) -> Result<(), FeedStoreError> {
+    connection.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = FULL;
+        PRAGMA wal_autocheckpoint = 0;
+        PRAGMA foreign_keys = ON;
+        ",
+    )?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn rebuild_private_connection(opened: &mut OpenedConnection) -> Result<(), FeedStoreError> {
+    let wal_path = opened
+        .backing
+        .path
+        .with_file_name(&opened.backing.wal_filename);
+    opened.backing.published_wal_len = opened
+        .backing
+        .wal
+        .as_ref()
+        .map(std::fs::File::metadata)
+        .transpose()
+        .map_err(|source| FeedStoreError::Io {
+            operation: "inspect durable feed database WAL during recovery",
+            path: wal_path.clone(),
+            source,
+        })?
+        .map_or(0, |metadata| metadata.len());
+    opened.backing.wal_header = opened
+        .backing
+        .wal
+        .as_ref()
+        .map(|wal| read_wal_header(wal, &wal_path))
+        .transpose()?
+        .flatten();
+    let (working_directory, working_path) = create_private_working_copy(
+        &opened.backing.directory,
+        &opened.backing.filename,
+        &opened.backing.file,
+        opened.backing.wal.as_ref(),
+        &opened.backing.path,
+    )?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let connection = Connection::open_with_flags(&working_path, flags)?;
+    configure_private_connection(&connection)?;
+    let old_connection = std::mem::replace(&mut opened.connection, connection);
+    let old_directory = std::mem::replace(&mut opened.working_directory, working_directory);
+    opened.working_path = working_path;
+    drop(old_connection);
+    drop(old_directory);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn checkpoint_private_connection(opened: &mut OpenedConnection) -> Result<(), FeedStoreError> {
+    use rustix::fs::{AtFlags, fsync, unlinkat};
+    use rustix::io::Errno;
+
+    let busy: i64 = opened
+        .connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+    if busy != 0 {
+        return Err(FeedStoreError::Io {
+            operation: "checkpoint private feed database WAL",
+            path: opened.working_path.clone(),
+            source: std::io::Error::other("SQLite WAL checkpoint remained busy"),
+        });
+    }
+    publish_checkpointed_main(&opened.working_path, &mut opened.backing)?;
+
+    #[cfg(test)]
+    if AFTER_CHECKPOINT_MAIN_RENAME_SYNCED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        rebuild_private_connection(opened)?;
+        return Ok(());
+    }
+
+    let cleanup = (|| -> Result<(), FeedStoreError> {
+        if opened.backing.wal.is_some() {
+            match unlinkat(
+                &opened.backing.directory,
+                &opened.backing.wal_filename,
+                AtFlags::empty(),
+            ) {
+                Ok(()) | Err(Errno::NOENT) => {}
+                Err(source) => {
+                    return Err(FeedStoreError::Io {
+                        operation: "remove checkpointed feed database WAL",
+                        path: opened
+                            .backing
+                            .path
+                            .with_file_name(&opened.backing.wal_filename),
+                        source: source.into(),
+                    });
+                }
+            }
+            opened.backing.wal = None;
+        }
+        let mut shm_filename = opened.backing.filename.clone();
+        shm_filename.push("-shm");
+        match unlinkat(&opened.backing.directory, &shm_filename, AtFlags::empty()) {
+            Ok(()) | Err(Errno::NOENT) => {}
+            Err(source) => {
+                return Err(FeedStoreError::Io {
+                    operation: "remove obsolete feed database SHM",
+                    path: opened.backing.path.with_file_name(shm_filename),
+                    source: source.into(),
+                });
+            }
+        }
+        fsync(&opened.backing.directory).map_err(|source| FeedStoreError::Io {
+            operation: "sync checkpointed feed database sidecar removal",
+            path: opened.backing.path.clone(),
+            source: source.into(),
+        })?;
+        opened.backing.published_wal_len = 0;
+        opened.backing.wal_header = None;
+        Ok(())
+    })();
+    if cleanup.is_err() {
+        rebuild_private_connection(opened)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn wal_checkpoint_threshold() -> u64 {
+    #[cfg(test)]
+    {
+        let forced = FORCED_WAL_CHECKPOINT_BYTES.load(std::sync::atomic::Ordering::SeqCst);
+        if forced != u64::MAX {
+            return forced;
+        }
+    }
+    64 * 1024 * 1024
+}
+
+fn publish_mutation<T>(
+    opened: &mut OpenedConnection,
+    result: Result<T, FeedStoreError>,
+) -> Result<T, FeedStoreError> {
+    let value = result?;
+    #[cfg(unix)]
+    {
+        if opened.poisoned {
+            return Err(FeedStoreError::WorkerStopped);
+        }
+        let _generation_lock = lock_feed_generation_exclusive(&opened.backing)?;
+        let baseline_wal_existed = opened.backing.wal.is_some();
+        let baseline_wal_len = opened.backing.published_wal_len;
+        let baseline_wal_header = opened.backing.wal_header;
+        let publication = match append_private_wal(opened) {
+            Ok(publication) => publication,
+            Err(error) => {
+                if let Err(recovery_error) = restore_last_durable_state(
+                    opened,
+                    baseline_wal_existed,
+                    baseline_wal_len,
+                    baseline_wal_header,
+                ) {
+                    opened.poisoned = true;
+                    return Err(recovery_error);
+                }
+                return Err(error);
+            }
+        };
+        match publication {
+            WalPublication::Unchanged => {}
+            WalPublication::Reset => {
+                if let Err(error) = checkpoint_private_connection(opened) {
+                    if let Err(recovery_error) = restore_last_durable_state(
+                        opened,
+                        baseline_wal_existed,
+                        baseline_wal_len,
+                        baseline_wal_header,
+                    ) {
+                        opened.poisoned = true;
+                        return Err(recovery_error);
+                    }
+                    return Err(error);
+                }
+            }
+            WalPublication::Appended => {
+                if opened.backing.published_wal_len >= wal_checkpoint_threshold()
+                    && checkpoint_private_connection(opened).is_err()
+                    && rebuild_private_connection(opened).is_err()
+                {
+                    opened.poisoned = true;
+                }
+            }
+        }
+    }
+    Ok(value)
+}
+fn initialize_connection(connection: &mut Connection) -> Result<(), FeedStoreError> {
     let schema_version: i64 =
         connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if schema_version > CURRENT_SCHEMA_VERSION {
@@ -742,18 +1799,64 @@ fn open_connection(path: &Path) -> Result<OpenedConnection, FeedStoreError> {
         "
         PRAGMA foreign_keys = OFF;
         PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
+        PRAGMA synchronous = FULL;
+        PRAGMA wal_autocheckpoint = 0;
         ",
     )?;
-    initialize_schema(&mut connection, schema_version)?;
+    initialize_schema(connection, schema_version)?;
     connection.execute_batch("PRAGMA foreign_keys = ON;")?;
-    Ok(OpenedConnection {
-        connection,
-        #[cfg(unix)]
-        _database_directory: prepared.directory,
-        #[cfg(unix)]
-        _database_file: prepared.file,
-    })
+    Ok(())
+}
+
+fn open_connection(path: &Path) -> Result<OpenedConnection, FeedStoreError> {
+    let prepared = prepare_database_path(path)?;
+    #[cfg(unix)]
+    {
+        verify_retained_file_identity(
+            &prepared.directory,
+            &prepared.filename,
+            &prepared.file,
+            &prepared.path,
+        )?;
+        #[cfg(test)]
+        pause_at_test_path_barrier(&AFTER_DATABASE_OPEN_PATH_RESOLVED, &prepared.path);
+        let was_created = prepared.created;
+        let (working_directory, working_path) = create_private_working_copy(
+            &prepared.directory,
+            &prepared.filename,
+            &prepared.file,
+            prepared.wal.as_ref(),
+            &prepared.path,
+        )?;
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        let connection = Connection::open_with_flags(&working_path, flags)?;
+        let mut opened = OpenedConnection {
+            connection,
+            working_directory,
+            working_path,
+            backing: prepared,
+            poisoned: false,
+        };
+        initialize_connection(&mut opened.connection)?;
+        if was_created {
+            let _generation_lock = lock_feed_generation_exclusive(&opened.backing)?;
+            checkpoint_private_connection(&mut opened)?;
+        } else {
+            publish_mutation(&mut opened, Ok(()))?;
+        }
+        Ok(opened)
+    }
+    #[cfg(not(unix))]
+    {
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        let mut connection = Connection::open_with_flags(&prepared.path, flags)?;
+        initialize_connection(&mut connection)?;
+        Ok(OpenedConnection { connection })
+    }
 }
 
 fn initialize_schema(
@@ -994,6 +2097,34 @@ fn normalize_timestamp_column(
     Ok(())
 }
 fn reconcile(connection: &mut Connection, feeds: Vec<ManifestFeed>) -> Result<(), FeedStoreError> {
+    let unchanged = {
+        let mut statement = connection.prepare(
+            "
+            SELECT url, title_override, group_name, tags, sort_order
+            FROM feed
+            WHERE subscribed = 1
+            ORDER BY sort_order ASC, id ASC
+            ",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut unchanged = true;
+        for (sort_order, feed) in feeds.iter().enumerate() {
+            let Some(row) = rows.next()? else {
+                unchanged = false;
+                break;
+            };
+            let tags = serde_json::to_string(&feed.tags)?;
+            unchanged &= row.get::<_, String>(0)? == feed.url;
+            unchanged &= row.get::<_, Option<String>>(1)? == feed.title_override;
+            unchanged &= row.get::<_, String>(2)? == feed.group;
+            unchanged &= row.get::<_, String>(3)? == tags;
+            unchanged &= row.get::<_, i64>(4)? == sort_order as i64;
+        }
+        unchanged && rows.next()?.is_none()
+    };
+    if unchanged {
+        return Ok(());
+    }
     let transaction = connection.transaction()?;
     transaction.execute("UPDATE feed SET subscribed = 0", [])?;
     let now = datetime_to_db(Utc::now());
@@ -1213,6 +2344,46 @@ fn upsert_entries(
     }
     Ok(())
 }
+#[cfg(test)]
+fn seed_test_entries(
+    connection: &mut Connection,
+    feed_ids: &[i64],
+    entries_per_feed: usize,
+) -> Result<(), FeedStoreError> {
+    let transaction = connection.transaction()?;
+    {
+        let mut statement = transaction.prepare(
+            "
+            INSERT INTO entry (feed_id, guid, title, fetched_at)
+            VALUES (?1, ?2, ?2, ?3)
+            ",
+        )?;
+        for feed_id in feed_ids {
+            for index in 0..entries_per_feed {
+                statement.execute(params![
+                    feed_id,
+                    format!("seed-{feed_id}-{index}"),
+                    "2026-01-01T00:00:00Z"
+                ])?;
+            }
+        }
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn apply_test_retention_quotas(
+    connection: &mut Connection,
+    feed_id: i64,
+    limits: RetentionQuotaLimits,
+) -> Result<(), FeedStoreError> {
+    let transaction = connection.transaction()?;
+    enforce_retention_quotas(&transaction, feed_id, limits)?;
+    transaction.commit()?;
+    Ok(())
+}
+
 fn enforce_retention_quotas(
     transaction: &Transaction<'_>,
     feed_id: i64,
@@ -1725,6 +2896,7 @@ pub fn snapshot_database(source: &Path, destination: &Path) -> Result<(), FeedSt
             &source.directory,
             &source.filename,
             &source.file,
+            &source.generation_lock,
             &source.path,
             destination,
         )
@@ -1745,6 +2917,7 @@ struct VerifiedSnapshotSource {
     directory: std::os::fd::OwnedFd,
     filename: std::ffi::OsString,
     file: std::fs::File,
+    generation_lock: std::fs::File,
 }
 
 #[cfg(unix)]
@@ -1773,6 +2946,7 @@ fn open_snapshot_source(source: &Path) -> Result<VerifiedSnapshotSource, FeedSto
         path: parent.clone(),
         source: source_error.into(),
     })?;
+    let generation_lock = lock_feed_generation_shared(&directory, &parent, filename)?;
     let file = openat(
         &directory,
         filename,
@@ -1800,6 +2974,7 @@ fn open_snapshot_source(source: &Path) -> Result<VerifiedSnapshotSource, FeedSto
         directory,
         filename: filename.to_os_string(),
         file: file.into(),
+        generation_lock,
     })
 }
 
@@ -1808,17 +2983,29 @@ pub(crate) fn snapshot_database_file(
     source_directory: &std::os::fd::OwnedFd,
     source_filename: &std::ffi::OsStr,
     source_file: &std::fs::File,
+    _generation_lock: &std::fs::File,
     source_path: &Path,
     destination: &Path,
 ) -> Result<(), FeedStoreError> {
     verify_retained_file_identity(source_directory, source_filename, source_file, source_path)?;
-    let directory_path = descriptor_directory_path(source_directory, source_path)?;
+    #[cfg(test)]
+    pause_at_test_path_barrier(&AFTER_SNAPSHOT_SOURCE_OPEN_PATH_RESOLVED, source_path);
+    #[cfg(test)]
+    pause_at_test_path_barrier(&AFTER_SNAPSHOT_GENERATION_SHARED_LOCKED, source_path);
+    let (working_directory, working_path) = create_private_working_copy(
+        source_directory,
+        source_filename,
+        source_file,
+        None,
+        source_path,
+    )?;
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
         | OpenFlags::SQLITE_OPEN_NO_MUTEX
         | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let connection = Connection::open_with_flags(directory_path.join(source_filename), flags)?;
-    verify_retained_file_identity(source_directory, source_filename, source_file, source_path)?;
-    snapshot_connection(&connection, destination)
+    let connection = Connection::open_with_flags(&working_path, flags)?;
+    let result = snapshot_connection(&connection, destination);
+    drop(working_directory);
+    result
 }
 
 struct PreparedSnapshotDestination {
@@ -1930,35 +3117,87 @@ fn prepare_snapshot_destination(
 }
 
 #[cfg(unix)]
-fn finish_snapshot_destination(
+fn publish_private_snapshot(
+    source_path: &Path,
     destination: &PreparedSnapshotDestination,
 ) -> Result<(), FeedStoreError> {
-    use rustix::fs::{AtFlags, FileType, Mode, OFlags, fchmod, fstat, openat, statat};
+    use rustix::fs::{
+        AtFlags, FileType, Mode, OFlags, RenameFlags, fchmod, fstat, fsync, openat, renameat_with,
+        statat, unlinkat,
+    };
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    let file = openat(
+    static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    verify_snapshot_destination_absent(destination)?;
+    let counter = SNAPSHOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary_name = format!(".snapshot.publish-{}-{counter}", std::process::id());
+    let temporary = openat(
         &destination.directory,
-        &destination.filename,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
-        Mode::empty(),
+        &temporary_name,
+        OFlags::RDWR
+            | OFlags::CREATE
+            | OFlags::EXCL
+            | OFlags::CLOEXEC
+            | OFlags::NOFOLLOW
+            | OFlags::NONBLOCK,
+        Mode::RUSR | Mode::WUSR,
     )
     .map_err(|source| FeedStoreError::Io {
-        operation: "open completed snapshot without following links",
+        operation: "create descriptor-bound snapshot publication",
         path: destination.path.clone(),
         source: source.into(),
     })?;
-    let metadata = fstat(&file).map_err(|source| FeedStoreError::Io {
-        operation: "inspect completed snapshot",
-        path: destination.path.clone(),
-        source: source.into(),
-    })?;
-    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
-        return Err(FeedStoreError::UnsafePath {
+    if let Err(source) = fchmod(&temporary, Mode::RUSR | Mode::WUSR) {
+        let _ = unlinkat(&destination.directory, &temporary_name, AtFlags::empty());
+        return Err(FeedStoreError::Io {
+            operation: "set owner-only snapshot publication mode",
             path: destination.path.clone(),
-            expected: "regular snapshot file",
+            source: source.into(),
         });
     }
-    fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(|source| FeedStoreError::Io {
-        operation: "set owner-only snapshot mode",
+    let mut temporary_file = std::fs::File::from(temporary);
+    let source_file = match std::fs::File::open(source_path) {
+        Ok(file) => file,
+        Err(source) => {
+            let _ = unlinkat(&destination.directory, &temporary_name, AtFlags::empty());
+            return Err(FeedStoreError::Io {
+                operation: "open private snapshot publication source",
+                path: source_path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if let Err(error) = copy_file_contents(
+        &source_file,
+        &mut temporary_file,
+        source_path,
+        &destination.path,
+    ) {
+        let _ = unlinkat(&destination.directory, &temporary_name, AtFlags::empty());
+        return Err(error);
+    }
+    if let Err(source) = renameat_with(
+        &destination.directory,
+        &temporary_name,
+        &destination.directory,
+        &destination.filename,
+        RenameFlags::NOREPLACE,
+    ) {
+        let _ = unlinkat(&destination.directory, &temporary_name, AtFlags::empty());
+        return Err(FeedStoreError::Io {
+            operation: "atomically publish snapshot",
+            path: destination.path.clone(),
+            source: source.into(),
+        });
+    }
+    fsync(&destination.directory).map_err(|source| FeedStoreError::Io {
+        operation: "sync snapshot directory",
+        path: destination.path.clone(),
+        source: source.into(),
+    })?;
+    let metadata = fstat(&temporary_file).map_err(|source| FeedStoreError::Io {
+        operation: "inspect completed snapshot",
         path: destination.path.clone(),
         source: source.into(),
     })?;
@@ -1972,8 +3211,9 @@ fn finish_snapshot_destination(
         path: destination.path.clone(),
         source: source.into(),
     })?;
-    if path_metadata.st_dev != metadata.st_dev
-        || path_metadata.st_ino != metadata.st_ino
+    if metadata.st_dev != path_metadata.st_dev
+        || metadata.st_ino != path_metadata.st_ino
+        || FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile
         || FileType::from_raw_mode(path_metadata.st_mode) != FileType::RegularFile
     {
         return Err(FeedStoreError::UnsafePath {
@@ -2005,27 +3245,29 @@ fn finish_snapshot_destination(
 
 fn snapshot_connection(connection: &Connection, destination: &Path) -> Result<(), FeedStoreError> {
     let prepared = prepare_snapshot_destination(destination)?;
-    #[cfg(test)]
-    pause_at_test_path_barrier(&AFTER_SNAPSHOT_DESTINATION_PREPARED, destination);
     #[cfg(unix)]
-    let publication_path = {
-        verify_snapshot_destination_absent(&prepared)?;
-        descriptor_directory_path(&prepared.directory, &prepared.path)?.join(&prepared.filename)
-    };
+    {
+        let (_snapshot_directory, snapshot_path) = create_private_snapshot(connection)?;
+        #[cfg(test)]
+        pause_at_test_path_barrier(&AFTER_SNAPSHOT_PUBLICATION_PATH_RESOLVED, &prepared.path);
+        publish_private_snapshot(&snapshot_path, &prepared)
+    }
     #[cfg(not(unix))]
-    let publication_path = prepared.path.clone();
-    let destination_text = publication_path
-        .to_str()
-        .ok_or_else(|| FeedStoreError::InvalidPath(prepared.path.clone()))?;
-    connection.execute("VACUUM INTO ?1", [destination_text])?;
-    finish_snapshot_destination(&prepared)
+    {
+        let destination_text = prepared
+            .path
+            .to_str()
+            .ok_or_else(|| FeedStoreError::InvalidPath(prepared.path.clone()))?;
+        connection.execute("VACUUM INTO ?1", [destination_text])?;
+        finish_snapshot_destination(&prepared)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use chrono::{DateTime, Duration, SecondsFormat, Utc};
     use rusqlite::{Connection, OptionalExtension};
@@ -2113,31 +3355,368 @@ mod tests {
             .collect()
     }
 
-    fn seed_entries(path: &Path, feed_ids: &[i64], entries_per_feed: usize) {
-        let mut connection = Connection::open(path).unwrap();
-        let transaction = connection.transaction().unwrap();
-        {
-            let mut statement = transaction
-                .prepare(
-                    "
-                    INSERT INTO entry (feed_id, guid, title, fetched_at)
-                    VALUES (?1, ?2, ?2, ?3)
-                    ",
-                )
-                .unwrap();
-            for feed_id in feed_ids {
-                for index in 0..entries_per_feed {
-                    statement
-                        .execute(rusqlite::params![
-                            feed_id,
-                            format!("seed-{feed_id}-{index}"),
-                            "2026-01-01T00:00:00Z"
-                        ])
-                        .unwrap();
-                }
+    #[cfg(unix)]
+    #[derive(Debug, PartialEq, Eq)]
+    struct DurableDatabaseState {
+        main_device: u64,
+        main_inode: u64,
+        main_bytes: Vec<u8>,
+        wal_bytes: Option<Vec<u8>>,
+    }
+
+    #[cfg(unix)]
+    fn database_wal_path(database: &Path) -> PathBuf {
+        let mut path = database.as_os_str().to_os_string();
+        path.push("-wal");
+        PathBuf::from(path)
+    }
+
+    #[cfg(unix)]
+    fn durable_database_state(database: &Path) -> DurableDatabaseState {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = fs::metadata(database).unwrap();
+        let wal = database_wal_path(database);
+        DurableDatabaseState {
+            main_device: metadata.dev(),
+            main_inode: metadata.ino(),
+            main_bytes: fs::read(database).unwrap(),
+            wal_bytes: wal.exists().then(|| fs::read(wal).unwrap()),
+        }
+    }
+
+    #[cfg(unix)]
+    struct IncrementalWalTestControls {
+        prior_fail_after_append: bool,
+        prior_checkpoint_bytes: u64,
+        prior_fail_after_checkpoint_rename: bool,
+    }
+
+    #[cfg(unix)]
+    impl IncrementalWalTestControls {
+        fn install(
+            checkpoint_bytes: u64,
+            fail_after_append: bool,
+            fail_after_checkpoint_rename: bool,
+        ) -> Self {
+            use std::sync::atomic::Ordering;
+
+            Self {
+                prior_fail_after_append: super::FAIL_AFTER_DURABLE_WAL_APPEND
+                    .swap(fail_after_append, Ordering::SeqCst),
+                prior_checkpoint_bytes: super::FORCED_WAL_CHECKPOINT_BYTES
+                    .swap(checkpoint_bytes, Ordering::SeqCst),
+                prior_fail_after_checkpoint_rename: super::AFTER_CHECKPOINT_MAIN_RENAME_SYNCED
+                    .swap(fail_after_checkpoint_rename, Ordering::SeqCst),
             }
         }
-        transaction.commit().unwrap();
+    }
+
+    #[cfg(unix)]
+    impl Drop for IncrementalWalTestControls {
+        fn drop(&mut self) {
+            use std::sync::atomic::Ordering;
+
+            super::FAIL_AFTER_DURABLE_WAL_APPEND
+                .store(self.prior_fail_after_append, Ordering::SeqCst);
+            super::FORCED_WAL_CHECKPOINT_BYTES.store(self.prior_checkpoint_bytes, Ordering::SeqCst);
+            super::AFTER_CHECKPOINT_MAIN_RENAME_SYNCED
+                .store(self.prior_fail_after_checkpoint_rename, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg(unix)]
+    async fn store_with_one_entry() -> (FeedStoreHandle, TempDir, Entry) {
+        let (store, temp) = open_test_store().await;
+        let feed_id = add_feed(
+            &store,
+            manifest_feed("https://incremental.example/feed", "News", &[]),
+        )
+        .await;
+        store
+            .apply_fetch(
+                feed_id,
+                success(
+                    vec![fetched_entry(
+                        "incremental-entry",
+                        Some(ts("2026-08-09T10:00:00Z")),
+                    )],
+                    ts("2026-08-09T12:00:00Z"),
+                    ts("2026-08-09T12:30:00Z"),
+                ),
+            )
+            .await
+            .unwrap();
+        let entry = entries_by_guid(&store)
+            .await
+            .remove("incremental-entry")
+            .unwrap();
+        (store, temp, entry)
+    }
+
+    #[cfg(unix)]
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn small_patch_appends_durable_wal_without_replacing_public_main_database() {
+        let (store, temp, entry) = store_with_one_entry().await;
+        let database = temp.path().join("feeds.db");
+        let _controls = IncrementalWalTestControls::install(u64::MAX, false, false);
+        let before = durable_database_state(&database);
+
+        let patched = store
+            .patch_entry(
+                entry.id,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(patched.bookmarked);
+
+        let after = durable_database_state(&database);
+        assert_eq!(after.main_device, before.main_device);
+        assert_eq!(after.main_inode, before.main_inode);
+        assert_eq!(after.main_bytes, before.main_bytes);
+        let before_wal = before.wal_bytes.as_deref().unwrap_or_default();
+        let after_wal = after
+            .wal_bytes
+            .as_deref()
+            .expect("successful patch must durably publish WAL bytes");
+        assert!(after_wal.starts_with(before_wal));
+        assert!(after_wal.len() > before_wal.len());
+
+        drop(store);
+        let reopened = FeedStoreHandle::open(&database).unwrap();
+        let saved = reopened
+            .list_entries(filters(EntryView::Saved))
+            .await
+            .unwrap();
+        assert_eq!(saved.entries, vec![patched]);
+    }
+
+    #[cfg(unix)]
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn failed_wal_publication_restores_live_and_reopened_state_to_exact_baseline() {
+        let (store, temp, entry) = store_with_one_entry().await;
+        let database = temp.path().join("feeds.db");
+        let baseline_entries = store.list_entries(filters(EntryView::All)).await.unwrap();
+        let baseline_files = durable_database_state(&database);
+        let _controls = IncrementalWalTestControls::install(u64::MAX, true, false);
+
+        let result = store
+            .patch_entry(
+                entry.id,
+                EntryPatch {
+                    read: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await;
+
+        assert!(
+            result.is_err(),
+            "injected WAL publication failure was ignored"
+        );
+        assert_eq!(
+            store.list_entries(filters(EntryView::All)).await.unwrap(),
+            baseline_entries
+        );
+        assert_eq!(durable_database_state(&database), baseline_files);
+
+        drop(store);
+        let reopened = FeedStoreHandle::open(&database).unwrap();
+        assert_eq!(
+            reopened
+                .list_entries(filters(EntryView::All))
+                .await
+                .unwrap(),
+            baseline_entries
+        );
+    }
+
+    #[cfg(unix)]
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn checkpoint_failure_after_main_rename_reopens_complete_new_state_with_old_wal() {
+        let (store, temp, entry) = store_with_one_entry().await;
+        let database = temp.path().join("feeds.db");
+        let _controls = IncrementalWalTestControls::install(1, false, true);
+
+        let patched = store
+            .patch_entry(
+                entry.id,
+                EntryPatch {
+                    bookmarked: Some(true),
+                    ..EntryPatch::default()
+                },
+            )
+            .await
+            .expect("durable WAL append makes the mutation successful");
+        assert!(patched.bookmarked);
+        drop(store);
+
+        let public_wal = database_wal_path(&database);
+        assert!(
+            fs::metadata(&public_wal).unwrap().len() > 0,
+            "old WAL was removed before checkpointed main rename was crash-safe"
+        );
+        let reopened = FeedStoreHandle::open(&database).unwrap();
+        let entries = reopened
+            .list_entries(filters(EntryView::All))
+            .await
+            .unwrap()
+            .entries;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, entry.id);
+        assert!(entries[0].bookmarked);
+    }
+
+    #[cfg(unix)]
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn unchanged_reconcile_does_not_grow_wal_or_publish_database_files() {
+        let (store, temp) = open_test_store().await;
+        let database = temp.path().join("feeds.db");
+        let feed = manifest_feed("https://unchanged.example/feed", "News", &["daily"]);
+        add_feed(&store, feed.clone()).await;
+        let _controls = IncrementalWalTestControls::install(u64::MAX, false, false);
+        let before = durable_database_state(&database);
+
+        store.reconcile(vec![feed]).await.unwrap();
+
+        assert_eq!(durable_database_state(&database), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn feed_database_writer_lock_is_exclusive_nonblocking_and_released_with_worker() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("feeds.db");
+        let first = FeedStoreHandle::open(&database).unwrap();
+
+        for filename in [".feeds.db.writer.lock", ".feeds.db.generation.lock"] {
+            let metadata = fs::symlink_metadata(temp.path().join(filename)).unwrap();
+            assert!(metadata.file_type().is_file());
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        }
+
+        let started = std::time::Instant::now();
+        let error = match FeedStoreHandle::open(&database) {
+            Ok(second) => {
+                drop(second);
+                panic!("second feed-store writer opened the same database")
+            }
+            Err(error) => error,
+        };
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "writer ownership acquisition blocked instead of failing"
+        );
+        assert!(
+            error.to_string().contains("already open"),
+            "writer ownership failure was not clear: {error}"
+        );
+
+        drop(first);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let reopened = loop {
+            match FeedStoreHandle::open(&database) {
+                Ok(store) => break store,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("writer lock was not released with worker: {error}"),
+            }
+        };
+        drop(reopened);
+    }
+
+    #[cfg(unix)]
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn path_snapshot_holds_one_generation_while_forced_checkpoint_publisher_waits() {
+        let (store, temp, entry) = store_with_one_entry().await;
+        let database = temp.path().join("feeds.db");
+        let destination = temp.path().join("generation-snapshot.db");
+        let _controls = IncrementalWalTestControls::install(1, false, false);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        super::install_after_snapshot_generation_shared_locked_barrier(
+            database.canonicalize().unwrap(),
+            barrier.clone(),
+        );
+
+        let snapshot_database_path = database.clone();
+        let snapshot_destination = destination.clone();
+        let snapshotter = std::thread::spawn(move || {
+            super::snapshot_database(&snapshot_database_path, &snapshot_destination)
+        });
+        barrier.wait();
+
+        let patch_store = store.clone();
+        let mut publisher = tokio::spawn(async move {
+            patch_store
+                .patch_entry(
+                    entry.id,
+                    EntryPatch {
+                        bookmarked: Some(true),
+                        ..EntryPatch::default()
+                    },
+                )
+                .await
+        });
+        let completed_while_snapshot_locked =
+            tokio::time::timeout(std::time::Duration::from_secs(1), &mut publisher)
+                .await
+                .ok();
+
+        barrier.wait();
+        snapshotter.join().unwrap().unwrap();
+        assert!(
+            completed_while_snapshot_locked.is_none(),
+            "checkpoint publisher did not wait for the snapshot generation reader"
+        );
+        let patched = publisher.await.unwrap().unwrap();
+        assert!(patched.bookmarked);
+
+        let snapshot = Connection::open(&destination).unwrap();
+        let snapshot_bookmarked: bool = snapshot
+            .query_row(
+                "SELECT bookmarked_at IS NOT NULL FROM entry WHERE id = ?1",
+                [patched.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !snapshot_bookmarked,
+            "snapshot mixed the post-checkpoint entry state into its locked old generation"
+        );
+        drop(snapshot);
+
+        drop(store);
+        let reopen_deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let reopened = loop {
+            match FeedStoreHandle::open(&database) {
+                Ok(store) => break store,
+                Err(_) if std::time::Instant::now() < reopen_deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("writer lock was not released for semantic reopen: {error}"),
+            }
+        };
+        let reopened_entry = reopened
+            .list_entries(filters(EntryView::All))
+            .await
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|candidate| candidate.id == patched.id)
+            .unwrap();
+        assert!(reopened_entry.bookmarked);
     }
 
     fn persisted_entry_count(path: &Path) -> i64 {
@@ -2145,13 +3724,6 @@ mod tests {
             .unwrap()
             .query_row("SELECT COUNT(*) FROM entry", [], |row| row.get(0))
             .unwrap()
-    }
-
-    fn apply_test_retention_quotas(path: &Path, feed_id: i64, limits: super::RetentionQuotaLimits) {
-        let mut connection = Connection::open(path).unwrap();
-        let transaction = connection.transaction().unwrap();
-        super::enforce_retention_quotas(&transaction, feed_id, limits).unwrap();
-        transaction.commit().unwrap();
     }
 
     #[test]
@@ -2299,7 +3871,7 @@ mod tests {
 
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let verified_database_path = database.canonicalize().unwrap();
-        super::install_after_database_path_prepared_barrier(
+        super::install_after_database_open_path_resolved_barrier(
             verified_database_path,
             barrier.clone(),
         );
@@ -2427,7 +3999,7 @@ mod tests {
             .canonicalize()
             .unwrap()
             .join("snapshot.db");
-        super::install_after_snapshot_destination_prepared_barrier(
+        super::install_after_snapshot_publication_path_resolved_barrier(
             verified_destination,
             barrier.clone(),
         );
@@ -3730,7 +5302,7 @@ mod tests {
             manifest_feed("https://one.example/feed", "News", &[]),
         )
         .await;
-        seed_entries(&path, &[feed_id], 5_000);
+        store.seed_entries(vec![feed_id], 5_000).await.unwrap();
         let fresh = fetched_entry("fresh-guid", Some(ts("2026-08-09T11:00:00Z")));
 
         store
@@ -3778,7 +5350,10 @@ mod tests {
             .into_iter()
             .map(|feed| feed.id)
             .collect::<Vec<_>>();
-        seed_entries(&path, &feed_ids[..10], 5_000);
+        store
+            .seed_entries(feed_ids[..10].to_vec(), 5_000)
+            .await
+            .unwrap();
         let fresh_feed_id = feed_ids[10];
 
         store
@@ -3810,8 +5385,7 @@ mod tests {
 
     #[tokio::test]
     async fn per_feed_count_quota_keeps_bookmarks_outside_the_publisher_budget() {
-        let (store, temp) = open_test_store().await;
-        let path = temp.path().join("feeds.db");
+        let (store, _temp) = open_test_store().await;
         let feed_id = add_feed(
             &store,
             manifest_feed("https://one.example/feed", "News", &[]),
@@ -3845,16 +5419,18 @@ mod tests {
             .await
             .unwrap();
 
-        apply_test_retention_quotas(
-            &path,
-            feed_id,
-            super::RetentionQuotaLimits {
-                per_feed_entries: 2,
-                per_feed_content_bytes: 1_024,
-                global_entries: 100,
-                global_content_bytes: 1_024,
-            },
-        );
+        store
+            .apply_retention_quotas(
+                feed_id,
+                super::RetentionQuotaLimits {
+                    per_feed_entries: 2,
+                    per_feed_content_bytes: 1_024,
+                    global_entries: 100,
+                    global_content_bytes: 1_024,
+                },
+            )
+            .await
+            .unwrap();
 
         let retained = entries_by_guid(&store).await;
         assert_eq!(retained.len(), 3);
@@ -3866,8 +5442,7 @@ mod tests {
 
     #[tokio::test]
     async fn per_feed_byte_quota_keeps_bookmark_bodies_outside_the_publisher_budget() {
-        let (store, temp) = open_test_store().await;
-        let path = temp.path().join("feeds.db");
+        let (store, _temp) = open_test_store().await;
         let feed_id = add_feed(
             &store,
             manifest_feed("https://one.example/feed", "News", &[]),
@@ -3904,16 +5479,18 @@ mod tests {
             .await
             .unwrap();
 
-        apply_test_retention_quotas(
-            &path,
-            feed_id,
-            super::RetentionQuotaLimits {
-                per_feed_entries: 100,
-                per_feed_content_bytes: 4,
-                global_entries: 100,
-                global_content_bytes: 1_024,
-            },
-        );
+        store
+            .apply_retention_quotas(
+                feed_id,
+                super::RetentionQuotaLimits {
+                    per_feed_entries: 100,
+                    per_feed_content_bytes: 4,
+                    global_entries: 100,
+                    global_content_bytes: 1_024,
+                },
+            )
+            .await
+            .unwrap();
 
         let retained = entries_by_guid(&store).await;
         assert_eq!(retained.len(), 3);
@@ -3930,8 +5507,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_count_quota_cannot_evict_an_unrelated_feed_bookmark() {
-        let (store, temp) = open_test_store().await;
-        let path = temp.path().join("feeds.db");
+        let (store, _temp) = open_test_store().await;
         store
             .reconcile(vec![
                 manifest_feed("https://bookmarks.example/feed", "News", &[]),
@@ -3978,16 +5554,18 @@ mod tests {
             .await
             .unwrap();
 
-        apply_test_retention_quotas(
-            &path,
-            feed_ids[3],
-            super::RetentionQuotaLimits {
-                per_feed_entries: 100,
-                per_feed_content_bytes: 1_024,
-                global_entries: 2,
-                global_content_bytes: 1_024,
-            },
-        );
+        store
+            .apply_retention_quotas(
+                feed_ids[3],
+                super::RetentionQuotaLimits {
+                    per_feed_entries: 100,
+                    per_feed_content_bytes: 1_024,
+                    global_entries: 2,
+                    global_content_bytes: 1_024,
+                },
+            )
+            .await
+            .unwrap();
 
         let retained = entries_by_guid(&store).await;
         assert_eq!(retained.len(), 3);
@@ -3999,8 +5577,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_byte_quota_cannot_charge_an_unrelated_bookmark_body() {
-        let (store, temp) = open_test_store().await;
-        let path = temp.path().join("feeds.db");
+        let (store, _temp) = open_test_store().await;
         store
             .reconcile(vec![
                 manifest_feed("https://bookmarks.example/feed", "News", &[]),
@@ -4054,16 +5631,18 @@ mod tests {
             .await
             .unwrap();
 
-        apply_test_retention_quotas(
-            &path,
-            feed_ids[3],
-            super::RetentionQuotaLimits {
-                per_feed_entries: 100,
-                per_feed_content_bytes: 1_024,
-                global_entries: 100,
-                global_content_bytes: 4,
-            },
-        );
+        store
+            .apply_retention_quotas(
+                feed_ids[3],
+                super::RetentionQuotaLimits {
+                    per_feed_entries: 100,
+                    per_feed_content_bytes: 1_024,
+                    global_entries: 100,
+                    global_content_bytes: 4,
+                },
+            )
+            .await
+            .unwrap();
 
         let retained = entries_by_guid(&store).await;
         assert_eq!(retained.len(), 3);
