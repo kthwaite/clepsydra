@@ -2,7 +2,7 @@
 
 ## Status
 
-Complete. Task 11 is implemented in `c3d5bb4` (`feat(editor): operate Base views inside Folios`). The implementation commit contains only Task 11 source, tests, story work, and the narrowly grounded stale diagnostic-ID assertion described below.
+Complete. Task 11 production is implemented in `c3d5bb4` (`feat(editor): operate Base views inside Folios`), and review commit `5c0587117d2d60a5980230d0060405594fd07ab5` (`test(editor): close Base embed ownership gaps`) closes the three Important test-quality findings. The commits contain only Task 11 source, tests, story work, and the narrowly grounded stale diagnostic-ID assertion described below.
 
 ## RED evidence
 
@@ -18,6 +18,21 @@ Initial result: 3 test files failed as expected.
 - `BaseEmbedElement.test.tsx`: suite failed to resolve the intentionally absent `#/editor/baseEmbedEditing` module.
 - `SlateEditor.base-embed.test.tsx`: all 16 characterization tests failed because slash discovery returned “No commands found” and the Base renderer/session/focus behavior did not exist.
 - jsdom also reported missing `Range.getBoundingClientRect`; the harness received the same DOM Range polyfill used by the existing Slate tests before GREEN.
+
+### Review-closure mutation RED
+
+The review identified three assertions that were weaker than their labels. Each replacement was mutation-checked before GREEN:
+
+- Removing the production `ReactEditor.isFocused(editor)` branch made the false-focus test fail because the spy was not consumed; the replacement dispatches Delete at the real `Editable`, proves the spy was called with the mounted editor, and preserves the exact selected node identity.
+- Recreating the editor when the parent’s persisted `initialValue` changes made the async persistence test lose the table focus. The replacement drives the platform-correct real save chord, waits on an asynchronous gate, serializes to Markdown, reloads Markdown into parent persistence state, and only then checks descendant focus and the original Slate selection.
+- Removing both unmount obsoletion defenses from the queued undefined-sort path made the dedicated test observe a `set_node` through its `editor.apply` spy:
+
+```text
+bun run --cwd ui test src/editor/elements/BaseEmbedElement.test.tsx -t "obsoletes queued and later controller work when unmounted"
+# RED: 1 failed; queued undefined sort emitted set_node after unmount
+```
+
+All deliberate production mutations were then restored before the focused GREEN run.
 
 ## Implementation
 
@@ -46,10 +61,10 @@ Initial result: 3 test files failed as expected.
 - before Shift+Tab, including first-block after-point fallback;
 - after Tab;
 - unhandled versus descendant-prevented Escape;
-- deletion gated by `ReactEditor.isFocused(editor)`;
+- false-focus Delete dispatches through the real `Editable`, consumes `ReactEditor.isFocused(editor)`, preserves the exact selected node, and retains the focused positive deletion branch;
 - following then preceding removal fallback;
 - inspector restoration;
-- autosave/parent rerender stability for descendant focus and Slate selection.
+- a platform-correct save chord, asynchronous Markdown persistence round trip, parent state update, and post-update descendant focus/Slate selection stability.
 
 ### Live adapter
 
@@ -59,7 +74,7 @@ Initial result: 3 test files failed as expected.
 - property commits never issue a Slate node transform;
 - title and configure navigation;
 - loading, missing Base/view, uncached error, cached error, and cached/loading recovery;
-- unmount obsoletes pending controller work;
+- undefined sort work is queued while mounted, unmounted before microtask flush, and proven not to emit `set_node`; later stale callbacks are also inert;
 - renderer attributes/children/content-editable boundaries and single-region ownership.
 
 ## Branch regression closed
@@ -91,7 +106,7 @@ bunx biome lint src/editor/baseEmbedEditing.tsx src/editor/elements/BaseEmbedEle
 # 10 files checked; no fixes applied
 ```
 
-Vitest emitted the repository’s existing Vite native-config warning and jsdom `Window.scrollTo()` notices; neither produced a test failure. The worktree was clean immediately after `c3d5bb4` and before adding this report.
+Vitest emitted the repository’s existing Vite native-config warning and jsdom `Window.scrollTo()` notices; neither produced a test failure. The worktree was clean immediately after `5c0587117d2d60a5980230d0060405594fd07ab5` and before correcting this report.
 
 ## Self-review
 
