@@ -16,7 +16,9 @@ import type { SerializeCtx } from "#/editor/schema/descriptor";
 import { getDescriptor } from "#/editor/schema/registry";
 import type { CustomElement, CustomText } from "#/editor/types";
 import { folioMathToMarkdown } from "#/lib/markdown/folioMath";
+import { baseFenceToMarkdown } from "./baseEmbedMarkdown";
 import type {
+  BaseFenceMdast,
   FolioInlineMathMdast,
   FolioMathMdast,
   WikiLinkMdast,
@@ -349,14 +351,25 @@ export function slateToMdast(nodes: Descendant[]): string {
     children: convertBlockChildren(nodes) as RootContent[],
   };
 
-  return toMarkdown(root as Nodes, {
+  const markdown = toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
     extensions: [
+      baseFenceToMarkdown(),
       folioMathToMarkdown(),
       gfmToMarkdown(),
       wikiLinkToMarkdownExtension(),
       singleTildeStrikethroughExtension(),
     ],
   });
+  const last = root.children.at(-1) as unknown as
+    | BaseFenceMdast
+    | undefined;
+  if (
+    last?.type === "baseFence" &&
+    !/[\r\n]$/.test(last.rawBlock)
+  ) {
+    return markdown.slice(0, -1);
+  }
+  return markdown;
 }

@@ -17,3 +17,9 @@ export interface WikiLinkMdast {
     permalink: string;
   };
 }
+
+/** Raw fenced Base block written verbatim by the Base Markdown handler. */
+export interface BaseFenceMdast {
+  type: "baseFence";
+  rawBlock: string;
+}

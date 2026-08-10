@@ -1,5 +1,6 @@
 import type { ElementDescriptor } from "./descriptor";
 import { blockquoteDescriptor } from "./elements/blockquote";
+import { baseEmbedDescriptor } from "./elements/baseEmbed";
 import { blockRefDescriptor } from "./elements/blockRef";
 import { codeBlockDescriptor } from "./elements/codeBlock";
 import { footnoteDefDescriptor } from "./elements/footnoteDef";
@@ -40,6 +41,7 @@ const ALL: ElementDescriptor[] = [
   footnoteRefDescriptor,
   footnoteDefDescriptor,
   mathBlockDescriptor,
+  baseEmbedDescriptor,
 ];
 
 export const REGISTRY = Object.fromEntries(

@@ -2,6 +2,7 @@ import type { BaseEditor, Descendant } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { ReactEditor } from "slate-react";
 import type { MathDelimiter } from "#/lib/markdown/folioMath";
+import type { BaseEmbedConfig } from "#/components/bases/embed-query";
 
 // --- Element types ---
 
@@ -118,6 +119,31 @@ export interface MathBlockElement {
   children: CustomText[];
 }
 
+interface BaseEmbedElementBase {
+  type: "base-embed";
+  children: [{ text: "" }];
+}
+
+export interface UnconfiguredBaseEmbedElement extends BaseEmbedElementBase {
+  status: "unconfigured";
+}
+
+export type ConfiguredBaseEmbedElement = BaseEmbedElementBase &
+  BaseEmbedConfig & {
+    status: "configured";
+  };
+
+export interface InvalidBaseEmbedElement extends BaseEmbedElementBase {
+  status: "invalid";
+  rawBlock: string;
+  parseError: string;
+}
+
+export type BaseEmbedElement =
+  | UnconfiguredBaseEmbedElement
+  | ConfiguredBaseEmbedElement
+  | InvalidBaseEmbedElement;
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -135,7 +161,8 @@ export type CustomElement =
   | FootnoteRefElement
   | InlineMathElement
   | MathBlockElement
-  | FootnoteDefElement;
+  | FootnoteDefElement
+  | BaseEmbedElement;
 
 export type ElementType = CustomElement["type"];
 

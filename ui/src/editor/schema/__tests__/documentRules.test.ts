@@ -74,4 +74,25 @@ describe("trailing paragraph after a code block", () => {
     Editor.normalize(editor, { force: true });
     expect(editor.children.length).toBe(1);
   });
+
+  it("appends an empty paragraph when the last block is a Base embed", () => {
+    const editor = withSchema(createEditor());
+    editor.children = [
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "books",
+        view: "Reading",
+        children: [{ text: "" }],
+      },
+    ] as never;
+
+    Editor.normalize(editor, { force: true });
+
+    expect(editor.children).toHaveLength(2);
+    expect(editor.children[1]).toEqual({
+      type: "paragraph",
+      children: [{ text: "" }],
+    });
+  });
 });
