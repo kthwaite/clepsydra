@@ -21,6 +21,13 @@ describe("resolveKindFromPath", () => {
     expect(resolveKindFromPath("tasks/x.md")).toBe("TASK");
     expect(resolveKindFromPath("todos/x.md")).toBe("TODO");
     expect(resolveKindFromPath("cycles/S-13.md")).toBe("CYCLE");
+    expect(resolveKindFromPath("conversations/example.md")).toBe(
+      "AI_CONVERSATION",
+    );
+    expect(resolveKindFromPath("conversation/example.md")).toBe(
+      "AI_CONVERSATION",
+    );
+    expect(resolveKindFromPath("chats/example.md")).toBe("AI_CONVERSATION");
   });
 
   it("tolerates leading slashes and nested paths", () => {
@@ -82,6 +89,13 @@ describe("resolveKind prefers backend kind", () => {
 });
 
 describe("KIND_META", () => {
+  it("includes AI conversations in the runtime kind list", () => {
+    expect(KINDS).toContain("AI_CONVERSATION");
+  });
+
+  it("uses the exact AI conversation label", () => {
+    expect(kindLabel("AI_CONVERSATION")).toBe("AI CONVERSATION");
+  });
   it("has a label and color var for every kind", () => {
     for (const k of KINDS) {
       expect(KIND_META[k].label.length).toBeGreaterThan(0);

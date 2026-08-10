@@ -510,6 +510,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/conversations/capture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["capture_conversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/encryption": {
         parameters: {
             query?: never;
@@ -1727,6 +1743,29 @@ export interface components {
             path: string;
             title?: string | null;
         };
+        /** @enum {string} */
+        CaptureConversationOperation: "created" | "appended" | "unchanged";
+        CaptureConversationRequest: {
+            host_conversation_id?: string | null;
+            provider?: string | null;
+            title: string;
+            turns: components["schemas"]["CaptureConversationTurnRequest"][];
+        };
+        CaptureConversationResponse: {
+            appended_turns: number;
+            operation: components["schemas"]["CaptureConversationOperation"];
+            page_id: string;
+            path: string;
+            skipped_turns: number;
+            warnings: string[];
+        };
+        CaptureConversationTurnRequest: {
+            content: string;
+            role: components["schemas"]["ConversationRoleRequest"];
+            source_turn_id?: string | null;
+            /** Format: date-time */
+            timestamp?: string | null;
+        };
         CaptureRequest: {
             content: string;
         };
@@ -1761,6 +1800,11 @@ export interface components {
             offset: number;
             /** Format: int32 */
             total: number;
+        };
+        /** @enum {string} */
+        ConversationRoleRequest: "user" | "assistant";
+        ConversationSummaryResponse: {
+            provider?: string | null;
         };
         CreateAnnotationRequest: {
             annotation_type?: null | components["schemas"]["AnnotationType"];
@@ -2081,7 +2125,7 @@ export interface components {
          *     vocabulary instead of hardcoding it.
          * @enum {string}
          */
-        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE";
+        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "AI_CONVERSATION";
         LocationResponse: {
             /** @description Optional human-readable label (e.g. `"London"`). */
             label?: string | null;
@@ -2132,6 +2176,7 @@ export interface components {
         PageDetailResponse: {
             body: string;
             canonical_name: string;
+            conversation?: null | components["schemas"]["ConversationSummaryResponse"];
             encrypted: boolean;
             encryption?: null | components["schemas"]["EncryptionMetaResponse"];
             inferred: boolean;
@@ -4308,6 +4353,66 @@ export interface operations {
             };
             /** @description Blob not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    capture_conversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptureConversationRequest"];
+            };
+        };
+        responses: {
+            /** @description Conversation appended or unchanged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureConversationResponse"];
+                };
+            };
+            /** @description Conversation created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureConversationResponse"];
+                };
+            };
+            /** @description Invalid capture request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conversation identity or content conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
