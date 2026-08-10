@@ -1,6 +1,11 @@
 import { Trash2 } from "lucide-react";
 import type { Heading } from "mdast";
-import { ReactEditor, useSelected, useSlateStatic } from "slate-react";
+import {
+  ReactEditor,
+  useReadOnly,
+  useSelected,
+  useSlateStatic,
+} from "slate-react";
 import { removeJournalTimeHeading } from "#/editor/transforms/journalTime";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type { JournalTimeElement } from "../types";
@@ -12,6 +17,7 @@ function JournalTimeHeading({
 }: Parameters<ElementDescriptor<JournalTimeElement>["render"]>[0]) {
   const editor = useSlateStatic();
   const selected = useSelected();
+  const readOnly = useReadOnly();
 
   return (
     <div
@@ -32,21 +38,23 @@ function JournalTimeHeading({
         </time>
       </h2>
       <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-border" />
-      <button
-        type="button"
-        aria-label={`Delete time heading ${element.time}`}
-        className={`shrink-0 border border-transparent p-1 text-ink-mute group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:border-border hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none ${selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => {
-          removeJournalTimeHeading(
-            editor,
-            ReactEditor.findPath(editor, element),
-          );
-          ReactEditor.focus(editor);
-        }}
-      >
-        <Trash2 aria-hidden="true" size={14} />
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          aria-label={`Delete time heading ${element.time}`}
+          className={`shrink-0 border border-transparent p-1 text-ink-mute group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:border-border hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none ${selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            removeJournalTimeHeading(
+              editor,
+              ReactEditor.findPath(editor, element),
+            );
+            ReactEditor.focus(editor);
+          }}
+        >
+          <Trash2 aria-hidden="true" size={14} />
+        </button>
+      )}
       {children}
     </div>
   );

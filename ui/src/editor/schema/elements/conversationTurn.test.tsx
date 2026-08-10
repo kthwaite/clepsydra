@@ -8,9 +8,10 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
-import { createEditor, type Descendant, Transforms } from "slate";
-import { Editable, Slate, withReact } from "slate-react";
+import { createEditor, type Descendant, Node, Transforms } from "slate";
+import { Editable, ReactEditor, Slate, withReact } from "slate-react";
 import { SlateEditor } from "#/editor/SlateEditor";
 import {
   ConversationPresentationProvider,
@@ -76,6 +77,12 @@ function articleFor(text: string) {
   const article = content.closest("article");
   if (!article) throw new Error(`No conversation article contains ${text}`);
   return article;
+}
+
+function testQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false, enabled: false } },
+  });
 }
 
 describe("conversation turn presentation", () => {
@@ -258,5 +265,113 @@ describe("SlateEditor read-only contract", () => {
 
     unmount();
     expect(editorRef.current).toBeNull();
+  });
+
+  it("keeps embedded element mutation controls inert in read-only mode", () => {
+    const onChange = vi.fn();
+    const editorRef = { current: null as CustomEditor | null };
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <SlateEditor
+          initialValue={[
+            turn(1, "assistant"),
+            {
+              type: "bulleted-list",
+              children: [
+                {
+                  type: "list-item",
+                  checked: false,
+                  children: [
+                    {
+                      type: "paragraph",
+                      children: [{ text: "unfinished task" }],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "journal-time",
+              time: "09:07",
+              children: [{ text: "" }],
+            },
+          ]}
+          onChange={onChange}
+          onSaveNow={vi.fn()}
+          readOnly
+          editorRef={editorRef}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.queryByRole("combobox", { name: "Change participant" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move turn up" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move turn down" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add turn after" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove turn" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Delete time heading 09:07" }),
+    ).toBeNull();
+
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeDisabled();
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    expect(editorRef.current?.children[1]).toMatchObject({
+      type: "bulleted-list",
+      children: [{ type: "list-item", checked: false }],
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("restores editorRef during StrictMode effect replay and clears it on unmount", async () => {
+    const editorRef = { current: null as CustomEditor | null };
+    const { unmount } = render(
+      <StrictMode>
+        <QueryClientProvider client={testQueryClient()}>
+          <SlateEditor
+            initialValue={[
+              { type: "paragraph", children: [{ text: "strict ref" }] },
+            ]}
+            onChange={vi.fn()}
+            onSaveNow={vi.fn()}
+            editorRef={editorRef}
+          />
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    unmount();
+    expect(editorRef.current).toBeNull();
+  });
+
+  it("does not process, focus, or acknowledge insertion requests in read-only mode", () => {
+    const onChange = vi.fn();
+    const onInsertionHandled = vi.fn();
+    const editorRef = { current: null as CustomEditor | null };
+    const focus = vi.spyOn(ReactEditor, "focus");
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <SlateEditor
+          initialValue={[
+            { type: "paragraph", children: [{ text: "original" }] },
+          ]}
+          onChange={onChange}
+          onSaveNow={vi.fn()}
+          insertionRequest={{ id: 7, markdown: "inserted" }}
+          onInsertionHandled={onInsertionHandled}
+          readOnly
+          editorRef={editorRef}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(Node.string(editorRef.current!)).toBe("original");
+    expect(focus).not.toHaveBeenCalled();
+    expect(onInsertionHandled).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

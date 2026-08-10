@@ -1,4 +1,4 @@
-import { ReactEditor, useSlateStatic } from "slate-react";
+import { ReactEditor, useReadOnly, useSlateStatic } from "slate-react";
 import {
   formatConversationMarker,
   type ConversationMarker,
@@ -39,6 +39,7 @@ function ConversationTurn({
 >[0]) {
   const editor = useSlateStatic();
   const presentation = useConversationPresentation();
+  const readOnly = useReadOnly();
   const assistantLabel = assistantDisplayLabel(presentation.provider);
   const participantLabel =
     element.role === "user" ? "You" : assistantLabel;
@@ -53,7 +54,7 @@ function ConversationTurn({
         contentEditable={false}
         className="ai-conversation-turn__participant"
       >
-        {presentation.mode === "read" ? (
+        {presentation.mode === "read" || readOnly ? (
           participantLabel
         ) : (
           <>

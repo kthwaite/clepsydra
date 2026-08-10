@@ -162,18 +162,19 @@ export function SlateEditor({
   );
   if (editorRef) editorRef.current = editor;
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    if (editorRef) editorRef.current = editor;
+    return () => {
       if (editorRef?.current === editor) editorRef.current = null;
-    },
-    [editor, editorRef],
-  );
+    };
+  }, [editor, editorRef]);
   const wikilinkEditing = useWikilinkEditingController(editor);
   const mathEditing = useMathEditingController(editor);
   const handledInsertionRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (
+      readOnly ||
       !insertionRequest ||
       handledInsertionRef.current === insertionRequest.id
     ) {
@@ -183,7 +184,7 @@ export function SlateEditor({
     insertMarkdown(editor, insertionRequest.markdown);
     ReactEditor.focus(editor);
     onInsertionHandled?.(insertionRequest.id);
-  }, [editor, insertionRequest, onInsertionHandled]);
+  }, [editor, insertionRequest, onInsertionHandled, readOnly]);
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
