@@ -572,27 +572,145 @@ describe("useBaseTableController embedded mode", () => {
     expect(result.current.memberError).toContain("revision conflict");
   });
 
-  it("announces when a capped authoritative refresh excludes the created row", async () => {
-    mocks.evaluationState.data = evaluation({ output: output([]) });
-    mocks.evaluationRefetch.mockResolvedValue({ data: mocks.evaluationState.data });
-    const { result } = renderHook(() =>
-      useBaseTableController(options({ limit: 1 })),
-    );
+  it.each([
+    {
+      label: "limit",
+      changeQuery: (current: BaseTableControllerOptions) => ({
+        ...current,
+        limit: 2,
+      }),
+    },
+    {
+      label: "sort",
+      changeQuery: (current: BaseTableControllerOptions) => ({
+        ...current,
+        sort: [{ field: "title", dir: "desc" }] satisfies SortKey[],
+      }),
+    },
+  ])(
+    "hides a completed capped-exclusion notice when the $label changes query identity",
+    async ({ changeQuery }) => {
+      mocks.evaluationState.data = evaluation({ output: output([]) });
+      mocks.evaluationRefetch.mockResolvedValue({ data: mocks.evaluationState.data });
+      const current = options({ limit: 1 });
+      const { result, rerender } = renderHook(
+        ({ value }) => useBaseTableController(value),
+        { initialProps: { value: current } },
+      );
 
-    act(() => result.current.onAddMember());
-    await act(async () => {
-      result.current.onSaveMember?.({ title: "Created", fields: {} });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+      act(() => result.current.onAddMember());
+      await act(async () => {
+        result.current.onSaveMember({ title: "Created", fields: {} });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
 
-    await waitFor(() =>
+      await waitFor(() =>
+        expect(result.current.memberNotice).toBe(
+          "The member was created, but it is not included in the current view.",
+        ),
+      );
+      expect(result.current.focusCreatedId).toBeUndefined();
+
+      mocks.evaluationState.data = evaluation({ output: output() });
+      rerender({ value: changeQuery(current) });
+
+      expect(result.current.memberNotice).toBeUndefined();
+      expect(result.current.focusCreatedId).toBeUndefined();
+    },
+  );
+
+  it.each([
+    {
+      label: "limit",
+      changeQuery: (current: BaseTableControllerOptions) => ({
+        ...current,
+        limit: 2,
+      }),
+    },
+    {
+      label: "sort",
+      changeQuery: (current: BaseTableControllerOptions) => ({
+        ...current,
+        sort: [{ field: "title", dir: "desc" }] satisfies SortKey[],
+      }),
+    },
+  ])(
+    "hides completed placement focus when the $label changes query identity",
+    async ({ changeQuery }) => {
+      const current = options({ limit: 1 });
+      const { result, rerender } = renderHook(
+        ({ value }) => useBaseTableController(value),
+        { initialProps: { value: current } },
+      );
+
+      act(() => result.current.onAddMember());
+      await act(async () => {
+        result.current.onSaveMember({ title: "Created", fields: {} });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(result.current.focusCreatedId).toBe("created"));
+      expect(result.current.memberNotice).toBeUndefined();
+
+      mocks.evaluationState.data = evaluation({ output: output() });
+      rerender({ value: changeQuery(current) });
+
+      expect(result.current.focusCreatedId).toBeUndefined();
+      expect(result.current.memberNotice).toBeUndefined();
+    },
+  );
+
+  it.each([
+    {
+      label: "limit",
+      changeQuery: (current: BaseTableControllerOptions) => ({
+        ...current,
+        limit: 2,
+      }),
+    },
+    {
+      label: "sort",
+      changeQuery: (current: BaseTableControllerOptions) => ({
+        ...current,
+        sort: [{ field: "title", dir: "desc" }] satisfies SortKey[],
+      }),
+    },
+  ])(
+    "retains a generic post-creation refresh notice when the $label changes query identity",
+    async ({ changeQuery }) => {
+      mocks.evaluationRefetch.mockResolvedValue({
+        error: { error: "refresh failed" },
+      });
+      const current = options({ limit: 1 });
+      const { result, rerender } = renderHook(
+        ({ value }) => useBaseTableController(value),
+        { initialProps: { value: current } },
+      );
+
+      act(() => result.current.onAddMember());
+      await act(async () => {
+        result.current.onSaveMember({ title: "Created", fields: {} });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() =>
+        expect(result.current.memberNotice).toBe(
+          "The member was created, but the current view could not be refreshed.",
+        ),
+      );
+
+      mocks.evaluationState.data = evaluation({ output: output() });
+      rerender({ value: changeQuery(current) });
+
       expect(result.current.memberNotice).toBe(
-        "The member was created, but it is not included in the current view.",
-      ),
-    );
-    expect(result.current.focusCreatedId).toBeUndefined();
-  });
+        "The member was created, but the current view could not be refreshed.",
+      );
+      expect(result.current.focusCreatedId).toBeUndefined();
+    },
+  );
 });
 
 describe("useBaseTableController standalone mode", () => {

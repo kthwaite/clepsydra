@@ -75,11 +75,25 @@ export interface BaseTableControllerModel {
   onCreatedRowFocused(createdId: string): void;
 }
 
+type PlacementIdentity =
+  | { mode: "standalone" }
+  | { mode: "embedded"; queryIdentity: string };
+
 type MemberCreationLifecycle =
   | { phase: "idle" }
   | { phase: "submitting"; operation: number; view: string }
   | { phase: "refreshing"; operation: number; createdId: string; view: string }
-  | { phase: "resolving"; operation: number; createdId: string; view: string };
+  | {
+      phase: "resolving";
+      operation: number;
+      createdId: string;
+      view: string;
+      placement: PlacementIdentity;
+    };
+
+type MemberNotice =
+  | { scope: "generic"; message: string }
+  | { scope: "query"; queryIdentity: string; message: string };
 
 interface MemberState {
   generation: number;
@@ -87,7 +101,7 @@ interface MemberState {
   error: string | undefined;
   diagnostics: BaseMemberDiagnostic[];
   creation: MemberCreationLifecycle;
-  notice: string | undefined;
+  notice: MemberNotice | undefined;
 }
 
 interface EmbeddedSuccess {
@@ -113,6 +127,19 @@ function outputContains(output: QueryOutput, id: string): boolean {
   return output.shape === "flat"
     ? output.rows.some((row) => row.id === id)
     : output.groups.some((group) => group.rows.some((row) => row.id === id));
+}
+
+function genericNotice(message: string): MemberNotice {
+  return { scope: "generic", message };
+}
+
+function placementNotice(
+  message: string,
+  placement: PlacementIdentity,
+): MemberNotice {
+  return placement.mode === "embedded"
+    ? { scope: "query", queryIdentity: placement.queryIdentity, message }
+    : genericNotice(message);
 }
 
 function isRevisionConflict(error: unknown): boolean {
@@ -277,14 +304,26 @@ export function useBaseTableController(
         const target = currentEmbeddedQuery.current;
         const refreshed = await target.refetch();
         if (!operationIsCurrent(operation, operationGeneration)) return undefined;
-        if (currentEmbeddedQuery.current.query === target.query) return refreshed;
+        if (currentEmbeddedQuery.current.query === target.query) {
+          return {
+            refreshed,
+            placement: {
+              mode: "embedded",
+              queryIdentity: target.query,
+            } as const,
+          };
+        }
       }
       return undefined;
     },
     [operationIsCurrent],
   );
   const finishMemberOperation = useCallback(
-    (operation: number, operationGeneration: number, notice?: string) => {
+    (
+      operation: number,
+      operationGeneration: number,
+      notice?: MemberNotice,
+    ) => {
       if (!operationIsCurrent(operation, operationGeneration)) return;
       currentOperation.current = undefined;
       setStoredMemberState((current) =>
@@ -302,13 +341,23 @@ export function useBaseTableController(
     const creation = memberState.creation;
     if (creation.phase !== "resolving") return;
     if (
+      creation.placement.mode === "embedded" &&
+      (mode !== "embedded" ||
+        creation.placement.queryIdentity !== embeddedQueryKey)
+    ) {
+      finishMemberOperation(creation.operation, generation);
+      return;
+    }
+    if (
       mode === "standalone" &&
       asciiCaseFold(creation.view) !== asciiCaseFold(activeView)
     ) {
       finishMemberOperation(
         creation.operation,
         generation,
-        "The member was created, but focus was skipped because the active view changed.",
+        genericNotice(
+          "The member was created, but focus was skipped because the active view changed.",
+        ),
       );
       return;
     }
@@ -321,7 +370,10 @@ export function useBaseTableController(
       finishMemberOperation(
         creation.operation,
         generation,
-        "The member was created, but it is not included in the current view.",
+        placementNotice(
+          "The member was created, but it is not included in the current view.",
+          creation.placement,
+        ),
       );
       return;
     }
@@ -330,12 +382,15 @@ export function useBaseTableController(
       finishMemberOperation(
         creation.operation,
         generation,
-        "The member was created, but this view does not display its title.",
+        genericNotice(
+          "The member was created, but this view does not display its title.",
+        ),
       );
     }
   }, [
     activeView,
     activeViewDefinition?.columns,
+    embeddedQueryKey,
     evaluationQuery.error,
     evaluationQuery.isFetching,
     evaluationQuery.isLoading,
@@ -430,10 +485,14 @@ export function useBaseTableController(
       : current,
     );
     try {
-      const refreshed = mode === "embedded"
+      const refresh = mode === "embedded"
         ? await refetchCurrentEmbeddedQuery(operation, operationGeneration)
-        : await savedViewRefetch();
-      if (!refreshed) return;
+        : {
+            refreshed: await savedViewRefetch(),
+            placement: { mode: "standalone" } as const,
+          };
+      if (!refresh) return;
+      const { refreshed, placement } = refresh;
       if (!operationIsCurrent(operation, operationGeneration)) return;
       if (
         mode === "standalone" &&
@@ -442,7 +501,9 @@ export function useBaseTableController(
         finishMemberOperation(
           operation,
           operationGeneration,
-          "The member was created, but focus was skipped because the active view changed.",
+          genericNotice(
+            "The member was created, but focus was skipped because the active view changed.",
+          ),
         );
         return;
       }
@@ -450,7 +511,9 @@ export function useBaseTableController(
         finishMemberOperation(
           operation,
           operationGeneration,
-          "The member was created, but the current view could not be refreshed.",
+          genericNotice(
+            "The member was created, but the current view could not be refreshed.",
+          ),
         );
         return;
       }
@@ -461,7 +524,10 @@ export function useBaseTableController(
         finishMemberOperation(
           operation,
           operationGeneration,
-          "The member was created, but it is not included in the current view.",
+          placementNotice(
+            "The member was created, but it is not included in the current view.",
+            placement,
+          ),
         );
         return;
       }
@@ -470,7 +536,9 @@ export function useBaseTableController(
         finishMemberOperation(
           operation,
           operationGeneration,
-          "The member was created, but this view does not display its title.",
+          genericNotice(
+            "The member was created, but this view does not display its title.",
+          ),
         );
         return;
       }
@@ -482,6 +550,7 @@ export function useBaseTableController(
               operation,
               createdId: created.id,
               view: activeView,
+              placement,
             },
           }
         : current,
@@ -490,7 +559,9 @@ export function useBaseTableController(
       finishMemberOperation(
         operation,
         operationGeneration,
-        "The member was created, but the current view could not be refreshed.",
+        genericNotice(
+          "The member was created, but the current view could not be refreshed.",
+        ),
       );
     }
   }, [
@@ -586,6 +657,20 @@ export function useBaseTableController(
   const memberSaving = creation.phase !== "idle" ||
     (memberState.draftOpen && mode === "embedded" && !embeddedAuthoritative);
 
+  const visibleMemberNotice = memberState.notice?.scope === "query"
+    ? mode === "embedded" &&
+        memberState.notice.queryIdentity === embeddedQueryKey
+      ? memberState.notice.message
+      : undefined
+    : memberState.notice?.message;
+  const focusCreatedId =
+    creation.phase === "resolving" &&
+      ((mode === "standalone" && creation.placement.mode === "standalone") ||
+        (mode === "embedded" &&
+          creation.placement.mode === "embedded" &&
+          creation.placement.queryIdentity === embeddedQueryKey))
+      ? creation.createdId
+      : undefined;
   return {
     definition: detail.data,
     detailLoading: detail.isLoading,
@@ -606,13 +691,13 @@ export function useBaseTableController(
     memberSaving,
     memberDiagnostics: memberState.diagnostics,
     memberError: memberState.error,
-    memberNotice: memberState.notice,
+    memberNotice: visibleMemberNotice,
     projects,
     onAddMember: handleAddMember,
     onSaveMember: handleSaveMember,
     onCancelMember: handleCancelMember,
     onMemberEdit: handleMemberEdit,
-    focusCreatedId: creation.phase === "resolving" ? creation.createdId : undefined,
+    focusCreatedId,
     onCreatedRowFocused: handleCreatedRowFocused,
   };
 }
