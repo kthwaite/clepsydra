@@ -1,24 +1,35 @@
 import { describe, expect, it } from "vitest";
+import { KINDS } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 
 describe("presentationFor", () => {
-  it("returns the generic fallback for kinds with no bespoke renderer", () => {
-    const p = presentationFor("NOTE");
-    expect(p.metaExtras).toBeNull();
+  it("uses the shared editor presentation for ordinary notes", () => {
+    const presentation = presentationFor("NOTE");
+
+    expect(presentation.bodyPresentation).toBe("editor");
+    expect(presentation.metaExtras).toBeNull();
   });
-  it("never throws for any known kind", () => {
-    for (const k of [
-      "NOTE",
-      "PROJECT",
-      "JOURNAL",
-      "TODO",
-      "QUOTE",
-      "BOOK",
-      "CAPTURE",
-      "CODE",
-      "PERSON",
-    ] as const) {
-      expect(() => presentationFor(k)).not.toThrow();
+
+  it("selects the transcript presentation for AI conversations", () => {
+    expect(presentationFor("AI_CONVERSATION").bodyPresentation).toBe(
+      "ai-conversation",
+    );
+  });
+
+  it("retains Journal's title and metadata presentation", () => {
+    const presentation = presentationFor("JOURNAL");
+
+    expect(presentation.bodyPresentation).toBe("editor");
+    expect(presentation.metaExtras).not.toBeNull();
+    expect(presentation.metaExtrasLabel).toBe("Journal");
+    expect(presentation.readOnlyTitle?.("journals/2026-08-09.md", "")).toBe(
+      "Sunday, 9 August 2026",
+    );
+  });
+
+  it("resolves every known kind without throwing", () => {
+    for (const kind of KINDS) {
+      expect(() => presentationFor(kind)).not.toThrow();
     }
   });
 });

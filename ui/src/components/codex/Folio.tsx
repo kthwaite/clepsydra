@@ -11,6 +11,7 @@ import {
 import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
+import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import {
@@ -25,10 +26,14 @@ import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
+import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
+import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
+import { insertConversationTurn } from "#/editor/conversation/transforms";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
+import type { CustomEditor } from "#/editor/types";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
@@ -129,6 +134,13 @@ export function Folio({ tabId, path }: FolioProps) {
   >(null);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [organizationOpen, setOrganizationOpen] = useState(false);
+  const [conversationMode, setConversationMode] = useState<"read" | "edit">(
+    "read",
+  );
+  const conversationEditorRef = useRef<CustomEditor | null>(null);
+  useEffect(() => {
+    setConversationMode("read");
+  }, [path]);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
     id: number;
@@ -185,11 +197,22 @@ export function Folio({ tabId, path }: FolioProps) {
     [],
   );
 
+  const folioCode = shortFolio(path);
+  const kind = useMemo(
+    () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
+    [path, editor.kind, editor.bodyMarkdown],
+  );
+  const presentation = presentationFor(kind);
+  const isAiConversation =
+    presentation.bodyPresentation === "ai-conversation";
+  const isJournal = kind === "JOURNAL";
+
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
   const saveNow = editor.saveNow;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isAiConversation && conversationMode === "read") return;
       if (e.defaultPrevented) return;
       if (matchesChord(e, SHORTCUTS["folio.save"].chord)) {
         e.preventDefault();
@@ -198,7 +221,7 @@ export function Folio({ tabId, path }: FolioProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [saveNow]);
+  }, [conversationMode, isAiConversation, saveNow]);
 
   const onScroll = () => {
     const el = bodyRef.current;
@@ -212,12 +235,6 @@ export function Folio({ tabId, path }: FolioProps) {
     });
   };
 
-  const folioCode = shortFolio(path);
-  const kind = useMemo(
-    () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
-    [path, editor.kind, editor.bodyMarkdown],
-  );
-  const isJournal = kind === "JOURNAL";
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
@@ -248,7 +265,6 @@ export function Folio({ tabId, path }: FolioProps) {
     encryptionState.status,
     hasPersistedJournalTag,
   ]);
-  const presentation = presentationFor(kind);
   const inferred = editor.inferred;
   const project = editor.project;
 
@@ -262,6 +278,17 @@ export function Folio({ tabId, path }: FolioProps) {
     [visibleEditorValue],
   );
   const toc = useMemo(() => buildToc(visibleEditorValue), [visibleEditorValue]);
+  const conversationDiagnostics = useMemo(
+    () =>
+      isAiConversation
+        ? diagnoseConversationMarkdown(editor.bodyMarkdown)
+        : null,
+    [editor.bodyMarkdown, isAiConversation],
+  );
+  const addConversationTurn = useCallback(() => {
+    if (!conversationEditorRef.current) return;
+    insertConversationTurn(conversationEditorRef.current);
+  }, []);
   const { activeIndex, scrollTo } = useScrollSpy(
     bodyRef,
     editor.editorRevision,
@@ -331,19 +358,74 @@ export function Folio({ tabId, path }: FolioProps) {
           onRequestLock={encryptionActions?.lock}
         />
       </div>
+      {isAiConversation ? (
+        <>
+          <AiConversationControls
+            mode={conversationMode}
+            onModeChange={setConversationMode}
+            onAddTurn={addConversationTurn}
+          />
+          {conversationDiagnostics &&
+          (conversationDiagnostics.malformedMarkerLines.length > 0 ||
+            conversationDiagnostics.validMarkers === 0) ? (
+            <div className="ai-conversation-warning" role="alert">
+              <span>
+                {conversationDiagnostics.malformedMarkerLines.length > 0
+                  ? `Conversation marker${
+                      conversationDiagnostics.malformedMarkerLines.length === 1
+                        ? ""
+                        : "s"
+                    } on line${
+                      conversationDiagnostics.malformedMarkerLines.length === 1
+                        ? ""
+                        : "s"
+                    } ${conversationDiagnostics.malformedMarkerLines.join(
+                      ", ",
+                    )} could not be read. The original text is preserved.`
+                  : "This AI conversation has no valid conversation markers. The original Markdown is preserved."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConversationMode("edit")}
+              >
+                Edit
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <hr className="cl-rule-dash mt-3" />
 
-      <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
+      <article
+        className={cn(
+          "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
+          isAiConversation &&
+            `ai-conversation--${conversationMode}`,
+        )}
+      >
         <WikilinkResolutionProvider path={path}>
-          <SlateEditor
-            key={`${path}:${editor.editorRevision}`}
-            initialValue={currentEditorValue}
-            onChange={editor.onSlateChange}
-            onSaveNow={editor.saveNow}
-            insertionRequest={attachmentInsertion}
-            onInsertionHandled={finishAttachmentInsertion}
-          />
+          <ConversationPresentationProvider
+            value={{
+              mode: isAiConversation ? conversationMode : "edit",
+              provider: isAiConversation
+                ? editor.conversationProvider
+                : null,
+            }}
+          >
+            <SlateEditor
+              key={`${path}:${editor.editorRevision}`}
+              initialValue={currentEditorValue}
+              onChange={editor.onSlateChange}
+              onSaveNow={editor.saveNow}
+              insertionRequest={attachmentInsertion}
+              onInsertionHandled={finishAttachmentInsertion}
+              readOnly={isAiConversation && conversationMode === "read"}
+              editorRef={
+                isAiConversation ? conversationEditorRef : undefined
+              }
+            />
+          </ConversationPresentationProvider>
         </WikilinkResolutionProvider>
       </article>
 

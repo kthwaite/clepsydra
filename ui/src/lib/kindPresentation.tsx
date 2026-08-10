@@ -14,6 +14,8 @@ export type KindMetaExtrasProps = {
 
 /** What a per-kind renderer may customise around the shared FOLIO editor. */
 export type KindPresentation = {
+  /** Selects the shared body surface without coupling Folio to kind names. */
+  bodyPresentation: "editor" | "ai-conversation";
   /** Extra META-rail block for this kind, or null for the generic surface. */
   metaExtras: ComponentType<KindMetaExtrasProps> | null;
   /** Label for FOLIO's wrapping Block around metaExtras (default "Details"). */
@@ -23,11 +25,19 @@ export type KindPresentation = {
   readOnlyTitle?: (path: string, title: string) => string;
 };
 
-const GENERIC: KindPresentation = { metaExtras: null };
+const GENERIC: KindPresentation = {
+  bodyPresentation: "editor",
+  metaExtras: null,
+};
 
 /** Bespoke registry. JOURNAL's metaExtras lands with the JournalMeta block. */
 const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
+  AI_CONVERSATION: {
+    bodyPresentation: "ai-conversation",
+    metaExtras: null,
+  },
   JOURNAL: {
+    bodyPresentation: "editor",
     metaExtras: JournalMeta,
     metaExtrasLabel: "Journal",
     readOnlyTitle: journalDayLabel,
