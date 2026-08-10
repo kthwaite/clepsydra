@@ -5,6 +5,7 @@ import {
   baseEmbedToMdast,
   isCanonicalBaseEmbedConfig,
 } from "#/editor/convert/baseEmbedMarkdown";
+import { BaseEmbedElement as BaseEmbedElementRenderer } from "../../elements/BaseEmbedElement";
 import type { ElementDescriptor } from "../descriptor";
 import type {
   BaseEmbedElement,
@@ -121,12 +122,7 @@ export const baseEmbedDescriptor: ElementDescriptor<BaseEmbedElement> = {
   type: "base-embed",
   kind: "void-block",
   create: (props) => makeBaseEmbed(props as BaseEmbedCreateProps),
-  render: ({ attributes, children }) => (
-    <div {...attributes}>
-      <div contentEditable={false} />
-      {children}
-    </div>
-  ),
+  render: (props) => <BaseEmbedElementRenderer {...props} />,
   normalize: ([node, path], editor) => {
     const persisted = node as unknown as Record<string, unknown>;
     if (!hasValidStateShape(persisted)) {

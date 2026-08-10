@@ -639,10 +639,10 @@ describe("BaseDefinitionWorkspace", () => {
     expect(sortField).toHaveAttribute("aria-invalid", "true");
     expect(sortField).toHaveAttribute(
       "aria-describedby",
-      "view-sort-field-error-0-0",
+      "view-0-sort-field-error-0",
     );
     expect(
-      sortField.ownerDocument.getElementById("view-sort-field-error-0-0"),
+      sortField.ownerDocument.getElementById("view-0-sort-field-error-0"),
     ).toHaveTextContent(/status.*cannot be sorted/i);
     expect(
       screen.getByRole("option", {
