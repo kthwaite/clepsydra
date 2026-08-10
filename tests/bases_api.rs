@@ -155,6 +155,27 @@ fn canonical_invalid_embed_query() -> serde_json::Value {
     })
 }
 
+fn serialized_filter_at_size(size: usize) -> serde_json::Value {
+    let mut children = (0..16)
+        .map(|index| {
+            serde_json::json!({
+                "field": "title",
+                "op": "eq",
+                "value": if index < 15 { "x".repeat(4096) } else { String::new() },
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut filter = serde_json::json!({ "all": children });
+    let current_size = serde_json::to_vec(&filter).unwrap().len();
+    let padding = size.checked_sub(current_size).unwrap();
+    assert!(padding <= 4096);
+    children = filter["all"].take().as_array().unwrap().clone();
+    children[15]["value"] = serde_json::Value::String("x".repeat(padding));
+    filter["all"] = serde_json::Value::Array(children);
+    assert_eq!(serde_json::to_vec(&filter).unwrap().len(), size);
+    filter
+}
+
 fn seed_identity_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
     fs::write(root.join("bases/identity.base.toml"), IDENTITY_BASE).unwrap();
@@ -1876,6 +1897,208 @@ async fn create_base_member_writes_one_matching_typed_page() {
 }
 
 #[tokio::test]
+async fn filtered_member_creation_matches_the_exact_uncapped_composed_query() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let embed_filter = serde_json::json!({
+        "all": [
+            { "field": "rating", "op": "gte", "value": 10 },
+            { "field": "author", "op": "contains", "value": "Le Guin" }
+        ]
+    });
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "Continues",
+            "embed_filter": embed_filter.clone(),
+            "title": "The Dispossessed",
+            "fields": {
+                "kind": "BOOK",
+                "author": "Ursula Le Guin",
+                "status": "reading",
+                "rating": 10
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    assert_eq!(
+        created.as_object().unwrap().keys().collect::<Vec<_>>(),
+        vec!["id", "path", "revision", "title"]
+    );
+
+    let evaluated = fixture
+        .server
+        .post("/api/vault/bases/reading/views/continues/evaluate")
+        .json(&serde_json::json!({ "filter": embed_filter }))
+        .await;
+    evaluated.assert_status_ok();
+    let evaluated: serde_json::Value = evaluated.json();
+    assert!(
+        evaluated["output"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == created["id"]),
+        "{evaluated}"
+    );
+}
+
+#[tokio::test]
+async fn filtered_member_mismatch_and_invalid_overrides_publish_nothing() {
+    let fixture = member_fixture(seed);
+    let revision = current_base_revision(&fixture, "reading").await;
+    let before_paths = page_paths(fixture.state.vault.root());
+    let before_rows = indexed_page_count(&fixture).await;
+    let cases = [
+        (
+            serde_json::json!({
+                "base_revision": revision,
+                "view": "Continues",
+                "embed_filter": { "field": "rating", "op": "gte", "value": 10 },
+                "title": "Below filter",
+                "fields": { "kind": "BOOK", "status": "reading", "rating": 9 }
+            }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "candidate is not valid for the selected Base view",
+            "rating",
+            "embed_filter",
+        ),
+        (
+            serde_json::json!({
+                "base_revision": revision,
+                "view": "Continues",
+                "embed_filter": { "field": "prop.missing", "op": "eq", "value": "x" },
+                "title": "Unknown filter field",
+                "fields": { "kind": "BOOK", "status": "reading" }
+            }),
+            StatusCode::BAD_REQUEST,
+            "invalid embed query",
+            "missing",
+            "embed_filter.field",
+        ),
+        (
+            serde_json::json!({
+                "base_revision": revision,
+                "view": "Continues",
+                "embed_filter": { "field": "rating", "op": "contains", "value": 10 },
+                "title": "Invalid filter operator",
+                "fields": { "kind": "BOOK", "status": "reading", "rating": 10 }
+            }),
+            StatusCode::BAD_REQUEST,
+            "invalid embed query",
+            "rating",
+            "embed_filter.op",
+        ),
+    ];
+
+    for (request, status, error_message, field, filter_path) in cases {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/reading/members")
+            .json(&request)
+            .await;
+        response.assert_status(status);
+        let error: serde_json::Value = response.json();
+        assert_eq!(error["status"], status.as_u16());
+        assert_eq!(error["error"], error_message);
+        if status == StatusCode::BAD_REQUEST {
+            assert_eq!(error["detail"]["code"], "invalid_embed_query");
+        }
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+        assert_eq!(diagnostics.len(), 1, "{error}");
+        assert_eq!(diagnostics[0]["scope"], "embed");
+        assert_eq!(diagnostics[0]["field"], field);
+        assert_eq!(diagnostics[0]["filter_path"], filter_path);
+        assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+        assert_eq!(indexed_page_count(&fixture).await, before_rows);
+    }
+
+    let stale = fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": "stale",
+            "view": "Continues",
+            "embed_filter": { "field": "rating", "op": "gte", "value": 10 },
+            "title": "Stale filtered member",
+            "fields": { "kind": "BOOK", "status": "reading", "rating": 10 }
+        }))
+        .await;
+    stale.assert_status(StatusCode::CONFLICT);
+    assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
+    assert_eq!(indexed_page_count(&fixture).await, before_rows);
+}
+
+#[tokio::test]
+async fn filtered_member_serialized_filter_enforces_the_exact_64_kib_boundary() {
+    let exact_fixture = member_fixture(seed);
+    let exact_revision = current_base_revision(&exact_fixture, "reading").await;
+    let exact_before_paths = page_paths(exact_fixture.state.vault.root());
+    let exact_before_rows = indexed_page_count(&exact_fixture).await;
+    let exact = exact_fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": exact_revision,
+            "view": "Continues",
+            "embed_filter": serialized_filter_at_size(64 * 1024),
+            "title": "Exact filter boundary",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await;
+    exact.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    let exact_error: serde_json::Value = exact.json();
+    assert_eq!(
+        exact_error["detail"]["diagnostics"][0]["scope"],
+        "embed"
+    );
+    assert_eq!(
+        page_paths(exact_fixture.state.vault.root()),
+        exact_before_paths
+    );
+    assert_eq!(indexed_page_count(&exact_fixture).await, exact_before_rows);
+
+    let oversized_fixture = member_fixture(seed);
+    let oversized_revision = current_base_revision(&oversized_fixture, "reading").await;
+    let oversized_before_paths = page_paths(oversized_fixture.state.vault.root());
+    let oversized_before_rows = indexed_page_count(&oversized_fixture).await;
+    let oversized = oversized_fixture
+        .server
+        .post("/api/vault/bases/reading/members")
+        .json(&serde_json::json!({
+            "base_revision": oversized_revision,
+            "view": "Continues",
+            "embed_filter": serialized_filter_at_size(64 * 1024 + 1),
+            "title": "Oversized filter",
+            "fields": { "kind": "BOOK", "status": "reading" }
+        }))
+        .await;
+    oversized.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = oversized.json();
+    assert_eq!(error["status"], 400);
+    assert_eq!(error["error"], "invalid embed query");
+    assert_eq!(error["detail"]["code"], "invalid_embed_query");
+    assert_eq!(error["detail"]["diagnostics"][0]["scope"], "embed");
+    assert_eq!(
+        error["detail"]["diagnostics"][0]["filter_path"],
+        "embed_filter"
+    );
+    assert_eq!(
+        page_paths(oversized_fixture.state.vault.root()),
+        oversized_before_paths
+    );
+    assert_eq!(
+        indexed_page_count(&oversized_fixture).await,
+        oversized_before_rows
+    );
+}
+
+#[tokio::test]
 async fn member_rejections_leave_no_file_or_index_row() {
     let fixture = member_fixture(seed);
     let before_paths = page_paths(fixture.state.vault.root());
@@ -2458,18 +2681,42 @@ async fn openapi_registers_base_member_contract() {
             "missing {schema}"
         );
     }
+    let request = &document["components"]["schemas"]["BaseMemberCreateRequest"];
+    assert!(request["properties"]["embed_filter"].is_object());
+    assert!(
+        !request["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "embed_filter")
+    );
 }
 
 #[tokio::test]
-async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and_uuid() {
+async fn filtered_member_relation_candidate_matches_indexed_links_for_canonical_alias_and_uuid() {
     let fixture = member_fixture(seed_relation_member_base);
     let revision = current_base_revision(&fixture, "relations").await;
 
-    for (view, title, target) in [
-        ("Canonical", "Canonical relation", "[[Solar Cycle]]"),
-        ("Alias", "Alias relation", "[[Science Fiction]]"),
-        ("Uuid", "UUID relation", "[[Science Fiction]]"),
-        ("MixedUuid", "Mixed UUID relation", "[[Science Fiction]]"),
+    for (view, title, target, embed_target) in [
+        (
+            "Canonical",
+            "Canonical relation",
+            "[[Solar Cycle]]",
+            "Solar Cycle",
+        ),
+        (
+            "Alias",
+            "Alias relation",
+            "[[Science Fiction]]",
+            "Science Fiction",
+        ),
+        ("Uuid", "UUID relation", "[[Science Fiction]]", LINK_TARGET_MIXED_ID),
+        (
+            "MixedUuid",
+            "Mixed UUID relation",
+            "[[Science Fiction]]",
+            LINK_TARGET_ID,
+        ),
     ] {
         let response = fixture
             .server
@@ -2478,21 +2725,34 @@ async fn relation_member_candidate_matches_indexed_links_for_canonical_alias_and
                 "base_revision": revision,
                 "view": view,
                 "title": title,
+                "embed_filter": {
+                    "field": "series",
+                    "op": "links_to",
+                    "value": embed_target
+                },
                 "fields": { "kind": "BOOK", "series": target }
             }))
             .await;
         response.assert_status(StatusCode::CREATED);
         let created: serde_json::Value = response.json();
 
-        let queried: serde_json::Value = fixture
+        let queried = fixture
             .server
-            .get(&format!(
-                "/api/vault/bases/relations/views/{view}?limit=25&offset=0"
+            .post(&format!(
+                "/api/vault/bases/relations/views/{view}/evaluate"
             ))
-            .await
-            .json();
+            .json(&serde_json::json!({
+                "filter": {
+                    "field": "series",
+                    "op": "links_to",
+                    "value": embed_target
+                }
+            }))
+            .await;
+        queried.assert_status_ok();
+        let queried: serde_json::Value = queried.json();
         assert!(
-            queried["rows"]
+            queried["output"]["rows"]
                 .as_array()
                 .unwrap()
                 .iter()

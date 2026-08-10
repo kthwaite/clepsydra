@@ -10,10 +10,16 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
-use crate::vault::base::{BaseDefinition, SYSTEM_FIELDS, candidate_link_targets};
+use crate::vault::base::{
+    BaseDefinition, Filter, SYSTEM_FIELDS, candidate_link_targets,
+};
 use crate::vault::base_document;
+use crate::vault::base_embed::{
+    EmbedOverrides, EmbedValidationDiagnostic, validate_embed_overrides,
+};
 use crate::vault::base_member::{
-    BaseMemberDiagnostic, BaseMemberScope, CandidateDerived, candidate_matches_with_link_targets,
+    BaseMemberDiagnostic, BaseMemberScope, CandidateDerived,
+    composed_candidate_matches_with_link_targets, composed_member_capability,
 };
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationError};
@@ -22,6 +28,7 @@ use crate::vault::page::{PageMeta, page_revision};
 use crate::vault::property_value::coerce_property_value;
 
 const MAX_PATH_ATTEMPTS: usize = 4;
+const MAX_EMBED_FILTER_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BaseMemberCreateRequest {
@@ -30,6 +37,7 @@ pub struct BaseMemberCreateRequest {
     pub title: String,
     #[serde(default)]
     pub fields: HashMap<String, serde_json::Value>,
+    pub embed_filter: Option<Filter>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -150,6 +158,38 @@ fn base_load_error(error: base_document::BaseDocumentError) -> ApiError {
         response
     }
 }
+fn validate_create_embed_filter(
+    base: &BaseDefinition,
+    embed_filter: Option<&Filter>,
+) -> Result<(), ApiError> {
+    if let Some(filter) = embed_filter
+        && serde_json::to_vec(filter)
+            .expect("Filter serialization must be infallible")
+            .len()
+            > MAX_EMBED_FILTER_BYTES
+    {
+        return Err(super::bases::invalid_embed_query(vec![
+            EmbedValidationDiagnostic {
+                field: None,
+                filter_path: Some("filter".to_owned()),
+                message: format!(
+                    "serialized embed filter exceeds {MAX_EMBED_FILTER_BYTES} bytes"
+                ),
+            },
+        ]));
+    }
+
+    validate_embed_overrides(
+        base,
+        EmbedOverrides {
+            filter: embed_filter,
+            sort: None,
+            limit: None,
+        },
+    )
+    .map_err(super::bases::invalid_embed_query)
+}
+
 
 fn is_reserved_field(key: &str) -> bool {
     matches!(
@@ -183,6 +223,7 @@ async fn create_base_member_with_ids(
     slug: String,
     request: BaseMemberCreateRequest,
     mut short_ids: impl Iterator<Item = String>,
+    fixed_page_id: Option<uuid::Uuid>,
 ) -> Result<BaseMemberCreateResponse, ApiError> {
     let stored = base_document::load(state.vault.root(), &slug).map_err(base_load_error)?;
     if stored.revision != request.base_revision {
@@ -204,6 +245,12 @@ async fn create_base_member_with_ids(
                 request.view
             ))
         })?;
+    validate_create_embed_filter(&stored.definition, request.embed_filter.as_ref())?;
+    let capability =
+        composed_member_capability(&stored.definition, &view, request.embed_filter.as_ref());
+    if !capability.enabled {
+        return Err(validation_error(capability.blockers));
+    }
 
     let title = request.title.trim();
     if title.is_empty() {
@@ -212,6 +259,9 @@ async fn create_base_member_with_ids(
 
     let created = state.clock.now();
     let mut meta = PageMeta::new();
+    if let Some(id) = fixed_page_id {
+        meta.id = id;
+    }
     meta.title = Some(title.to_owned());
     meta.created_at = Some(created);
     meta.updated_at = Some(created);
@@ -295,9 +345,10 @@ async fn create_base_member_with_ids(
         )
         .map_err(internal_creation_error)?;
 
-        candidate_matches_with_link_targets(
+        composed_candidate_matches_with_link_targets(
             &stored.definition,
             &view,
+            request.embed_filter.as_ref(),
             &meta,
             path.as_str(),
             &CandidateDerived {
@@ -366,7 +417,7 @@ pub async fn create_base_member(
     let Json(request) =
         payload.map_err(|error| ApiError::bad_request(format!("invalid request body: {error}")))?;
     let ids = std::iter::repeat_with(crate::vault::block_id::generate_short_id);
-    create_base_member_with_ids(state, slug, request, ids)
+    create_base_member_with_ids(state, slug, request, ids, None)
         .await
         .map(|response| (StatusCode::CREATED, Json(response)))
 }
@@ -472,6 +523,22 @@ name = "All"
         (temp, state, revision)
     }
 
+    async fn indexed_uuid_count(state: &AppState, id: &str) -> i64 {
+        let id = id.to_owned();
+        state
+            .index
+            .with_index(move |index, _| {
+                index
+                    .connection()
+                    .query_row("SELECT COUNT(*) FROM pages WHERE id = ?1", [id], |row| {
+                        row.get(0)
+                    })
+                    .unwrap()
+            })
+            .await
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn generated_path_collision_retries_without_overwriting_the_existing_page() {
         let (_temp, state, revision) = setup();
@@ -485,8 +552,10 @@ name = "All"
                 view: "all".to_owned(),
                 title: "Collision".to_owned(),
                 fields: HashMap::new(),
+                embed_filter: None,
             },
             ["taken".to_owned(), "free".to_owned()].into_iter(),
+            None,
         )
         .await
         .unwrap();
@@ -510,5 +579,78 @@ name = "All"
             2,
             "one collision seed and one created page should exist"
         );
+    }
+
+    #[tokio::test]
+    async fn filtered_member_pre_boundary_rejections_leave_fixed_path_and_uuid_absent() {
+        use crate::vault::base::Op;
+
+        let (_temp, state, revision) = setup();
+        let cases = [
+            (
+                BaseMemberCreateRequest {
+                    base_revision: revision.clone(),
+                    view: "All".to_owned(),
+                    title: "Mismatch".to_owned(),
+                    fields: HashMap::new(),
+                    embed_filter: Some(Filter::Cmp {
+                        field: "title".to_owned(),
+                        op: Op::Eq,
+                        value: serde_json::json!("Other"),
+                    }),
+                },
+                "reject-a",
+                "notes/20260809.mismatch.reject-a.md",
+                "01951234-0000-7000-8000-000000000511",
+                422,
+            ),
+            (
+                BaseMemberCreateRequest {
+                    base_revision: revision.clone(),
+                    view: "All".to_owned(),
+                    title: "Invalid filter".to_owned(),
+                    fields: HashMap::new(),
+                    embed_filter: Some(Filter::Cmp {
+                        field: "missing".to_owned(),
+                        op: Op::Eq,
+                        value: serde_json::json!("x"),
+                    }),
+                },
+                "reject-b",
+                "notes/20260809.invalid-filter.reject-b.md",
+                "01951234-0000-7000-8000-000000000512",
+                400,
+            ),
+            (
+                BaseMemberCreateRequest {
+                    base_revision: "stale".to_owned(),
+                    view: "All".to_owned(),
+                    title: "Stale".to_owned(),
+                    fields: HashMap::new(),
+                    embed_filter: None,
+                },
+                "reject-c",
+                "notes/20260809.stale.reject-c.md",
+                "01951234-0000-7000-8000-000000000513",
+                409,
+            ),
+        ];
+
+        for (request, short_id, expected_path, page_id, expected_status) in cases {
+            let page_id = uuid::Uuid::parse_str(page_id).unwrap();
+            let error = create_base_member_with_ids(
+                Arc::clone(&state),
+                "collision".to_owned(),
+                request,
+                [short_id.to_owned()].into_iter(),
+                Some(page_id),
+            )
+            .await
+            .unwrap_err();
+
+            assert_eq!(error.status, expected_status);
+            assert!(!state.vault.root().join(expected_path).exists());
+            assert_eq!(indexed_uuid_count(&state, &page_id.to_string()).await, 0);
+        }
     }
 }

@@ -171,14 +171,7 @@ where
             limit: request.limit,
         },
     )
-    .map_err(|diagnostics| {
-        ApiError::invalid_embed_query(
-            diagnostics
-                .into_iter()
-                .map(public_embed_diagnostic)
-                .collect(),
-        )
-    })?;
+    .map_err(invalid_embed_query)?;
 
     let member_creation =
         composed_member_capability(&stored.definition, &view, request.filter.as_ref());
@@ -223,6 +216,15 @@ where
         revision,
         member_creation,
     })
+}
+
+pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -> ApiError {
+    ApiError::invalid_embed_query(
+        diagnostics
+            .into_iter()
+            .map(public_embed_diagnostic)
+            .collect(),
+    )
 }
 
 fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {

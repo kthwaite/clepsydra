@@ -62,6 +62,21 @@ fn markdown_file_count(root: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
+async fn indexed_uuid_count(index: &IndexHandle, id: &str) -> i64 {
+    let id = id.to_owned();
+    index
+        .with_index(move |index, _| {
+            index
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pages WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        })
+        .await
+        .unwrap()
+}
+
 async fn advance_request_to_held_path_lock<F>(mut request: Pin<&mut F>, index: &IndexHandle)
 where
     F: Future,
@@ -2488,20 +2503,34 @@ Source body.
 }
 
 #[tokio::test]
-async fn page_create_rolls_back_file_when_index_publication_fails() {
+async fn page_create_rolls_back_file_and_exact_uuid_when_index_publication_fails() {
     use clepsydra::vault::mutation_coordinator::{
         CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
     };
     use clepsydra::vault::page::PageMeta;
     use clepsydra::vault::path::VaultPath;
 
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000501";
     let tmp = TempDir::new().unwrap();
     let vault = Vault::open(tmp.path()).unwrap();
     let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
     let handle = IndexHandle::spawn(index, vault.clone());
-    let _ = handle
-        .with_index(|_, _| -> () { panic!("terminate index thread for failure test") })
-        .await;
+    handle
+        .with_index(|index, _| {
+            index
+                .connection()
+                .execute_batch(&format!(
+                    "CREATE TRIGGER reject_fixed_create
+                     BEFORE INSERT ON pages
+                     WHEN NEW.id = '{PAGE_ID}'
+                     BEGIN
+                       SELECT RAISE(FAIL, 'injected during-index failure');
+                     END;"
+                ))
+                .unwrap();
+        })
+        .await
+        .unwrap();
 
     let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
@@ -2510,13 +2539,15 @@ async fn page_create_rolls_back_file_when_index_publication_fails() {
             notified.store(true, std::sync::atomic::Ordering::SeqCst);
         }
     });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
     let error = MutationCoordinator::new()
         .create_page(
             &vault,
             &handle,
             CreatePageCommand {
                 path: VaultPath::new("failure.md").unwrap(),
-                meta: PageMeta::new(),
+                meta,
                 body: "persisted".to_string(),
             },
             notify,
@@ -2535,6 +2566,7 @@ async fn page_create_rolls_back_file_when_index_publication_fails() {
         !tmp.path().join("failure.md").exists(),
         "failed index publication must roll back the created file"
     );
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
     assert!(
         !notified.load(std::sync::atomic::Ordering::SeqCst),
         "notification must follow successful indexing"
@@ -2542,13 +2574,14 @@ async fn page_create_rolls_back_file_when_index_publication_fails() {
 }
 
 #[tokio::test]
-async fn page_create_rolls_back_published_file_before_indexing_when_directory_sync_fails() {
+async fn page_create_rolls_back_exact_path_and_uuid_after_publication_failure() {
     use clepsydra::vault::atomic_file::AtomicPublicationError;
     use clepsydra::vault::mutation_coordinator::{
         CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
     };
     use clepsydra::vault::page::PageMeta;
     use clepsydra::vault::path::VaultPath;
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000502";
 
     let tmp = TempDir::new().unwrap();
     let vault = Vault::open(tmp.path()).unwrap();
@@ -2569,13 +2602,15 @@ async fn page_create_rolls_back_published_file_before_indexing_when_directory_sy
             notified.store(true, std::sync::atomic::Ordering::SeqCst);
         }
     });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
     let error = coordinator
         .create_page(
             &vault,
             &handle,
             CreatePageCommand {
                 path: VaultPath::new("not-durable.md").unwrap(),
-                meta: PageMeta::new(),
+                meta,
                 body: "not durable".to_owned(),
             },
             notify,
@@ -2592,20 +2627,67 @@ async fn page_create_rolls_back_published_file_before_indexing_when_directory_sy
         } if source.to_string().contains("injected parent directory sync failure")
     ));
     assert!(!tmp.path().join("not-durable.md").exists());
-    let page_count: i64 = handle
-        .with_index(|index, _| {
-            index
-                .connection()
-                .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
-                .unwrap()
-        })
-        .await
-        .unwrap();
-    assert_eq!(page_count, 0);
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
     assert!(
         !notified.load(std::sync::atomic::Ordering::SeqCst),
         "notification must follow a durable filesystem and index publication"
     );
+}
+
+#[tokio::test]
+async fn page_create_injected_pre_publication_failure_leaves_exact_path_and_uuid_absent() {
+    use clepsydra::vault::atomic_file::AtomicPublicationError;
+    use clepsydra::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationError, MutationNotification,
+    };
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000503";
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_create_publication_hook(Some(Arc::new(|_, _| {
+        Err(AtomicPublicationError::NotPublished(std::io::Error::other(
+            "injected before-publication failure",
+        )))
+    })));
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+
+    let error = coordinator
+        .create_page(
+            &vault,
+            &handle,
+            CreatePageCommand {
+                path: VaultPath::new("before-publication.md").unwrap(),
+                meta,
+                body: String::new(),
+            },
+            notify,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Filesystem {
+            filesystem_applied: false,
+            ..
+        }
+    ));
+    assert!(!tmp.path().join("before-publication.md").exists());
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
+    assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 #[tokio::test]
@@ -2681,13 +2763,68 @@ async fn page_create_reports_primary_and_rollback_sync_failures_without_indexing
     assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn page_create_notifies_once_after_caller_cancellation() {
+#[tokio::test]
+async fn page_create_pre_publication_cancellation_leaves_exact_path_and_uuid_absent() {
     use clepsydra::vault::mutation_coordinator::{
         CreatePageCommand, MutationCoordinator, MutationNotification,
     };
     use clepsydra::vault::page::PageMeta;
     use clepsydra::vault::path::VaultPath;
+
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000504";
+    let tmp = TempDir::new().unwrap();
+    let vault = Vault::open(tmp.path()).unwrap();
+    let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+    let handle = IndexHandle::spawn(index, vault.clone());
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let path = VaultPath::new("cancelled-before-publication.md").unwrap();
+    let held = coordinator.lock_paths(std::slice::from_ref(&path)).await;
+    let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new({
+        let notified = Arc::clone(&notified);
+        move |_| {
+            notified.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
+    let worker = Arc::clone(&coordinator);
+    let worker_vault = vault.clone();
+    let worker_handle = handle.clone();
+    let creating = tokio::spawn(async move {
+        worker
+            .create_page(
+                &worker_vault,
+                &worker_handle,
+                CreatePageCommand {
+                    path,
+                    meta,
+                    body: String::new(),
+                },
+                notify,
+            )
+            .await
+    });
+
+    tokio::task::yield_now().await;
+    assert!(!creating.is_finished());
+    creating.abort();
+    let _ = creating.await;
+    drop(held);
+
+    assert!(!tmp.path().join("cancelled-before-publication.md").exists());
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 0);
+    assert!(!notified.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn page_create_post_publication_cancellation_commits_exact_path_uuid_and_one_notification() {
+    use clepsydra::vault::mutation_coordinator::{
+        CreatePageCommand, MutationCoordinator, MutationNotification,
+    };
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+    const PAGE_ID: &str = "01951234-0000-7000-8000-000000000505";
 
     let tmp = TempDir::new().unwrap();
     let vault = Vault::open(tmp.path()).unwrap();
@@ -2702,11 +2839,12 @@ async fn page_create_notifies_once_after_caller_cancellation() {
         let entered_tx = Arc::clone(&entered_tx);
         let release_rx = Arc::clone(&release_rx);
         move |path, content| {
+            let publication = clepsydra::vault::atomic_file::atomic_create(path, content);
             if let Some(entered_tx) = entered_tx.lock().take() {
                 let _ = entered_tx.send(());
             }
             release_rx.lock().recv().unwrap();
-            clepsydra::vault::atomic_file::atomic_create(path, content)
+            publication
         }
     })));
 
@@ -2719,6 +2857,8 @@ async fn page_create_notifies_once_after_caller_cancellation() {
             let _ = event_tx.send(notification);
         }
     });
+    let mut meta = PageMeta::new();
+    meta.id = uuid::Uuid::parse_str(PAGE_ID).unwrap();
 
     let worker = Arc::clone(&coordinator);
     let worker_vault = vault.clone();
@@ -2730,7 +2870,7 @@ async fn page_create_notifies_once_after_caller_cancellation() {
                 &worker_handle,
                 CreatePageCommand {
                     path: VaultPath::new("cancelled-create.md").unwrap(),
-                    meta: PageMeta::new(),
+                    meta,
                     body: "durable".to_owned(),
                 },
                 notify,
@@ -2766,6 +2906,7 @@ async fn page_create_notifies_once_after_caller_cancellation() {
         .await
         .unwrap();
     assert_eq!(indexed, 1);
+    assert_eq!(indexed_uuid_count(&handle, PAGE_ID).await, 1);
 }
 #[tokio::test]
 async fn page_mutation_projected_move_invokes_hook_before_notification() {

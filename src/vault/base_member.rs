@@ -102,25 +102,6 @@ pub fn composed_candidate_matches(
     )
 }
 
-pub(crate) fn candidate_matches_with_link_targets(
-    base: &BaseDefinition,
-    view: &ViewDefinition,
-    meta: &PageMeta,
-    path: &str,
-    derived: &CandidateDerived,
-    link_targets: &CandidateLinkTargets,
-) -> Result<(), Vec<BaseMemberDiagnostic>> {
-    composed_candidate_matches_with_link_targets(
-        base,
-        view,
-        None,
-        meta,
-        path,
-        derived,
-        link_targets,
-    )
-}
-
 pub(crate) fn composed_candidate_matches_with_link_targets(
     base: &BaseDefinition,
     view: &ViewDefinition,
