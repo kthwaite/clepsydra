@@ -18,6 +18,7 @@ export const KIND_FOLDER: Record<Kind, string> = {
   PERSON: "people",
   TASK: "tasks",
   CYCLE: "cycles",
+  AI_CONVERSATION: "conversations",
 };
 
 const SLUG_MAX = 40;

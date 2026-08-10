@@ -13,6 +13,7 @@ import { Editor, Transforms } from "slate";
 import {
   ReactEditor,
   type RenderElementProps,
+  useReadOnly,
   useSlateStatic,
 } from "slate-react";
 import {
@@ -142,9 +143,12 @@ function ActivatableMath({
   children: ReactNode;
   display: boolean;
   testId: string;
-  onActivate(): void;
+  onActivate?: () => void;
 }) {
   const Wrapper = display ? "div" : "span";
+  if (!onActivate) {
+    return <Wrapper data-testid={testId}>{children}</Wrapper>;
+  }
   return (
     <Wrapper
       data-testid={testId}
@@ -170,12 +174,14 @@ export function MathElement({
   element,
 }: MathElementProps) {
   const editor = useSlateStatic();
+  const readOnly = useReadOnly();
   const controller = useMathEditing();
   const path = ReactEditor.findPath(editor, element);
   const display = element.type === "math-block";
-  const active = controller.isActive(path);
+  const active = !readOnly && controller.isActive(path);
 
   const activate = () => {
+    if (readOnly) return;
     Transforms.select(editor, path);
     controller.begin(path);
   };
@@ -208,7 +214,7 @@ export function MathElement({
     <ActivatableMath
       display={display}
       testId={element.type}
-      onActivate={activate}
+      onActivate={readOnly ? undefined : activate}
     >
       <MathExpression
         tex={element.tex}

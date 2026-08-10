@@ -17,6 +17,10 @@ import type {
 } from "#/editor/types";
 import { remarkFolioMath } from "#/lib/markdown/folioMath";
 import type { FolioInlineMathMdast, FolioMathMdast } from "./mdastTypes";
+import {
+  parseConversationMarker,
+  type ConversationMarker,
+} from "#/editor/conversation/marker";
 
 // Re-export for the barrel
 export type { Descendant };
@@ -86,6 +90,7 @@ function convertChildren(
   nodes: RootContent[],
   extractMetadata = true,
   recognizeJournalTime = false,
+  insideBlockquote = false,
 ): Descendant[] {
   const result: Descendant[] = [];
   for (const node of nodes) {
@@ -93,12 +98,49 @@ function convertChildren(
       node,
       extractMetadata,
       recognizeJournalTime,
+      insideBlockquote,
     );
     if (converted != null) {
       result.push(converted);
     }
   }
   return result;
+}
+
+function conversationMarkerFromBlockquote(
+  node: Extract<RootContent, { type: "blockquote" }>,
+): { marker: ConversationMarker; body: RootContent[] } | null {
+  const first = node.children[0];
+  if (!first || first.type !== "paragraph" || first.children.length === 0) {
+    return null;
+  }
+  const firstChild = first.children[0];
+  if (firstChild.type !== "text" && firstChild.type !== "html") return null;
+
+  const marker = parseConversationMarker(firstChild.value);
+  if (marker && first.children.length === 1) {
+    return { marker, body: node.children.slice(1) as RootContent[] };
+  }
+
+  // The capture renderer emits `> marker` immediately followed by `> body`.
+  // CommonMark can therefore merge the marker and first body line into one
+  // paragraph, including separate phrasing children for formatting.
+  if (firstChild.type !== "text") return null;
+  const lineEnd = firstChild.value.indexOf("\n");
+  if (lineEnd < 0) return null;
+  const prefixMarker = parseConversationMarker(firstChild.value.slice(0, lineEnd));
+  if (!prefixMarker) return null;
+
+  const bodyChildren = first.children.slice(1);
+  const remainder = firstChild.value.slice(lineEnd + 1);
+  if (remainder) {
+    bodyChildren.unshift({ type: "text", value: remainder });
+  }
+  const body = node.children.slice(1) as RootContent[];
+  if (bodyChildren.length > 0) {
+    body.unshift({ type: "paragraph", children: bodyChildren });
+  }
+  return { marker: prefixMarker, body };
 }
 
 /**
@@ -109,6 +151,7 @@ function convertBlockNode(
   node: RootContent,
   extractMetadata = true,
   recognizeJournalTime = false,
+  insideBlockquote = false,
 ): Descendant | null {
   switch (node.type) {
     case "paragraph": {
@@ -148,11 +191,32 @@ function convertBlockNode(
         children: [{ text: node.value }],
       };
 
-    case "blockquote":
+    case "blockquote": {
+      const conversation = conversationMarkerFromBlockquote(node);
+      if (conversation) {
+        const children = convertChildren(conversation.body, true, false, true);
+        return {
+          type: "conversation-turn",
+          role: conversation.marker.role,
+          source: conversation.marker.source,
+          ...(conversation.marker.sequence === null
+            ? {}
+            : { sourceSequence: conversation.marker.sequence }),
+          ...(conversation.marker.timestamp === null
+            ? {}
+            : { timestamp: conversation.marker.timestamp }),
+          origin: conversation.marker.origin,
+          children:
+            children.length > 0
+              ? children
+              : [{ type: "paragraph", children: [{ text: "" }] }],
+        };
+      }
       return {
         type: "blockquote",
-        children: convertChildren(node.children as RootContent[]),
+        children: convertChildren(node.children as RootContent[], true, false, true),
       };
+    }
 
     case "list":
       return {
@@ -164,7 +228,9 @@ function convertBlockNode(
       const math = node as FolioMathMdast;
       return {
         type: "math-block",
-        tex: math.data.folioSourceBody,
+        tex: insideBlockquote
+          ? math.data.folioSourceBody.replace(/^> ?/gm, "")
+          : math.data.folioSourceBody,
         delimiter: math.data.folioDelimiter,
         children: [{ text: "" }],
       } satisfies MathBlockElement;

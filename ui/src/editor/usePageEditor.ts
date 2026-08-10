@@ -97,6 +97,7 @@ interface PageEditorState {
   updatedAt: string | null;
   bodyMarkdown: string;
   kind: string | null;
+  conversationProvider: string | null;
   inferred: boolean;
   project: string | null;
   encryptionState: DecryptedBodyState;
@@ -684,6 +685,7 @@ export function usePageEditor(
     updatedAt: page?.meta?.updated_at ?? null,
     bodyMarkdown: plainBody ?? "",
     kind: page?.kind ?? null,
+    conversationProvider: page?.conversation?.provider ?? null,
     inferred: page?.inferred ?? true,
     project: page?.project ?? null,
     encryptionState,

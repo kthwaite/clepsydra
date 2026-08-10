@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import {
   type BasePoint,
   createEditor,
@@ -21,6 +28,7 @@ import {
   type BlockConversion,
 } from "#/editor/transforms/blockConversions";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
+import type { CustomEditor } from "#/editor/types";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import { makeDecorateCode } from "./decorate-code";
@@ -109,12 +117,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: "divider", label: "Divider", description: "Horizontal rule" },
 ];
 
-interface SlateEditorProps {
+export interface SlateEditorProps {
   initialValue: Descendant[];
   onChange: (value: Descendant[], editor: Editor) => void;
   onSaveNow: () => void | Promise<void>;
   insertionRequest?: { id: number; markdown: string } | null;
   onInsertionHandled?: (id: number) => void;
+  readOnly?: boolean;
+  editorRef?: MutableRefObject<CustomEditor | null>;
 }
 
 interface ComboboxTrigger {
@@ -132,6 +142,8 @@ export function SlateEditor({
   onSaveNow,
   insertionRequest,
   onInsertionHandled,
+  readOnly = false,
+  editorRef,
 }: SlateEditorProps) {
   const editor = useMemo(
     () =>
@@ -148,12 +160,21 @@ export function SlateEditor({
       ),
     [],
   );
+  if (editorRef) editorRef.current = editor;
+
+  useEffect(() => {
+    if (editorRef) editorRef.current = editor;
+    return () => {
+      if (editorRef?.current === editor) editorRef.current = null;
+    };
+  }, [editor, editorRef]);
   const wikilinkEditing = useWikilinkEditingController(editor);
   const mathEditing = useMathEditingController(editor);
   const handledInsertionRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (
+      readOnly ||
       !insertionRequest ||
       handledInsertionRef.current === insertionRequest.id
     ) {
@@ -163,7 +184,7 @@ export function SlateEditor({
     insertMarkdown(editor, insertionRequest.markdown);
     ReactEditor.focus(editor);
     onInsertionHandled?.(insertionRequest.id);
-  }, [editor, insertionRequest, onInsertionHandled]);
+  }, [editor, insertionRequest, onInsertionHandled, readOnly]);
 
   const { data: pagesData } = usePages();
   const pages = pagesData?.items ?? [];
@@ -212,6 +233,7 @@ export function SlateEditor({
   };
 
   const handleChange = (value: Descendant[]) => {
+    if (readOnly) return;
     onChange(value, editor);
 
     const { selection } = editor;
@@ -607,21 +629,24 @@ export function SlateEditor({
               renderElement={renderElement}
               renderLeaf={renderLeaf}
               decorate={decorateCode}
-              onKeyDown={handleKeyDown}
-              onDOMBeforeInput={vim.handleDOMBeforeInput}
-              onMouseDown={vim.handleMouseDown}
+              readOnly={readOnly}
+              onKeyDown={readOnly ? undefined : handleKeyDown}
+              onDOMBeforeInput={
+                readOnly ? undefined : vim.handleDOMBeforeInput
+              }
+              onMouseDown={readOnly ? undefined : vim.handleMouseDown}
               placeholder="Start writing..."
               className="min-h-[200px] w-full min-w-0 outline-none"
               spellCheck
             />
-            {isVimEnabled && (
+            {!readOnly && isVimEnabled && (
               <VimStatusBar mode={vim.mode} pending={vim.pending} />
             )}
           </WikilinkEditingProvider>
         </MathEditingProvider>
       </Slate>
 
-      {wikilinkTrigger && (
+      {!readOnly && wikilinkTrigger && (
         <WikilinkCombobox
           pages={pages}
           query={wikilinkTrigger.query}
@@ -634,7 +659,7 @@ export function SlateEditor({
         />
       )}
 
-      {blockRefTrigger && (
+      {!readOnly && blockRefTrigger && (
         <BlockRefCombobox
           query={blockRefTrigger.query}
           reference={createSelectionReference(editor)}
@@ -643,7 +668,7 @@ export function SlateEditor({
         />
       )}
 
-      {slashTrigger && (
+      {!readOnly && slashTrigger && (
         <SlashCombobox
           commands={slashCommands}
           query={slashTrigger.query}

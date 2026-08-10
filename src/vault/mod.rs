@@ -14,6 +14,7 @@ pub mod cas;
 pub mod checkpoint;
 pub mod config;
 pub mod context;
+pub mod conversation;
 pub mod derivation;
 pub mod derivers;
 pub mod encryption;

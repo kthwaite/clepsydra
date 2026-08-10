@@ -9,6 +9,7 @@ import {
 import {
   ReactEditor,
   type RenderElementProps,
+  useReadOnly,
   useSlateStatic,
 } from "slate-react";
 import { cn } from "#/lib/cn";
@@ -34,6 +35,7 @@ function ListItem({
   children: React.ReactNode;
 }) {
   const editor = useSlateStatic();
+  const readOnly = useReadOnly();
   const checked = element.checked;
   const isTask = checked !== undefined && checked !== null;
 
@@ -56,7 +58,9 @@ function ListItem({
         <input
           type="checkbox"
           checked={checked}
+          disabled={readOnly}
           onChange={(e) => {
+            if (readOnly) return;
             e.preventDefault();
             const path = ReactEditor.findPath(editor, element);
             Transforms.setNodes(

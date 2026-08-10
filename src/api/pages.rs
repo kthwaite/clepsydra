@@ -58,6 +58,8 @@ pub struct PageDetail {
     pub project: Option<String>,
     pub encrypted: bool,
     pub encryption: Option<EncryptionMetaResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<super::conversations::ConversationSummaryResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -82,7 +84,6 @@ pub struct PageMetaResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
 }
-
 /// OpenAPI schema for page detail responses.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PageDetailResponse {
@@ -98,6 +99,8 @@ pub struct PageDetailResponse {
     pub project: Option<String>,
     pub encrypted: bool,
     pub encryption: Option<EncryptionMetaResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<super::conversations::ConversationSummaryResponse>,
 }
 
 /// OpenAPI schema for paginated page listing.
@@ -312,10 +315,17 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         .as_ref()
         .map(EncryptionMetaResponse::from);
     let encrypted = encryption.is_some();
+    let conversation = super::conversations::conversation_summary(&page.meta);
+    let mut meta = page.meta;
+    // Conversation identity and ledger hashes are operational metadata, not
+    // public page metadata. Keep ordinary reads non-destructive by sanitizing
+    // only this response-owned copy.
+    meta.extra
+        .remove(crate::vault::conversation::CONVERSATION_META_KEY);
     PageDetail {
         path: page.path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
-        meta: page.meta,
+        meta,
         body: page.body,
         revision,
         kind: kind.as_str().to_string(),
@@ -323,6 +333,7 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         project,
         encrypted,
         encryption,
+        conversation,
     }
 }
 

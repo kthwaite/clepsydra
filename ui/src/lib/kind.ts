@@ -29,6 +29,7 @@ export const KINDS = [
   "PERSON",
   "TASK",
   "CYCLE",
+  "AI_CONVERSATION",
 ] as const satisfies readonly Kind[];
 
 type MissingFromKinds = Exclude<Kind, (typeof KINDS)[number]>;
@@ -59,6 +60,7 @@ export const KIND_META: Record<Kind, KindMeta> = {
   NOTE: { label: "NOTE", color: "var(--ink-mute)" },
   TASK: { label: "TASK", color: "var(--hot)" },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
+  AI_CONVERSATION: { label: "AI CONVERSATION", color: "var(--cool)" },
 };
 
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
@@ -100,6 +102,9 @@ const FOLDER_KIND: Record<string, Kind> = {
   persons: "PERSON",
   person: "PERSON",
   contacts: "PERSON",
+  conversations: "AI_CONVERSATION",
+  conversation: "AI_CONVERSATION",
+  chats: "AI_CONVERSATION",
 };
 
 export function resolveKindFromPath(path: string): Kind {
@@ -117,7 +122,7 @@ function normalizeKind(value: string | undefined | null): Kind | null {
 }
 
 const FRONTMATTER_RE = /^\s*---\r?\n([\s\S]*?)\r?\n---/;
-const TYPE_LINE_RE = /^(?:type|kind)\s*:\s*["']?([A-Za-z]+)["']?\s*$/im;
+const TYPE_LINE_RE = /^(?:type|kind)\s*:\s*["']?([A-Za-z_]+)["']?\s*$/im;
 
 export function parseFrontmatterKind(
   body: string | undefined | null,

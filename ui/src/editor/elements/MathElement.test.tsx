@@ -39,9 +39,11 @@ import type {
 function MathEditingSurface({
   editor,
   onKeyDown,
+  readOnly,
 }: {
   editor: Editor;
   onKeyDown?: KeyboardEventHandler;
+  readOnly?: boolean;
 }) {
   const controller = useMathEditingController(editor);
   const renderElement = (props: RenderElementProps) => {
@@ -62,7 +64,7 @@ function MathEditingSurface({
   return (
     <MathEditingProvider value={controller}>
       <div onKeyDown={onKeyDown}>
-        <Editable renderElement={renderElement} />
+        <Editable renderElement={renderElement} readOnly={readOnly} />
       </div>
     </MathEditingProvider>
   );
@@ -71,6 +73,7 @@ function MathEditingSurface({
 function renderMathEditor(
   kind: "inline" | "display" = "inline",
   onKeyDown?: KeyboardEventHandler,
+  readOnly = false,
 ) {
   const editor = withReact(withHistory(withSchema(createEditor())));
   const value: Descendant[] =
@@ -101,7 +104,11 @@ function renderMathEditor(
 
   render(
     <Slate editor={editor} initialValue={value}>
-      <MathEditingSurface editor={editor} onKeyDown={onKeyDown} />
+      <MathEditingSurface
+        editor={editor}
+        onKeyDown={onKeyDown}
+        readOnly={readOnly}
+      />
     </Slate>,
   );
   return editor;
@@ -290,6 +297,22 @@ describe("MathElement", () => {
       source,
     );
     expect(Node.get(editor, [0, 1])).toMatchObject({ tex: "x^2" });
+  });
+
+  it("renders inert math without changing the Slate tree in read-only mode", () => {
+    const editor = renderMathEditor("inline", undefined, true);
+    const before = JSON.parse(JSON.stringify(editor.children));
+    const math = screen.getByTestId("inline-math");
+
+    fireEvent.click(math);
+    fireEvent.keyDown(math, { key: "Enter" });
+
+    expect(
+      screen.queryByRole("textbox", { name: "Edit inline math" }),
+    ).toBeNull();
+    expect(math).not.toHaveAttribute("role", "button");
+    expect(math).not.toHaveAttribute("tabindex");
+    expect(editor.children).toEqual(before);
   });
 });
 

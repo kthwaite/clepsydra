@@ -118,6 +118,16 @@ export interface MathBlockElement {
   children: CustomText[];
 }
 
+export interface ConversationTurnElement {
+  type: "conversation-turn";
+  role: "user" | "assistant";
+  source: string;
+  sourceSequence?: number;
+  timestamp?: string;
+  origin: "source" | "local";
+  children: Descendant[];
+}
+
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -135,6 +145,7 @@ export type CustomElement =
   | FootnoteRefElement
   | InlineMathElement
   | MathBlockElement
+  | ConversationTurnElement
   | FootnoteDefElement;
 
 export type ElementType = CustomElement["type"];

@@ -67,7 +67,7 @@ fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
 
 /// Frontmatter keys owned by the system serializer; patching them as
 /// properties would corrupt page identity or bypass typed update paths.
-const RESERVED_KEYS: [&str; 9] = [
+const RESERVED_KEYS: [&str; 10] = [
     "id",
     "title",
     "type",
@@ -77,6 +77,7 @@ const RESERVED_KEYS: [&str; 9] = [
     "created_at",
     "updated_at",
     "encryption",
+    "conversation",
 ];
 
 /// Apply a property patch to the page with the given id.
@@ -206,7 +207,7 @@ pub async fn patch_properties(
         .index
         .with_index(move |index, _vault| -> Result<_, rusqlite::Error> {
             let mut stmt = index.connection().prepare(
-                "SELECT key, value_json FROM page_properties WHERE page_id = ?1 ORDER BY key, ord",
+                "SELECT key, value_json FROM page_properties WHERE page_id = ?1 AND key != 'conversation' ORDER BY key, ord",
             )?;
             let rows: Vec<(String, String)> = stmt
                 .query_map(rusqlite::params![props_id], |row| {

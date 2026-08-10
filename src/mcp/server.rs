@@ -13,7 +13,7 @@ use std::sync::Arc;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::client::{ApiClient, encode_vault_path};
@@ -331,6 +331,31 @@ pub struct PreviewMutationParams {
     pub destination: Option<String>,
     /// Link rewrite mode (delete_page only; default plain_text).
     pub rewrite: Option<RewriteMode>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationRoleParam {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CaptureConversationTurnParams {
+    /// Visible participant role. System/developer/tool turns are not accepted.
+    pub role: ConversationRoleParam,
+    /// Exact visible turn content as Markdown; do not summarize.
+    pub content: String,
+    pub source_turn_id: Option<String>,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CaptureConversationParams {
+    pub title: String,
+    pub provider: Option<String>,
+    pub host_conversation_id: Option<String>,
+    pub turns: Vec<CaptureConversationTurnParams>,
 }
 
 /// If `value` carries an oversized `body` string, truncate it in place (on a
@@ -728,6 +753,31 @@ impl VaultMcpServer {
             .await
             .map_err(|e| e.to_string())?;
         truncate_body(&mut value, MAX_BODY_BYTES);
+
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_capture_conversation",
+        description = "Capture the complete visible user/assistant conversation as an AI_CONVERSATION Folio. Send ordered turns verbatim, not a summary. Clepsydra creates once and appends only when provider + host_conversation_id identify an exact existing capture; truncated or divergent context conflicts rather than guessing. Hidden system/developer prompts and tool traces are not accepted.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_capture_conversation(
+        &self,
+        Parameters(params): Parameters<CaptureConversationParams>,
+    ) -> Result<String, String> {
+        let value = self
+            .client
+            .post_json(
+                "/api/vault/conversations/capture",
+                &serde_json::to_value(params).map_err(|e| e.to_string())?,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
         render(&value)
     }
 
@@ -979,11 +1029,14 @@ impl ServerHandler for VaultMcpServer {
              relationships with vault_links. Create pages with vault_create_page (search \
              first to avoid duplicates), make targeted edits with vault_edit_page or \
              vault_append_page, and quick-capture into today's journal with \
-             vault_journal_capture. Organise by declaring kind/project with vault_assign \
-             (the vault relocates files itself); vault_preview_mutation dry-runs moves \
-             and deletes before they touch linked pages. Page paths are vault-relative; \
-             page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
-             folders. On a conflict error, re-read the page and re-apply the change."
+             vault_journal_capture. When a user asks to send this conversation to Clepsydra, \
+             use vault_capture_conversation: supply every complete visible user/assistant turn \
+             in order, verbatim; generic vault_create_page is not the conversation-capture path. \
+             Organise by declaring kind/project with vault_assign (the vault relocates files \
+             itself); vault_preview_mutation dry-runs moves and deletes before they touch linked \
+             pages. Page paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map \
+             to canonical top-level folders. On a conflict error, re-read the page and re-apply \
+             the change."
                 .to_string(),
         );
         info
@@ -1037,6 +1090,7 @@ mod tests {
             [
                 "vault_append_page",
                 "vault_assign",
+                "vault_capture_conversation",
                 "vault_create_page",
                 "vault_delete_page",
                 "vault_edit_page",
@@ -1053,6 +1107,96 @@ mod tests {
                 "vault_update_page",
             ]
         );
+    }
+
+    #[test]
+    fn capture_conversation_schema_restricts_roles_and_requires_turns() {
+        let tool = VaultMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "vault_capture_conversation")
+            .expect("conversation capture tool should be registered");
+        let schema = &*tool.input_schema;
+        let role_schema = &schema["$defs"]["ConversationRoleParam"];
+        assert_eq!(role_schema["enum"], json!(["user", "assistant"]));
+        assert!(
+            schema["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|field| field == "turns")),
+            "turns should be required: {schema:?}"
+        );
+    }
+
+    fn capture_turn(role: ConversationRoleParam, content: &str) -> CaptureConversationTurnParams {
+        CaptureConversationTurnParams {
+            role,
+            content: content.to_string(),
+            source_turn_id: None,
+            timestamp: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_conversation_creates_then_appends_without_exposing_host_id() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let params = CaptureConversationParams {
+            title: "MCP transcript".into(),
+            provider: Some("claude".into()),
+            host_conversation_id: Some("mcp-host-id".into()),
+            turns: vec![
+                capture_turn(ConversationRoleParam::User, "Question"),
+                capture_turn(ConversationRoleParam::Assistant, "Answer"),
+            ],
+        };
+
+        let created = server
+            .vault_capture_conversation(Parameters(params))
+            .await
+            .expect("first capture should succeed");
+        assert!(created.contains(r#""operation": "created""#), "{created}");
+        assert!(!created.contains("mcp-host-id"), "{created}");
+
+        let appended = server
+            .vault_capture_conversation(Parameters(CaptureConversationParams {
+                title: "MCP transcript".into(),
+                provider: Some("claude".into()),
+                host_conversation_id: Some("mcp-host-id".into()),
+                turns: vec![
+                    capture_turn(ConversationRoleParam::User, "Question"),
+                    capture_turn(ConversationRoleParam::Assistant, "Answer"),
+                    capture_turn(ConversationRoleParam::User, "Follow-up"),
+                ],
+            }))
+            .await
+            .expect("second capture should append");
+        assert!(
+            appended.contains(r#""operation": "appended""#),
+            "{appended}"
+        );
+        assert!(!appended.contains("mcp-host-id"), "{appended}");
+    }
+
+    #[tokio::test]
+    async fn capture_conversation_error_does_not_expose_raw_source_turn_id() {
+        const SENTINEL_SOURCE_ID: &str = "raw-source-turn-id-must-not-escape";
+        let (server, _tmp) = serve_seeded_vault().await;
+        let mut first = capture_turn(ConversationRoleParam::User, "Question");
+        first.source_turn_id = Some(SENTINEL_SOURCE_ID.into());
+        let mut second = capture_turn(ConversationRoleParam::Assistant, "Answer");
+        second.source_turn_id = Some(SENTINEL_SOURCE_ID.into());
+
+        let error = server
+            .vault_capture_conversation(Parameters(CaptureConversationParams {
+                title: "MCP transcript".into(),
+                provider: Some("claude".into()),
+                host_conversation_id: Some("mcp-host-id".into()),
+                turns: vec![first, second],
+            }))
+            .await
+            .expect_err("duplicate source turn IDs should be rejected");
+
+        assert!(error.contains("API error 400"), "{error}");
+        assert!(!error.contains(SENTINEL_SOURCE_ID), "{error}");
     }
 
     /// Spin the real API router over a seeded temp vault on an ephemeral port

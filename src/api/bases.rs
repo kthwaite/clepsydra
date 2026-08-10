@@ -18,6 +18,7 @@ use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
+use super::query::redact_conversation_columns;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
@@ -398,7 +399,10 @@ pub async fn preview_base(
         })
         .await;
     let (output, evaluation_error) = match evaluation {
-        Ok(Ok(output)) => (Some(output), None),
+        Ok(Ok(mut output)) => {
+            redact_conversation_columns(&mut output);
+            (Some(output), None)
+        }
         Ok(Err(error)) => (None, Some(format!("query error: {error}"))),
         Err(error) => (None, Some(format!("index error: {error}"))),
     };
@@ -453,7 +457,7 @@ pub async fn evaluate_view(
         params.dir.as_deref(),
     );
 
-    let output = state
+    let mut output = state
         .index
         .with_index(move |index, _vault| {
             let ctx = QueryContext::for_base(&base);
@@ -462,6 +466,7 @@ pub async fn evaluate_view(
         .await
         .map_err(|e| ApiError::internal(format!("index error: {e}")))?
         .map_err(|e| ApiError::bad_request(format!("query error: {e}")))?;
+    redact_conversation_columns(&mut output);
     Ok(Json(output))
 }
 

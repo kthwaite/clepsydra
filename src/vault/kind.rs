@@ -26,6 +26,8 @@ pub enum Kind {
     Person,
     Task,
     Cycle,
+    #[schema(rename = "AI_CONVERSATION")]
+    AiConversation,
 }
 
 impl Kind {
@@ -44,6 +46,7 @@ impl Kind {
             Kind::Person => "people",
             Kind::Task => "tasks",
             Kind::Cycle => "cycles",
+            Kind::AiConversation => "conversations",
         }
     }
 
@@ -61,6 +64,7 @@ impl Kind {
             Kind::Person => "PERSON",
             Kind::Task => "TASK",
             Kind::Cycle => "CYCLE",
+            Kind::AiConversation => "AI_CONVERSATION",
         }
     }
 
@@ -78,6 +82,7 @@ impl Kind {
             "PERSON" => Some(Kind::Person),
             "TASK" => Some(Kind::Task),
             "CYCLE" => Some(Kind::Cycle),
+            "AI_CONVERSATION" => Some(Kind::AiConversation),
             _ => None,
         }
     }
@@ -97,6 +102,7 @@ impl Kind {
             "people" | "persons" | "person" | "contacts" => Some(Kind::Person),
             "tasks" | "task" => Some(Kind::Task),
             "cycles" | "cycle" | "sprints" | "sprint" => Some(Kind::Cycle),
+            "conversations" | "conversation" | "chats" => Some(Kind::AiConversation),
             _ => None,
         }
     }
@@ -141,6 +147,10 @@ mod tests {
     fn from_token_is_case_insensitive() {
         assert_eq!(Kind::from_token("quote"), Some(Kind::Quote));
         assert_eq!(Kind::from_token("  QUOTE "), Some(Kind::Quote));
+        assert_eq!(
+            Kind::from_token("ai_conversation"),
+            Some(Kind::AiConversation)
+        );
         assert_eq!(Kind::from_token("recipe"), None);
     }
 
@@ -150,12 +160,16 @@ mod tests {
         assert_eq!(Kind::Todo.canonical_folder(), "todos");
         assert_eq!(Kind::Person.canonical_folder(), "people");
         assert_eq!(Kind::Code.canonical_folder(), "code");
+        assert_eq!(Kind::AiConversation.canonical_folder(), "conversations");
     }
 
     #[test]
     fn declared_kind_wins_and_is_not_inferred() {
         let (k, inferred) = resolve("projects/x.md", Some(Kind::Quote));
         assert_eq!(k, Kind::Quote);
+        assert!(!inferred);
+        let (k, inferred) = resolve("notes/x.md", Some(Kind::AiConversation));
+        assert_eq!(k, Kind::AiConversation);
         assert!(!inferred);
     }
 
@@ -167,6 +181,12 @@ mod tests {
         );
         assert_eq!(resolve("diary/x.md", None), (Kind::Journal, true));
         assert_eq!(resolve("tasks/x.md", None), (Kind::Task, true));
+        for folder in ["conversations", "conversation", "chats"] {
+            assert_eq!(
+                resolve(&format!("{folder}/x.md"), None),
+                (Kind::AiConversation, true)
+            );
+        }
     }
 
     #[test]
@@ -189,6 +209,7 @@ mod tests {
             Kind::Person,
             Kind::Task,
             Kind::Cycle,
+            Kind::AiConversation,
         ];
         for k in all {
             assert_eq!(
@@ -202,6 +223,15 @@ mod tests {
         assert_eq!(Kind::from_folder("tasks"), Some(Kind::Task));
         assert_eq!(Kind::from_folder("todos"), Some(Kind::Todo));
         assert_eq!(Kind::from_folder("sprints"), Some(Kind::Cycle));
+        assert_eq!(
+            Kind::from_folder("conversations"),
+            Some(Kind::AiConversation)
+        );
+        assert_eq!(
+            Kind::from_folder("conversation"),
+            Some(Kind::AiConversation)
+        );
+        assert_eq!(Kind::from_folder("chats"), Some(Kind::AiConversation));
     }
 
     #[test]
@@ -210,5 +240,10 @@ mod tests {
         assert_eq!(encoded, "\"QUOTE\"");
         let decoded: Kind = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, Kind::Quote);
+
+        let encoded = serde_json::to_string(&Kind::AiConversation).unwrap();
+        assert_eq!(encoded, "\"AI_CONVERSATION\"");
+        let decoded: Kind = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, Kind::AiConversation);
     }
 }

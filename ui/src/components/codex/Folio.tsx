@@ -11,6 +11,7 @@ import {
 import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
+import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import {
@@ -25,10 +26,14 @@ import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
+import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
+import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
+import { insertConversationTurn } from "#/editor/conversation/transforms";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
+import type { CustomEditor } from "#/editor/types";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
@@ -129,6 +134,13 @@ export function Folio({ tabId, path }: FolioProps) {
   >(null);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [organizationOpen, setOrganizationOpen] = useState(false);
+  const [conversationMode, setConversationMode] = useState<"read" | "edit">(
+    "read",
+  );
+  const conversationEditorRef = useRef<CustomEditor | null>(null);
+  useEffect(() => {
+    setConversationMode("read");
+  }, [path]);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
     id: number;
@@ -185,20 +197,32 @@ export function Folio({ tabId, path }: FolioProps) {
     [],
   );
 
+  const folioCode = shortFolio(path);
+  const kind = useMemo(
+    () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
+    [path, editor.kind, editor.bodyMarkdown],
+  );
+  const presentation = presentationFor(kind);
+  const isAiConversation =
+    presentation.bodyPresentation === "ai-conversation";
+  const conversationReadOnly =
+    isAiConversation && conversationMode === "read";
+  const isJournal = kind === "JOURNAL";
+
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
   const saveNow = editor.saveNow;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (matchesChord(e, SHORTCUTS["folio.save"].chord)) {
-        e.preventDefault();
-        void saveNow().catch(() => undefined);
-      }
+      if (!matchesChord(e, SHORTCUTS["folio.save"].chord)) return;
+      e.preventDefault();
+      if (conversationReadOnly) return;
+      void saveNow().catch(() => undefined);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [saveNow]);
+  }, [conversationReadOnly, saveNow]);
 
   const onScroll = () => {
     const el = bodyRef.current;
@@ -212,12 +236,6 @@ export function Folio({ tabId, path }: FolioProps) {
     });
   };
 
-  const folioCode = shortFolio(path);
-  const kind = useMemo(
-    () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
-    [path, editor.kind, editor.bodyMarkdown],
-  );
-  const isJournal = kind === "JOURNAL";
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
@@ -248,7 +266,6 @@ export function Folio({ tabId, path }: FolioProps) {
     encryptionState.status,
     hasPersistedJournalTag,
   ]);
-  const presentation = presentationFor(kind);
   const inferred = editor.inferred;
   const project = editor.project;
 
@@ -262,6 +279,17 @@ export function Folio({ tabId, path }: FolioProps) {
     [visibleEditorValue],
   );
   const toc = useMemo(() => buildToc(visibleEditorValue), [visibleEditorValue]);
+  const conversationDiagnostics = useMemo(
+    () =>
+      isAiConversation
+        ? diagnoseConversationMarkdown(editor.bodyMarkdown)
+        : null,
+    [editor.bodyMarkdown, isAiConversation],
+  );
+  const addConversationTurn = useCallback(() => {
+    if (!conversationEditorRef.current) return;
+    insertConversationTurn(conversationEditorRef.current);
+  }, []);
   const { activeIndex, scrollTo } = useScrollSpy(
     bodyRef,
     editor.editorRevision,
@@ -300,12 +328,18 @@ export function Folio({ tabId, path }: FolioProps) {
             <Pip kind={kind} />
             {kindLabel(kind)}
           </span>
-          <SaveIndicator
-            status={editor.saveStatus}
-            error={editor.saveError}
-            revisionConflict={editor.revisionConflict}
-            onReloadAfterConflict={editor.reloadAfterConflict}
-          />
+          {conversationReadOnly && editor.revisionConflict ? (
+            <span className="text-xs text-destructive">
+              Page changed on disk
+            </span>
+          ) : (
+            <SaveIndicator
+              status={editor.saveStatus}
+              error={editor.saveError}
+              revisionConflict={editor.revisionConflict}
+              onReloadAfterConflict={editor.reloadAfterConflict}
+            />
+          )}
         </div>
       </div>
       <hr className="cl-rule-dash mt-2" />
@@ -314,36 +348,101 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const document = (
     <>
-      <div className="mt-4">
-        <PageEditorHeader
+      {conversationReadOnly ? (
+        <ReadOnlyPageHeader
           path={path}
           title={editor.title}
-          onTitleChange={editor.setTitle}
-          readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
           tags={editableTags}
-          derivedTags={isJournal ? ["journal"] : []}
-          tagSuggestions={tagSuggestions}
-          onTagsChange={editor.setTags}
           aliases={editor.aliases}
-          onAliasesChange={editor.setAliases}
-          onSaveNow={editor.saveNow}
           encrypted={encrypted}
-          onRequestLock={encryptionActions?.lock}
         />
-      </div>
+      ) : (
+        <div className="mt-4">
+          <PageEditorHeader
+            path={path}
+            title={editor.title}
+            onTitleChange={editor.setTitle}
+            readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
+            tags={editableTags}
+            derivedTags={isJournal ? ["journal"] : []}
+            tagSuggestions={tagSuggestions}
+            onTagsChange={editor.setTags}
+            aliases={editor.aliases}
+            onAliasesChange={editor.setAliases}
+            onSaveNow={editor.saveNow}
+            encrypted={encrypted}
+            onRequestLock={encryptionActions?.lock}
+          />
+        </div>
+      )}
+      {isAiConversation ? (
+        <>
+          <AiConversationControls
+            mode={conversationMode}
+            onModeChange={setConversationMode}
+            onAddTurn={addConversationTurn}
+          />
+          {conversationDiagnostics &&
+          (conversationDiagnostics.malformedMarkerLines.length > 0 ||
+            conversationDiagnostics.validMarkers === 0) ? (
+            <div className="ai-conversation-warning" role="alert">
+              <span>
+                {conversationDiagnostics.malformedMarkerLines.length > 0
+                  ? `Conversation marker${
+                      conversationDiagnostics.malformedMarkerLines.length === 1
+                        ? ""
+                        : "s"
+                    } on line${
+                      conversationDiagnostics.malformedMarkerLines.length === 1
+                        ? ""
+                        : "s"
+                    } ${conversationDiagnostics.malformedMarkerLines.join(
+                      ", ",
+                    )} could not be read. The original text is preserved.`
+                  : "This AI conversation has no valid conversation markers. The original Markdown is preserved."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConversationMode("edit")}
+              >
+                Edit
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <hr className="cl-rule-dash mt-3" />
 
-      <article className="codex-prose mt-5 font-sans text-[17px] leading-[1.65]">
+      <article
+        className={cn(
+          "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
+          isAiConversation &&
+            `ai-conversation--${conversationMode}`,
+        )}
+      >
         <WikilinkResolutionProvider path={path}>
-          <SlateEditor
-            key={`${path}:${editor.editorRevision}`}
-            initialValue={currentEditorValue}
-            onChange={editor.onSlateChange}
-            onSaveNow={editor.saveNow}
-            insertionRequest={attachmentInsertion}
-            onInsertionHandled={finishAttachmentInsertion}
-          />
+          <ConversationPresentationProvider
+            value={{
+              mode: isAiConversation ? conversationMode : "generic",
+              provider: isAiConversation
+                ? editor.conversationProvider
+                : null,
+            }}
+          >
+            <SlateEditor
+              key={`${path}:${editor.editorRevision}`}
+              initialValue={currentEditorValue}
+              onChange={editor.onSlateChange}
+              onSaveNow={editor.saveNow}
+              insertionRequest={attachmentInsertion}
+              onInsertionHandled={finishAttachmentInsertion}
+              readOnly={conversationReadOnly}
+              editorRef={
+                isAiConversation ? conversationEditorRef : undefined
+              }
+            />
+          </ConversationPresentationProvider>
         </WikilinkResolutionProvider>
       </article>
 
@@ -363,41 +462,49 @@ export function Folio({ tabId, path }: FolioProps) {
       <KV
         k="Kind"
         v={
-          <KindSelect
-            value={kind}
-            inferred={inferred}
-            onAssign={(k) =>
-              assign.mutate(
-                { params: { path: { path } }, body: { kind: k } },
-                { onSuccess: followMove },
-              )
-            }
-          />
+          conversationReadOnly ? (
+            <span>{kindLabel(kind)}</span>
+          ) : (
+            <KindSelect
+              value={kind}
+              inferred={inferred}
+              onAssign={(k) =>
+                assign.mutate(
+                  { params: { path: { path } }, body: { kind: k } },
+                  { onSuccess: followMove },
+                )
+              }
+            />
+          )
         }
       />
       <KV
         k="Project"
         v={
-          <ProjectCombo
-            key={project ?? ""}
-            value={project}
-            options={projects}
-            onAssign={(slug) =>
-              assign.mutate(
-                { params: { path: { path } }, body: { project: slug } },
-                { onSuccess: followMove },
-              )
-            }
-            onClear={() =>
-              assign.mutate(
-                {
-                  params: { path: { path } },
-                  body: { clear_project: true },
-                },
-                { onSuccess: followMove },
-              )
-            }
-          />
+          conversationReadOnly ? (
+            <span>{project ?? "—"}</span>
+          ) : (
+            <ProjectCombo
+              key={project ?? ""}
+              value={project}
+              options={projects}
+              onAssign={(slug) =>
+                assign.mutate(
+                  { params: { path: { path } }, body: { project: slug } },
+                  { onSuccess: followMove },
+                )
+              }
+              onClear={() =>
+                assign.mutate(
+                  {
+                    params: { path: { path } },
+                    body: { clear_project: true },
+                  },
+                  { onSuccess: followMove },
+                )
+              }
+            />
+          )
         }
       />
       <KV
@@ -407,16 +514,20 @@ export function Folio({ tabId, path }: FolioProps) {
       <KV
         k="Protection"
         v={
-          <button
-            type="button"
-            className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
-            disabled={!editor.pageId}
-            onClick={() =>
-              setProtectionDialog(encrypted ? "unprotect" : "protect")
-            }
-          >
-            {encrypted ? "encrypted · remove" : "plaintext · protect"}
-          </button>
+          conversationReadOnly ? (
+            <span>{encrypted ? "encrypted" : "plaintext"}</span>
+          ) : (
+            <button
+              type="button"
+              className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
+              disabled={!editor.pageId}
+              onClick={() =>
+                setProtectionDialog(encrypted ? "unprotect" : "protect")
+              }
+            >
+              {encrypted ? "encrypted · remove" : "plaintext · protect"}
+            </button>
+          )
         }
       />
     </Block>
@@ -445,81 +556,97 @@ export function Folio({ tabId, path }: FolioProps) {
       })()}
 
       <Block label="Attachments">
-        <button
-          type="button"
-          aria-expanded={attachmentsOpen}
-          className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
-          onClick={() => setAttachmentsOpen((open) => !open)}
-        >
-          <span>Manage attachments</span>
-          <span aria-hidden>{attachmentsOpen ? "⌄" : "›"}</span>
-        </button>
-        {attachmentsOpen ? (
-          <Suspense
-            fallback={
-              <p className="cl-marg mt-2 mb-0">Loading attachment tools…</p>
-            }
-          >
-            <div className="mt-2">
-              <AttachmentManager
-                protectedPage={encrypted}
-                onInsertMarkdown={requestAttachmentInsertion}
-              />
-            </div>
-          </Suspense>
-        ) : null}
+        {conversationReadOnly ? (
+          <p className="cl-marg m-0">Switch to Edit to manage attachments.</p>
+        ) : (
+          <>
+            <button
+              type="button"
+              aria-expanded={attachmentsOpen}
+              className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+              onClick={() => setAttachmentsOpen((open) => !open)}
+            >
+              <span>Manage attachments</span>
+              <span aria-hidden>{attachmentsOpen ? "⌄" : "›"}</span>
+            </button>
+            {attachmentsOpen ? (
+              <Suspense
+                fallback={
+                  <p className="cl-marg mt-2 mb-0">
+                    Loading attachment tools…
+                  </p>
+                }
+              >
+                <div className="mt-2">
+                  <AttachmentManager
+                    protectedPage={encrypted}
+                    onInsertMarkdown={requestAttachmentInsertion}
+                  />
+                </div>
+              </Suspense>
+            ) : null}
+          </>
+        )}
       </Block>
 
       <Block label="Organization">
-        <button
-          type="button"
-          aria-expanded={organizationOpen}
-          className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
-          onClick={() => setOrganizationOpen((open) => !open)}
-        >
-          <span>Manage paths</span>
-          <span aria-hidden>{organizationOpen ? "⌄" : "›"}</span>
-        </button>
-        {organizationOpen ? (
-          <Suspense
-            fallback={<p className="cl-marg mt-2 mb-0">Loading path tools…</p>}
-          >
-            <div className="mt-2 grid gap-2">
-              {editor.isDraft ? (
-                <p className="cl-marg mb-0">
-                  Save this page before moving or deleting it.
-                </p>
-              ) : (
-                <PageActionsMenu
-                  path={path}
-                  beforeMutation={editor.saveNow}
-                  onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
-                  onDeleted={() => {
-                    closeTab(tabId);
-                    if (mobile) void navigate({ to: "/" });
-                  }}
-                />
-              )}
-              <FolderActionsMenu
-                beforeMutation={editor.saveNow}
-                onMoved={(source, destination) => {
-                  if (path === source || path.startsWith(`${source}/`)) {
-                    updateTabPath(
-                      tabId,
-                      `${destination}${path.slice(source.length)}`,
-                    );
-                  }
-                }}
-                onDeleted={(source) => {
-                  if (path === source || path.startsWith(`${source}/`)) {
-                    closeTab(tabId);
-                    if (mobile) void navigate({ to: "/" });
-                  }
-                }}
-              />
-            </div>
-          </Suspense>
-        ) : null}
+        {conversationReadOnly ? (
+          <p className="cl-marg m-0">Switch to Edit to manage paths.</p>
+        ) : (
+          <>
+            <button
+              type="button"
+              aria-expanded={organizationOpen}
+              className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+              onClick={() => setOrganizationOpen((open) => !open)}
+            >
+              <span>Manage paths</span>
+              <span aria-hidden>{organizationOpen ? "⌄" : "›"}</span>
+            </button>
+            {organizationOpen ? (
+              <Suspense
+                fallback={
+                  <p className="cl-marg mt-2 mb-0">Loading path tools…</p>
+                }
+              >
+                <div className="mt-2 grid gap-2">
+                  {editor.isDraft ? (
+                    <p className="cl-marg mb-0">
+                      Save this page before moving or deleting it.
+                    </p>
+                  ) : (
+                    <PageActionsMenu
+                      path={path}
+                      beforeMutation={editor.saveNow}
+                      onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
+                      onDeleted={() => {
+                        closeTab(tabId);
+                        if (mobile) void navigate({ to: "/" });
+                      }}
+                    />
+                  )}
+                  <FolderActionsMenu
+                    beforeMutation={editor.saveNow}
+                    onMoved={(source, destination) => {
+                      if (path === source || path.startsWith(`${source}/`)) {
+                        updateTabPath(
+                          tabId,
+                          `${destination}${path.slice(source.length)}`,
+                        );
+                      }
+                    }}
+                    onDeleted={(source) => {
+                      if (path === source || path.startsWith(`${source}/`)) {
+                        closeTab(tabId);
+                        if (mobile) void navigate({ to: "/" });
+                      }
+                    }}
+                  />
+                </div>
+              </Suspense>
+            ) : null}
+          </>
+        )}
       </Block>
 
       <OpenFilesAccordion activeTabId={tabId} />
@@ -642,7 +769,7 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   const protection =
-    protectionDialog && editor.pageId ? (
+    !conversationReadOnly && protectionDialog && editor.pageId ? (
       <Suspense fallback={null}>
         <NoteProtectionDialog
           mode={protectionDialog}
@@ -801,6 +928,68 @@ function DesktopFolioLayout({
       )}
       {protection}
     </div>
+  );
+}
+
+function ReadOnlyPageHeader({
+  path,
+  title,
+  tags,
+  aliases,
+  encrypted,
+}: {
+  path: string;
+  title: string;
+  tags: string[];
+  aliases: string[];
+  encrypted: boolean;
+}) {
+  const displayTitle = title || path.split("/").pop() || path;
+  return (
+    <section
+      aria-label="Page metadata"
+      className="mt-4 pb-4 max-md:flex max-md:flex-col max-md:gap-3"
+    >
+      {encrypted ? (
+        <span className="cl-mono mb-2 block text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+          encrypted
+        </span>
+      ) : null}
+      <h1 className="w-full font-heading text-2xl font-bold">
+        {displayTitle}
+      </h1>
+      <dl className="cl-mono mt-2 grid gap-2 text-[10px]">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <dt className="uppercase tracking-[0.12em] text-ink-mute">Tags</dt>
+          <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
+            {tags.length > 0
+              ? tags.map((tag) => (
+                  <span key={tag} className="border border-rule px-1.5 py-[1px]">
+                    {tag}
+                  </span>
+                ))
+              : "—"}
+          </dd>
+        </div>
+        {aliases.length > 0 ? (
+          <div className="flex flex-wrap items-baseline gap-2">
+            <dt className="uppercase tracking-[0.12em] text-ink-mute">
+              Aliases
+            </dt>
+            <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
+              {aliases.map((alias) => (
+                <span
+                  key={alias}
+                  className="border border-rule px-1.5 py-[1px]"
+                >
+                  {alias}
+                </span>
+              ))}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
   );
 }
 

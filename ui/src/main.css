@@ -698,6 +698,167 @@ ul {
     margin-block: 1.25em;
 }
 
+/* AI conversation Folios use an editorial speaker gutter rather than chat
+   bubbles. Read and Edit share one Slate tree and the same prose measure. */
+.ai-conversation-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-gap);
+    margin-block: var(--space-gap);
+    font-family: var(--font-mono);
+    font-size: var(--text-fs-s);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.ai-conversation-controls__modes {
+    display: inline-flex;
+    border: 1px solid var(--rule);
+}
+
+.ai-conversation-controls button {
+    min-block-size: 2rem;
+    border: 0;
+    border-inline-end: 1px solid var(--rule);
+    padding-inline: var(--space-pad);
+    background: var(--paper);
+    color: var(--ink-mute);
+}
+
+.ai-conversation-controls button:last-child {
+    border-inline-end: 0;
+}
+
+.ai-conversation-controls button:hover {
+    color: var(--ink);
+}
+
+.ai-conversation-controls button[aria-pressed="true"],
+.ai-conversation-controls__add {
+    background: var(--paper-2);
+    color: var(--accent);
+}
+
+.ai-conversation-controls button:focus-visible,
+.ai-conversation-warning button:focus-visible,
+.ai-conversation-turn select:focus-visible,
+.ai-conversation-turn button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.ai-conversation-warning {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-gap);
+    border-block: 1px solid var(--warn);
+    padding-block: calc(var(--space-pad) / 2);
+    color: var(--ink-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-fs);
+    line-height: 1.5;
+}
+
+.ai-conversation-warning button {
+    flex: none;
+    border: 1px solid var(--warn);
+    padding: calc(var(--space-pad) / 2) var(--space-pad);
+    color: var(--warn);
+    text-transform: uppercase;
+}
+
+.ai-conversation-turn {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: var(--space-gap);
+    align-items: start;
+}
+
+.ai-conversation-turn__participant {
+    padding-block-start: calc(var(--space-pad) / 2);
+    color: var(--ink-mute);
+    font-family: var(--font-mono);
+    font-size: var(--text-fs);
+    font-style: normal;
+    letter-spacing: 0.12em;
+    line-height: 1.4;
+    text-transform: uppercase;
+}
+
+.ai-conversation-turn__content {
+    min-width: 0;
+    padding-inline-start: var(--space-pad);
+}
+
+.ai-conversation-turn[data-role="assistant"] .ai-conversation-turn__content {
+    border-inline-start: 2px solid var(--cool);
+}
+
+.ai-conversation--read .ai-conversation-turn {
+    padding-block: var(--space-gap);
+}
+
+.ai-conversation--edit .ai-conversation-turn {
+    padding-block: calc(var(--space-gap) / 2);
+    border-block-start: 1px solid var(--rule-soft);
+}
+
+.ai-conversation--edit .ai-conversation-turn__participant select {
+    width: 100%;
+    border: 1px solid var(--rule);
+    padding: calc(var(--space-pad) / 2);
+    background: var(--paper-2);
+    color: var(--ink);
+}
+
+.ai-conversation-turn__actions {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin-block-start: calc(var(--space-gap) / 2);
+}
+
+.ai-conversation-turn__actions button {
+    min-block-size: 2rem;
+    border: 1px solid var(--rule);
+    border-inline-end: 0;
+    color: var(--ink-mute);
+}
+
+.ai-conversation-turn__actions button:last-child {
+    border-inline-end: 1px solid var(--rule);
+}
+
+@media (width < 48rem) {
+    .ai-conversation-controls,
+    .ai-conversation-warning {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ai-conversation-controls__modes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .ai-conversation-controls button,
+    .ai-conversation-warning button,
+    .ai-conversation-turn__actions button,
+    .ai-conversation--edit .ai-conversation-turn__participant select {
+        min-block-size: 44px;
+    }
+
+    .ai-conversation-turn {
+        grid-template-columns: minmax(0, 1fr);
+        gap: calc(var(--space-gap) / 2);
+    }
+
+    .ai-conversation-turn__content {
+        padding-inline-start: var(--space-pad);
+    }
+}
+
 /* Folio TeX previews — KaTeX output is kept within the prose measure. */
 .folio-math {
     vertical-align: -0.08em;
