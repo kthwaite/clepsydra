@@ -61,10 +61,12 @@ summarize. Clepsydra cannot retrieve omitted or truncated turns, hidden
 system/developer prompts, tool calls or results, or attachment contents.
 When the host exposes both provider and conversation ID, pass both; the
 server keeps the normalized provider and a derived hash, not the raw host
-ID, then creates once and appends only an exact new suffix. A missing host
-ID creates a new Folio. Report the returned `created`, `appended`, or
-`unchanged` operation. On truncation or divergence conflict, ask the user
-to re-run from a host context containing the complete earlier prefix; never
+ID, then creates once. Later captures match earlier turns by ordered role,
+content, and source turn identity before appending only the new suffix;
+timestamp differences do not affect matching. A missing host ID creates a
+new Folio. Report the returned `created`, `appended`, or `unchanged`
+operation. On truncation or divergence conflict, ask the user to re-run
+from a host context containing the complete earlier prefix; never
 fuzzy-match or overwrite.
 
 **Create.** Always `vault_search` first — the note may exist; extend it

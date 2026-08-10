@@ -141,10 +141,12 @@ When both identity fields are available, Clepsydra persists the normalized
 provider and a hash derived from the provider and host conversation ID in
 Folio metadata, not the raw host ID; the result omits it too. The first
 capture returns
-`operation: "created"`. A later submission with the same identity and exact
-earlier prefix appends only the new suffix and returns
-`operation: "appended"`; an identical resubmission returns
-`operation: "unchanged"`. The result also reports `path`, `page_id`,
+`operation: "created"`. A later submission with the same identity matches
+earlier turns by their ordered roles, content, and source turn identities,
+then appends only the new suffix and returns `operation: "appended"`.
+Timestamps are stored but do not affect prefix matching. A submission with
+no new turns returns `operation: "unchanged"`. The result also reports
+`path`, `page_id`,
 `appended_turns`, `skipped_turns`, and `warnings`.
 
 Without `host_conversation_id`, each call creates a new Folio. A shorter
