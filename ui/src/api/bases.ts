@@ -1,11 +1,27 @@
-import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  queryOptions,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
 import { isApiError } from "./error";
-import { invalidateByPath, queryKeys } from "./keys";
+import {
+  baseViewEvaluationBody,
+  type BaseEmbedConfig,
+  queryIdentity,
+} from "#/components/bases/embed-query";
+import {
+  type BaseEvaluationQueryKey,
+  invalidateByPath,
+  queryKeys,
+} from "./keys";
 
+export type ApiError = components["schemas"]["ApiError"];
 export type BaseDetailResponse = components["schemas"]["BaseDetailResponse"];
 export type BaseMemberCreateRequest =
   components["schemas"]["BaseMemberCreateRequest"];
@@ -15,6 +31,10 @@ export type BaseMemberCapability =
   components["schemas"]["BaseMemberCapability"];
 export type BaseMemberDiagnostic =
   components["schemas"]["BaseMemberDiagnostic"];
+export type BaseViewEvaluateRequest =
+  components["schemas"]["BaseViewEvaluateRequest"];
+export type BaseViewEvaluateResponse =
+  components["schemas"]["BaseViewEvaluateResponse"];
 export type BaseFile = components["schemas"]["BaseFile"];
 export type BaseListResponse = components["schemas"]["BaseListResponse"];
 export type BaseSummary = components["schemas"]["BaseSummary"];
@@ -36,6 +56,7 @@ const BASE_MEMBER_SCOPES: ReadonlySet<string> = new Set([
   "membership",
   "view",
   "field",
+  "embed",
 ]);
 
 function isBaseMemberDiagnostic(
@@ -88,18 +109,20 @@ export function decodeBaseMemberDiagnostics(
   return diagnostics;
 }
 
-function useInvalidateBaseQueries() {
-  const qc = useQueryClient();
-  return useCallback(() => {
-    invalidateByPath(qc, queryKeys.bases.pathPrefix);
-    invalidateByPath(qc, queryKeys.query.pathPrefix);
-  }, [qc]);
-}
-
-export function invalidateBaseMemberQueries(queryClient: QueryClient): void {
+export function invalidateBaseMutationQueries(
+  queryClient: QueryClient,
+): void {
   invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
   invalidateByPath(queryClient, queryKeys.query.pathPrefix);
   invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
+}
+
+function useInvalidateBaseQueries() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    () => invalidateBaseMutationQueries(queryClient),
+    [queryClient],
+  );
 }
 
 export const useBases = () => $api.useQuery("get", "/api/vault/bases", {});
@@ -112,7 +135,7 @@ export function useCreateBase() {
 export function useCreateBaseMember() {
   const queryClient = useQueryClient();
   return $api.useMutation("post", "/api/vault/bases/{slug}/members", {
-    onSuccess: () => invalidateBaseMemberQueries(queryClient),
+    onSuccess: () => invalidateBaseMutationQueries(queryClient),
   });
 }
 
@@ -164,18 +187,54 @@ export function useBaseView(
   );
 }
 
+export function baseViewEvaluationOptions(config: BaseEmbedConfig) {
+  return queryOptions<
+    BaseViewEvaluateResponse,
+    ApiError,
+    BaseViewEvaluateResponse,
+    BaseEvaluationQueryKey
+  >({
+    queryKey: queryKeys.bases.evaluation(queryIdentity(config)),
+    queryFn: async (): Promise<BaseViewEvaluateResponse> => {
+      const { data, error } = await fetchClient.POST(
+        "/api/vault/bases/{slug}/views/{view}/evaluate",
+        {
+          params: { path: { slug: config.base, view: config.view } },
+          body: baseViewEvaluationBody(config),
+        },
+      );
+      if (error) throw error;
+      if (!data) {
+        throw {
+          status: 500,
+          error: "Embedded Base evaluation response was empty",
+          hint: null,
+        } satisfies ApiError;
+      }
+      return data;
+    },
+  });
+}
+
+export function useBaseViewEvaluation(
+  config: BaseEmbedConfig,
+): UseQueryResult<BaseViewEvaluateResponse, ApiError> {
+  return useQuery({
+    ...baseViewEvaluationOptions(config),
+    enabled: !!config.base && !!config.view,
+    throwOnError: false,
+  });
+}
+
 /**
  * The property patch: the cell-edit write path. Sends only the changed keys
  * plus type hints from the base schema; the response embeds the refreshed
  * projections (read-after-write) so callers reconcile without waiting on SSE.
  */
 function usePatchProperties() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return $api.useMutation("patch", "/api/vault/pages/by-id/{uuid}/properties", {
-    onSuccess: () => {
-      invalidateByPath(qc, queryKeys.bases.pathPrefix);
-      invalidateByPath(qc, queryKeys.query.pathPrefix);
-    },
+    onSuccess: () => invalidateBaseMutationQueries(queryClient),
   });
 }
 
@@ -215,8 +274,7 @@ export function usePropertyCommit() {
         });
       } catch {
         toast.error(`Could not update ${key} — refreshed to current state`);
-        invalidateByPath(qc, queryKeys.bases.pathPrefix);
-        invalidateByPath(qc, queryKeys.query.pathPrefix);
+        invalidateBaseMutationQueries(qc);
       }
     },
     [patch, qc],

@@ -38,6 +38,7 @@ export interface BaseMemberDraftField {
   definition?: PropertyDefinition;
   membership: boolean;
   viewOnly: boolean;
+  embedOnly: boolean;
 }
 
 export interface BaseMemberDraftValue {
@@ -113,7 +114,7 @@ export function composeMemberDraftFields(
   ];
   const requirements = new Map<
     string,
-    { membership: boolean; viewOnly: boolean }
+    { membership: boolean; viewOnly: boolean; embedOnly: boolean }
   >();
   for (const requirement of capability.fields) {
     const resolved = resolveDraftField(requirement.field, properties);
@@ -122,6 +123,7 @@ export function composeMemberDraftFields(
     requirements.set(resolved.identity, {
       membership: (current?.membership ?? false) || requirement.membership,
       viewOnly: (current?.viewOnly ?? false) || requirement.view,
+      embedOnly: (current?.embedOnly ?? false) || requirement.embed,
     });
   }
 
@@ -135,6 +137,7 @@ export function composeMemberDraftFields(
     const labels = requirements.get(resolved.identity) ?? {
       membership: false,
       viewOnly: false,
+      embedOnly: false,
     };
     if (resolved.source === "system") {
       if (Object.hasOwn(READ_ONLY_SYSTEM, resolved.bare)) continue;

@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { createRef, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -26,7 +26,10 @@ import type {
   BaseMemberCapability,
   QueryOutput,
 } from "#/api/bases";
-import { BaseTableView } from "#/components/bases/BaseTableView";
+import {
+  BaseTableView,
+  type BaseTableViewHandle,
+} from "#/components/bases/BaseTableView";
 import type { BaseMemberDraftField } from "#/components/bases/member-draft";
 
 const definition: BaseDetailResponse = {
@@ -75,6 +78,7 @@ const memberDraftFields: BaseMemberDraftField[] = [
     kind: "title",
     membership: true,
     viewOnly: false,
+    embedOnly: false,
   },
 ];
 
@@ -97,7 +101,7 @@ function renderView(overrides: Partial<ViewProps>) {
       definition={definition}
       activeView="Continues"
       output={flat}
-      sortOverride={{}}
+      sort={undefined}
       memberCapability={enabledCapability}
       memberDraftFields={memberDraftFields}
       memberDraftOpen={false}
@@ -114,6 +118,12 @@ function renderView(overrides: Partial<ViewProps>) {
     ...spies,
     rerender: (next: Partial<ViewProps>) => result.rerender(element(next)),
   };
+}
+
+async function flushFocusTimer(): Promise<void> {
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 }
 
 describe("BaseTableView", () => {
@@ -233,6 +243,245 @@ describe("BaseTableView", () => {
     expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
   });
 
+  it("cancels created focus on a view switch even when the same row ID remains", async () => {
+    vi.useFakeTimers();
+    const onCreatedRowFocused = vi.fn();
+    const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+
+    props.rerender({
+      activeView: "Shelf",
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "reading", total: 1, aggregates: [1, 4.5], rows: [row] },
+        ],
+      },
+    });
+    await flushFocusTimer();
+    vi.useRealTimers();
+
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "The Book of the New Sun" }),
+    ).not.toHaveFocus();
+  });
+
+  it("retries created focus when the same ID reappears after disappearing", async () => {
+    const onCreatedRowFocused = vi.fn();
+    vi.useFakeTimers();
+    const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+
+    props.rerender({
+      output: { shape: "flat", rows: [], total: 0 },
+    });
+    await flushFocusTimer();
+    vi.useRealTimers();
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+
+    props.rerender({ output: flat });
+    const title = screen.getByRole("button", {
+      name: "The Book of the New Sun",
+    });
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers created focus through cached loading and error states", async () => {
+    vi.useFakeTimers();
+    const onCreatedRowFocused = vi.fn();
+    const props = renderView({
+      focusCreatedId: row.id,
+      onCreatedRowFocused,
+      viewLoading: true,
+    });
+    await flushFocusTimer();
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+
+    props.rerender({
+      viewLoading: false,
+      viewError: "query error: bad filter",
+    });
+    await flushFocusTimer();
+    vi.useRealTimers();
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+
+    props.rerender({ viewLoading: false, viewError: undefined });
+    const title = screen.getByRole("button", {
+      name: "The Book of the New Sun",
+    });
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels queued created focus when cached output becomes loading", async () => {
+    vi.useFakeTimers();
+    const onCreatedRowFocused = vi.fn();
+    const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+
+    props.rerender({ viewLoading: true });
+    await flushFocusTimer();
+    vi.useRealTimers();
+
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+  });
+
+  it("rechecks error after the focus timer and before its completion microtask", () => {
+    vi.useFakeTimers();
+    const onCreatedRowFocused = vi.fn();
+    const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+    const queuedMicrotasks: VoidFunction[] = [];
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, "queueMicrotask")
+      .mockImplementation((task) => queuedMicrotasks.push(task));
+
+    try {
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+      const title = screen.getByRole("button", {
+        name: "The Book of the New Sun",
+      });
+      expect(title).toHaveFocus();
+      expect(onCreatedRowFocused).not.toHaveBeenCalled();
+      expect(queuedMicrotasks.length).toBeGreaterThan(0);
+
+      props.rerender({ viewError: "query error: stale evaluation" });
+      act(() => {
+        for (const task of queuedMicrotasks.splice(0)) task();
+      });
+
+      expect(screen.getByRole("alert")).toHaveTextContent("stale evaluation");
+      expect(onCreatedRowFocused).not.toHaveBeenCalled();
+    } finally {
+      queueMicrotaskSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not claim created focus when the active view omits title", async () => {
+    const onCreatedRowFocused = vi.fn();
+    vi.useFakeTimers();
+    renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["author"],
+          },
+        ],
+      },
+      focusCreatedId: row.id,
+      onCreatedRowFocused,
+    });
+    await flushFocusTimer();
+    vi.useRealTimers();
+
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: row.title })).toBeNull();
+  });
+
+  it("focuses entry on the active saved-view control", () => {
+    const ref = createRef<BaseTableViewHandle>();
+    render(
+      <BaseTableView
+        ref={ref}
+        definition={definition}
+        activeView="Continues"
+        output={flat}
+        sort={undefined}
+        memberCapability={enabledCapability}
+        onViewChange={vi.fn()}
+        onSortChange={vi.fn()}
+        onOpenPage={vi.fn()}
+        onCommitCell={vi.fn()}
+      />,
+    );
+
+    expect(ref.current?.focusEntry()).toBe(true);
+    expect(screen.getByRole("button", { name: "Continues" })).toHaveFocus();
+  });
+
+  it("falls back to the rendered read-only table for entry focus", () => {
+    const ref = createRef<BaseTableViewHandle>();
+    render(
+      <BaseTableView
+        ref={ref}
+        definition={definition}
+        activeView="Continues"
+        output={flat}
+        sort={undefined}
+        readOnly
+        onViewChange={vi.fn()}
+        onSortChange={vi.fn()}
+        onOpenPage={vi.fn()}
+        onCommitCell={vi.fn()}
+      />,
+    );
+
+    let focused = false;
+    act(() => {
+      focused = ref.current?.focusEntry() ?? false;
+    });
+    const grid = screen.getByRole("grid");
+    expect(focused).toBe(true);
+    expect(grid).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("focuses the first grouped table for read-only entry", () => {
+    const ref = createRef<BaseTableViewHandle>();
+    render(
+      <BaseTableView
+        ref={ref}
+        definition={definition}
+        activeView="Shelf"
+        output={{
+          shape: "grouped",
+          groups: [
+            { key: "reading", total: 1, aggregates: [1, 4.5], rows: [row] },
+            { key: "queued", total: 0, aggregates: [0, null], rows: [] },
+          ],
+        }}
+        sort={undefined}
+        readOnly
+        onViewChange={vi.fn()}
+        onSortChange={vi.fn()}
+        onOpenPage={vi.fn()}
+        onCommitCell={vi.fn()}
+      />,
+    );
+
+    const grids = screen.getAllByRole("grid");
+    let focused = false;
+    act(() => {
+      focused = ref.current?.focusEntry() ?? false;
+    });
+    expect(focused).toBe(true);
+    expect(grids[0]).toContainElement(document.activeElement as HTMLElement);
+    expect(grids[1]).not.toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("returns false when entry has no enabled view or table target", () => {
+    const ref = createRef<BaseTableViewHandle>();
+    render(
+      <BaseTableView
+        ref={ref}
+        definition={{ ...definition, views: [] }}
+        activeView=""
+        output={undefined}
+        viewLoading
+        sort={undefined}
+        onViewChange={vi.fn()}
+        onSortChange={vi.fn()}
+        onOpenPage={vi.fn()}
+        onCommitCell={vi.fn()}
+      />,
+    );
+
+    expect(ref.current?.focusEntry()).toBe(false);
+  });
+
   it("renders group header rows with aggregate chips", () => {
     const grouped: QueryOutput = {
       shape: "grouped",
@@ -293,6 +542,28 @@ describe("BaseTableView", () => {
     expect(props.onCommitCell).not.toHaveBeenCalled();
   });
 
+  it("displays only the first sort key and replaces all keys on header sort", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      sort: [
+        { field: "author", dir: "desc" },
+        { field: "rating", dir: "asc" },
+      ],
+    });
+
+    expect(
+      screen.getByRole("columnheader", { name: /author/ }),
+    ).toHaveAttribute("aria-sort", "descending");
+    expect(
+      screen.getByRole("columnheader", { name: "title" }),
+    ).toHaveAttribute("aria-sort", "none");
+
+    await user.click(screen.getByRole("columnheader", { name: "title" }));
+    expect(props.onSortChange).toHaveBeenCalledWith([
+      { field: "title", dir: "asc" },
+    ]);
+  });
+
   it("sorts scalar headers but keeps multi-valued headers inert", async () => {
     const user = userEvent.setup();
     const props = renderView({
@@ -342,10 +613,9 @@ describe("BaseTableView", () => {
     expect(props.onSortChange).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("columnheader", { name: "author" }));
-    expect(props.onSortChange).toHaveBeenCalledWith({
-      sort: "author",
-      dir: "asc",
-    });
+    expect(props.onSortChange).toHaveBeenCalledWith([
+      { field: "author", dir: "asc" },
+    ]);
   });
 
   it("treats omitted property definitions as an empty read-only schema", () => {
@@ -365,6 +635,218 @@ describe("BaseTableView", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("bad filter");
     expect(screen.queryByRole("grid")).toBeNull();
+  });
+
+  it("keeps same-key cached rows mounted beside loading and error status", () => {
+    const props = renderView({ viewLoading: true });
+
+    expect(screen.getByText("The Book of the New Sun")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "View loading" })).toHaveTextContent(
+      "Loading",
+    );
+
+    props.rerender({
+      viewLoading: false,
+      viewError: "query error: bad filter",
+    });
+    expect(screen.getByText("The Book of the New Sun")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("bad filter");
+  });
+
+  it("invalidates every evaluation identity dimension independently", () => {
+    const props = renderView({});
+    let previousGrid = screen.getByRole("grid");
+    const expectRemount = (next: Partial<ViewProps>) => {
+      props.rerender(next);
+      const currentGrid = screen.getByRole("grid");
+      expect(currentGrid).not.toBe(previousGrid);
+      previousGrid = currentGrid;
+    };
+    const restoreBaseline = () => {
+      expectRemount({
+        definition,
+        activeView: "Continues",
+        output: flat,
+        sort: undefined,
+      });
+    };
+
+    expectRemount({
+      definition: { ...definition, revision: "revision-2" },
+    });
+    restoreBaseline();
+
+    const twinViewDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "First",
+          layout: "table",
+          columns: ["title", "author"],
+        },
+        {
+          name: "Second",
+          layout: "table",
+          columns: ["title", "author"],
+        },
+      ],
+    };
+    expectRemount({
+      definition: twinViewDefinition,
+      activeView: "First",
+    });
+    expectRemount({
+      definition: twinViewDefinition,
+      activeView: "Second",
+    });
+    restoreBaseline();
+
+    expectRemount({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "rating"],
+          },
+          definition.views![1],
+        ],
+      },
+    });
+    expect(screen.getByRole("columnheader", { name: "rating" })).toBeInTheDocument();
+    restoreBaseline();
+
+    expectRemount({
+      definition: {
+        ...definition,
+        views: [
+          {
+            ...definition.views![0],
+            group_by: "status",
+          },
+          definition.views![1],
+        ],
+      },
+    });
+    restoreBaseline();
+
+    expectRemount({
+      definition: {
+        ...definition,
+        views: [
+          {
+            ...definition.views![0],
+            aggregates: [{ fn: "count" }],
+          },
+          definition.views![1],
+        ],
+      },
+    });
+    restoreBaseline();
+
+    expectRemount({ sort: [] });
+    restoreBaseline();
+
+    expectRemount({
+      sort: [
+        { field: "author", dir: "asc" },
+        { field: "rating", dir: "asc" },
+        { field: "status", dir: "desc" },
+      ],
+    });
+    expectRemount({
+      sort: [
+        { field: "author", dir: "asc" },
+        { field: "status", dir: "desc" },
+        { field: "rating", dir: "asc" },
+      ],
+    });
+    expectRemount({
+      sort: [
+        { field: "author", dir: "asc" },
+        { field: "status", dir: "asc" },
+        { field: "rating", dir: "asc" },
+      ],
+    });
+    expect(screen.getByRole("columnheader", { name: /author/ })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+    restoreBaseline();
+
+    expectRemount({
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "reading", total: 1, aggregates: [], rows: [row] },
+        ],
+      },
+    });
+    expect(screen.getByText("reading")).toBeInTheDocument();
+  });
+
+  it("invalidates a grouped table when raw keys share a formatted label", () => {
+    const props = renderView({
+      output: {
+        shape: "grouped",
+        groups: [{ key: null, total: 1, aggregates: [], rows: [row] }],
+      },
+    });
+    const nullKeyGrid = screen.getByRole("grid");
+    expect(screen.getByText("(empty)")).toBeInTheDocument();
+
+    props.rerender({
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "(empty)", total: 1, aggregates: [], rows: [row] },
+        ],
+      },
+    });
+
+    expect(screen.getByText("(empty)")).toBeInTheDocument();
+    expect(screen.getByRole("grid")).not.toBe(nullKeyGrid);
+  });
+
+  it("announces flat output excluded by the current cap", () => {
+    renderView({
+      output: { shape: "flat", rows: [row], total: 3 },
+    });
+
+    expect(screen.getByRole("status", { name: "Result limit" })).toHaveTextContent(
+      "Showing 1 of 3 rows; 2 rows excluded by the current limit.",
+    );
+  });
+
+  it("announces grouped cap exclusion while retaining true totals and aggregates", () => {
+    renderView({
+      activeView: "Shelf",
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "reading", total: 3, aggregates: [3, 4.75], rows: [row] },
+          { key: "queued", total: 2, aggregates: [2, 4], rows: [] },
+        ],
+      },
+    });
+
+    expect(screen.getByText("3 rows")).toBeInTheDocument();
+    expect(screen.getByText(/count\s*3/)).toBeInTheDocument();
+    expect(screen.getByText(/avg\(rating\)\s*4.75/)).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Result limit" })).toHaveTextContent(
+      "Showing 1 of 5 rows across groups; 4 rows excluded by the current per-group limit.",
+    );
+  });
+
+  it("renders one labelled region without an application role", () => {
+    renderView({});
+
+    expect(
+      screen.getAllByRole("region", { name: "Reading Log table view" }),
+    ).toHaveLength(1);
+    expect(screen.getAllByRole("grid")).toHaveLength(1);
+    expect(screen.queryByRole("application")).not.toBeInTheDocument();
   });
 
   it("commits an edited property cell with only the changed key", async () => {
@@ -407,7 +889,7 @@ describe("BaseTableView", () => {
       definition: sharedColumnDefinition,
       activeView: "First",
       output: flat,
-      sortOverride: {},
+      sort: undefined,
       onViewChange: vi.fn(),
       onSortChange: vi.fn(),
       onOpenPage: vi.fn(),
@@ -469,7 +951,7 @@ describe("BaseTableView", () => {
       definition: tabDefinition,
       activeView: "Continues",
       output: flat,
-      sortOverride: {},
+      sort: undefined,
       onViewChange: vi.fn(),
       onSortChange: vi.fn(),
       onOpenPage: vi.fn(),

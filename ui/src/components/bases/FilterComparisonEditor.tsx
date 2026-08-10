@@ -1,6 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import type { BaseFilter, FilterOp, PropertyType } from "#/api/bases";
-import type { RegisterFocusTarget } from "./BaseDefinitionWorkspace";
+import type {
+  BaseDiagnostic,
+  RegisterFocusTarget,
+} from "./BaseDefinitionWorkspace";
 import {
   type DraftProperty,
   type FilterPath,
@@ -27,14 +30,19 @@ const SYSTEM_FIELDS: readonly FieldCapability[] = [
   { key: "journal_date", label: "Journal date", type: "date" },
   { key: "word_count", label: "Word count", type: "number" },
 ];
+export const CANONICAL_FILTER_FIELDS = SYSTEM_FIELDS.map(({ key }) => key);
 
 const VALUELESS_OPERATORS: Partial<Record<FilterOp, true>> = {
   is_empty: true,
   not_empty: true,
 };
 
-function diagnosticPath(path: FilterPath, control: "field" | "op" | "value") {
-  let result = "filter";
+function diagnosticPath(
+  root: string,
+  path: FilterPath,
+  control: "field" | "op" | "value",
+) {
+  let result = root;
   for (const segment of path) {
     result += typeof segment === "number" ? `[${segment}]` : `.${segment}`;
   }
@@ -59,6 +67,8 @@ interface FilterComparisonEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter): void;
   registerFocus: RegisterFocusTarget;
+  diagnostics?: BaseDiagnostic[];
+  diagnosticRoot?: string;
 }
 
 export function FilterComparisonEditor({
@@ -68,10 +78,13 @@ export function FilterComparisonEditor({
   properties,
   onChange,
   registerFocus,
+  diagnostics = [],
+  diagnosticRoot = "filter",
 }: FilterComparisonEditorProps) {
   const [relationSuggestions, setRelationSuggestions] = useState<string[]>([]);
   const [freeformDraft, setFreeformDraft] = useState<string>();
   const relationListId = useId();
+  const diagnosticId = useId();
 
   const declaredFields: FieldCapability[] = properties
     .filter(
@@ -120,6 +133,26 @@ export function FilterComparisonEditor({
   const missingOptions = selectedOptionValues.filter(
     (option) => !declaredOptions.includes(option),
   );
+  const diagnosticsFor = (control: "field" | "op" | "value") =>
+    diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.path === diagnosticPath(diagnosticRoot, path, control),
+    );
+  const fieldDiagnostics = diagnosticsFor("field");
+  const operatorDiagnostics = diagnosticsFor("op");
+  const valueDiagnostics = diagnosticsFor("value");
+  const fieldInvalid = fieldDiagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  const operatorInvalid = operatorDiagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  const valueInvalid = valueDiagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  const fieldErrorId = `${diagnosticId}-field-error`;
+  const operatorErrorId = `${diagnosticId}-operator-error`;
+  const valueErrorId = `${diagnosticId}-value-error`;
 
   useEffect(() => {
     let cancelled = false;
@@ -182,10 +215,17 @@ export function FilterComparisonEditor({
         <span className={labelClass}>Field</span>
         <select
           ref={(element) =>
-            registerFocus(diagnosticPath(path, "field"), element)
+            registerFocus(
+              diagnosticPath(diagnosticRoot, path, "field"),
+              element,
+            )
           }
           aria-label={`Field for condition ${position}`}
           value={filterValue.field}
+          aria-invalid={fieldInvalid || undefined}
+          aria-describedby={
+            fieldDiagnostics.length > 0 ? fieldErrorId : undefined
+          }
           onChange={(event) => {
             const nextCapability = fields.find(
               (field) => field.key === event.target.value,
@@ -224,13 +264,28 @@ export function FilterComparisonEditor({
             </optgroup>
           )}
         </select>
+        {fieldDiagnostics.length > 0 ? (
+          <span
+            id={fieldErrorId}
+            role="alert"
+            className="mt-1 text-xs text-destructive"
+          >
+            {fieldDiagnostics.map((diagnostic) => diagnostic.message).join(" ")}
+          </span>
+        ) : null}
       </label>
 
       <label className="flex min-w-0 flex-col">
         <span className={labelClass}>Operator</span>
         <select
-          ref={(element) => registerFocus(diagnosticPath(path, "op"), element)}
+          ref={(element) =>
+            registerFocus(diagnosticPath(diagnosticRoot, path, "op"), element)
+          }
           aria-label={`Operator for condition ${position}`}
+          aria-invalid={operatorInvalid || undefined}
+          aria-describedby={
+            operatorDiagnostics.length > 0 ? operatorErrorId : undefined
+          }
           value={activeOperator}
           onChange={(event) => {
             const nextOperator = operatorOptions.find(
@@ -261,6 +316,17 @@ export function FilterComparisonEditor({
             </option>
           ))}
         </select>
+        {operatorDiagnostics.length > 0 ? (
+          <span
+            id={operatorErrorId}
+            role="alert"
+            className="mt-1 text-xs text-destructive"
+          >
+            {operatorDiagnostics
+              .map((diagnostic) => diagnostic.message)
+              .join(" ")}
+          </span>
+        ) : null}
       </label>
 
       {hasValue && (
@@ -269,9 +335,16 @@ export function FilterComparisonEditor({
           {capability.type === "bool" ? (
             <select
               ref={(element) =>
-                registerFocus(diagnosticPath(path, "value"), element)
+                registerFocus(
+                  diagnosticPath(diagnosticRoot, path, "value"),
+                  element,
+                )
               }
               aria-label={`Value for condition ${position}`}
+              aria-invalid={valueInvalid || undefined}
+              aria-describedby={
+                valueDiagnostics.length > 0 ? valueErrorId : undefined
+              }
               multiple={activeOperator === "in"}
               value={
                 activeOperator === "in"
@@ -304,9 +377,16 @@ export function FilterComparisonEditor({
           ) : declaredOptions.length > 0 ? (
             <select
               ref={(element) =>
-                registerFocus(diagnosticPath(path, "value"), element)
+                registerFocus(
+                  diagnosticPath(diagnosticRoot, path, "value"),
+                  element,
+                )
               }
               aria-label={`Value for condition ${position}`}
+              aria-invalid={valueInvalid || undefined}
+              aria-describedby={
+                valueDiagnostics.length > 0 ? valueErrorId : undefined
+              }
               multiple={activeOperator === "in"}
               value={
                 activeOperator === "in"
@@ -346,9 +426,16 @@ export function FilterComparisonEditor({
             <>
               <input
                 ref={(element) =>
-                  registerFocus(diagnosticPath(path, "value"), element)
+                  registerFocus(
+                    diagnosticPath(diagnosticRoot, path, "value"),
+                    element,
+                  )
                 }
                 aria-label={`Value for condition ${position}`}
+                aria-invalid={valueInvalid || undefined}
+                aria-describedby={
+                  valueDiagnostics.length > 0 ? valueErrorId : undefined
+                }
                 type={inputType}
                 list={
                   capability.type === "relation" ? relationListId : undefined
@@ -385,6 +472,17 @@ export function FilterComparisonEditor({
               )}
             </>
           )}
+          {valueDiagnostics.length > 0 ? (
+            <span
+              id={valueErrorId}
+              role="alert"
+              className="mt-1 text-xs text-destructive"
+            >
+              {valueDiagnostics
+                .map((diagnostic) => diagnostic.message)
+                .join(" ")}
+            </span>
+          ) : null}
         </label>
       )}
     </div>

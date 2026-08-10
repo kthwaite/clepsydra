@@ -15,7 +15,9 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use crate::vault::base::{Aggregate, Filter, PropertyType, SortKey};
-use crate::vault::query::{QueryContext, QueryOutput, QueryRow, QuerySpec, evaluate};
+use crate::vault::query::{
+    GroupRowLimit, QueryContext, QueryOutput, QueryRow, QuerySpec, evaluate,
+};
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct QueryRequest {
@@ -55,6 +57,40 @@ pub(crate) fn redact_conversation_columns(output: &mut QueryOutput) {
     }
 }
 
+impl QueryRequest {
+    fn into_query_parts(self) -> (QuerySpec, HashMap<String, PropertyType>) {
+        let Self {
+            filter,
+            sort,
+            group_by,
+            aggregates,
+            columns,
+            types,
+            limit,
+            offset,
+            group_row_limit,
+        } = self;
+        let group_row_limit = match group_row_limit {
+            Some(limit) => GroupRowLimit::Limit(limit),
+            None => GroupRowLimit::Default,
+        };
+
+        (
+            QuerySpec {
+                filter,
+                sort,
+                group_by,
+                aggregates,
+                columns,
+                limit,
+                offset,
+                group_row_limit,
+            },
+            types,
+        )
+    }
+}
+
 /// Evaluate an ad-hoc query over the whole vault.
 #[utoipa::path(
     post,
@@ -71,17 +107,7 @@ pub async fn run_query(
     State(state): State<Arc<AppState>>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryOutput>, ApiError> {
-    let spec = QuerySpec {
-        filter: request.filter,
-        sort: request.sort,
-        group_by: request.group_by,
-        aggregates: request.aggregates,
-        columns: request.columns,
-        limit: request.limit,
-        offset: request.offset,
-        group_row_limit: request.group_row_limit,
-    };
-    let types = request.types;
+    let (spec, types) = request.into_query_parts();
 
     let mut output = state
         .index
@@ -98,4 +124,29 @@ pub async fn run_query(
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/", post(run_query))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QueryRequest;
+    use crate::vault::query::GroupRowLimit;
+
+    #[test]
+    fn generic_query_absent_group_limit_maps_to_default() {
+        let request: QueryRequest = serde_json::from_value(serde_json::json!({})).unwrap();
+
+        let (spec, _types) = request.into_query_parts();
+
+        assert_eq!(spec.group_row_limit, GroupRowLimit::Default);
+    }
+
+    #[test]
+    fn generic_query_explicit_group_limit_maps_to_explicit_cap() {
+        let request: QueryRequest =
+            serde_json::from_value(serde_json::json!({ "group_row_limit": 7 })).unwrap();
+
+        let (spec, _types) = request.into_query_parts();
+
+        assert_eq!(spec.group_row_limit, GroupRowLimit::Limit(7));
+    }
 }

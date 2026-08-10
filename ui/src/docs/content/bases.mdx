@@ -217,6 +217,42 @@ Press <kbd>Escape</kbd> to cancel after any open field editor has closed. Derive
 
 Renaming or removing a property declaration changes only the base schema. It does not rename or remove that key in existing page frontmatter. Deleting a base removes only its `.base.toml` definition: all matching Markdown pages and all of their properties remain.
 
+## Embed a Base in a Folio
+
+A Base embed is a live, non-owning view of the same pages as its saved Base. The Folio stores only the Base/view reference and document-local filter, sort, and limit. It does not copy the Base definition, table rows, or member pages into the Folio.
+
+In a Folio editor, open the slash-command menu and choose **Base embed**. The structured **Edit Base embed** inspector opens immediately. Select a Base and one of its saved views, then optionally build an additional nested filter, arrange ordered sort keys, and set a row limit. Choose **Save** to replace the new block with the configured live table; **Cancel** removes a new unconfigured block or leaves an existing configured block unchanged.
+
+The saved Folio Markdown contains a fenced `base` block. This is a complete valid example:
+
+````markdown
+```base
+base = "reading-log"
+view = "Currently reading"
+filter = { field = "rating", op = "gte", value = 4 }
+sort = [{ field = "rating", dir = "desc" }]
+limit = 20
+```
+````
+
+Normal configured embeds are not edited as raw source. Use **Edit embed** and the structured inspector; raw TOML editing appears only when repairing an invalid fence. Saving a valid configuration writes canonical TOML with the keys in `base`, `view`, `filter`, `sort`, `limit` order.
+
+An omitted embed limit has an effective default of 50. Explicit limits accept 1 through 200. A flat table applies the limit to its total returned rows; a grouped table applies it to each group while preserving the true group totals and aggregates. The rendered block reports when rows were capped.
+
+An omitted `sort` inherits the saved view's ordered sort. An explicit `sort = []` removes saved-view sorting without inheriting it. Switching saved views keeps the embed filter and limit but resets sort to inherited for the new view. Changing the Base selects its first view, clears filter and sort, and keeps the limit. Clicking a sortable table header replaces any ordered override with that one column and direction. These Base/view/sort changes update only this Folio block and survive reload.
+
+The embedded table keeps the normal Base table controls. A title opens its member Folio, and declared properties use their type-specific inline editors. Property edits write the member page, not the Folio block. **Add member** is available only when the current Base membership, saved-view filter, and embed filter can be satisfied by a new page. Its draft includes fields required by all three scopes. A successful save creates one member page atomically; if the configured row cap excludes that matching page, the block keeps the success, leaves the updated cap notice visible, and does not try to focus a row that was not returned.
+
+Missing references remain in the document. A missing Base shows its slug with **Edit embed** and **Remove**; a missing or renamed view can be replaced from the inspector. Malformed or otherwise invalid `base` fences preserve their original bytes and open the inspector in source-repair mode. Invalid repairs stay local, and saving valid TOML replaces the recovery source with one canonical configured block.
+
+The embed is one Slate block with explicit keyboard boundaries:
+
+- Select the block and press <kbd>Enter</kbd> or <kbd>F2</kbd> to enter its first enabled view/table control, falling back to **Edit embed** and then **Remove**.
+- Press <kbd>Tab</kbd> through the embedded controls to leave at the Slate point after the block; <kbd>Shift</kbd>+<kbd>Tab</kbd> through the first control leaves before it.
+- Press <kbd>Escape</kbd> to leave after the block unless a cell editor, dialog, or other nested control handled the key first.
+- Press <kbd>Backspace</kbd> or <kbd>Delete</kbd> to remove the selected block only while the Folio editor owns focus. Focus moves to the following text point, or the preceding point when necessary.
+- Cancelling or pressing <kbd>Escape</kbd> in the inspector returns focus to **Edit embed** for an existing block.
+
 The structured editor is the normal authoring path, but the TOML format remains public and editable. Manual TOML is useful for advanced changes or recovery. If a definition cannot be parsed, `/bases` reports it under **Base files needing repair** and provides its path. Repair that file in a text editor, then reload; Clepsydra never fabricates a replacement draft over an unparseable file.
 
 ## Neovim/LSP completions and warnings

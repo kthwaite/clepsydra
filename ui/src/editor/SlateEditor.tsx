@@ -14,6 +14,7 @@ import {
   Node,
   Point,
   Range,
+  type RangeRef,
   Element as SlateElement,
   Text,
   Transforms,
@@ -31,6 +32,10 @@ import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWik
 import type { CustomEditor } from "#/editor/types";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
+import {
+  BaseEmbedEditingProvider,
+  useBaseEmbedEditingController,
+} from "./baseEmbedEditing";
 import { makeDecorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
@@ -50,6 +55,7 @@ import {
 } from "./plugins/withOutliner";
 import { useRefractor } from "./refractor-lazy";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
+import { makeBaseEmbed } from "./schema/elements/baseEmbed";
 import { makeBlockRef } from "./schema/elements/blockRef";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
@@ -102,6 +108,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: "time",
     label: "Time Heading",
     description: "Insert the current local time as a section heading",
+  },
+  {
+    id: "base",
+    label: "Base embed",
+    description: "Insert a live saved Base view",
   },
   { id: "h1", label: "Heading 1", description: "Large heading" },
   { id: "h2", label: "Heading 2", description: "Medium heading" },
@@ -170,6 +181,7 @@ export function SlateEditor({
   }, [editor, editorRef]);
   const wikilinkEditing = useWikilinkEditingController(editor);
   const mathEditing = useMathEditingController(editor);
+  const baseEmbedEditing = useBaseEmbedEditingController(editor);
   const handledInsertionRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -408,16 +420,42 @@ export function SlateEditor({
       const { selection } = editor;
       if (!selection) return;
 
-      const conversion = slashCommandToConversion(cmd.id);
-      if (!conversion) {
+      const entry = Editor.above(editor, {
+        match: (node) =>
+          SlateElement.isElement(node) && node.type === "paragraph",
+      });
+      if (!entry) {
         setSlashTrigger(null);
         return;
       }
 
-      const entry = Editor.above(editor, {
-        match: (n) => SlateElement.isElement(n) && n.type === "paragraph",
-      });
-      if (!entry) {
+      if (cmd.id === "base") {
+        let bookmark: RangeRef | undefined;
+        const node = makeBaseEmbed();
+        Editor.withoutNormalizing(editor, () => {
+          Transforms.delete(editor, {
+            at: { anchor: slashTrigger.anchor, focus: selection.focus },
+          });
+          if (editor.selection) {
+            bookmark = Editor.rangeRef(editor, editor.selection, {
+              affinity: "forward",
+            });
+          }
+          Transforms.insertNodes(editor, node, {
+            at: entry[1],
+            voids: true,
+          });
+          Transforms.select(editor, entry[1]);
+        });
+        baseEmbedEditing.begin(entry[1], {
+          ...(bookmark ? { insertionBookmark: bookmark } : {}),
+        });
+        setSlashTrigger(null);
+        return;
+      }
+
+      const conversion = slashCommandToConversion(cmd.id);
+      if (!conversion) {
         setSlashTrigger(null);
         return;
       }
@@ -429,7 +467,7 @@ export function SlateEditor({
       });
       setSlashTrigger(null);
     },
-    [slashTrigger, editor],
+    [baseEmbedEditing, slashTrigger, editor],
   );
 
   const dismissSlash = useCallback(() => {
@@ -449,6 +487,45 @@ export function SlateEditor({
         ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)
       ) {
         event.preventDefault();
+        return;
+      }
+    }
+
+    if ((event.key === "Enter" || event.key === "F2") && editor.selection) {
+      const selectedBase = Editor.above(editor, {
+        at: editor.selection,
+        match: (node) =>
+          SlateElement.isElement(node) && node.type === "base-embed",
+        mode: "lowest",
+        voids: true,
+      });
+      if (selectedBase && !ReactEditor.isFocused(editor)) {
+        return true;
+      }
+      if (selectedBase) {
+        event.preventDefault();
+        baseEmbedEditing.focusEntry(selectedBase[1]);
+        return;
+      }
+    }
+
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      editor.selection
+    ) {
+      const selectedBase = Editor.above(editor, {
+        at: editor.selection,
+        match: (node) =>
+          SlateElement.isElement(node) && node.type === "base-embed",
+        mode: "lowest",
+        voids: true,
+      });
+      if (selectedBase && !ReactEditor.isFocused(editor)) {
+        return true;
+      }
+      if (selectedBase) {
+        event.preventDefault();
+        baseEmbedEditing.remove(selectedBase[1], selectedBase[0]);
         return;
       }
     }
@@ -623,27 +700,29 @@ export function SlateEditor({
         initialValue={initialValue}
         onChange={handleChange}
       >
-        <MathEditingProvider value={mathEditing}>
-          <WikilinkEditingProvider value={wikilinkEditing}>
-            <Editable
-              renderElement={renderElement}
-              renderLeaf={renderLeaf}
-              decorate={decorateCode}
-              readOnly={readOnly}
-              onKeyDown={readOnly ? undefined : handleKeyDown}
-              onDOMBeforeInput={
-                readOnly ? undefined : vim.handleDOMBeforeInput
-              }
-              onMouseDown={readOnly ? undefined : vim.handleMouseDown}
-              placeholder="Start writing..."
-              className="min-h-[200px] w-full min-w-0 outline-none"
-              spellCheck
-            />
-            {!readOnly && isVimEnabled && (
-              <VimStatusBar mode={vim.mode} pending={vim.pending} />
-            )}
-          </WikilinkEditingProvider>
-        </MathEditingProvider>
+        <BaseEmbedEditingProvider value={baseEmbedEditing}>
+          <MathEditingProvider value={mathEditing}>
+            <WikilinkEditingProvider value={wikilinkEditing}>
+              <Editable
+                renderElement={renderElement}
+                renderLeaf={renderLeaf}
+                decorate={decorateCode}
+                readOnly={readOnly}
+                onKeyDown={readOnly ? undefined : handleKeyDown}
+                onDOMBeforeInput={
+                  readOnly ? undefined : vim.handleDOMBeforeInput
+                }
+                onMouseDown={readOnly ? undefined : vim.handleMouseDown}
+                placeholder="Start writing..."
+                className="min-h-[200px] w-full min-w-0 outline-none"
+                spellCheck
+              />
+              {!readOnly && isVimEnabled && (
+                <VimStatusBar mode={vim.mode} pending={vim.pending} />
+              )}
+            </WikilinkEditingProvider>
+          </MathEditingProvider>
+        </BaseEmbedEditingProvider>
       </Slate>
 
       {!readOnly && wikilinkTrigger && (

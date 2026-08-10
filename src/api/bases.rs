@@ -8,11 +8,12 @@
 
 use std::sync::Arc;
 
-use axum::Json;
-use axum::Router;
-use axum::extract::{Path, Query, State};
+use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -26,8 +27,14 @@ use crate::vault::base::{
 };
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
-use crate::vault::base_member::{BaseMemberCapability, creation_capabilities};
-use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use crate::vault::base_embed::{
+    EmbedOverrides, EmbedValidationDiagnostic, composed_query_spec, validate_embed_overrides,
+};
+use crate::vault::base_member::{
+    BaseMemberCapability, BaseMemberDiagnostic, BaseMemberScope, composed_member_capability,
+    creation_capabilities,
+};
+use crate::vault::query::{GroupRowLimit, QueryContext, QueryOutput, QuerySpec, evaluate};
 
 /// One entry in the registry listing.
 #[derive(Debug, Serialize, ToSchema)]
@@ -120,6 +127,143 @@ pub struct BasePreviewResponse {
     pub evaluation_error: Option<String>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BaseViewEvaluateRequest {
+    pub filter: Option<Filter>,
+    #[schema(max_items = 8)]
+    pub sort: Option<Vec<SortKey>>,
+    #[schema(minimum = 1, maximum = 200)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BaseViewEvaluateResponse {
+    pub output: QueryOutput,
+    pub revision: String,
+    pub member_creation: BaseMemberCapability,
+}
+
+struct PreparedEmbeddedEvaluation {
+    base: BaseDefinition,
+    spec: QuerySpec,
+    revision: String,
+    member_creation: BaseMemberCapability,
+}
+
+fn prepare_embedded_evaluation<L>(
+    root: &std::path::Path,
+    slug: &str,
+    view_name: &str,
+    request: BaseViewEvaluateRequest,
+    load: L,
+) -> Result<PreparedEmbeddedEvaluation, ApiError>
+where
+    L: FnOnce(&std::path::Path, &str) -> Result<StoredBase, BaseDocumentError>,
+{
+    let stored = load(root, slug).map_err(embedded_document_error)?;
+    let view = stored.definition.view(view_name).cloned().ok_or_else(|| {
+        ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
+    })?;
+    validate_embed_overrides(
+        &stored.definition,
+        EmbedOverrides {
+            filter: request.filter.as_ref(),
+            sort: request.sort.as_deref(),
+            limit: request.limit,
+        },
+    )
+    .map_err(invalid_embed_query)?;
+
+    let member_creation =
+        composed_member_capability(&stored.definition, &view, request.filter.as_ref());
+    let spec = composed_query_spec(
+        &stored.definition,
+        &view,
+        request.filter,
+        request.sort,
+        request.limit,
+    );
+
+    Ok(PreparedEmbeddedEvaluation {
+        base: stored.definition,
+        spec,
+        revision: stored.revision,
+        member_creation,
+    })
+}
+
+async fn evaluate_embedded_view_with<L, E, F>(
+    root: &std::path::Path,
+    slug: &str,
+    view_name: &str,
+    request: BaseViewEvaluateRequest,
+    load: L,
+    evaluate_prepared: E,
+) -> Result<BaseViewEvaluateResponse, ApiError>
+where
+    L: FnOnce(&std::path::Path, &str) -> Result<StoredBase, BaseDocumentError> + Send,
+    E: FnOnce(BaseDefinition, QuerySpec) -> F + Send,
+    F: std::future::Future<Output = Result<QueryOutput, ApiError>> + Send,
+{
+    let PreparedEmbeddedEvaluation {
+        base,
+        spec,
+        revision,
+        member_creation,
+    } = prepare_embedded_evaluation(root, slug, view_name, request, load)?;
+    let output = evaluate_prepared(base, spec).await?;
+    Ok(BaseViewEvaluateResponse {
+        output,
+        revision,
+        member_creation,
+    })
+}
+
+pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -> ApiError {
+    ApiError::invalid_embed_query(
+        diagnostics
+            .into_iter()
+            .map(public_embed_diagnostic)
+            .collect(),
+    )
+}
+
+fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {
+    let filter_path = diagnostic.filter_path.map(|path| {
+        path.strip_prefix("filter")
+            .map_or(path.clone(), |suffix| format!("embed_filter{suffix}"))
+    });
+    BaseMemberDiagnostic {
+        scope: BaseMemberScope::Embed,
+        field: diagnostic.field,
+        filter_path,
+        message: diagnostic.message,
+    }
+}
+
+fn embedded_document_error(error: BaseDocumentError) -> ApiError {
+    match error {
+        BaseDocumentError::InvalidSlug(_) => ApiError::bad_request("invalid base reference"),
+        BaseDocumentError::NotFound(slug) => {
+            ApiError::not_found(format!("no base with slug `{slug}`"))
+        }
+        error @ (BaseDocumentError::UnsupportedDocument(_)
+        | BaseDocumentError::InvalidDefinition(_)) => {
+            tracing::warn!(error = ?error, error_display = %error, "Base definition unavailable");
+            ApiError::conflict("base definition is unavailable")
+        }
+        error @ (BaseDocumentError::Io(_)
+        | BaseDocumentError::PublishedButNotDurable(_)
+        | BaseDocumentError::AlreadyExists(_)
+        | BaseDocumentError::Conflict { .. }) => internal_evaluation_error(error),
+    }
+}
+
+fn internal_evaluation_error(error: impl std::fmt::Debug + std::fmt::Display) -> ApiError {
+    tracing::error!(error = ?error, error_display = %error, "Base view evaluation failed");
+    ApiError::internal("base evaluation failed")
+}
+
 fn query_spec(
     base: &BaseDefinition,
     view: Option<&ViewDefinition>,
@@ -128,31 +272,31 @@ fn query_spec(
     sort_override: Option<&str>,
     sort_dir: Option<&str>,
 ) -> QuerySpec {
-    let view_filter = view.and_then(|view| view.filter.clone());
-    let filter = match (base.file.filter.clone(), view_filter) {
-        (Some(membership), Some(view)) => Some(Filter::All(vec![membership, view])),
-        (membership, view) => membership.or(view),
-    };
-    let sort = match sort_override {
-        Some(field) => vec![SortKey {
+    let sort = sort_override.map(|field| {
+        vec![SortKey {
             field: field.to_owned(),
             dir: match sort_dir {
                 Some("desc") => SortDir::Desc,
                 _ => SortDir::Asc,
             },
-        }],
-        None => view.map_or_else(Vec::new, |view| view.sort.clone()),
-    };
+        }]
+    });
 
-    QuerySpec {
-        filter,
-        sort,
-        group_by: view.and_then(|view| view.group_by.clone()),
-        aggregates: view.map_or_else(Vec::new, |view| view.aggregates.clone()),
-        columns: view.map_or_else(Vec::new, |view| view.columns.clone()),
-        limit,
-        offset,
-        group_row_limit: None,
+    match view {
+        Some(view) => {
+            let mut spec = composed_query_spec(base, view, None, sort, limit);
+            spec.offset = offset;
+            spec.group_row_limit = GroupRowLimit::Default;
+            spec
+        }
+        None => QuerySpec {
+            filter: base.file.filter.clone(),
+            sort: sort.unwrap_or_default(),
+            limit,
+            offset,
+            group_row_limit: GroupRowLimit::Default,
+            ..Default::default()
+        },
     }
 }
 
@@ -470,6 +614,55 @@ pub async fn evaluate_view(
     Ok(Json(output))
 }
 
+/// Evaluate a saved view with request-owned embed overrides.
+#[utoipa::path(
+    post,
+    path = "/{slug}/views/{view}/evaluate",
+    context_path = "/api/vault/bases",
+    tag = "Bases",
+    params(
+        ("slug" = String, Path, description = "Base slug"),
+        ("view" = String, Path, description = "Saved view name")
+    ),
+    request_body = BaseViewEvaluateRequest,
+    responses(
+        (status = 200, body = BaseViewEvaluateResponse),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError),
+        (status = 500, body = ApiError)
+    )
+)]
+pub async fn evaluate_embedded_view(
+    State(state): State<Arc<AppState>>,
+    Path((slug, view_name)): Path<(String, String)>,
+    payload: Result<Bytes, BytesRejection>,
+) -> Result<Json<BaseViewEvaluateResponse>, ApiError> {
+    let bytes = payload.map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
+    let request =
+        serde_json::from_slice(&bytes).map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
+    let index = state.index.clone();
+    let response = evaluate_embedded_view_with(
+        state.vault.root(),
+        &slug,
+        &view_name,
+        request,
+        base_document::load,
+        move |base, spec| async move {
+            index
+                .with_index(move |index, _vault| {
+                    evaluate(index.connection(), &spec, &QueryContext::for_base(&base))
+                })
+                .await
+                .map_err(internal_evaluation_error)?
+                .map_err(internal_evaluation_error)
+        },
+    )
+    .await?;
+
+    Ok(Json(response))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_bases).post(create_base))
@@ -480,6 +673,10 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/{slug}/views/{view}", get(evaluate_view))
         .route(
+            "/{slug}/views/{view}/evaluate",
+            post(evaluate_embedded_view).layer(DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
             "/{slug}/members",
             post(super::base_members::create_base_member),
         )
@@ -487,10 +684,15 @@ pub fn router() -> Router<Arc<AppState>> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::document_error;
-    use crate::vault::base_document::BaseDocumentError;
+    use super::{BaseViewEvaluateRequest, document_error, evaluate_embedded_view_with};
+    use crate::vault::base::{BaseDefinition, BaseFile, Filter, Op, ViewDefinition};
+    use crate::vault::base_document::{BaseDocumentError, StoredBase};
+    use crate::vault::query::{QueryOutput, QueryRow};
 
     #[test]
     fn published_but_not_durable_maps_to_distinct_internal_error() {
@@ -505,5 +707,95 @@ mod tests {
         );
         assert_eq!(error.detail, None);
         assert_eq!(error.hint, None);
+    }
+
+    #[tokio::test]
+    async fn evaluate_embedded_full_response_uses_one_injected_snapshot() {
+        let ambient = tempfile::tempdir().unwrap();
+        fs::create_dir_all(ambient.path().join("bases")).unwrap();
+        fs::write(
+            ambient.path().join("bases/embedded.base.toml"),
+            "name = \"Ambient disk Base\"\n[[views]]\nname = \"Ambient View\"\nlayout = \"table\"\n",
+        )
+        .unwrap();
+        let load_calls = Arc::new(AtomicUsize::new(0));
+        let evaluation_calls = Arc::new(AtomicUsize::new(0));
+        let snapshot = StoredBase {
+            definition: BaseDefinition {
+                slug: "injected".to_string(),
+                file: BaseFile {
+                    name: "Injected Snapshot".to_string(),
+                    description: None,
+                    filter: None,
+                    properties: Vec::new(),
+                    views: vec![ViewDefinition {
+                        name: "Configured View".to_string(),
+                        layout: "table".to_string(),
+                        filter: None,
+                        sort: Vec::new(),
+                        group_by: None,
+                        aggregates: Vec::new(),
+                        columns: vec!["title".to_string()],
+                    }],
+                },
+            },
+            diagnostics: Vec::new(),
+            revision: "injected-revision".to_string(),
+        };
+        let request = BaseViewEvaluateRequest {
+            filter: Some(Filter::Cmp {
+                field: "title".to_string(),
+                op: Op::Eq,
+                value: serde_json::json!("Injected Snapshot"),
+            }),
+            sort: None,
+            limit: Some(1),
+        };
+        let counted_loads = Arc::clone(&load_calls);
+        let counted_evaluations = Arc::clone(&evaluation_calls);
+
+        let response = evaluate_embedded_view_with(
+            ambient.path(),
+            "embedded",
+            "CONFIGURED VIEW",
+            request,
+            move |_, _| {
+                counted_loads.fetch_add(1, Ordering::SeqCst);
+                Ok(snapshot)
+            },
+            move |base, spec| async move {
+                counted_evaluations.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(base.slug, "injected");
+                assert_eq!(base.file.name, "Injected Snapshot");
+                assert_eq!(spec.columns, vec!["title"]);
+                assert_eq!(spec.limit, Some(1));
+                Ok(QueryOutput::Flat {
+                    rows: vec![QueryRow {
+                        id: base.slug.clone(),
+                        path: format!("{}.md", base.slug),
+                        title: Some(base.file.name.clone()),
+                        kind: "NOTE".to_string(),
+                        project: None,
+                        columns: serde_json::Map::new(),
+                    }],
+                    total: 1,
+                })
+            },
+        )
+        .await
+        .unwrap();
+        let serialized = serde_json::to_value(response).unwrap();
+
+        assert_eq!(load_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(evaluation_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(serialized["output"]["rows"][0]["id"], "injected");
+        assert_eq!(
+            serialized["output"]["rows"][0]["title"],
+            "Injected Snapshot"
+        );
+        assert_eq!(serialized["revision"], "injected-revision");
+        assert_eq!(serialized["member_creation"]["view"], "Configured View");
+        assert_eq!(serialized["member_creation"]["fields"][0]["field"], "title");
+        assert_eq!(serialized["member_creation"]["fields"][0]["embed"], true);
     }
 }

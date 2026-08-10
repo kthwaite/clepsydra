@@ -14,30 +14,35 @@ const fields: BaseMemberDraftField[] = [
     kind: "title",
     membership: true,
     viewOnly: false,
+    embedOnly: false,
   },
   {
     key: "kind",
     kind: "kind",
     membership: true,
     viewOnly: false,
+    embedOnly: false,
   },
   {
     key: "project",
     kind: "project",
     membership: false,
     viewOnly: true,
+    embedOnly: false,
   },
   {
     key: "tags",
     kind: "tags",
     membership: false,
     viewOnly: false,
+    embedOnly: false,
   },
   {
     key: "aliases",
     kind: "aliases",
     membership: false,
     viewOnly: false,
+    embedOnly: false,
   },
   {
     key: "rating",
@@ -45,6 +50,7 @@ const fields: BaseMemberDraftField[] = [
     definition: { type: "number" },
     membership: false,
     viewOnly: false,
+    embedOnly: true,
   },
   {
     key: "status",
@@ -52,6 +58,7 @@ const fields: BaseMemberDraftField[] = [
     definition: { type: "select", options: ["unread", "read"] },
     membership: false,
     viewOnly: true,
+    embedOnly: true,
   },
 ];
 
@@ -135,10 +142,20 @@ describe("BaseMemberDraft", () => {
       enabled: true,
       blockers: [],
       fields: [
-        { field: "kind", membership: true, view: false },
-        { field: "prop.kind", membership: false, view: true },
-        { field: "prop.word_count", membership: false, view: true },
-        { field: "prop.journal_date", membership: false, view: true },
+        { field: "kind", membership: true, view: false, embed: false },
+        { field: "prop.kind", membership: false, view: true, embed: false },
+        {
+          field: "prop.word_count",
+          membership: false,
+          view: true,
+          embed: false,
+        },
+        {
+          field: "prop.journal_date",
+          membership: false,
+          view: true,
+          embed: false,
+        },
       ],
     };
     render(
@@ -245,10 +262,12 @@ describe("BaseMemberDraft", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Edit New member — Rating" }),
-    ).toBeInTheDocument();
+    ).toHaveAccessibleDescription("Required for the embedded filter.");
     expect(
       screen.getByRole("button", { name: "Edit New member — Status" }),
-    ).toHaveAccessibleDescription("Required for the active view.");
+    ).toHaveAccessibleDescription(
+      "Required for the active view and the embedded filter.",
+    );
   });
 
   it("associates diagnostics, announces the row error, and focuses the first invalid field", () => {
@@ -275,7 +294,7 @@ describe("BaseMemberDraft", () => {
     });
     expect(status).toHaveFocus();
     expect(status).toHaveAccessibleDescription(
-      "Required for the active view. status must equal unread",
+      "Required for the active view and the embedded filter. status must equal unread",
     );
   });
 
@@ -441,6 +460,7 @@ describe("BaseMemberDraft", () => {
         kind: "title",
         membership: false,
         viewOnly: false,
+        embedOnly: false,
       },
       {
         key: "rating",
@@ -448,6 +468,7 @@ describe("BaseMemberDraft", () => {
         definition: { type: "number" },
         membership: false,
         viewOnly: false,
+        embedOnly: false,
       },
     ];
     render(draftElement({ fields: keyboardFields, onSave }));
@@ -481,6 +502,7 @@ describe("BaseMemberDraft", () => {
         kind: "title",
         membership: false,
         viewOnly: false,
+        embedOnly: false,
       },
       {
         key: "reading status",
@@ -488,6 +510,7 @@ describe("BaseMemberDraft", () => {
         definition: { type: "select", options: ["unread", "read"] },
         membership: false,
         viewOnly: true,
+        embedOnly: false,
       },
     ];
     render(
@@ -529,12 +552,14 @@ describe("BaseMemberDraft", () => {
         kind: "title",
         membership: false,
         viewOnly: false,
+        embedOnly: false,
       },
       {
         key: "project",
         kind: "project",
         membership: false,
         viewOnly: false,
+        embedOnly: false,
       },
     ];
     render(draftElement({ fields: projectFields, onSave }));

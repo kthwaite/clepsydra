@@ -16,7 +16,9 @@ import type { SerializeCtx } from "#/editor/schema/descriptor";
 import { getDescriptor } from "#/editor/schema/registry";
 import type { CustomElement, CustomText } from "#/editor/types";
 import { folioMathToMarkdown } from "#/lib/markdown/folioMath";
+import { baseFenceToMarkdown } from "./baseEmbedMarkdown";
 import type {
+  BaseFenceMdast,
   FolioInlineMathMdast,
   FolioMathMdast,
   WikiLinkMdast,
@@ -338,6 +340,34 @@ const ctx: SerializeCtx = {
 
 // ---------------------------------------------------------------------------
 // Public API
+function withoutBaseEmbedTrailingSentinel(
+  nodes: Descendant[],
+): Descendant[] {
+  if (nodes.length < 2) return nodes;
+  const base = nodes[nodes.length - 2];
+  const sentinel = nodes[nodes.length - 1];
+  if (
+    SlateText.isText(base) ||
+    base.type !== "base-embed" ||
+    SlateText.isText(sentinel) ||
+    sentinel.type !== "paragraph" ||
+    sentinel.baseEmbedTrailingSentinel !== true ||
+    Object.keys(sentinel).length !== 3 ||
+    sentinel.children.length !== 1
+  ) {
+    return nodes;
+  }
+  const child = sentinel.children[0];
+  if (
+    !SlateText.isText(child) ||
+    child.text !== "" ||
+    Object.keys(child).length !== 1
+  ) {
+    return nodes;
+  }
+  return nodes.slice(0, -1);
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -346,17 +376,30 @@ const ctx: SerializeCtx = {
 export function slateToMdast(nodes: Descendant[]): string {
   const root: Root = {
     type: "root",
-    children: convertBlockChildren(nodes) as RootContent[],
+    children: convertBlockChildren(
+      withoutBaseEmbedTrailingSentinel(nodes),
+    ) as RootContent[],
   };
 
-  return toMarkdown(root as Nodes, {
+  const markdown = toMarkdown(root as Nodes, {
     bullet: "*",
     rule: "-",
     extensions: [
+      baseFenceToMarkdown(),
       folioMathToMarkdown(),
       gfmToMarkdown(),
       wikiLinkToMarkdownExtension(),
       singleTildeStrikethroughExtension(),
     ],
   });
+  const last = root.children.at(-1) as unknown as
+    | BaseFenceMdast
+    | undefined;
+  if (
+    last?.type === "baseFence" &&
+    !/[\r\n]$/.test(last.rawBlock)
+  ) {
+    return markdown.slice(0, -1);
+  }
+  return markdown;
 }

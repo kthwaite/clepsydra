@@ -39,11 +39,21 @@ function fieldLabel(key: string): string {
 
 
 function requirementText(field: BaseMemberDraftField): string | undefined {
+  if (field.membership && field.viewOnly && field.embedOnly) {
+    return "Required for base membership, the active view, and the embedded filter.";
+  }
   if (field.membership && field.viewOnly) {
     return "Required for base membership and the active view.";
   }
+  if (field.membership && field.embedOnly) {
+    return "Required for base membership and the embedded filter.";
+  }
+  if (field.viewOnly && field.embedOnly) {
+    return "Required for the active view and the embedded filter.";
+  }
   if (field.membership) return "Required for base membership.";
   if (field.viewOnly) return "Required for the active view.";
+  if (field.embedOnly) return "Required for the embedded filter.";
   return undefined;
 }
 

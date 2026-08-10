@@ -1,4 +1,5 @@
 //! Uniform error handling for API responses.
+use crate::vault::base_member::BaseMemberDiagnostic;
 use crate::vault::path::VaultPath;
 use axum::Json;
 use axum::http::StatusCode;
@@ -94,6 +95,16 @@ impl ApiError {
             detail: Some(detail),
             hint: None,
         }
+    }
+
+    pub fn invalid_embed_query(diagnostics: Vec<BaseMemberDiagnostic>) -> Self {
+        Self::bad_request_with_detail(
+            "invalid embed query",
+            serde_json::json!({
+                "code": "invalid_embed_query",
+                "diagnostics": diagnostics,
+            }),
+        )
     }
 
     pub fn unprocessable_with_detail(msg: impl Into<String>, detail: serde_json::Value) -> Self {

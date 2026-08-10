@@ -24,10 +24,12 @@ vi.mock("@tanstack/react-router", () => ({
 
 const mocks = vi.hoisted(() => ({
   createMember: vi.fn(),
-
   commit: vi.fn(),
   refetchBase: vi.fn(),
   refetchView: vi.fn(),
+  useBase: vi.fn(),
+  useBaseView: vi.fn(),
+  useBaseViewEvaluation: vi.fn(),
   viewState: {
     data: undefined as QueryOutput | undefined,
     error: null as unknown,
@@ -65,13 +67,23 @@ const definition: BaseDetailResponse = {
       view: "continues",
       enabled: true,
       fields: [
-        { field: "kind", membership: true, view: false },
-        { field: "status", membership: false, view: true },
-        { field: "project", membership: false, view: false },
-        { field: "tags", membership: false, view: false },
-        { field: "aliases", membership: false, view: false },
-        { field: "optional_rating", membership: false, view: false },
-        { field: "optional_status", membership: false, view: false },
+        { field: "kind", membership: true, view: false, embed: false },
+        { field: "status", membership: false, view: true, embed: false },
+        { field: "project", membership: false, view: false, embed: false },
+        { field: "tags", membership: false, view: false, embed: false },
+        { field: "aliases", membership: false, view: false, embed: false },
+        {
+          field: "optional_rating",
+          membership: false,
+          view: false,
+          embed: false,
+        },
+        {
+          field: "optional_status",
+          membership: false,
+          view: false,
+          embed: false,
+        },
       ],
       blockers: [],
     },
@@ -88,13 +100,33 @@ vi.mock("#/api/bases", async (importOriginal) => {
   const actual = await importOriginal<typeof BasesApi>();
   return {
     ...actual,
-    useBase: () => ({
-      data: definition,
-      error: null,
-      isLoading: false,
-      refetch: mocks.refetchBase,
-    }),
-    useBaseView: () => ({ ...mocks.viewState, refetch: mocks.refetchView }),
+    useBase: (slug: string) => {
+      mocks.useBase(slug);
+      return {
+        data: definition,
+        error: null,
+        isLoading: false,
+        refetch: mocks.refetchBase,
+      };
+    },
+    useBaseView: (
+      slug: string,
+      view: string | undefined,
+      overrides: BasesApi.ViewOverrides,
+    ) => {
+      mocks.useBaseView(slug, view, overrides);
+      return { ...mocks.viewState, refetch: mocks.refetchView };
+    },
+    useBaseViewEvaluation: (config: unknown) => {
+      mocks.useBaseViewEvaluation(config);
+      return {
+        data: undefined,
+        error: null,
+        isLoading: false,
+        isFetching: false,
+        refetch: vi.fn(),
+      };
+    },
     useCreateBaseMember: () => ({
       mutateAsync: mocks.createMember,
       isPending: false,
@@ -151,6 +183,58 @@ async function fillMemberDraft(user: UserEvent) {
   );
   return title;
 }
+
+describe("BaseTable standalone regression", () => {
+  it("keeps the saved-view GET query, first-key sorting, and property commit path", async () => {
+    const user = userEvent.setup();
+    mocks.viewState.data = groupedOutput();
+    mocks.viewState.error = null;
+    mocks.viewState.isLoading = false;
+    mocks.viewState.isFetching = false;
+    mocks.useBase.mockReset();
+    mocks.useBaseView.mockReset();
+    mocks.commit.mockReset();
+
+    render(<BaseTable slug="reading" />);
+
+    expect(mocks.useBase).toHaveBeenLastCalledWith("reading");
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Continues",
+      {},
+    );
+
+    await user.click(screen.getByRole("columnheader", { name: "rating" }));
+    await waitFor(() =>
+      expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+        "reading",
+        "Continues",
+        { sort: "rating", dir: "asc" },
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "8" }));
+    const rating = screen.getByRole("spinbutton", { name: "Edit number" });
+    await user.clear(rating);
+    await user.type(rating, "10{Enter}");
+    expect(mocks.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "existing" }),
+      "rating",
+      10,
+      undefined,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Shelf" }));
+    await waitFor(() =>
+      expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+        "reading",
+        "Shelf",
+        {},
+      ),
+    );
+  });
+});
+
 
 describe("BaseTable member creation", () => {
   it("preserves a rejected draft, clears stale diagnostics on edit, then focuses the authoritative grouped row", async () => {

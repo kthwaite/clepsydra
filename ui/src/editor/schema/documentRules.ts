@@ -49,14 +49,22 @@ function ensureTrailingParagraph(editor: Editor): boolean {
   const last = children[children.length - 1];
   if (
     !SlateElement.isElement(last) ||
-    (last.type !== "code-block" && last.type !== "journal-time")
+    (last.type !== "base-embed" &&
+      last.type !== "code-block" &&
+      last.type !== "journal-time")
   ) {
     return false;
   }
 
   Transforms.insertNodes(
     editor,
-    { type: "paragraph", children: [{ text: "" }] } as never,
+    {
+      type: "paragraph",
+      ...(last.type === "base-embed"
+        ? { baseEmbedTrailingSentinel: true }
+        : {}),
+      children: [{ text: "" }],
+    } as never,
     { at: [children.length] },
   );
   return true;

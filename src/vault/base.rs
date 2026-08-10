@@ -28,20 +28,6 @@ pub const SYSTEM_FIELDS: &[&str] = &[
     "journal_date",
     "word_count",
 ];
-/// System fields with scalar values backed by the query evaluator's sort
-/// semantics. Multi-valued or otherwise unsupported system fields are
-/// intentionally absent.
-pub const SCALAR_SORT_SYSTEM_FIELDS: &[&str] = &[
-    "id",
-    "path",
-    "title",
-    "kind",
-    "project",
-    "created_at",
-    "updated_at",
-    "journal_date",
-    "word_count",
-];
 
 /// Closed set of declarable property types (v1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -534,11 +520,7 @@ fn cmp_matches_meta(
 }
 
 fn system_property_type(sys: crate::vault::query::SysField) -> PropertyType {
-    match sys {
-        crate::vault::query::SysField::WordCount => PropertyType::Number,
-        crate::vault::query::SysField::JournalDate => PropertyType::Date,
-        _ => PropertyType::Text,
-    }
+    sys.property_type()
 }
 
 fn system_scalar<'a>(
@@ -574,6 +556,7 @@ fn system_scalar<'a>(
             .meta
             .updated_at
             .map(|value| Comparable::Text(Cow::Owned(value.to_rfc3339()))),
+        SysField::Encryption => Some(Comparable::Bool(context.meta.encryption.is_some())),
         SysField::JournalDate => context
             .journal_date
             .map(|value| Comparable::Text(Cow::Owned(value.to_string()))),
@@ -1094,60 +1077,32 @@ fn validate_sort_field(
     context: &str,
     push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
 ) {
-    if let Some(name) = field.strip_prefix("sys.") {
-        if !SYSTEM_FIELDS.contains(&name) {
-            push(
-                BaseDiagnosticSeverity::Error,
-                Some(path.to_string()),
-                format!("{context}: unknown system field `{name}`"),
-            );
-        } else if !SCALAR_SORT_SYSTEM_FIELDS.contains(&name) {
-            push(
-                BaseDiagnosticSeverity::Error,
-                Some(path.to_string()),
-                format!("{context}: system field `{name}` is not scalar-sortable"),
-            );
-        }
-        return;
-    }
+    use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 
-    if let Some(name) = field.strip_prefix("prop.") {
-        validate_property_sort_field(base, name, path, context, push);
-        return;
-    }
-
-    if SYSTEM_FIELDS.contains(&field) {
-        if !SCALAR_SORT_SYSTEM_FIELDS.contains(&field) {
-            push(
-                BaseDiagnosticSeverity::Error,
-                Some(path.to_string()),
-                format!("{context}: system field `{field}` is not scalar-sortable"),
-            );
-        }
-        return;
-    }
-
-    validate_property_sort_field(base, field, path, context, push);
-}
-
-fn validate_property_sort_field(
-    base: &BaseDefinition,
-    field: &str,
-    path: &str,
-    context: &str,
-    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
-) {
-    if let Some(definition) = base.property(field)
-        && !definition.property_type.is_scalar_sortable()
-    {
-        push(
+    match resolve_field(field, &QueryContext::for_base(base)) {
+        Ok(ResolvedField::Sys(sys)) if !sys.is_scalar_sortable() => push(
             BaseDiagnosticSeverity::Error,
             Some(path.to_string()),
             format!(
-                "{context}: property `{field}` ({:?}) is not scalar-sortable",
-                definition.property_type
+                "{context}: system field `{}` is not scalar-sortable",
+                sys.as_str()
             ),
-        );
+        ),
+        Ok(ResolvedField::Prop { key, ty })
+            if base.property(&key).is_some() && !ty.is_scalar_sortable() =>
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path.to_string()),
+                format!("{context}: property `{key}` ({ty:?}) is not scalar-sortable"),
+            );
+        }
+        Err(error) => push(
+            BaseDiagnosticSeverity::Error,
+            Some(path.to_string()),
+            format!("{context}: {error}"),
+        ),
+        _ => {}
     }
 }
 
@@ -1174,12 +1129,11 @@ fn validate_filter(
         }
         Filter::Cmp { field, op, value } => {
             if *op == Op::Contains {
-                use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
+                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 
                 let query_context = QueryContext::for_base(base);
                 let supported = match resolve_field(field, &query_context) {
-                    Ok(ResolvedField::Sys(SysField::WordCount)) => false,
-                    Ok(ResolvedField::Sys(_)) => true,
+                    Ok(ResolvedField::Sys(sys)) => sys.supports_contains(),
                     Ok(ResolvedField::Prop { ty, .. }) => ty.supports_contains(),
                     Err(_) => false,
                 };
@@ -1194,10 +1148,6 @@ fn validate_filter(
                     return;
                 }
             }
-            let bare = field
-                .strip_prefix("prop.")
-                .or_else(|| field.strip_prefix("sys."))
-                .unwrap_or(field);
             if *op == Op::LinksTo {
                 use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 
@@ -1225,29 +1175,34 @@ fn validate_filter(
                     return;
                 }
             }
-            let is_system = !field.starts_with("prop.") && SYSTEM_FIELDS.contains(&bare);
-            if !is_system {
-                match base.property(bare) {
-                    Some(def) => {
-                        if op.is_ordering() && !def.property_type.is_ordered() {
+            use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+
+            match resolve_field(field, &QueryContext::for_base(base)) {
+                Ok(ResolvedField::Sys(_)) => {}
+                Ok(ResolvedField::Prop { key, ty }) => {
+                    if base.property(&key).is_some() {
+                        if op.is_ordering() && !ty.is_ordered() {
                             push(
                                 BaseDiagnosticSeverity::Warning,
                                 Some(format!("{path}.op")),
-                                format!(
-                                    "{context}: `{op:?}` cannot order `{bare}` ({:?})",
-                                    def.property_type
-                                ),
+                                format!("{context}: `{op:?}` cannot order `{key}` ({ty:?})"),
                             );
                         }
+                    } else {
+                        push(
+                            BaseDiagnosticSeverity::Warning,
+                            Some(format!("{path}.field")),
+                            format!(
+                                "{context}: field `{key}` is not declared in [properties] (matching against raw vault values)"
+                            ),
+                        );
                     }
-                    None => push(
-                        BaseDiagnosticSeverity::Warning,
-                        Some(format!("{path}.field")),
-                        format!(
-                            "{context}: field `{bare}` is not declared in [properties] (matching against raw vault values)"
-                        ),
-                    ),
                 }
+                Err(error) => push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("{path}.field")),
+                    format!("{context}: {error}"),
+                ),
             }
         }
     }
@@ -1795,5 +1750,35 @@ value = "BOOK"
 "#;
         let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), bare);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+    #[test]
+    fn saved_definition_rejects_contains_for_bare_and_explicit_non_text_property() {
+        let content = r#"
+name = "Invalid contains aliases"
+[filter]
+all = [
+  { field = "rating", op = "contains", value = 4 },
+  { field = "prop.rating", op = "contains", value = 4 }
+]
+[properties]
+rating = { type = "number" }
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert_eq!(errors[0].path.as_deref(), Some("filter.all[0].op"));
+        assert_eq!(errors[1].path.as_deref(), Some("filter.all[1].op"));
+        assert_eq!(
+            errors[0].message,
+            "filter: op `contains` is not valid for non-text field `rating`"
+        );
+        assert_eq!(
+            errors[1].message,
+            "filter: op `contains` is not valid for non-text field `prop.rating`"
+        );
     }
 }

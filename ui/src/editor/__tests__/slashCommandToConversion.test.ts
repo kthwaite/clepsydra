@@ -53,4 +53,14 @@ describe("slashCommandToConversion", () => {
   it("SC-06: returns null for an unknown id", () => {
     expect(slashCommandToConversion("nope")).toBeNull();
   });
+
+  it("SC-07: discovers Base embed in the slash menu", () => {
+    expect(SlateEditorModule.SLASH_COMMANDS).toContainEqual(
+      expect.objectContaining({ id: "base", label: "Base embed" }),
+    );
+  });
+
+  it("SC-08: keeps Base insertion out of generic block conversions", () => {
+    expect(slashCommandToConversion("base")).toBeNull();
+  });
 });

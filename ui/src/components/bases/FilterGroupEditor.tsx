@@ -1,6 +1,9 @@
 import type { BaseFilter } from "#/api/bases";
 import { Button } from "#/components/ui/button";
-import type { RegisterFocusTarget } from "./BaseDefinitionWorkspace";
+import type {
+  BaseDiagnostic,
+  RegisterFocusTarget,
+} from "./BaseDefinitionWorkspace";
 import {
   type DraftProperty,
   type FilterPath,
@@ -17,6 +20,8 @@ interface FilterGroupEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;
   registerFocus: RegisterFocusTarget;
+  diagnostics?: BaseDiagnostic[];
+  diagnosticRoot?: string;
 }
 
 function emptyComparison(): BaseFilter {
@@ -40,6 +45,8 @@ export function FilterGroupEditor({
   properties,
   onChange,
   registerFocus,
+  diagnostics = [],
+  diagnosticRoot = "filter",
 }: FilterGroupEditorProps) {
   if ("field" in value) {
     return (
@@ -50,6 +57,8 @@ export function FilterGroupEditor({
         properties={properties}
         onChange={(next) => onChange(replaceFilterAtPath(root, path, next))}
         registerFocus={registerFocus}
+        diagnostics={diagnostics}
+        diagnosticRoot={diagnosticRoot}
       />
     );
   }
@@ -73,6 +82,8 @@ export function FilterGroupEditor({
           properties={properties}
           onChange={onChange}
           registerFocus={registerFocus}
+          diagnostics={diagnostics}
+          diagnosticRoot={diagnosticRoot}
         />
         <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
           <Button
@@ -182,6 +193,8 @@ export function FilterGroupEditor({
                 properties={properties}
                 onChange={onChange}
                 registerFocus={registerFocus}
+                diagnostics={diagnostics}
+                diagnosticRoot={diagnosticRoot}
               />
               <div className="mt-2 flex flex-wrap gap-1">
                 <Button

@@ -1,6 +1,10 @@
 import { createEditor } from "slate";
 import { describe, expect, it } from "vitest";
 import {
+  baseEmbedDescriptor,
+  makeBaseEmbed,
+} from "../elements/baseEmbed";
+import {
   inlineMathDescriptor,
   makeInlineMath,
   makeMathBlock,
@@ -26,6 +30,7 @@ const VOID = new Set<ElementType>([
   "journal-time",
   "math-block",
   "image",
+  "base-embed",
 ]);
 
 const ALL_TYPES: ElementType[] = [
@@ -46,6 +51,7 @@ const ALL_TYPES: ElementType[] = [
   "journal-time",
   "math-block",
   "image",
+  "base-embed",
 ];
 
 describe("withSchema classification", () => {
@@ -85,6 +91,47 @@ describe("withSchema classification", () => {
     expect(makeMathBlock({ tex: "x", delimiter: "$$" }).children).toEqual([
       { text: "" },
     ]);
+  });
+
+  it("registers Base embeds as void blocks and creates every discriminated state", () => {
+    const unconfigured = makeBaseEmbed();
+    const configured = makeBaseEmbed({
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      sort: [],
+      limit: 20,
+    });
+    const invalid = makeBaseEmbed({
+      status: "invalid",
+      rawBlock: "```base\nbad\n```\n",
+      parseError: "bad TOML",
+    });
+
+    expect(baseEmbedDescriptor.kind).toBe("void-block");
+    expect(unconfigured).toEqual({
+      type: "base-embed",
+      status: "unconfigured",
+      children: [{ text: "" }],
+    });
+    expect(configured).toEqual({
+      type: "base-embed",
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      sort: [],
+      limit: 20,
+      children: [{ text: "" }],
+    });
+    expect(invalid).toEqual({
+      type: "base-embed",
+      status: "invalid",
+      rawBlock: "```base\nbad\n```\n",
+      parseError: "bad TOML",
+      children: [{ text: "" }],
+    });
+    expect(editor.isInline(unconfigured)).toBe(false);
+    expect(editor.isVoid(unconfigured)).toBe(true);
   });
 
   it("serializes math descriptors with authored delimiter metadata", () => {

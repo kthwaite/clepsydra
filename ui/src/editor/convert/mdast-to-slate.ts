@@ -16,6 +16,7 @@ import type {
   WikilinkElement,
 } from "#/editor/types";
 import { remarkFolioMath } from "#/lib/markdown/folioMath";
+import { baseEmbedFromCode } from "./baseEmbedMarkdown";
 import type { FolioInlineMathMdast, FolioMathMdast } from "./mdastTypes";
 import {
   parseConversationMarker,
@@ -71,7 +72,7 @@ export function mdastToSlate(markdown: string): Descendant[] {
     value: markdown,
   }) as Root;
 
-  const result = convertChildren(tree.children, true, true);
+  const result = convertChildren(tree.children, markdown, true, true);
 
   // Slate invariant: document must have at least one block
   if (result.length === 0) {
@@ -88,6 +89,7 @@ export function mdastToSlate(markdown: string): Descendant[] {
  */
 function convertChildren(
   nodes: RootContent[],
+  source: string,
   extractMetadata = true,
   recognizeJournalTime = false,
   insideBlockquote = false,
@@ -96,6 +98,7 @@ function convertChildren(
   for (const node of nodes) {
     const converted = convertBlockNode(
       node,
+      source,
       extractMetadata,
       recognizeJournalTime,
       insideBlockquote,
@@ -149,6 +152,7 @@ function conversationMarkerFromBlockquote(
  */
 function convertBlockNode(
   node: RootContent,
+  source: string,
   extractMetadata = true,
   recognizeJournalTime = false,
   insideBlockquote = false,
@@ -184,17 +188,26 @@ function convertBlockNode(
       return extractMetadata ? extractBlockMetadata(el) : el;
     }
 
-    case "code":
+    case "code": {
+      const baseEmbed = baseEmbedFromCode(node, source);
+      if (baseEmbed) return baseEmbed;
       return {
         type: "code-block",
         ...(node.lang ? { language: node.lang } : {}),
         children: [{ text: node.value }],
       };
+    }
 
     case "blockquote": {
       const conversation = conversationMarkerFromBlockquote(node);
       if (conversation) {
-        const children = convertChildren(conversation.body, true, false, true);
+        const children = convertChildren(
+          conversation.body,
+          source,
+          true,
+          false,
+          true,
+        );
         return {
           type: "conversation-turn",
           role: conversation.marker.role,
@@ -214,14 +227,20 @@ function convertBlockNode(
       }
       return {
         type: "blockquote",
-        children: convertChildren(node.children as RootContent[], true, false, true),
+        children: convertChildren(
+          node.children as RootContent[],
+          source,
+          true,
+          false,
+          true,
+        ),
       };
     }
 
     case "list":
       return {
         type: node.ordered ? "numbered-list" : "bulleted-list",
-        children: node.children.map((item) => convertListItem(item)),
+        children: node.children.map((item) => convertListItem(item, source)),
       };
 
     case "math": {
@@ -280,7 +299,7 @@ function convertBlockNode(
       return {
         type: "footnote-def",
         identifier: (node as { identifier: string }).identifier,
-        children: convertChildren(node.children as RootContent[]),
+        children: convertChildren(node.children as RootContent[], source),
       };
 
     // Node types we intentionally skip
@@ -299,15 +318,18 @@ function convertBlockNode(
  * Convert an mdast listItem to a Slate list-item element.
  * Metadata extraction is done at the list-item level (not on child paragraphs).
  */
-function convertListItem(node: {
-  type: "listItem";
-  checked?: boolean | null;
-  children: RootContent[];
-}): ListItemElement {
+function convertListItem(
+  node: {
+    type: "listItem";
+    checked?: boolean | null;
+    children: RootContent[];
+  },
+  source: string,
+): ListItemElement {
   // Convert children WITHOUT metadata extraction — we extract at the list-item level
   const el: ListItemElement = {
     type: "list-item",
-    children: convertChildren(node.children as RootContent[], false),
+    children: convertChildren(node.children as RootContent[], source, false),
   };
 
   // Propagate checkbox state from GFM task list items

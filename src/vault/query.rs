@@ -35,6 +35,7 @@ pub enum SysField {
     Aliases,
     CreatedAt,
     UpdatedAt,
+    Encryption,
     JournalDate,
     WordCount,
 }
@@ -51,6 +52,7 @@ impl SysField {
             "aliases" => SysField::Aliases,
             "created_at" => SysField::CreatedAt,
             "updated_at" => SysField::UpdatedAt,
+            "encryption" => SysField::Encryption,
             "journal_date" => SysField::JournalDate,
             "word_count" => SysField::WordCount,
             _ => return None,
@@ -68,6 +70,7 @@ impl SysField {
             SysField::Aliases => "aliases",
             SysField::CreatedAt => "created_at",
             SysField::UpdatedAt => "updated_at",
+            SysField::Encryption => "encryption",
             SysField::JournalDate => "journal_date",
             SysField::WordCount => "word_count",
         }
@@ -84,10 +87,31 @@ impl SysField {
             SysField::Project => "p.project",
             SysField::CreatedAt => "p.created_at",
             SysField::UpdatedAt => "p.updated_at",
+            SysField::Encryption => "p.encrypted",
             SysField::JournalDate => "p.journal_date",
             SysField::WordCount => "p.word_count",
             SysField::Tags | SysField::Aliases => return None,
         })
+    }
+
+    pub(crate) fn property_type(self) -> PropertyType {
+        match self {
+            SysField::Encryption => PropertyType::Bool,
+            SysField::WordCount => PropertyType::Number,
+            SysField::JournalDate => PropertyType::Date,
+            _ => PropertyType::Text,
+        }
+    }
+
+    pub(crate) fn is_scalar_sortable(self) -> bool {
+        !matches!(
+            self,
+            SysField::Tags | SysField::Aliases | SysField::Encryption
+        )
+    }
+
+    pub(crate) fn supports_contains(self) -> bool {
+        self.property_type().supports_contains()
     }
 }
 
@@ -333,7 +357,7 @@ fn compile_cmp(
                     }
                     Ok(format!("{column} IN ({})", holes.join(", ")))
                 }
-                Op::Contains if sys == SysField::WordCount => Err(QueryError::InvalidOp {
+                Op::Contains if !sys.supports_contains() => Err(QueryError::InvalidOp {
                     field: field.to_string(),
                     op,
                 }),
@@ -369,11 +393,7 @@ fn bind_sys_value(
     sys: SysField,
     value: &serde_json::Value,
 ) -> Result<SqlValue, QueryError> {
-    let ty = match sys {
-        SysField::WordCount => PropertyType::Number,
-        _ => PropertyType::Text,
-    };
-    bind_value(field, ty, value)
+    bind_value(field, sys.property_type(), value)
 }
 
 /// Membership-style compile for `tags` / `aliases`.
@@ -528,6 +548,14 @@ fn compile_prop(
 
 pub const DEFAULT_GROUP_ROW_LIMIT: u32 = 50;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GroupRowLimit {
+    #[default]
+    Default,
+    Unlimited,
+    Limit(u32),
+}
+
 /// A full query specification (view definition or generic query request).
 #[derive(Debug, Default)]
 pub struct QuerySpec {
@@ -539,7 +567,7 @@ pub struct QuerySpec {
     pub columns: Vec<String>,
     pub limit: Option<u32>,
     pub offset: u32,
-    pub group_row_limit: Option<u32>,
+    pub group_row_limit: GroupRowLimit,
 }
 
 /// One result row: system fields plus materialized columns (`ord = 0`
@@ -608,6 +636,12 @@ fn prepare(spec: &QuerySpec, ctx: &QueryContext) -> Result<PreparedQuery, QueryE
         };
         match resolve_field(&sort_key.field, ctx)? {
             ResolvedField::Sys(sys) => {
+                if !sys.is_scalar_sortable() {
+                    return Err(QueryError::InvalidOp {
+                        field: sort_key.field.clone(),
+                        op: Op::Eq,
+                    });
+                }
                 let column = sys.column().ok_or_else(|| QueryError::InvalidOp {
                     field: sort_key.field.clone(),
                     op: Op::Eq,
@@ -798,7 +832,11 @@ fn evaluate_grouped(
         rows.collect::<Result<_, _>>()?
     };
 
-    let row_limit = spec.group_row_limit.unwrap_or(DEFAULT_GROUP_ROW_LIMIT);
+    let row_limit = match spec.group_row_limit {
+        GroupRowLimit::Default => Some(DEFAULT_GROUP_ROW_LIMIT),
+        GroupRowLimit::Unlimited => None,
+        GroupRowLimit::Limit(limit) => Some(limit),
+    };
     let mut groups = Vec::with_capacity(headers.len());
     for (key, total, aggregates) in headers {
         let rows = fetch_rows(
@@ -807,7 +845,7 @@ fn evaluate_grouped(
             ctx,
             &prepared,
             Some((&group_column, key.as_ref())),
-            Some(row_limit),
+            row_limit,
             0,
         )?;
         groups.push(GroupResult {
@@ -865,12 +903,13 @@ fn fetch_rows(
     // columns (tags, aliases) come from the exact meta_json arrays; scalar
     // system columns are already in the fixed select list.
     let mut select_cols =
-        "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.journal_date, p.word_count"
+        "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.encrypted, p.journal_date, p.word_count"
             .to_string();
     let mut column_joins = String::new();
     let mut column_params: Vec<SqlValue> = Vec::new();
     // Requested column name → position among the appended (json) columns.
     let mut json_columns: Vec<String> = Vec::new();
+    let mut system_columns: Vec<(String, SysField)> = Vec::new();
     for (i, name) in spec.columns.iter().enumerate() {
         match resolve_field(name, ctx)? {
             ResolvedField::Sys(SysField::Tags) => {
@@ -881,7 +920,7 @@ fn fetch_rows(
                 select_cols.push_str(", json_extract(p.meta_json, '$.aliases')");
                 json_columns.push(name.clone());
             }
-            ResolvedField::Sys(_) => {} // already in the fixed select list
+            ResolvedField::Sys(sys) => system_columns.push((name.clone(), sys)),
             ResolvedField::Prop { key, .. } => {
                 let alias = format!("c{i}");
                 column_joins.push_str(&format!(
@@ -947,12 +986,12 @@ fn fetch_rows(
     }
 
     let mut stmt = conn.prepare(&sql)?;
-    let n_fixed = 9;
+    let n_fixed = 10;
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
         let mut columns = serde_json::Map::new();
         // Scalar system columns requested by name (the full SYSTEM_FIELDS
         // contract; tags/aliases arrive via the appended json columns).
-        let sys_pairs: [(&str, serde_json::Value); 9] = [
+        let sys_pairs: [(&str, serde_json::Value); 10] = [
             ("id", sql_value_to_json(row.get(0)?)),
             ("path", sql_value_to_json(row.get(1)?)),
             ("title", sql_value_to_json(row.get(2)?)),
@@ -960,12 +999,16 @@ fn fetch_rows(
             ("project", sql_value_to_json(row.get(4)?)),
             ("created_at", sql_value_to_json(row.get(5)?)),
             ("updated_at", sql_value_to_json(row.get(6)?)),
-            ("journal_date", sql_value_to_json(row.get(7)?)),
-            ("word_count", sql_value_to_json(row.get(8)?)),
+            ("encryption", serde_json::Value::Bool(row.get(7)?)),
+            ("journal_date", sql_value_to_json(row.get(8)?)),
+            ("word_count", sql_value_to_json(row.get(9)?)),
         ];
-        for name in &spec.columns {
-            if let Some((_, v)) = sys_pairs.iter().find(|(n, _)| n == name) {
-                columns.insert(name.clone(), v.clone());
+        for (requested_name, system_field) in &system_columns {
+            if let Some((_, value)) = sys_pairs
+                .iter()
+                .find(|(canonical_name, _)| *canonical_name == system_field.as_str())
+            {
+                columns.insert(requested_name.clone(), value.clone());
             }
         }
         for (i, name) in json_columns.iter().enumerate() {
@@ -1152,6 +1195,60 @@ moment  = { type = "datetime" }
         let registry = crate::vault::base::BaseRegistry::load(tmp.path());
         let base = registry.get("reading").unwrap().clone();
         (tmp, index, base)
+    }
+
+    fn grouped_limit_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        for index in 0..55 {
+            let id = format!("0190f8a0-0000-7000-8000-{index:012x}");
+            std::fs::write(
+                tmp.path().join(format!("group-{index:02}.md")),
+                page(
+                    &id,
+                    "BOOK",
+                    &format!("Book {index:02}"),
+                    &format!("status = \"reading\"\nrating = {}\n", index + 1),
+                ),
+            )
+            .unwrap();
+        }
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    fn grouped_limit_spec(group_row_limit: GroupRowLimit) -> QuerySpec {
+        QuerySpec {
+            filter: book_filter(),
+            group_by: Some("status".into()),
+            aggregates: vec![
+                Aggregate {
+                    function: AggregateFn::Count,
+                    field: None,
+                },
+                Aggregate {
+                    function: AggregateFn::Sum,
+                    field: Some("rating".into()),
+                },
+            ],
+            group_row_limit,
+            ..Default::default()
+        }
+    }
+
+    fn only_group(output: QueryOutput) -> GroupResult {
+        let QueryOutput::Grouped { mut groups } = output else {
+            panic!("expected grouped output");
+        };
+        assert_eq!(groups.len(), 1);
+        groups.pop().unwrap()
     }
 
     fn flat_paths(output: &QueryOutput) -> Vec<String> {
@@ -1530,7 +1627,7 @@ moment  = { type = "datetime" }
     }
 
     #[test]
-    fn grouped_query_returns_null_bucket_aggregates_and_caps_rows() {
+    fn grouped_query_returns_null_bucket_aggregates_and_explicitly_caps_rows() {
         let (_tmp, index, base) = fixture();
         let spec = QuerySpec {
             filter: book_filter(),
@@ -1545,7 +1642,7 @@ moment  = { type = "datetime" }
                     field: Some("rating".into()),
                 },
             ],
-            group_row_limit: Some(1),
+            group_row_limit: GroupRowLimit::Limit(1),
             ..Default::default()
         };
         let out = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
@@ -1577,6 +1674,86 @@ moment  = { type = "datetime" }
         assert_eq!(empty.total, 1, "statusless page lands in the NULL bucket");
         // The NULL bucket sorts last.
         assert_eq!(groups.last().unwrap().key, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn grouped_default_caps_rows_at_fifty_without_capping_totals_or_aggregates() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = grouped_limit_spec(GroupRowLimit::Default);
+
+        let group = only_group(
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap(),
+        );
+
+        assert_eq!(group.rows.len(), 50);
+        assert_eq!(group.total, 55);
+        assert_eq!(
+            group.aggregates,
+            vec![serde_json::json!(55), serde_json::json!(1540.0)]
+        );
+    }
+
+    #[test]
+    fn grouped_unlimited_returns_every_row() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = grouped_limit_spec(GroupRowLimit::Unlimited);
+
+        let group = only_group(
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap(),
+        );
+
+        assert_eq!(group.rows.len(), 55);
+        assert_eq!(group.total, 55);
+    }
+
+    #[test]
+    fn grouped_explicit_limit_caps_rows_without_capping_totals_or_aggregates() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = grouped_limit_spec(GroupRowLimit::Limit(1));
+
+        let group = only_group(
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap(),
+        );
+
+        assert_eq!(group.rows.len(), 1);
+        assert_eq!(group.total, 55);
+        assert_eq!(
+            group.aggregates,
+            vec![serde_json::json!(55), serde_json::json!(1540.0)]
+        );
+    }
+
+    #[test]
+    fn flat_absent_limit_is_uncapped() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            limit: None,
+            ..Default::default()
+        };
+
+        let output = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
+
+        assert_eq!(flat_paths(&output).len(), 55);
+    }
+
+    #[test]
+    fn flat_explicit_limit_caps_rows_without_capping_total() {
+        let (_tmp, index, base) = grouped_limit_fixture();
+        let spec = QuerySpec {
+            filter: book_filter(),
+            limit: Some(1),
+            ..Default::default()
+        };
+
+        let QueryOutput::Flat { rows, total } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("expected flat output");
+        };
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(total, 55);
     }
 
     #[test]
@@ -1653,5 +1830,113 @@ moment  = { type = "datetime" }
         let e = rows.iter().find(|r| r.path == "e.md").unwrap();
         assert_eq!(e.columns["tags"], serde_json::Value::Null);
         assert_eq!(e.columns["aliases"], serde_json::Value::Null);
+    }
+
+    fn encryption_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        const ARMOR: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAuLi4K\n-----END AGE ENCRYPTED FILE-----\n";
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        std::fs::write(
+            tmp.path().join("unprotected.md"),
+            page(
+                "0190f8a0-0000-7000-8000-0000000000e0",
+                "BOOK",
+                "Unprotected",
+                "",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("protected.md"),
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e1\"\ntitle = \"Protected\"\ntype = \"BOOK\"\nencryption = {{ format = \"age\", version = 1, key_id = \"test-key\" }}\n+++\n{ARMOR}"
+            ),
+        )
+        .unwrap();
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    #[test]
+    fn encryption_system_field_filters_and_materializes_boolean_aliases() {
+        let (_tmp, index, base) = encryption_fixture();
+        let protected_spec = QuerySpec {
+            filter: Some(Filter::Cmp {
+                field: "encryption".into(),
+                op: Op::Eq,
+                value: serde_json::json!(true),
+            }),
+            columns: vec!["encryption".into()],
+            ..Default::default()
+        };
+        let protected = evaluate(
+            index.connection(),
+            &protected_spec,
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat {
+            rows: protected_rows,
+            ..
+        } = protected
+        else {
+            panic!("expected flat");
+        };
+        assert_eq!(
+            protected_rows
+                .iter()
+                .map(|row| row.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["protected.md"]
+        );
+        assert_eq!(
+            protected_rows[0].columns["encryption"],
+            serde_json::Value::Bool(true)
+        );
+
+        let unprotected_spec = QuerySpec {
+            filter: Some(Filter::Cmp {
+                field: "sys.encryption".into(),
+                op: Op::Eq,
+                value: serde_json::json!(false),
+            }),
+            columns: vec!["encryption".into(), "sys.encryption".into()],
+            ..Default::default()
+        };
+        let unprotected = evaluate(
+            index.connection(),
+            &unprotected_spec,
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat {
+            rows: unprotected_rows,
+            ..
+        } = unprotected
+        else {
+            panic!("expected flat");
+        };
+        assert_eq!(
+            unprotected_rows
+                .iter()
+                .map(|row| row.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unprotected.md"]
+        );
+        assert_eq!(
+            unprotected_rows[0].columns["encryption"],
+            serde_json::Value::Bool(false)
+        );
+        assert_eq!(
+            unprotected_rows[0].columns["sys.encryption"],
+            serde_json::Value::Bool(false)
+        );
     }
 }

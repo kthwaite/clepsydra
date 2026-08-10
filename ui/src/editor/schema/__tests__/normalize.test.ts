@@ -1,5 +1,6 @@
 import { createEditor, Editor } from "slate";
 import { describe, expect, it } from "vitest";
+import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { withSchema } from "../withSchema";
 
 describe("code-block purity invariant", () => {
@@ -211,4 +212,223 @@ describe("math integrity invariant", () => {
       expect(math.children).toEqual([{ text: "" }]);
     },
   );
+});
+
+const RECOVERY_BLOCK = "```base\n```\n";
+const RECOVERY_NODE = {
+  type: "base-embed",
+  status: "invalid",
+  rawBlock: RECOVERY_BLOCK,
+  parseError: "Invalid persisted base-embed node",
+  children: [{ text: "" }],
+};
+
+function normalizePersistedBase(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const editor = withSchema(createEditor());
+  editor.children = [node] as never;
+  Editor.normalize(editor, { force: true });
+  return editor.children[0] as unknown as Record<string, unknown>;
+}
+
+describe("Base embed integrity invariant", () => {
+  it.each([
+    {
+      type: "base-embed",
+      status: "unconfigured",
+      children: [{ text: "" }],
+    },
+    {
+      type: "base-embed",
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      filter: {
+        all: [
+          { field: "rating", op: "gte", value: 4 },
+          { field: "archived", op: "is_empty" },
+        ],
+      },
+      sort: [],
+      limit: 200,
+      children: [{ text: "" }],
+    },
+    {
+      type: "base-embed",
+      status: "invalid",
+      rawBlock: "````base\r\nunknown = true\r\n````",
+      parseError: "Unknown key",
+      children: [{ text: "" }],
+    },
+  ])("retains the complete valid $status state", (node) => {
+    expect(normalizePersistedBase(structuredClone(node))).toEqual(node);
+  });
+
+  it.each([
+    {
+      type: "base-embed",
+      status: "unconfigured",
+      children: [{ text: "stale", bold: true }, { text: "extra" }],
+    },
+    {
+      type: "base-embed",
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      children: [],
+    },
+    {
+      type: "base-embed",
+      status: "invalid",
+      rawBlock: RECOVERY_BLOCK,
+      parseError: "empty body",
+      children: [{ type: "paragraph", children: [{ text: "nested" }] }],
+    },
+  ])("repairs $status to exactly one empty text child", (node) => {
+    expect(normalizePersistedBase(node).children).toEqual([{ text: "" }]);
+  });
+
+  it.each([
+    [
+      "unknown status",
+      {
+        type: "base-embed",
+        status: "future",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "configured missing base",
+      {
+        type: "base-embed",
+        status: "configured",
+        view: "v",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "configured blank view",
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "b",
+        view: " ",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "configured malformed filter",
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "b",
+        view: "v",
+        filter: { field: "f", op: "eq" },
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "configured malformed sort",
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "b",
+        view: "v",
+        sort: [{ field: "f", dir: "up" }],
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "configured malformed limit",
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "b",
+        view: "v",
+        limit: 201,
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "unconfigured with stale configured properties",
+      {
+        type: "base-embed",
+        status: "unconfigured",
+        base: "b",
+        view: "v",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "configured with stale invalid properties",
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "b",
+        view: "v",
+        rawBlock: RECOVERY_BLOCK,
+        parseError: "stale",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "invalid with stale configured properties",
+      {
+        type: "base-embed",
+        status: "invalid",
+        rawBlock: RECOVERY_BLOCK,
+        parseError: "bad",
+        base: "b",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "invalid with malformed source",
+      {
+        type: "base-embed",
+        status: "invalid",
+        rawBlock: 42,
+        parseError: "bad",
+        children: [{ text: "" }],
+      },
+    ],
+    [
+      "recognized status with an unknown property",
+      {
+        type: "base-embed",
+        status: "unconfigured",
+        future: true,
+        children: [{ text: "" }],
+      },
+    ],
+  ])("replaces %s with the exact invalid recovery node", (_name, node) => {
+    expect(normalizePersistedBase(node as Record<string, unknown>)).toEqual(
+      RECOVERY_NODE,
+    );
+  });
+
+  it("normalizes malformed configured state, serializes a real fence, and reloads one invalid node", () => {
+    const editor = withSchema(createEditor());
+    editor.children = [
+      {
+        type: "base-embed",
+        status: "configured",
+        base: "books",
+        children: [{ text: "" }],
+      },
+    ] as never;
+    Editor.normalize(editor, { force: true });
+
+    const markdown = slateToMarkdown(editor.children);
+    expect(markdown.startsWith(RECOVERY_BLOCK)).toBe(true);
+    const reloaded = markdownToSlate(markdown);
+    expect(reloaded).toHaveLength(1);
+    expect(reloaded[0]).toMatchObject({
+      type: "base-embed",
+      status: "invalid",
+      rawBlock: RECOVERY_BLOCK,
+      children: [{ text: "" }],
+    });
+  });
 });

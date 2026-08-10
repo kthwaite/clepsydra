@@ -2,12 +2,15 @@ import type { BaseEditor, Descendant } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { ReactEditor } from "slate-react";
 import type { MathDelimiter } from "#/lib/markdown/folioMath";
+import type { BaseEmbedConfig } from "#/components/bases/embed-query";
 
 // --- Element types ---
 
 export interface ParagraphElement {
   type: "paragraph";
   blockId?: string;
+  /** Editor-only caret escape synthesized after a terminal Base embed. */
+  baseEmbedTrailingSentinel?: true;
   properties?: Record<string, string>;
   children: Descendant[];
 }
@@ -128,6 +131,30 @@ export interface ConversationTurnElement {
   children: Descendant[];
 }
 
+interface BaseEmbedElementBase {
+  type: "base-embed";
+  children: [{ text: "" }];
+}
+
+export interface UnconfiguredBaseEmbedElement extends BaseEmbedElementBase {
+  status: "unconfigured";
+}
+
+export type ConfiguredBaseEmbedElement = BaseEmbedElementBase &
+  BaseEmbedConfig & {
+    status: "configured";
+  };
+
+export interface InvalidBaseEmbedElement extends BaseEmbedElementBase {
+  status: "invalid";
+  rawBlock: string;
+  parseError: string;
+}
+
+export type BaseEmbedElement =
+  | UnconfiguredBaseEmbedElement
+  | ConfiguredBaseEmbedElement
+  | InvalidBaseEmbedElement;
 export type CustomElement =
   | ParagraphElement
   | HeadingElement
@@ -146,7 +173,8 @@ export type CustomElement =
   | InlineMathElement
   | MathBlockElement
   | ConversationTurnElement
-  | FootnoteDefElement;
+  | FootnoteDefElement
+  | BaseEmbedElement;
 
 export type ElementType = CustomElement["type"];
 

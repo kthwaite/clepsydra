@@ -12,10 +12,15 @@ import { useMemo } from "react";
 import { createEditor, type Descendant } from "slate";
 import { withHistory } from "slate-history";
 import { Editable, Slate, withReact } from "slate-react";
+import {
+  BaseEmbedEditingProvider,
+  useBaseEmbedEditingController,
+} from "#/editor/baseEmbedEditing";
 import { makeDecorateCode } from "#/editor/decorate-code";
 import { renderElement } from "#/editor/elements/renderElement";
 import { renderLeaf } from "#/editor/elements/renderLeaf";
 import { refractor } from "#/editor/refractor-languages";
+import { makeBaseEmbed } from "./elements/baseEmbed";
 import { makeBlockquote } from "./elements/blockquote";
 import { makeBlockRef } from "./elements/blockRef";
 import { makeCodeBlock } from "./elements/codeBlock";
@@ -49,7 +54,7 @@ import { withSchema } from "./withSchema";
 // ---------------------------------------------------------------------------
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false } },
+  defaultOptions: { queries: { enabled: false, retry: false } },
 });
 
 // Stories import the grammar bundle eagerly — no lazy-loading ceremony here.
@@ -60,15 +65,18 @@ function SchemaPreview({ value }: { value: Descendant[] }) {
     () => withReact(withHistory(withSchema(createEditor()))),
     [],
   );
+  const baseEmbedEditing = useBaseEmbedEditingController(editor);
   return (
     <Slate editor={editor} initialValue={value}>
-      <Editable
-        readOnly
-        renderElement={renderElement}
-        renderLeaf={renderLeaf}
-        decorate={decorateCode}
-        className="max-w-2xl font-body text-ink outline-none"
-      />
+      <BaseEmbedEditingProvider value={baseEmbedEditing}>
+        <Editable
+          readOnly
+          renderElement={renderElement}
+          renderLeaf={renderLeaf}
+          decorate={decorateCode}
+          className="max-w-2xl font-body text-ink outline-none"
+        />
+      </BaseEmbedEditingProvider>
     </Slate>
   );
 }
@@ -247,6 +255,21 @@ export const FootnoteDef: Story = {
     ]),
 };
 
+export const BaseEmbed: Story = {
+  name: "Base Embed (recoverable mocked reference)",
+  render: () =>
+    renderWithProviders([
+      makeBaseEmbed({
+        status: "configured",
+        base: "reading",
+        view: "Continues",
+        filter: { field: "rating", op: "gte", value: 4 },
+        sort: [{ field: "rating", dir: "desc" }],
+        limit: 20,
+      }),
+      makeParagraph({ children: [{ text: "" }] }),
+    ]),
+};
 // --- Inline elements (wrapped in a paragraph) -------------------------------
 
 export const Wikilink: Story = {

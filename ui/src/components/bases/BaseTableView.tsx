@@ -1,8 +1,11 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -24,7 +27,7 @@ import type {
   PropertyType,
   QueryOutput,
   QueryRow,
-  ViewOverrides,
+  SortKey,
 } from "#/api/bases";
 import { Button, buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
@@ -38,16 +41,24 @@ import type {
   BaseMemberDraftValue,
 } from "./member-draft";
 
-interface BaseTableViewProps {
+export interface BaseTableViewHandle {
+  /**
+   * Focuses the active saved-view button, falling back to the first rendered
+   * React Aria table when the view switcher has no enabled control.
+   */
+  focusEntry(): boolean;
+}
+
+export interface BaseTableViewProps {
   definition: BaseDetailResponse;
   activeView: string;
   onViewChange: (name: string) => void;
   output: QueryOutput | undefined;
-  /** When set, the grid is replaced by an error banner. */
+  /** When set without cached output, the grid is replaced by an error banner. */
   viewError?: string;
   viewLoading?: boolean;
-  sortOverride: ViewOverrides;
-  onSortChange: (override: ViewOverrides) => void;
+  sort: SortKey[] | undefined;
+  onSortChange: (sort: SortKey[] | undefined) => void;
   onOpenPage: (path: string) => void;
   configureSlug?: string;
   onCommitCell: (
@@ -84,6 +95,11 @@ interface ForwardFocusRequest {
   rowId: string;
   node: HTMLButtonElement | null;
   ref: (node: HTMLButtonElement | null) => void;
+}
+
+interface CreatedFocusRequest {
+  id: string;
+  view: string;
 }
 
 
@@ -124,18 +140,21 @@ function aggregateLabel(
 
 /**
  * The Vessel data grid: one react-aria `Table` per (group of) rows, column
- * sorting mapped to query sort overrides, group header rows carrying
+ * sorting mapped to ordered query sort keys, group header rows carrying
  * aggregate chips. Purely presentational — data and commits flow through
  * props (`BaseTable` wires the queries).
  */
-export function BaseTableView({
+export const BaseTableView = forwardRef<
+  BaseTableViewHandle,
+  BaseTableViewProps
+>(function BaseTableView({
   definition,
   activeView,
   onViewChange,
   output,
   viewError,
   viewLoading,
-  sortOverride,
+  sort,
   onSortChange,
   onOpenPage,
   configureSlug,
@@ -155,7 +174,7 @@ export function BaseTableView({
   onMemberEdit,
   focusCreatedId,
   onCreatedRowFocused,
-}: BaseTableViewProps) {
+}, ref) {
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
@@ -163,6 +182,27 @@ export function BaseTableView({
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
   const properties = definition.properties ?? EMPTY_PROPERTIES;
+  const evaluationIdentity = useMemo(
+    () =>
+      JSON.stringify({
+        revision: definition.revision,
+        view: equivalentActiveView,
+        columns: view?.columns ?? ["title"],
+        grouping: view?.group_by ?? null,
+        aggregates: view?.aggregates ?? [],
+        sort: sort === undefined ? "inherited" : sort,
+        outputShape: output?.shape ?? null,
+      }),
+    [
+      definition.revision,
+      equivalentActiveView,
+      output?.shape,
+      sort,
+      view?.aggregates,
+      view?.columns,
+      view?.group_by,
+    ],
+  );
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const activeViewIdentityRef = useRef(equivalentActiveView);
   const nextForwardFocusToken = useRef(0);
@@ -206,7 +246,73 @@ export function BaseTableView({
   const createdTitleRef = useRef<HTMLButtonElement | null>(null);
   const focusedCreatedId = useRef<string | undefined>(undefined);
   const createdFocusTimer = useRef<number | undefined>(undefined);
+  const createdFocusRequest = useRef<CreatedFocusRequest | undefined>(
+    focusCreatedId
+      ? { id: focusCreatedId, view: equivalentActiveView }
+      : undefined,
+  );
+  const createdFocusBlocked = useRef(Boolean(viewError || viewLoading));
+  const createdRowFocusedHandler = useRef(onCreatedRowFocused);
   const viewRootRef = useRef<HTMLDivElement | null>(null);
+  const activeViewControlRef = useRef<HTMLButtonElement | null>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusEntry() {
+        const target =
+          activeViewControlRef.current ??
+          viewRootRef.current?.querySelector<HTMLElement>(
+            '[role="grid"], table',
+          );
+        if (
+          !target ||
+          !target.isConnected ||
+          (target instanceof HTMLButtonElement &&
+            (target.disabled ||
+              target.getAttribute("aria-disabled") === "true"))
+        ) {
+          return false;
+        }
+        if (!(target instanceof HTMLButtonElement)) {
+          target.tabIndex = -1;
+        }
+        target.focus();
+        return (
+          document.activeElement === target ||
+          target.contains(document.activeElement)
+        );
+      },
+    }),
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const focusIsBlocked = Boolean(viewError || viewLoading);
+    createdFocusBlocked.current = focusIsBlocked;
+    createdRowFocusedHandler.current = onCreatedRowFocused;
+    if (focusIsBlocked && createdFocusTimer.current !== undefined) {
+      window.clearTimeout(createdFocusTimer.current);
+      createdFocusTimer.current = undefined;
+    }
+    const request = createdFocusRequest.current;
+    if (!focusCreatedId) {
+      createdFocusRequest.current = undefined;
+      focusedCreatedId.current = undefined;
+    } else if (!request || request.id !== focusCreatedId) {
+      createdFocusRequest.current = {
+        id: focusCreatedId,
+        view: equivalentActiveView,
+      };
+    }
+  }, [
+    equivalentActiveView,
+    focusCreatedId,
+    onCreatedRowFocused,
+    viewError,
+    viewLoading,
+  ]);
+
   const setCreatedTitleRef = useCallback(
     (node: HTMLButtonElement | null) => {
       createdTitleRef.current = node;
@@ -217,9 +323,12 @@ export function BaseTableView({
         }
         return;
       }
+      const request = createdFocusRequest.current;
       if (
-        !focusCreatedId ||
-        focusedCreatedId.current === focusCreatedId ||
+        !request ||
+        request.view !== activeViewIdentityRef.current ||
+        createdFocusBlocked.current ||
+        focusedCreatedId.current === request.id ||
         createdFocusTimer.current !== undefined
       ) {
         return;
@@ -229,23 +338,39 @@ export function BaseTableView({
       // pending effect focuses the row. Prime that state, then restore the
       // requested descendant focus after the row effect has settled.
       node.focus();
-      const createdId = focusCreatedId;
+      const { id: createdId, view: requestView } = request;
       createdFocusTimer.current = window.setTimeout(() => {
         createdFocusTimer.current = undefined;
-        if (createdTitleRef.current !== node) return;
+        const current = createdFocusRequest.current;
+        if (
+          createdFocusBlocked.current ||
+          createdTitleRef.current !== node ||
+          current?.id !== createdId ||
+          current.view !== requestView ||
+          activeViewIdentityRef.current !== requestView ||
+          !node.isConnected
+        ) {
+          return;
+        }
         node.focus();
         queueMicrotask(() => {
+          const latest = createdFocusRequest.current;
           if (
+            !createdFocusBlocked.current &&
             createdTitleRef.current === node &&
+            latest?.id === createdId &&
+            latest.view === requestView &&
+            activeViewIdentityRef.current === requestView &&
+            node.isConnected &&
             document.activeElement === node
           ) {
             focusedCreatedId.current = createdId;
-            onCreatedRowFocused?.(createdId);
+            createdRowFocusedHandler.current?.(createdId);
           }
         });
       }, 0);
     },
-    [focusCreatedId, onCreatedRowFocused],
+    [],
   );
   const setForwardTitleRef = useCallback(
     (token: number, node: HTMLButtonElement | null) => {
@@ -353,12 +478,16 @@ export function BaseTableView({
     memberCapability?.enabled !== true;
 
   useEffect(() => {
-    if (!focusCreatedId) {
-      focusedCreatedId.current = undefined;
-      return;
+    if (focusCreatedId) {
+      setCreatedTitleRef(createdTitleRef.current);
     }
-    setCreatedTitleRef(createdTitleRef.current);
-  }, [focusCreatedId, output, setCreatedTitleRef]);
+  }, [
+    focusCreatedId,
+    output,
+    setCreatedTitleRef,
+    viewError,
+    viewLoading,
+  ]);
 
   useEffect(
     () => () => {
@@ -369,28 +498,37 @@ export function BaseTableView({
     [],
   );
 
-  const sortDescriptor = sortOverride.sort
+  const primarySort = sort?.[0];
+  const sortDescriptor = primarySort
     ? {
-        column: sortOverride.sort,
+        column: primarySort.field,
         direction:
-          sortOverride.dir === "desc"
+          primarySort.dir === "desc"
             ? ("descending" as const)
             : ("ascending" as const),
       }
     : undefined;
 
-  const grid = (rows: QueryRow[], label: string) => (
+  const grid = (
+    rows: QueryRow[],
+    label: string,
+    cacheIdentity: string,
+  ) => (
     <Table
+      key={cacheIdentity}
       aria-label={label}
       sortDescriptor={readOnly ? undefined : sortDescriptor}
       onSortChange={
         readOnly
           ? undefined
           : (descriptor) =>
-              onSortChange({
-                sort: String(descriptor.column),
-                dir: descriptor.direction === "descending" ? "desc" : "asc",
-              })
+              onSortChange([
+                {
+                  field: String(descriptor.column),
+                  dir:
+                    descriptor.direction === "descending" ? "desc" : "asc",
+                },
+              ])
       }
       className="w-full border-collapse"
     >
@@ -426,8 +564,14 @@ export function BaseTableView({
         })}
       </TableHeader>
       <TableBody
-        key={`${activeView}:${memberDraftOpen ? "draft" : "active"}`}
-        dependencies={[activeCell]}
+        key={`${cacheIdentity}:${memberDraftOpen ? "draft" : "active"}`}
+        dependencies={[
+          activeCell,
+          evaluationIdentity,
+          focusCreatedId,
+          memberDraftOpen,
+          readOnly,
+        ]}
         items={rows}
       >
         {(row) => (
@@ -549,6 +693,26 @@ export function BaseTableView({
 
   const groups: GroupResult[] | null =
     output?.shape === "grouped" ? output.groups : null;
+  const capStatus = (() => {
+    if (output?.shape === "flat" && output.rows.length < output.total) {
+      const excluded = output.total - output.rows.length;
+      return `Showing ${output.rows.length} of ${output.total} rows; ${excluded} rows excluded by the current limit.`;
+    }
+    if (output?.shape === "grouped") {
+      let shown = 0;
+      let total = 0;
+      for (const group of output.groups) {
+        shown += group.rows.length;
+        total += group.total;
+      }
+      if (shown < total) {
+        return `Showing ${shown} of ${total} rows across groups; ${total - shown} rows excluded by the current per-group limit.`;
+      }
+    }
+    return undefined;
+  })();
+  const shouldRenderGrid =
+    output !== undefined || (!viewError && !viewLoading);
 
   return (
     <div
@@ -578,6 +742,11 @@ export function BaseTableView({
               </span>
             ) : (
               <button
+                ref={
+                  asciiCaseFold(v.name) === equivalentActiveView
+                    ? activeViewControlRef
+                    : undefined
+                }
                 key={v.name}
                 type="button"
                 className={cn(
@@ -659,45 +828,70 @@ export function BaseTableView({
         >
           View failed: {viewError}
         </p>
-      ) : viewLoading ? (
-        <p className="cl-mono px-1 py-2 text-[11px] text-ink-mute">Loading…</p>
-      ) : groups ? (
-        <div className="flex flex-col gap-4">
-          {groups.map((group) => {
-            const key =
-              group.key == null
-                ? "(empty)"
-                : formatCellValue(group.key as CellValue);
-            return (
-              <section key={key}>
-                <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
-                  <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
-                    {key}
-                  </span>
-                  <span className="cl-mono text-[10px] text-ink-mute">
-                    {group.total} row{group.total === 1 ? "" : "s"}
-                  </span>
-                  {group.aggregates.map((value, i) => (
-                    <span
-                      key={i}
-                      className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
-                    >
-                      {aggregateLabel(definition, activeView, i)}{" "}
-                      {formatCellValue(value as CellValue)}
+      ) : null}
+      {viewLoading ? (
+        <p
+          role="status"
+          aria-label="View loading"
+          className="cl-mono px-1 py-2 text-[11px] text-ink-mute"
+        >
+          Loading…
+        </p>
+      ) : null}
+      {capStatus ? (
+        <p
+          role="status"
+          aria-label="Result limit"
+          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
+        >
+          {capStatus}
+        </p>
+      ) : null}
+      {shouldRenderGrid ? (
+        groups ? (
+          <div className="flex flex-col gap-4">
+            {groups.map((group, index) => {
+              const key =
+                group.key == null
+                  ? "(empty)"
+                  : formatCellValue(group.key as CellValue);
+              const groupIdentity = `${evaluationIdentity}:group:${index}:${JSON.stringify(group.key)}`;
+              return (
+                <section key={groupIdentity}>
+                  <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
+                    <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
+                      {key}
                     </span>
-                  ))}
-                </header>
-                {grid(group.rows, `${definition.name} — ${key}`)}
-              </section>
-            );
-          })}
-        </div>
-      ) : (
-        grid(
-          output?.shape === "flat" ? output.rows : [],
-          `${definition.name} — ${activeView}`,
+                    <span className="cl-mono text-[10px] text-ink-mute">
+                      {group.total} row{group.total === 1 ? "" : "s"}
+                    </span>
+                    {group.aggregates.map((value, i) => (
+                      <span
+                        key={i}
+                        className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+                      >
+                        {aggregateLabel(definition, activeView, i)}{" "}
+                        {formatCellValue(value as CellValue)}
+                      </span>
+                    ))}
+                  </header>
+                  {grid(
+                    group.rows,
+                    `${definition.name} — ${key}`,
+                    groupIdentity,
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        ) : (
+          grid(
+            output?.shape === "flat" ? output.rows : [],
+            `${definition.name} — ${activeView}`,
+            `${evaluationIdentity}:flat`,
+          )
         )
-      )}
+      ) : null}
     </div>
   );
-}
+});
