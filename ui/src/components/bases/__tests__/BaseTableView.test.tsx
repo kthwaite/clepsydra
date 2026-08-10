@@ -559,11 +559,11 @@ describe("BaseTableView", () => {
       definition: terminalDefinition,
       output: { shape: "flat", rows: [], total: 0 },
     });
-    const add = screen.getByRole("button", { name: "Add member" });
-    add.focus();
-    await Promise.resolve();
-
-    expect(add).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Reading Log table view" }),
+      ).toHaveFocus(),
+    );
   });
 
   it("does not carry terminal Tab focus into another saved view", async () => {
@@ -589,11 +589,11 @@ describe("BaseTableView", () => {
       definition: terminalDefinition,
       activeView: "Second",
     });
-    const add = screen.getByRole("button", { name: "Add member" });
-    add.focus();
-    await Promise.resolve();
-
-    expect(add).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Reading Log table view" }),
+      ).toHaveFocus(),
+    );
     expect(
       screen.getByRole("button", { name: "The Book of the New Sun" }),
     ).not.toHaveFocus();
@@ -622,17 +622,112 @@ describe("BaseTableView", () => {
       definition: terminalDefinition,
       output: { shape: "flat", rows: [], total: 0 },
     });
-    const add = screen.getByRole("button", { name: "Add member" });
-    add.focus();
     props.rerender({ definition: terminalDefinition, output: flat });
-    await Promise.resolve();
-
-    expect(add).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Reading Log table view" }),
+      ).toHaveFocus(),
+    );
     expect(
       screen.getByRole("button", { name: "The Book of the New Sun" }),
     ).not.toHaveFocus();
   });
 
+
+  it("focuses the stable view region when terminal Tab has no title target", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["rating"],
+          },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    fireEvent.keyDown(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+      { key: "Tab" },
+    );
+    expect(props.onCommitCell).toHaveBeenCalledTimes(1);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Reading Log table view" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("keeps created-title focus authoritative over terminal Tab", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "rating"],
+          },
+        ],
+      },
+      focusCreatedId: row.id,
+    });
+    const title = screen.getByRole("button", {
+      name: "The Book of the New Sun",
+    });
+    await waitFor(() => expect(title).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    fireEvent.keyDown(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+      { key: "Tab" },
+    );
+    expect(props.onCommitCell).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(title).toHaveFocus());
+  });
+
+  it("clears terminal Tab focus when loading replaces the target grid", async () => {
+    const user = userEvent.setup();
+    const terminalDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "rating"],
+        },
+      ],
+    };
+    const props = renderView({ definition: terminalDefinition });
+
+    await user.click(screen.getByRole("button", { name: "4.5" }));
+    fireEvent.keyDown(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+      { key: "Tab" },
+    );
+    props.rerender({
+      definition: terminalDefinition,
+      viewLoading: true,
+    });
+    const region = screen.getByRole("region", {
+      name: "Reading Log table view",
+    });
+    await waitFor(() => expect(region).toHaveFocus());
+
+    props.rerender({
+      definition: terminalDefinition,
+      viewLoading: false,
+    });
+    await Promise.resolve();
+    expect(region).toHaveFocus();
+  });
 
   it("keeps an invalid number open when Tab cannot accept it", async () => {
     const user = userEvent.setup();

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import {
@@ -158,11 +165,13 @@ export function BaseTableView({
   const properties = definition.properties ?? EMPTY_PROPERTIES;
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const activeViewIdentityRef = useRef(equivalentActiveView);
-  activeViewIdentityRef.current = equivalentActiveView;
   const nextForwardFocusToken = useRef(0);
   const pendingForwardFocus = useRef<ForwardFocusRequest | undefined>(
     undefined,
   );
+  const [forwardFocusRequest, setForwardFocusRequest] = useState<
+    ForwardFocusRequest | undefined
+  >(undefined);
   const editableColumns = columns.filter(
     (column) =>
       SYSTEM_COLUMNS[column] === undefined && properties[column] !== undefined,
@@ -186,26 +195,6 @@ export function BaseTableView({
         output.groups.some((group) =>
           group.rows.some((row) => String(row.id) === activeRowId),
         ));
-  const pendingForwardFocusRequest = pendingForwardFocus.current;
-  const pendingForwardFocusRowIsRendered =
-    pendingForwardFocusRequest !== undefined &&
-    (output?.shape === "flat"
-      ? output.rows.some(
-          (row) => String(row.id) === pendingForwardFocusRequest.rowId,
-        )
-      : output?.shape === "grouped" &&
-        output.groups.some((group) =>
-          group.rows.some(
-            (row) => String(row.id) === pendingForwardFocusRequest.rowId,
-          ),
-        ));
-  if (
-    pendingForwardFocusRequest &&
-    (pendingForwardFocusRequest.view !== equivalentActiveView ||
-      !pendingForwardFocusRowIsRendered)
-  ) {
-    pendingForwardFocus.current = undefined;
-  }
 
 
   useEffect(() => {
@@ -217,6 +206,7 @@ export function BaseTableView({
   const createdTitleRef = useRef<HTMLButtonElement | null>(null);
   const focusedCreatedId = useRef<string | undefined>(undefined);
   const createdFocusTimer = useRef<number | undefined>(undefined);
+  const viewRootRef = useRef<HTMLDivElement | null>(null);
   const setCreatedTitleRef = useCallback(
     (node: HTMLButtonElement | null) => {
       createdTitleRef.current = node;
@@ -262,7 +252,7 @@ export function BaseTableView({
       const request = pendingForwardFocus.current;
       if (!request || request.token !== token) return;
       if (!node) {
-        pendingForwardFocus.current = undefined;
+        request.node = null;
         return;
       }
       request.node = node;
@@ -281,11 +271,77 @@ export function BaseTableView({
           return;
         }
         pendingForwardFocus.current = undefined;
+        setForwardFocusRequest((requestState) =>
+          requestState?.token === token ? undefined : requestState,
+        );
         node.focus();
       });
     },
     [],
   );
+  useLayoutEffect(() => {
+    activeViewIdentityRef.current = equivalentActiveView;
+    const request = pendingForwardFocus.current;
+    if (!request) return;
+
+    const requestRowIsRendered =
+      output?.shape === "flat"
+        ? output.rows.some((row) => String(row.id) === request.rowId)
+        : output?.shape === "grouped" &&
+          output.groups.some((group) =>
+            group.rows.some((row) => String(row.id) === request.rowId),
+          );
+    const titleCanRender =
+      columns.includes("title") &&
+      !readOnly &&
+      !memberDraftOpen &&
+      !viewError &&
+      !viewLoading;
+    const createdTitleIsRendered =
+      titleCanRender &&
+      focusCreatedId !== undefined &&
+      (output?.shape === "flat"
+        ? output.rows.some((row) => String(row.id) === focusCreatedId)
+        : output?.shape === "grouped" &&
+          output.groups.some((group) =>
+            group.rows.some((row) => String(row.id) === focusCreatedId),
+          ));
+
+    const fallbackNode = createdTitleIsRendered
+      ? createdTitleRef.current
+      : request.view === equivalentActiveView &&
+          requestRowIsRendered &&
+          titleCanRender
+        ? undefined
+        : viewRootRef.current;
+    if (fallbackNode === undefined) return;
+
+    pendingForwardFocus.current = undefined;
+    setForwardFocusRequest((current) =>
+      current?.token === request.token ? undefined : current,
+    );
+    if (!fallbackNode) return;
+    const committedView = equivalentActiveView;
+    queueMicrotask(() => {
+      if (
+        nextForwardFocusToken.current === request.token &&
+        activeViewIdentityRef.current === committedView &&
+        fallbackNode.isConnected
+      ) {
+        fallbackNode.focus();
+      }
+    });
+  }, [
+    columns,
+    equivalentActiveView,
+    forwardFocusRequest,
+    focusCreatedId,
+    memberDraftOpen,
+    output,
+    readOnly,
+    viewError,
+    viewLoading,
+  ]);
   const memberBlocker =
     memberCapability?.enabled === true
       ? undefined
@@ -391,11 +447,10 @@ export function BaseTableView({
                       ref={
                         row.id === focusCreatedId
                           ? setCreatedTitleRef
-                          : pendingForwardFocus.current?.view ===
+                          : forwardFocusRequest?.view ===
                                 equivalentActiveView &&
-                              String(row.id) ===
-                                pendingForwardFocus.current.rowId
-                            ? pendingForwardFocus.current.ref
+                              String(row.id) === forwardFocusRequest.rowId
+                            ? forwardFocusRequest.ref
                             : undefined
                       }
                       type="button"
@@ -421,6 +476,8 @@ export function BaseTableView({
                     }
                     onEdit={() => {
                       pendingForwardFocus.current = undefined;
+                      nextForwardFocusToken.current += 1;
+                      setForwardFocusRequest(undefined);
                       setActiveCell({
                         rowId: String(row.id),
                         column,
@@ -428,16 +485,23 @@ export function BaseTableView({
                       });
                     }}
                     onCancel={() => {
+                      if (pendingForwardFocus.current) return;
                       pendingForwardFocus.current = undefined;
+                      setForwardFocusRequest(undefined);
                       setActiveCell(null);
                     }}
                     onCommit={(value, hint) => {
                       pendingForwardFocus.current = undefined;
+                      nextForwardFocusToken.current += 1;
+                      setForwardFocusRequest(undefined);
                       setActiveCell(null);
                       onCommitCell(row, column, value, hint);
                     }}
                     onCommitNext={(value, hint) => {
+                      const token = nextForwardFocusToken.current + 1;
+                      nextForwardFocusToken.current = token;
                       pendingForwardFocus.current = undefined;
+                      setForwardFocusRequest(undefined);
                       onCommitCell(row, column, value, hint);
                       const nextColumn = nextEditableColumn(column);
                       if (nextColumn) {
@@ -451,18 +515,18 @@ export function BaseTableView({
                       const rowIndex = rows.findIndex(
                         (candidate) => String(candidate.id) === String(row.id),
                       );
-                      const token = nextForwardFocusToken.current + 1;
-                      nextForwardFocusToken.current = token;
                       const targetRowId = String(
                         rows[rowIndex + 1]?.id ?? row.id,
                       );
-                      pendingForwardFocus.current = {
+                      const request: ForwardFocusRequest = {
                         token,
                         view: equivalentActiveView,
                         rowId: targetRowId,
                         node: null,
                         ref: (node) => setForwardTitleRef(token, node),
                       };
+                      pendingForwardFocus.current = request;
+                      setForwardFocusRequest(request);
                       setActiveCell(null);
                     }}
                   />
@@ -487,7 +551,13 @@ export function BaseTableView({
     output?.shape === "grouped" ? output.groups : null;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div
+      ref={viewRootRef}
+      role="region"
+      aria-label={`${definition.name} table view`}
+      tabIndex={-1}
+      className="flex flex-col gap-3"
+    >
       <div className="flex flex-wrap items-center gap-3 border-b border-rule pb-2">
         <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
           {definition.name}
