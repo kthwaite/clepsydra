@@ -763,6 +763,12 @@ describe("pure Base embed validation bounds", () => {
   );
 });
 
+function expectAllDescriptionTargetsToExist(element: HTMLElement) {
+  const ids = element.getAttribute("aria-describedby")?.split(/\s+/) ?? [];
+  expect(ids.length).toBeGreaterThan(0);
+  for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
+}
+
 describe("BaseEmbedInspector source repair", () => {
   it.each([
     [
@@ -807,6 +813,10 @@ describe("BaseEmbedInspector source repair", () => {
     const source = screen.getByRole("textbox", { name: "Base embed TOML" });
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(source).toHaveAccessibleDescription(/valid TOML/i);
+    expectAllDescriptionTargetsToExist(
+      screen.getByRole("dialog", { name: "Configure Base embed" }),
+    );
+    expectAllDescriptionTargetsToExist(source);
 
     await user.clear(source);
     await user.type(source, 'base = "reading"\nview = "All"\nlimit = 40\n');
@@ -830,5 +840,13 @@ describe("BaseEmbedInspector source repair", () => {
       screen.getByText(/TOML body exceeds 65536 UTF-8 bytes/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    const dialog = screen.getByRole("dialog", {
+      name: "Configure Base embed",
+    });
+    expectAllDescriptionTargetsToExist(dialog);
+    expect(dialog).not.toHaveAttribute(
+      "aria-describedby",
+      expect.stringContaining("base-embed-root-diagnostics"),
+    );
   });
 });

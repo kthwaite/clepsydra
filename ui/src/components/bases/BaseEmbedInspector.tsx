@@ -349,7 +349,9 @@ export function BaseEmbedInspector({
           : "Choose a saved Base view and local query overrides."
       }
       ariaDescribedBy={
-        rootDiagnostics.length > 0 ? "base-embed-root-diagnostics" : undefined
+        !sourceRepair && rootDiagnostics.length > 0
+          ? "base-embed-root-diagnostics"
+          : undefined
       }
       size="xl"
       footer={

@@ -8,7 +8,8 @@ Commits:
 
 - `f1578e6` — `feat(ui): configure Folio Base embeds`
 - `850f09d` — `fix(ui): harden Base embed inspector`
-- final review-closure commit — associates root diagnostics and gates cached refetch errors
+- `9497c78` — `fix(ui): close Base inspector validation gaps`
+- final ARIA closure commit — removes dangling source-repair diagnostic references
 
 ## Implementation
 
@@ -39,7 +40,7 @@ bun run --cwd ui test src/components/bases/__tests__/ViewsEditor.test.tsx
 
 ### Review-fix RED/GREEN
 
-The first focused review found six Important issues. Regressions first failed for explicit empty sort persistence, hidden root/group/sort diagnostics, stale canceled drafts across sessions/node replacement, settled detail errors and delayed stale detail, canonical expansion changing persisted parsing, and the unassociated React Aria dialog description. A second independent rereview caught two remaining gaps: root `$` diagnostics were visible but not included in the dialog's accessible description, and a settled refetch error with matching cached detail still permitted Save.
+The first focused review found six Important issues. Regressions first failed for explicit empty sort persistence, hidden root/group/sort diagnostics, stale canceled drafts across sessions/node replacement, settled detail errors and delayed stale detail, canonical expansion changing persisted parsing, and the unassociated React Aria dialog description. A second independent rereview caught two remaining gaps: root `$` diagnostics were visible but not included in the dialog's accessible description, and a settled refetch error with matching cached detail still permitted Save. A final closure review found that source-repair `$` diagnostics inherited the structured-only root diagnostic ID; focused RED proved the dangling `aria-describedby` token for both parse and canonical-overflow errors.
 
 After normalizing empty inspector sort to inherited, session-scoped resets, full visible and programmatic diagnostic ownership, error-aware detail readiness gating, split shape/canonical-size validation, and explicit dialog description association:
 
@@ -48,7 +49,7 @@ bun run --cwd ui test src/components/bases/__tests__/MembershipEditor.test.tsx s
 5 files passed; 171 tests passed.
 ```
 
-Coverage includes Base/view reset rules, missing references, a real delayed stale-detail transition, missing detail and cached-detail refetch-error gating, local/no-partial writes, closed-to-open and node-replacement resets, inherited empty sort omission, one-node Save, configured and source-repair Cancel, Escape, focus restoration, initial focus, dialog/control descriptions, refreshing/invalid Save states, every structured diagnostic visibly and programmatically associated with its owner, declared/canonical fields, raw-versus-canonical size compatibility, long CRLF/unclosed source extraction, and every shared bound at $N$ and $N+1$ through the inspector.
+Coverage includes Base/view reset rules, missing references, a real delayed stale-detail transition, missing detail and cached-detail refetch-error gating, local/no-partial writes, closed-to-open and node-replacement resets, inherited empty sort omission, one-node Save, configured and source-repair Cancel, Escape, focus restoration, initial focus, dialog/control descriptions with every IDREF resolved, refreshing/invalid Save states, every structured diagnostic visibly and programmatically associated with its owner, declared/canonical fields, raw-versus-canonical size compatibility, long CRLF/unclosed source extraction, and every shared bound at $N$ and $N+1$ through the inspector.
 
 Vitest emitted only the existing Vite future-native-loader warnings for `__dirname` and extensionless `./mdx-plugin`.
 
