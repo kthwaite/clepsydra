@@ -1,6 +1,7 @@
 import type { ElementDescriptor } from "./descriptor";
 import { blockquoteDescriptor } from "./elements/blockquote";
 import { blockRefDescriptor } from "./elements/blockRef";
+import { conversationTurnDescriptor } from "./elements/conversationTurn";
 import { codeBlockDescriptor } from "./elements/codeBlock";
 import { footnoteDefDescriptor } from "./elements/footnoteDef";
 import { footnoteRefDescriptor } from "./elements/footnoteRef";
@@ -26,6 +27,7 @@ const ALL: ElementDescriptor[] = [
   paragraphDescriptor,
   headingDescriptor,
   codeBlockDescriptor,
+  conversationTurnDescriptor,
   blockquoteDescriptor,
   bulletedListDescriptor,
   numberedListDescriptor,
