@@ -313,6 +313,18 @@ describe("BaseTableView", () => {
     expect(onCreatedRowFocused).toHaveBeenCalledTimes(1);
   });
 
+  it("cancels queued created focus when cached output becomes loading", async () => {
+    vi.useFakeTimers();
+    const onCreatedRowFocused = vi.fn();
+    const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
+
+    props.rerender({ viewLoading: true });
+    await flushFocusTimer();
+    vi.useRealTimers();
+
+    expect(onCreatedRowFocused).not.toHaveBeenCalled();
+  });
+
   it("does not claim created focus when the active view omits title", async () => {
     const onCreatedRowFocused = vi.fn();
     vi.useFakeTimers();
@@ -356,6 +368,65 @@ describe("BaseTableView", () => {
 
     expect(ref.current?.focusEntry()).toBe(true);
     expect(screen.getByRole("button", { name: "Continues" })).toHaveFocus();
+  });
+
+  it("falls back to the rendered read-only table for entry focus", () => {
+    const ref = createRef<BaseTableViewHandle>();
+    render(
+      <BaseTableView
+        ref={ref}
+        definition={definition}
+        activeView="Continues"
+        output={flat}
+        sort={undefined}
+        readOnly
+        onViewChange={vi.fn()}
+        onSortChange={vi.fn()}
+        onOpenPage={vi.fn()}
+        onCommitCell={vi.fn()}
+      />,
+    );
+
+    let focused = false;
+    act(() => {
+      focused = ref.current?.focusEntry() ?? false;
+    });
+    const grid = screen.getByRole("grid");
+    expect(focused).toBe(true);
+    expect(grid).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("focuses the first grouped table for read-only entry", () => {
+    const ref = createRef<BaseTableViewHandle>();
+    render(
+      <BaseTableView
+        ref={ref}
+        definition={definition}
+        activeView="Shelf"
+        output={{
+          shape: "grouped",
+          groups: [
+            { key: "reading", total: 1, aggregates: [1, 4.5], rows: [row] },
+            { key: "queued", total: 0, aggregates: [0, null], rows: [] },
+          ],
+        }}
+        sort={undefined}
+        readOnly
+        onViewChange={vi.fn()}
+        onSortChange={vi.fn()}
+        onOpenPage={vi.fn()}
+        onCommitCell={vi.fn()}
+      />,
+    );
+
+    const grids = screen.getAllByRole("grid");
+    let focused = false;
+    act(() => {
+      focused = ref.current?.focusEntry() ?? false;
+    });
+    expect(focused).toBe(true);
+    expect(grids[0]).toContainElement(document.activeElement as HTMLElement);
+    expect(grids[1]).not.toContainElement(document.activeElement as HTMLElement);
   });
 
   it("returns false when entry has no enabled view or table target", () => {
@@ -549,48 +620,86 @@ describe("BaseTableView", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("bad filter");
   });
 
-  it("invalidates row and group caches for the complete evaluation identity", () => {
-    const grouped: QueryOutput = {
-      shape: "grouped",
-      groups: [
-        { key: "reading", total: 1, aggregates: [1, 4.5], rows: [row] },
-      ],
+  it("invalidates each same-revision evaluation identity dimension", () => {
+    const props = renderView({});
+    let previousGrid = screen.getByRole("grid");
+    const expectRemount = (next: Partial<ViewProps>) => {
+      props.rerender(next);
+      const currentGrid = screen.getByRole("grid");
+      expect(currentGrid).not.toBe(previousGrid);
+      previousGrid = currentGrid;
     };
-    const props = renderView({
-      activeView: "Shelf",
-      output: grouped,
-      sort: [{ field: "rating", dir: "desc" }],
-    });
-    expect(screen.getByRole("columnheader", { name: /rating/ })).toBeInTheDocument();
-    expect(screen.getByText("reading")).toBeInTheDocument();
+    const restoreBaseline = () => {
+      expectRemount({
+        definition,
+        activeView: "Continues",
+        output: flat,
+        sort: undefined,
+      });
+    };
 
-    props.rerender({
+    expectRemount({
       definition: {
         ...definition,
-        revision: definition.revision,
         views: [
-          definition.views![0],
           {
-            name: "Shelf",
+            name: "Continues",
             layout: "table",
-            columns: ["title", "author"],
+            columns: ["title", "rating"],
           },
+          definition.views![1],
         ],
       },
-      activeView: "Shelf",
-      output: flat,
+    });
+    expect(screen.getByRole("columnheader", { name: "rating" })).toBeInTheDocument();
+    restoreBaseline();
+
+    expectRemount({
+      definition: {
+        ...definition,
+        views: [
+          {
+            ...definition.views![0],
+            group_by: "status",
+          },
+          definition.views![1],
+        ],
+      },
+    });
+    restoreBaseline();
+
+    expectRemount({
+      definition: {
+        ...definition,
+        views: [
+          {
+            ...definition.views![0],
+            aggregates: [{ fn: "count" }],
+          },
+          definition.views![1],
+        ],
+      },
+    });
+    restoreBaseline();
+
+    expectRemount({
       sort: [{ field: "author", dir: "asc" }],
     });
-
-    expect(
-      screen.queryByRole("columnheader", { name: /rating/ }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("reading")).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /author/ })).toHaveAttribute(
       "aria-sort",
       "ascending",
     );
-    expect(screen.getByText("Gene Wolfe")).toBeInTheDocument();
+    restoreBaseline();
+
+    expectRemount({
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "reading", total: 1, aggregates: [], rows: [row] },
+        ],
+      },
+    });
+    expect(screen.getByText("reading")).toBeInTheDocument();
   });
 
   it("announces flat output excluded by the current cap", () => {

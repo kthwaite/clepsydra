@@ -255,31 +255,46 @@ export const BaseTableView = forwardRef<
   const createdRowFocusedHandler = useRef(onCreatedRowFocused);
   const viewRootRef = useRef<HTMLDivElement | null>(null);
   const activeViewControlRef = useRef<HTMLButtonElement | null>(null);
-  const entryTableRef = useRef<HTMLTableElement | null>(null);
 
   useImperativeHandle(
     ref,
     () => ({
       focusEntry() {
-        const target = activeViewControlRef.current ?? entryTableRef.current;
+        const target =
+          activeViewControlRef.current ??
+          viewRootRef.current?.querySelector<HTMLElement>(
+            '[role="grid"], table',
+          );
         if (
           !target ||
           !target.isConnected ||
-          target.getAttribute("aria-disabled") === "true" ||
-          (target instanceof HTMLButtonElement && target.disabled)
+          (target instanceof HTMLButtonElement &&
+            (target.disabled ||
+              target.getAttribute("aria-disabled") === "true"))
         ) {
           return false;
         }
+        if (!(target instanceof HTMLButtonElement)) {
+          target.tabIndex = -1;
+        }
         target.focus();
-        return document.activeElement === target;
+        return (
+          document.activeElement === target ||
+          target.contains(document.activeElement)
+        );
       },
     }),
     [],
   );
 
   useLayoutEffect(() => {
-    createdFocusBlocked.current = Boolean(viewError || viewLoading);
+    const focusIsBlocked = Boolean(viewError || viewLoading);
+    createdFocusBlocked.current = focusIsBlocked;
     createdRowFocusedHandler.current = onCreatedRowFocused;
+    if (focusIsBlocked && createdFocusTimer.current !== undefined) {
+      window.clearTimeout(createdFocusTimer.current);
+      createdFocusTimer.current = undefined;
+    }
     const request = createdFocusRequest.current;
     if (!focusCreatedId) {
       createdFocusRequest.current = undefined;
@@ -328,6 +343,7 @@ export const BaseTableView = forwardRef<
         createdFocusTimer.current = undefined;
         const current = createdFocusRequest.current;
         if (
+          createdFocusBlocked.current ||
           createdTitleRef.current !== node ||
           current?.id !== createdId ||
           current.view !== requestView ||
@@ -340,6 +356,7 @@ export const BaseTableView = forwardRef<
         queueMicrotask(() => {
           const latest = createdFocusRequest.current;
           if (
+            !createdFocusBlocked.current &&
             createdTitleRef.current === node &&
             latest?.id === createdId &&
             latest.view === requestView &&
@@ -496,11 +513,9 @@ export const BaseTableView = forwardRef<
     rows: QueryRow[],
     label: string,
     cacheIdentity: string,
-    isEntryTable: boolean,
   ) => (
     <Table
       key={cacheIdentity}
-      ref={isEntryTable ? entryTableRef : undefined}
       aria-label={label}
       sortDescriptor={readOnly ? undefined : sortDescriptor}
       onSortChange={
@@ -864,7 +879,6 @@ export const BaseTableView = forwardRef<
                     group.rows,
                     `${definition.name} — ${key}`,
                     groupIdentity,
-                    index === 0,
                   )}
                 </section>
               );
@@ -875,7 +889,6 @@ export const BaseTableView = forwardRef<
             output?.shape === "flat" ? output.rows : [],
             `${definition.name} — ${activeView}`,
             `${evaluationIdentity}:flat`,
-            true,
           )
         )
       ) : null}
