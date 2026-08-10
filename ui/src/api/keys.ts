@@ -1,5 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
 
+export type BaseEvaluationQueryKey = readonly [
+  "post",
+  "/api/vault/bases/{slug}/views/{view}/evaluate",
+  string,
+];
+
 export const queryKeys = {
   blocks: {
     all: ["blocks"] as const,
@@ -56,12 +62,11 @@ export const queryKeys = {
   index: { pathPrefix: "/api/vault/index" },
   bases: {
     pathPrefix: "/api/vault/bases",
-    evaluation: (identity: string) =>
-      [
-        "post",
-        "/api/vault/bases/{slug}/views/{view}/evaluate",
-        identity,
-      ] as const,
+    evaluation: (identity: string): BaseEvaluationQueryKey => [
+      "post",
+      "/api/vault/bases/{slug}/views/{view}/evaluate",
+      identity,
+    ],
   },
   query: { pathPrefix: "/api/vault/query" },
 } as const;

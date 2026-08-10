@@ -3,19 +3,25 @@ import {
   queryOptions,
   useQuery,
   useQueryClient,
+  type UseQueryResult,
 } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
-import { formatApiError, isApiError } from "./error";
+import { isApiError } from "./error";
 import {
   baseViewEvaluationBody,
   type BaseEmbedConfig,
   queryIdentity,
 } from "#/components/bases/embed-query";
-import { invalidateByPath, queryKeys } from "./keys";
+import {
+  type BaseEvaluationQueryKey,
+  invalidateByPath,
+  queryKeys,
+} from "./keys";
 
+export type ApiError = components["schemas"]["ApiError"];
 export type BaseDetailResponse = components["schemas"]["BaseDetailResponse"];
 export type BaseMemberCreateRequest =
   components["schemas"]["BaseMemberCreateRequest"];
@@ -182,7 +188,12 @@ export function useBaseView(
 }
 
 export function baseViewEvaluationOptions(config: BaseEmbedConfig) {
-  return queryOptions({
+  return queryOptions<
+    BaseViewEvaluateResponse,
+    ApiError,
+    BaseViewEvaluateResponse,
+    BaseEvaluationQueryKey
+  >({
     queryKey: queryKeys.bases.evaluation(queryIdentity(config)),
     queryFn: async (): Promise<BaseViewEvaluateResponse> => {
       const { data, error } = await fetchClient.POST(
@@ -192,18 +203,22 @@ export function baseViewEvaluationOptions(config: BaseEmbedConfig) {
           body: baseViewEvaluationBody(config),
         },
       );
-      if (error) {
-        throw new Error(
-          formatApiError(error, "Failed to evaluate embedded Base view"),
-        );
+      if (error) throw error;
+      if (!data) {
+        throw {
+          status: 500,
+          error: "Embedded Base evaluation response was empty",
+          hint: null,
+        } satisfies ApiError;
       }
-      if (!data) throw new Error("Embedded Base evaluation response was empty");
       return data;
     },
   });
 }
 
-export function useBaseViewEvaluation(config: BaseEmbedConfig) {
+export function useBaseViewEvaluation(
+  config: BaseEmbedConfig,
+): UseQueryResult<BaseViewEvaluateResponse, ApiError> {
   return useQuery({
     ...baseViewEvaluationOptions(config),
     enabled: !!config.base && !!config.view,
