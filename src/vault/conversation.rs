@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -69,8 +69,13 @@ pub enum ConversationError {
     InvalidHostIdHash,
     #[error("turn {sequence} content must not be blank")]
     BlankTurnContent { sequence: u64 },
-    #[error("source turn ID is repeated within the submitted transcript: {source_turn_id}")]
-    DuplicateSourceTurnId { source_turn_id: String },
+    #[error(
+        "source turn ID at sequence {duplicate_sequence} repeats sequence {first_sequence}"
+    )]
+    DuplicateSourceTurnId {
+        first_sequence: u64,
+        duplicate_sequence: u64,
+    },
     #[error("turn count exceeds the supported range")]
     TurnCountOverflow,
     #[error("invalid conversation ledger: {0}")]
@@ -132,7 +137,7 @@ pub fn prepare_transcript(
 
     let captured_turn_count =
         u64::try_from(turns.len()).map_err(|_| ConversationError::TurnCountOverflow)?;
-    let mut seen_source_ids = HashSet::with_capacity(turns.len());
+    let mut seen_source_ids = HashMap::with_capacity(turns.len());
     let mut prepared_turns = Vec::with_capacity(turns.len());
 
     for (index, turn) in turns.iter().enumerate() {
@@ -151,10 +156,12 @@ pub fn prepare_transcript(
             .as_deref()
             .filter(|source_turn_id| !source_turn_id.trim().is_empty());
         if let Some(source_turn_id) = source_turn_id
-            && !seen_source_ids.insert(source_turn_id)
+            && let Some(first_sequence) =
+                seen_source_ids.insert(source_turn_id, source_sequence)
         {
             return Err(ConversationError::DuplicateSourceTurnId {
-                source_turn_id: source_turn_id.to_string(),
+                first_sequence,
+                duplicate_sequence: source_sequence,
             });
         }
 
@@ -591,21 +598,27 @@ mod tests {
     }
 
     #[test]
-    fn repeated_nonempty_source_turn_id_is_rejected_even_for_identical_content() {
-        let result = prepare_transcript(
+    fn repeated_nonempty_source_turn_id_is_rejected_without_exposing_the_raw_id() {
+        const SENTINEL_SOURCE_ID: &str = "raw-source-turn-id-must-not-escape";
+        let error = prepare_transcript(
             Some("claude"),
             None,
             &[
-                sourced_turn(ConversationRole::User, "same", "duplicate"),
-                sourced_turn(ConversationRole::User, "same", "duplicate"),
+                sourced_turn(ConversationRole::User, "same", SENTINEL_SOURCE_ID),
+                sourced_turn(ConversationRole::User, "same", SENTINEL_SOURCE_ID),
             ],
-        );
+        )
+        .unwrap_err();
 
         assert!(matches!(
-            result,
-            Err(ConversationError::DuplicateSourceTurnId { source_turn_id })
-                if source_turn_id == "duplicate"
+            error,
+            ConversationError::DuplicateSourceTurnId {
+                first_sequence: 1,
+                duplicate_sequence: 2,
+            }
         ));
+        let message = error.to_string();
+        assert!(!message.contains(SENTINEL_SOURCE_ID), "{message}");
     }
 
     #[test]

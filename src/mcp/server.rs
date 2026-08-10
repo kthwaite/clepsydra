@@ -1173,6 +1173,29 @@ mod tests {
         assert!(!appended.contains("mcp-host-id"), "{appended}");
     }
 
+    #[tokio::test]
+    async fn capture_conversation_error_does_not_expose_raw_source_turn_id() {
+        const SENTINEL_SOURCE_ID: &str = "raw-source-turn-id-must-not-escape";
+        let (server, _tmp) = serve_seeded_vault().await;
+        let mut first = capture_turn(ConversationRoleParam::User, "Question");
+        first.source_turn_id = Some(SENTINEL_SOURCE_ID.into());
+        let mut second = capture_turn(ConversationRoleParam::Assistant, "Answer");
+        second.source_turn_id = Some(SENTINEL_SOURCE_ID.into());
+
+        let error = server
+            .vault_capture_conversation(Parameters(CaptureConversationParams {
+                title: "MCP transcript".into(),
+                provider: Some("claude".into()),
+                host_conversation_id: Some("mcp-host-id".into()),
+                turns: vec![first, second],
+            }))
+            .await
+            .expect_err("duplicate source turn IDs should be rejected");
+
+        assert!(error.contains("API error 400"), "{error}");
+        assert!(!error.contains(SENTINEL_SOURCE_ID), "{error}");
+    }
+
     /// Spin the real API router over a seeded temp vault on an ephemeral port
     /// and return a `VaultMcpServer` pointed at it. The `TempDir` keeps the
     /// vault alive for the test's duration.

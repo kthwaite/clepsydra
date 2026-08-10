@@ -8,6 +8,17 @@
 
 - `bun run test src/editor/schema/elements/conversationTurn.test.tsx src/editor/convert/__tests__/conversation.test.ts src/components/codex/__tests__/FolioAiConversation.test.tsx` — 3 files passed, 33 tests passed.
 
+## Conversation error privacy
+
+- Duplicate `source_turn_id` validation now reports first and repeated source sequence positions without carrying or rendering the raw host-provided identifier.
+- Added vault, HTTP API, and MCP regressions proving a sentinel source turn ID is rejected but absent from observable error text.
+
+### Verification
+
+- `cargo test vault::conversation::tests` — 13 passed.
+- `cargo test --test api_conversations_test` — 16 passed.
+- `cargo test mcp::server::tests::capture_conversation` — 3 passed.
+
 ## Embedded editor controls in Read mode
 
 - Audited every registered element: block references and links only navigate/copy, footnotes only preview, and conversation turns, journal headings, and task checkboxes already honor their read-only contracts. Wikilink, math, and code-language controls were the remaining mutation paths.

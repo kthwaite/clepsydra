@@ -336,6 +336,33 @@ async fn invalid_requests_return_bad_request_without_artifacts() {
 }
 
 #[tokio::test]
+async fn duplicate_source_turn_ids_return_bad_request_without_exposing_the_raw_id() {
+    const SENTINEL_SOURCE_ID: &str = "raw-source-turn-id-must-not-escape";
+    let (server, tmp) = setup_server();
+    let body = payload(json!([
+        {
+            "role": "user",
+            "content": "First",
+            "source_turn_id": SENTINEL_SOURCE_ID,
+        },
+        {
+            "role": "assistant",
+            "content": "Second",
+            "source_turn_id": SENTINEL_SOURCE_ID,
+        },
+    ]));
+
+    let (status, response) = capture(&server, body).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        !response.to_string().contains(SENTINEL_SOURCE_ID),
+        "{response}"
+    );
+    assert!(files_under(&tmp.path().join("vault"), "conversations").is_empty());
+}
+
+#[tokio::test]
 async fn duplicate_exact_identity_pages_return_conflict() {
     let provider = "claude";
     let host_hash = host_identity_hash(provider, RAW_HOST_ID).unwrap();
