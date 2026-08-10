@@ -93,7 +93,10 @@ import { WikilinkElement } from "#/editor/elements/WikilinkElement";
 function renderWikilink(
   target: string,
   alias?: string,
-  { active = false }: { active?: boolean } = {},
+  {
+    active = false,
+    readOnly = false,
+  }: { active?: boolean; readOnly?: boolean } = {},
 ) {
   const editor = withReact(withSchema(createEditor()));
   const element: WikilinkElementType = {
@@ -122,7 +125,7 @@ function renderWikilink(
     );
   const result = render(
     <Slate editor={editor} initialValue={value}>
-      <Editable renderElement={renderElement} />
+      <Editable renderElement={renderElement} readOnly={readOnly} />
     </Slate>,
   );
   return { ...result, editor, element };
@@ -239,6 +242,29 @@ describe("WikilinkElement editing and navigation", () => {
       expect(resolveOrCreateMock).not.toHaveBeenCalled();
     },
   );
+
+  it("opens a resolved target on plain click in read-only mode", () => {
+    lookupMock.mockReturnValue("notes/target.md");
+    renderWikilink("Target", undefined, { readOnly: true });
+
+    fireEvent.click(screen.getByRole("link"));
+
+    expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md");
+    expect(beginMock).not.toHaveBeenCalled();
+    expect(resolveOrCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("does not edit or create a dangling target in read-only mode", () => {
+    renderWikilink("Unwritten Page", undefined, { readOnly: true });
+    const link = screen.getByRole("link");
+
+    fireEvent.click(link);
+    fireEvent.click(link, { metaKey: true });
+
+    expect(beginMock).not.toHaveBeenCalled();
+    expect(resolveOrCreateMock).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
+  });
 
   it("renders the active draft as an inline textbox instead of a passive link", () => {
     lookupMock.mockReturnValue("notes/target.md");

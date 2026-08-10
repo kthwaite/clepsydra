@@ -1,6 +1,11 @@
 import { type MouseEvent, useRef } from "react";
 import { Path } from "slate";
-import { ReactEditor, type RenderElementProps, useSlateStatic } from "slate-react";
+import {
+  ReactEditor,
+  type RenderElementProps,
+  useReadOnly,
+  useSlateStatic,
+} from "slate-react";
 import { CLink } from "#/components/codex/CLink";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
@@ -14,6 +19,7 @@ type Props = RenderElementProps & { element: WikilinkElementType };
 
 export function WikilinkElement({ attributes, children, element }: Props) {
   const editor = useSlateStatic();
+  const readOnly = useReadOnly();
   const controller = useWikilinkEditing();
   const { lookup } = useWikilinkResolution();
   const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
@@ -51,6 +57,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   };
 
   if (
+    !readOnly &&
     activeSession !== null &&
     Path.equals(activeSession.path, path)
   ) {
@@ -95,13 +102,17 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const handleClick = (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    if (readOnly) {
+      if (resolved) openTab("page", resolved);
+      return;
+    }
     if (event.metaKey || event.ctrlKey) {
       void openTarget(element.target);
-    } else {
-      const { hoverId, close } = usePreviewStore.getState();
-      if (hoverId) close(hoverId);
-      controller.begin(path, "end", "after");
+      return;
     }
+    const { hoverId, close } = usePreviewStore.getState();
+    if (hoverId) close(hoverId);
+    controller.begin(path, "end", "after");
   };
 
   return (

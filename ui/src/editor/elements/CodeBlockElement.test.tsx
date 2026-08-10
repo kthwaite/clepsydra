@@ -15,7 +15,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-function renderInEditor(language?: string) {
+function renderInEditor(language?: string, readOnly = false) {
   const editor = withReact(createEditor());
   const value: Descendant[] = [
     {
@@ -32,7 +32,7 @@ function renderInEditor(language?: string) {
   );
   render(
     <Slate editor={editor} initialValue={value}>
-      <Editable renderElement={renderElement} />
+      <Editable renderElement={renderElement} readOnly={readOnly} />
     </Slate>,
   );
   return editor;
@@ -84,5 +84,21 @@ describe("CodeBlockElement", () => {
     expect(
       (editor.children[0] as { language?: string }).language,
     ).toBeUndefined();
+  });
+
+  it("keeps copy available but makes language inert in read-only mode", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    const editor = renderInEditor("rust", true);
+    const before = JSON.parse(JSON.stringify(editor.children));
+
+    expect(screen.getByText("RUST")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "RUST" })).toBeNull();
+    expect(screen.queryByPlaceholderText("Search language…")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Copy code" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("fn main() {}"));
+    expect(editor.children).toEqual(before);
   });
 });

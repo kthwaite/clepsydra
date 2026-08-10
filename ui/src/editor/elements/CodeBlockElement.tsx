@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ReactEditor,
   type RenderElementProps,
+  useReadOnly,
   useSlateStatic,
 } from "slate-react";
 import { CopyButton } from "#/components/ui/CopyButton";
@@ -14,6 +15,7 @@ type Props = RenderElementProps & { element: CodeBlockElementType };
 
 export function CodeBlockElement({ attributes, children, element }: Props) {
   const editor = useSlateStatic();
+  const readOnly = useReadOnly();
   const [open, setOpen] = useState(false);
   // useState (not useRef) so CodeLangPicker re-renders with a non-null
   // reference once the trigger button mounts.
@@ -23,6 +25,10 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
   const label = lang ? displayLabel(lang) : "TXT";
 
   const handleSelect = (next: string | null) => {
+    if (readOnly) {
+      setOpen(false);
+      return;
+    }
     try {
       const path = ReactEditor.findPath(editor, element);
       setCodeBlockLanguage(editor, path, next);
@@ -49,17 +55,23 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
             label="Copy code"
             className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
           />
-          <button
-            type="button"
-            ref={setTrigger}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setOpen((o) => !o)}
-            aria-haspopup="listbox"
-            aria-expanded={open}
-            className="cl-mono cursor-pointer uppercase tracking-[0.18em] text-accent hover:text-accent-deep"
-          >
-            {label}
-          </button>
+          {readOnly ? (
+            <span className="cl-mono uppercase tracking-[0.18em] text-accent">
+              {label}
+            </span>
+          ) : (
+            <button
+              type="button"
+              ref={setTrigger}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOpen((o) => !o)}
+              aria-haspopup="listbox"
+              aria-expanded={open}
+              className="cl-mono cursor-pointer uppercase tracking-[0.18em] text-accent hover:text-accent-deep"
+            >
+              {label}
+            </button>
+          )}
         </div>
       </div>
       <pre
@@ -68,7 +80,7 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
       >
         <code>{children}</code>
       </pre>
-      {open && (
+      {!readOnly && open && (
         <CodeLangPicker
           value={lang}
           reference={trigger}
