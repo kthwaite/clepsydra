@@ -13,6 +13,7 @@ pub mod canonical;
 pub mod cas;
 pub mod checkpoint;
 pub mod config;
+pub mod conversation;
 pub mod context;
 pub mod derivation;
 pub mod derivers;
