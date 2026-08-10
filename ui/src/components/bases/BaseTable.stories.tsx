@@ -83,7 +83,7 @@ const meta: Meta<typeof BaseTableView> = {
   component: BaseTableView,
   args: {
     definition,
-    sortOverride: {},
+    sort: undefined,
     onViewChange: () => {},
     onSortChange: () => {},
     onOpenPage: () => {},

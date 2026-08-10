@@ -53,9 +53,9 @@ export interface BaseTableControllerModel {
   output: QueryOutput | undefined;
   viewError: string | undefined;
   viewLoading: boolean;
-  sortOverride: ViewOverrides;
+  sort: SortKey[] | undefined;
   onViewChange(name: string): void;
-  onSortChange(override: ViewOverrides): void;
+  onSortChange(sort: SortKey[] | undefined): void;
   onOpenPage(path: string): void;
   configureSlug: string | undefined;
   onCommitCell(row: QueryRow, key: string, value: CellValue, hint?: PropertyType): void;
@@ -527,13 +527,12 @@ export function useBaseTableController(
     notifySortChange(undefined);
     notifyViewChange(name);
   }, [generation, mode, notifySortChange, notifyViewChange]);
-  const handleSortChange = useCallback((override: ViewOverrides) => {
-    notifySortChange(
-      override.sort
-        ? [{ field: override.sort, dir: override.dir ?? "asc" }]
-        : undefined,
-    );
-  }, [notifySortChange]);
+  const handleSortChange = useCallback(
+    (nextSort: SortKey[] | undefined) => {
+      notifySortChange(nextSort);
+    },
+    [notifySortChange],
+  );
   const handleAddMember = useCallback(() => {
     if (
       memberCapability?.enabled !== true ||
@@ -595,7 +594,7 @@ export function useBaseTableController(
     output,
     viewError: viewErrorValue ? (viewErrorObject?.error ?? "request failed") : undefined,
     viewLoading,
-    sortOverride,
+    sort,
     onViewChange: handleViewChange,
     onSortChange: handleSortChange,
     onOpenPage: handleOpenPage,

@@ -212,7 +212,7 @@ export function BasePreview({
             activeView={displayView.name}
             onViewChange={() => undefined}
             output={output}
-            sortOverride={{}}
+            sort={undefined}
             onSortChange={() => undefined}
             onOpenPage={() => undefined}
             onCommitCell={() => undefined}
