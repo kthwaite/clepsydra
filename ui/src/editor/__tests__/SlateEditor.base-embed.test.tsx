@@ -116,17 +116,20 @@ vi.mock("#/editor/elements/EmbeddedBaseTable", async () => {
         },
       }));
       return (
-        <button
-          ref={entryRef}
-          type="button"
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && harnessState.tablePreventsEscape) {
-              event.preventDefault();
-            }
-          }}
-        >
-          Table entry
-        </button>
+        <>
+          <button
+            ref={entryRef}
+            type="button"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && harnessState.tablePreventsEscape) {
+                event.preventDefault();
+              }
+            }}
+          >
+            Table entry
+          </button>
+          <input aria-label="Member title" defaultValue="draft" />
+        </>
       );
     }),
   };
@@ -140,7 +143,10 @@ beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "isContentEditable", {
     configurable: true,
     get(this: HTMLElement) {
-      return this.closest('[contenteditable="true"]') !== null;
+      return (
+        this.closest("[contenteditable]")?.getAttribute("contenteditable") ===
+        "true"
+      );
     },
   });
   Object.defineProperty(Range.prototype, "getBoundingClientRect", {
@@ -208,11 +214,15 @@ function renderEditor(initialValue: Descendant[]) {
   );
   const editor = harnessState.editor;
   if (!editor) throw new Error("Slate editor was not mounted");
+  const editable = view.container.querySelector<HTMLElement>(
+    '[contenteditable="true"]',
+  );
+  if (!editable) throw new Error("Slate Editable was not mounted");
   return {
     ...view,
     client,
     editor,
-    editable: screen.getByRole("textbox"),
+    editable,
     onChange,
     onSaveNow,
   };
@@ -510,35 +520,110 @@ describe("Base embed keyboard ownership", () => {
     expect(second.editor.selection).toBeNull();
   });
 
-  it("deletes a selected embed only while Slate owns focus", async () => {
-    const { editor, editable } = renderEditor([
-      paragraph("before"),
-      configured(),
-      paragraph("after"),
-    ]);
-    selectBase(editor, [1]);
-    const selected = editor.children[1];
-    const focused = vi
-      .spyOn(ReactEditor, "isFocused")
-      .mockReturnValueOnce(false);
+  it.each(["Enter", "F2", "Backspace", "Delete"])(
+    "leaves nested member-input %s ownership untouched while the Base void stays selected",
+    async (key) => {
+      const user = userEvent.setup();
+      const { editor, editable } = renderEditor([
+        configured(),
+        paragraph("after"),
+      ]);
+      selectBase(editor, [0]);
+      await focusSlate(editor, editable);
+      const selection = structuredClone(editor.selection);
+      const selected = editor.children[0];
+      const memberTitle = screen.getByRole("textbox", {
+        name: "Member title",
+      });
+      await user.click(memberTitle);
+      expect(ReactEditor.isFocused(editor)).toBe(false);
+      const editableTargetSpy = vi
+        .spyOn(ReactEditor, "hasEditableTarget")
+        .mockReturnValueOnce(true);
 
-    fireEvent.keyDown(editable, { key: "Delete" });
+      try {
+        const keyDown = new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          cancelable: true,
+        });
+        act(() => {
+          memberTitle.dispatchEvent(keyDown);
+        });
 
-    expect(focused).toHaveBeenCalledOnce();
-    expect(focused).toHaveBeenCalledWith(editor);
-    focused.mockRestore();
-    expect(editor.children[1]).toBe(selected);
-    expect(editor.selection?.anchor.path.slice(0, 1)).toEqual([1]);
+        expect(keyDown.defaultPrevented).toBe(false);
+        expect(memberTitle).toHaveFocus();
+        expect(editor.children[0]).toBe(selected);
+        expect(editor.selection).toEqual(selection);
+      } finally {
+        editableTargetSpy.mockRestore();
+      }
+    },
+  );
 
-    await focusSlate(editor, editable);
-    fireEvent.keyDown(editable, { key: "Delete" });
-    expect(
-      editor.children.some(
-        (node) => SlateElement.isElement(node) && node.type === "base-embed",
-      ),
-    ).toBe(false);
-    expect(editor.selection?.anchor.path[0]).toBe(1);
-  });
+  it.each([
+    {
+      key: "{Backspace}",
+      selection: [5, 5] as const,
+      expected: "draf",
+    },
+    { key: "{Delete}", selection: [0, 0] as const, expected: "raft" },
+  ])(
+    "$key keeps native text editing in the nested member input",
+    async ({ key, selection, expected }) => {
+      const user = userEvent.setup();
+      const { editor, editable } = renderEditor([
+        configured(),
+        paragraph("after"),
+      ]);
+      selectBase(editor, [0]);
+      await focusSlate(editor, editable);
+      const slateSelection = structuredClone(editor.selection);
+      const selected = editor.children[0];
+      const memberTitle = screen.getByRole("textbox", {
+        name: "Member title",
+      }) as HTMLInputElement;
+      await user.click(memberTitle);
+      expect(ReactEditor.isFocused(editor)).toBe(false);
+      memberTitle.setSelectionRange(...selection);
+      const editableTargetSpy = vi
+        .spyOn(ReactEditor, "hasEditableTarget")
+        .mockReturnValueOnce(true);
+
+      try {
+        await user.keyboard(key);
+
+        expect(memberTitle).toHaveValue(expected);
+        expect(memberTitle).toHaveFocus();
+        expect(editor.children[0]).toBe(selected);
+        expect(editor.selection).toEqual(slateSelection);
+      } finally {
+        editableTargetSpy.mockRestore();
+      }
+    },
+  );
+
+  it.each(["Backspace", "Delete"])(
+    "%s removes a selected embed while Slate owns focus",
+    async (key) => {
+      const { editor, editable } = renderEditor([
+        paragraph("before"),
+        configured(),
+        paragraph("after"),
+      ]);
+      selectBase(editor, [1]);
+      await focusSlate(editor, editable);
+
+      fireEvent.keyDown(editable, { key });
+
+      expect(
+        editor.children.some(
+          (node) => SlateElement.isElement(node) && node.type === "base-embed",
+        ),
+      ).toBe(false);
+      expect(editor.selection?.anchor.path[0]).toBe(1);
+    },
+  );
 
   it("Remove focuses the following point and falls back to the preceding point", async () => {
     const first = renderEditor([
@@ -580,7 +665,10 @@ describe("Base embed keyboard ownership", () => {
     );
     const editor = harnessState.editor;
     if (!editor) throw new Error("Slate editor was not mounted");
-    const editable = screen.getByRole("textbox");
+    const editable = document.querySelector<HTMLElement>(
+      '[contenteditable="true"]',
+    );
+    if (!editable) throw new Error("Slate Editable was not mounted");
     selectBase(editor, [0]);
     await focusSlate(editor, editable);
     fireEvent.keyDown(editable, {

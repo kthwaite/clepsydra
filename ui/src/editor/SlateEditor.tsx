@@ -477,6 +477,9 @@ export function SlateEditor({
         mode: "lowest",
         voids: true,
       });
+      if (selectedBase && !ReactEditor.isFocused(editor)) {
+        return true;
+      }
       if (selectedBase) {
         event.preventDefault();
         baseEmbedEditing.focusEntry(selectedBase[1]);
@@ -495,11 +498,12 @@ export function SlateEditor({
         mode: "lowest",
         voids: true,
       });
+      if (selectedBase && !ReactEditor.isFocused(editor)) {
+        return true;
+      }
       if (selectedBase) {
         event.preventDefault();
-        if (ReactEditor.isFocused(editor)) {
-          baseEmbedEditing.remove(selectedBase[1], selectedBase[0]);
-        }
+        baseEmbedEditing.remove(selectedBase[1], selectedBase[0]);
         return;
       }
     }
