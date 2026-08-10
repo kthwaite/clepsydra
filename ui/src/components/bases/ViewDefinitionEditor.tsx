@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Aggregate, PropertyType, SortKey } from "#/api/bases";
+import type { Aggregate, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import type {
   BaseDiagnostic,
@@ -9,12 +9,12 @@ import {
   type AggregateFunction,
   aggregateFunctions,
   canGroup,
-  canSort,
   type DraftProperty,
   type DraftView,
   moveItem,
 } from "./definition-model";
 import { MembershipEditor } from "./MembershipEditor";
+import { OrderedSortEditor } from "./OrderedSortEditor";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
 interface FieldCapability {
@@ -76,7 +76,6 @@ export function ViewDefinitionEditor({
     ({ type }) =>
       type !== "system-multi" && type !== "word_count" && canGroup(type),
   );
-  const sortFields = fields.filter(({ type }) => canSort(type));
   const unselectedColumns = fields.filter(
     ({ key }) => !view.columns.includes(key),
   );
@@ -99,15 +98,6 @@ export function ViewDefinitionEditor({
   const layoutInvalid = layoutDiagnostics.some(
     (diagnostic) => diagnostic.severity === "error",
   );
-
-  function replaceSort(index: number, sort: SortKey) {
-    onChange({
-      ...view,
-      sort: view.sort.map((current, position) =>
-        position === index ? sort : current,
-      ),
-    });
-  }
 
   function replaceAggregate(index: number, aggregate: Aggregate) {
     onChange({
@@ -312,144 +302,15 @@ export function ViewDefinitionEditor({
         <h4 id={`${view.id}-sort-heading`} className={headingClass}>
           Sort order
         </h4>
-        <ol className="mt-3 grid gap-2" aria-label="Ordered sort keys">
-          {view.sort.map((sort, index) => {
-            const sortPath = `${viewPath}.sort[${index}].field`;
-            const sortDiagnostics = diagnostics.filter(
-              (diagnostic) => diagnostic.path === sortPath,
-            );
-            const sortInvalid = sortDiagnostics.some(
-              (diagnostic) => diagnostic.severity === "error",
-            );
-            const sortSupported = sortFields.some(
-              ({ key }) => key === sort.field,
-            );
-            const errorId = `view-sort-field-error-${viewIndex}-${index}`;
-            return (
-              <li
-                key={index}
-                className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]"
-              >
-                <div>
-                  <label className={labelClass}>
-                    Sort field {index + 1}
-                    <select
-                      ref={(element) => registerFocus(sortPath, element)}
-                      className={controlClass}
-                      value={sort.field}
-                      aria-invalid={sortInvalid || undefined}
-                      aria-describedby={
-                        sortDiagnostics.length ? errorId : undefined
-                      }
-                      onChange={(event) =>
-                        replaceSort(index, {
-                          ...sort,
-                          field: event.target.value,
-                        })
-                      }
-                    >
-                      {!sortSupported ? (
-                        <option value={sort.field}>
-                          {sort.field} (unsupported for sorting)
-                        </option>
-                      ) : null}
-                      {sortFields.map(({ key }) => (
-                        <option key={key} value={key}>
-                          {key}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {sortDiagnostics.length > 0 ? (
-                    <span
-                      id={errorId}
-                      role="alert"
-                      className="mt-1 block text-xs normal-case tracking-normal text-destructive"
-                    >
-                      {sortDiagnostics
-                        .map((diagnostic) => diagnostic.message)
-                        .join(" ")}
-                    </span>
-                  ) : null}
-                </div>
-                <label className={labelClass}>
-                  Sort direction {index + 1}
-                  <select
-                    className={controlClass}
-                    value={sort.dir ?? "asc"}
-                    onChange={(event) =>
-                      replaceSort(index, {
-                        ...sort,
-                        dir: event.target.value as "asc" | "desc",
-                      })
-                    }
-                  >
-                    <option value="asc">Ascending</option>
-                    <option value="desc">Descending</option>
-                  </select>
-                </label>
-                <div className="flex flex-wrap gap-1">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    isDisabled={index === 0}
-                    onPress={() =>
-                      onChange({
-                        ...view,
-                        sort: moveItem(view.sort, index, index - 1),
-                      })
-                    }
-                  >
-                    Move sort {index + 1} up
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    isDisabled={index === view.sort.length - 1}
-                    onPress={() =>
-                      onChange({
-                        ...view,
-                        sort: moveItem(view.sort, index, index + 1),
-                      })
-                    }
-                  >
-                    Move sort {index + 1} down
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onPress={() =>
-                      onChange({
-                        ...view,
-                        sort: view.sort.filter(
-                          (_, position) => position !== index,
-                        ),
-                      })
-                    }
-                  >
-                    Remove sort {index + 1}
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-        <Button
-          className="mt-3"
-          size="sm"
-          variant="secondary"
-          onPress={() =>
-            onChange({
-              ...view,
-              sort: [
-                ...view.sort,
-                { field: sortFields[0]?.key ?? "title", dir: "asc" },
-              ],
-            })
-          }
-        >
-          Add sort
-        </Button>
+        <OrderedSortEditor
+          value={view.sort}
+          properties={properties}
+          diagnostics={diagnostics}
+          diagnosticRoot={`${viewPath}.sort`}
+          idPrefix={`view-${viewIndex}`}
+          onChange={(sort) => onChange({ ...view, sort })}
+          registerFocus={registerFocus}
+        />
       </section>
 
       <section
@@ -620,9 +481,9 @@ export function ViewDefinitionEditor({
             value={view.filter}
             properties={properties}
             onChange={(filter) => onChange({ ...view, filter })}
-            registerFocus={(path, element) =>
-              registerFocus(`${viewPath}.${path}`, element)
-            }
+            registerFocus={registerFocus}
+            diagnostics={diagnostics}
+            diagnosticRoot={`${viewPath}.filter`}
           />
         </div>
       </section>

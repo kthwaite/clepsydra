@@ -48,10 +48,17 @@ const TOML_SHORT_ESCAPE_BY_CODE: Record<number, string> = {
   0x0d: "\\r",
 };
 
-class BaseEmbedValidationError extends Error {}
+class BaseEmbedValidationError extends Error {
+  readonly path: string;
 
-function fail(message: string): never {
-  throw new BaseEmbedValidationError(message);
+  constructor(path: string, message: string) {
+    super(message);
+    this.path = path;
+  }
+}
+
+function fail(message: string, path = "$"): never {
+  throw new BaseEmbedValidationError(path, message);
 }
 
 function isTable(value: unknown): value is Record<string, unknown> {
@@ -66,34 +73,48 @@ function assertClosedKeys(
   table: Record<string, unknown>,
   required: readonly string[],
   optional: readonly string[] = [],
+  path = "$",
 ): void {
   const allowed = new Set([...required, ...optional]);
   for (const key of Object.keys(table)) {
-    if (!allowed.has(key)) fail(`Unknown key \`${key}\``);
+    if (!allowed.has(key)) fail(`Unknown key \`${key}\``, `${path}.${key}`);
   }
   for (const key of required) {
-    if (!Object.hasOwn(table, key)) fail(`Missing required key \`${key}\``);
+    if (!Object.hasOwn(table, key)) {
+      fail(`Missing required key \`${key}\``, `${path}.${key}`);
+    }
   }
 }
 
-function assertBoundedField(value: unknown): asserts value is string {
-  if (typeof value !== "string") fail("Filter and sort fields must be strings");
+function assertBoundedField(
+  value: unknown,
+  path: string,
+): asserts value is string {
+  if (typeof value !== "string") {
+    fail("Filter and sort fields must be strings", path);
+  }
   const bytes = textEncoder.encode(value).length;
   if (bytes > MAX_FIELD_BYTES) {
-    fail(`Field identifier is ${bytes} UTF-8 bytes; maximum is ${MAX_FIELD_BYTES}`);
+    fail(
+      `Field identifier is ${bytes} UTF-8 bytes; maximum is ${MAX_FIELD_BYTES}`,
+      path,
+    );
   }
 }
 
-function validateTomlData(value: unknown): void {
-  const stack = [value];
+function validateTomlData(value: unknown, path: string): void {
+  const stack: Array<{ value: unknown; path: string }> = [{ value, path }];
   const seen = new WeakSet<object>();
   while (stack.length > 0) {
-    const current = stack.pop();
+    const entry = stack.pop();
+    if (!entry) continue;
+    const current = entry.value;
     if (typeof current === "string") {
       const bytes = textEncoder.encode(current).length;
       if (bytes > MAX_SCALAR_STRING_BYTES) {
         fail(
           `String value is ${bytes} UTF-8 bytes; maximum is ${MAX_SCALAR_STRING_BYTES}`,
+          entry.path,
         );
       }
       continue;
@@ -105,18 +126,26 @@ function validateTomlData(value: unknown): void {
       continue;
     }
     if (Array.isArray(current)) {
-      if (seen.has(current)) fail("Cyclic values cannot be persisted");
+      if (seen.has(current)) {
+        fail("Cyclic values cannot be persisted", entry.path);
+      }
       seen.add(current);
-      stack.push(...current);
+      current.forEach((child, index) =>
+        stack.push({ value: child, path: `${entry.path}[${index}]` }),
+      );
       continue;
     }
     if (isTable(current)) {
-      if (seen.has(current)) fail("Cyclic values cannot be persisted");
+      if (seen.has(current)) {
+        fail("Cyclic values cannot be persisted", entry.path);
+      }
       seen.add(current);
-      stack.push(...Object.values(current));
+      for (const [key, child] of Object.entries(current)) {
+        stack.push({ value: child, path: `${entry.path}.${key}` });
+      }
       continue;
     }
-    fail("Filter values must be JSON-compatible TOML data");
+    fail("Filter values must be JSON-compatible TOML data", entry.path);
   }
 }
 
@@ -128,33 +157,39 @@ function validateFilter(
   value: unknown,
   depth: number,
   state: FilterValidationState,
+  path: string,
 ): asserts value is BaseFilter {
-  if (!isTable(value)) fail("Filter nodes must be inline tables");
+  if (!isTable(value)) fail("Filter nodes must be inline tables", path);
   state.nodes += 1;
   if (depth > MAX_FILTER_DEPTH) {
-    fail(`Filter depth ${depth} exceeds maximum of ${MAX_FILTER_DEPTH}`);
+    fail(`Filter depth ${depth} exceeds maximum of ${MAX_FILTER_DEPTH}`, path);
   }
   if (state.nodes > MAX_FILTER_NODES) {
-    fail(`Filter has more than ${MAX_FILTER_NODES} nodes`);
+    fail(`Filter has more than ${MAX_FILTER_NODES} nodes`, path);
   }
 
   if (Object.hasOwn(value, "all") || Object.hasOwn(value, "any")) {
     const key = Object.hasOwn(value, "all") ? "all" : "any";
-    assertClosedKeys(value, [key]);
+    assertClosedKeys(value, [key], [], path);
     const children = value[key];
-    if (!Array.isArray(children)) fail(`Filter \`${key}\` must be an array`);
+    if (!Array.isArray(children)) {
+      fail(`Filter \`${key}\` must be an array`, `${path}.${key}`);
+    }
     if (children.length > MAX_LOGICAL_CHILDREN) {
       fail(
         `Filter group has ${children.length} children; maximum is ${MAX_LOGICAL_CHILDREN}`,
+        `${path}.${key}`,
       );
     }
-    for (const child of children) validateFilter(child, depth + 1, state);
+    children.forEach((child, index) =>
+      validateFilter(child, depth + 1, state, `${path}.${key}[${index}]`),
+    );
     return;
   }
 
   if (Object.hasOwn(value, "not")) {
-    assertClosedKeys(value, ["not"]);
-    validateFilter(value.not, depth + 1, state);
+    assertClosedKeys(value, ["not"], [], path);
+    validateFilter(value.not, depth + 1, state, `${path}.not`);
     return;
   }
 
@@ -162,54 +197,67 @@ function validateFilter(
     typeof value.op !== "string" ||
     !Object.hasOwn(FILTER_OPERATORS, value.op)
   ) {
-    fail("Filter comparison has an unknown operator");
+    fail("Filter comparison has an unknown operator", `${path}.op`);
   }
   const carriesValue = !Object.hasOwn(VALUELESS_OPERATORS, value.op);
-  assertClosedKeys(value, carriesValue ? ["field", "op", "value"] : ["field", "op"]);
-  assertBoundedField(value.field);
+  assertClosedKeys(
+    value,
+    carriesValue ? ["field", "op", "value"] : ["field", "op"],
+    [],
+    path,
+  );
+  assertBoundedField(value.field, `${path}.field`);
   if (!carriesValue) return;
   if (value.op === "links_to" && typeof value.value !== "string") {
-    fail("Filter operator `links_to` expects a string target");
+    fail("Filter operator `links_to` expects a string target", `${path}.value`);
   }
   if (value.op === "in") {
-    if (!Array.isArray(value.value)) fail("Filter operator `in` expects an array");
+    if (!Array.isArray(value.value)) {
+      fail("Filter operator `in` expects an array", `${path}.value`);
+    }
     if (value.value.length > MAX_IN_VALUES) {
-      fail(`Filter operator \`in\` accepts at most ${MAX_IN_VALUES} values`);
+      fail(
+        `Filter operator \`in\` accepts at most ${MAX_IN_VALUES} values`,
+        `${path}.value`,
+      );
     }
   }
-  validateTomlData(value.value);
+  validateTomlData(value.value, `${path}.value`);
 }
 
 function validateSort(value: unknown): asserts value is SortKey[] {
-  if (!Array.isArray(value)) fail("Sort must be an array");
+  if (!Array.isArray(value)) fail("Sort must be an array", "sort");
   if (value.length > MAX_SORT_KEYS) {
-    fail(`Sort has ${value.length} keys; maximum is ${MAX_SORT_KEYS}`);
+    fail(`Sort has ${value.length} keys; maximum is ${MAX_SORT_KEYS}`, "sort");
   }
-  for (const item of value) {
-    if (!isTable(item)) fail("Sort keys must be inline tables");
-    assertClosedKeys(item, ["field"], ["dir"]);
-    assertBoundedField(item.field);
+  value.forEach((item, index) => {
+    const path = `sort[${index}]`;
+    if (!isTable(item)) fail("Sort keys must be inline tables", path);
+    assertClosedKeys(item, ["field"], ["dir"], path);
+    assertBoundedField(item.field, `${path}.field`);
     if (
       Object.hasOwn(item, "dir") &&
       item.dir !== "asc" &&
       item.dir !== "desc"
     ) {
-      fail("Sort direction must be `asc` or `desc`");
+      fail("Sort direction must be `asc` or `desc`", `${path}.dir`);
     }
-  }
+  });
 }
 
-function validateBaseEmbedConfig(value: unknown): asserts value is BaseEmbedConfig {
+function assertValidBaseEmbedConfig(
+  value: unknown,
+): asserts value is BaseEmbedConfig {
   if (!isTable(value)) fail("Base embed configuration must be a TOML table");
   assertClosedKeys(value, ["base", "view"], ["filter", "sort", "limit"]);
   if (typeof value.base !== "string" || value.base.trim().length === 0) {
-    fail("`base` must be a nonblank string");
+    fail("`base` must be a nonblank string", "base");
   }
   if (typeof value.view !== "string" || value.view.trim().length === 0) {
-    fail("`view` must be a nonblank string");
+    fail("`view` must be a nonblank string", "view");
   }
   if (Object.hasOwn(value, "filter")) {
-    validateFilter(value.filter, 1, { nodes: 0 });
+    validateFilter(value.filter, 1, { nodes: 0 }, "filter");
   }
   if (Object.hasOwn(value, "sort")) validateSort(value.sort);
   if (
@@ -218,7 +266,10 @@ function validateBaseEmbedConfig(value: unknown): asserts value is BaseEmbedConf
       (value.limit as number) < MIN_LIMIT ||
       (value.limit as number) > MAX_LIMIT)
   ) {
-    fail(`\`limit\` must be an integer from ${MIN_LIMIT} through ${MAX_LIMIT}`);
+    fail(
+      `\`limit\` must be an integer from ${MIN_LIMIT} through ${MAX_LIMIT}`,
+      "limit",
+    );
   }
 }
 
@@ -313,7 +364,7 @@ function serializeSort(sort: SortKey[]): string {
 }
 
 function canonicalBody(config: BaseEmbedConfig): string {
-  validateBaseEmbedConfig(config);
+  assertValidBaseEmbedConfig(config);
   const lines = [
     `base = ${encodeTomlBasicString(config.base)}`,
     `view = ${encodeTomlBasicString(config.view)}`,
@@ -321,13 +372,64 @@ function canonicalBody(config: BaseEmbedConfig): string {
   if (config.filter !== undefined) {
     lines.push(`filter = ${serializeFilter(config.filter)}`);
   }
-  if (config.sort !== undefined) lines.push(`sort = ${serializeSort(config.sort)}`);
+  if (config.sort !== undefined)
+    lines.push(`sort = ${serializeSort(config.sort)}`);
   if (config.limit !== undefined) lines.push(`limit = ${config.limit}`);
   const body = `${lines.join("\n")}\n`;
-  if (textEncoder.encode(body).length > MAX_BODY_BYTES) {
-    fail(`Base embed TOML body exceeds ${MAX_BODY_BYTES} UTF-8 bytes`);
+  const bodyBytes = textEncoder.encode(body).length;
+  if (bodyBytes > MAX_BODY_BYTES) {
+    fail(`Base embed TOML body exceeds ${MAX_BODY_BYTES} UTF-8 bytes`, "$");
   }
   return body;
+}
+
+export interface BaseEmbedValidationDiagnostic {
+  path: string;
+  message: string;
+}
+
+export function validateBaseEmbedConfig(
+  value: unknown,
+): BaseEmbedValidationDiagnostic[] {
+  try {
+    canonicalBody(value as BaseEmbedConfig);
+    return [];
+  } catch (error) {
+    return [
+      {
+        path: error instanceof BaseEmbedValidationError ? error.path : "$",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    ];
+  }
+}
+
+export type ParsedBaseEmbedConfig =
+  | { config: BaseEmbedConfig; diagnostics: [] }
+  | { config?: undefined; diagnostics: BaseEmbedValidationDiagnostic[] };
+
+export function parseBaseEmbedConfig(source: string): ParsedBaseEmbedConfig {
+  try {
+    const bodyBytes = textEncoder.encode(source).length;
+    if (bodyBytes > MAX_BODY_BYTES) {
+      fail(
+        `Base embed TOML body is ${bodyBytes} UTF-8 bytes; maximum is ${MAX_BODY_BYTES}`,
+      );
+    }
+    const config = parse(source) as unknown;
+    const diagnostics = validateBaseEmbedConfig(config);
+    if (diagnostics.length > 0) return { diagnostics };
+    return { config: config as BaseEmbedConfig, diagnostics: [] };
+  } catch (error) {
+    return {
+      diagnostics: [
+        {
+          path: error instanceof BaseEmbedValidationError ? error.path : "$",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
 }
 
 export function isCanonicalBaseEmbedConfig(
@@ -339,6 +441,31 @@ export function isCanonicalBaseEmbedConfig(
   } catch {
     return false;
   }
+}
+export function extractBaseEmbedTomlBody(rawBlock: string): string {
+  const openingEnd = rawBlock.indexOf("\n");
+  if (openingEnd === -1) return "";
+  const openingLine = rawBlock.slice(0, openingEnd).replace(/\r$/, "");
+  const opening = openingLine.match(/^ {0,3}(`{3,}|~{3,})base[ \t]*$/);
+  if (!opening) return rawBlock;
+
+  const terminalLength = rawBlock.endsWith("\r\n")
+    ? 2
+    : rawBlock.endsWith("\n") || rawBlock.endsWith("\r")
+      ? 1
+      : 0;
+  const positionedBlock =
+    terminalLength > 0 ? rawBlock.slice(0, -terminalLength) : rawBlock;
+  const delimiter = opening[1];
+  const lastLineStart = positionedBlock.lastIndexOf("\n") + 1;
+  const lastLine = positionedBlock.slice(lastLineStart).replace(/\r$/, "");
+  const closing = new RegExp(
+    `^ {0,3}\\${delimiter[0]}{${delimiter.length},}[ \\t]*$`,
+  );
+  const bodyStart = openingEnd + 1;
+  return closing.test(lastLine)
+    ? positionedBlock.slice(bodyStart, lastLineStart)
+    : positionedBlock.slice(bodyStart);
 }
 
 interface FenceSource {
@@ -356,13 +483,12 @@ function sliceFenceSource(node: Code, source: string): FenceSource {
   const positionedBlock = source.slice(start, end);
   let rawBlock = positionedBlock;
   if (source.startsWith("\r\n", end)) rawBlock += "\r\n";
-  else if (source[end] === "\n" || source[end] === "\r") rawBlock += source[end];
+  else if (source[end] === "\n" || source[end] === "\r")
+    rawBlock += source[end];
 
   const openingEnd = positionedBlock.indexOf("\n");
   if (openingEnd === -1) return { rawBlock, body: "" };
-  const openingLine = positionedBlock
-    .slice(0, openingEnd)
-    .replace(/\r$/, "");
+  const openingLine = positionedBlock.slice(0, openingEnd).replace(/\r$/, "");
   const opening = openingLine.match(/^ {0,3}(`{3,}|~{3,})base[ \t]*$/);
   if (!opening) fail("Invalid Base fence opening delimiter");
 
@@ -391,12 +517,12 @@ export function baseEmbedFromCode(
   try {
     const sourceFence = sliceFenceSource(node, source);
     rawBlock = sourceFence.rawBlock;
-    const bodyBytes = textEncoder.encode(sourceFence.body).length;
-    if (bodyBytes > MAX_BODY_BYTES) {
-      fail(`Base embed TOML body is ${bodyBytes} UTF-8 bytes; maximum is ${MAX_BODY_BYTES}`);
+    const parsed = parseBaseEmbedConfig(sourceFence.body);
+    if (!parsed.config) {
+      const diagnostic = parsed.diagnostics[0];
+      fail(diagnostic?.message ?? BASE_EMBED_RECOVERY_ERROR, diagnostic?.path);
     }
-    const config = parse(sourceFence.body) as unknown;
-    validateBaseEmbedConfig(config);
+    const config = parsed.config;
     return {
       type: "base-embed",
       status: "configured",
@@ -435,7 +561,10 @@ export function baseEmbedToMdast(node: BaseEmbedElement): RootContent {
       rawBlock = BASE_EMBED_RECOVERY_BLOCK;
     }
   }
-  return { type: "baseFence", rawBlock } as BaseFenceMdast as unknown as RootContent;
+  return {
+    type: "baseFence",
+    rawBlock,
+  } as BaseFenceMdast as unknown as RootContent;
 }
 
 function baseFenceHandler(

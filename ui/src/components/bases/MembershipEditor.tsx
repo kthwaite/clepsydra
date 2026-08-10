@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import type { BaseFilter } from "#/api/bases";
 import { Button } from "#/components/ui/button";
-import type { RegisterFocusTarget } from "./BaseDefinitionWorkspace";
+import type {
+  BaseDiagnostic,
+  RegisterFocusTarget,
+} from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
 import { FilterGroupEditor } from "./FilterGroupEditor";
 
@@ -10,6 +13,9 @@ interface MembershipEditorProps {
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;
   registerFocus: RegisterFocusTarget;
+  label?: string;
+  diagnostics?: BaseDiagnostic[];
+  diagnosticRoot?: string;
 }
 
 export function MembershipEditor({
@@ -17,6 +23,9 @@ export function MembershipEditor({
   properties,
   onChange,
   registerFocus,
+  label = "Membership filter",
+  diagnostics = [],
+  diagnosticRoot = "filter",
 }: MembershipEditorProps) {
   const [draftValue, setDraftValue] = useState(value);
 
@@ -31,7 +40,7 @@ export function MembershipEditor({
 
   if (!draftValue) {
     return (
-      <div aria-label="Membership filter">
+      <div aria-label={label}>
         <div className="border-y border-border py-5">
           <p className="text-sm font-medium text-foreground">All pages</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -73,7 +82,7 @@ export function MembershipEditor({
   }
 
   return (
-    <div aria-label="Membership filter">
+    <div aria-label={label}>
       <FilterGroupEditor
         value={draftValue}
         root={draftValue}
@@ -82,6 +91,8 @@ export function MembershipEditor({
         properties={properties}
         onChange={commit}
         registerFocus={registerFocus}
+        diagnostics={diagnostics}
+        diagnosticRoot={diagnosticRoot}
       />
       <div
         aria-label="Root membership controls"
