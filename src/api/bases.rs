@@ -198,6 +198,33 @@ where
     })
 }
 
+async fn evaluate_embedded_view_with<L, E, F>(
+    root: &std::path::Path,
+    slug: &str,
+    view_name: &str,
+    request: BaseViewEvaluateRequest,
+    load: L,
+    evaluate_prepared: E,
+) -> Result<BaseViewEvaluateResponse, ApiError>
+where
+    L: FnOnce(&std::path::Path, &str) -> Result<StoredBase, BaseDocumentError> + Send,
+    E: FnOnce(BaseDefinition, QuerySpec) -> F + Send,
+    F: std::future::Future<Output = Result<QueryOutput, ApiError>> + Send,
+{
+    let PreparedEmbeddedEvaluation {
+        base,
+        spec,
+        revision,
+        member_creation,
+    } = prepare_embedded_evaluation(root, slug, view_name, request, load)?;
+    let output = evaluate_prepared(base, spec).await?;
+    Ok(BaseViewEvaluateResponse {
+        output,
+        revision,
+        member_creation,
+    })
+}
+
 fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {
     let filter_path = diagnostic.filter_path.map(|path| {
         path.strip_prefix("filter").map_or(path.clone(), |suffix| {
@@ -608,37 +635,30 @@ pub async fn evaluate_embedded_view(
     let bytes = payload.map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
     let request = serde_json::from_slice(&bytes)
         .map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
-    let prepared = prepare_embedded_evaluation(
+    let index = state.index.clone();
+    let response = evaluate_embedded_view_with(
         state.vault.root(),
         &slug,
         &view_name,
         request,
         base_document::load,
-    )?;
-    let PreparedEmbeddedEvaluation {
-        base,
-        spec,
-        revision,
-        member_creation,
-    } = prepared;
-    let output = state
-        .index
-        .with_index(move |index, _vault| {
-            evaluate(
-                index.connection(),
-                &spec,
-                &QueryContext::for_base(&base),
-            )
-        })
-        .await
-        .map_err(internal_evaluation_error)?
-        .map_err(internal_evaluation_error)?;
+        move |base, spec| async move {
+            index
+                .with_index(move |index, _vault| {
+                    evaluate(
+                        index.connection(),
+                        &spec,
+                        &QueryContext::for_base(&base),
+                    )
+                })
+                .await
+                .map_err(internal_evaluation_error)?
+                .map_err(internal_evaluation_error)
+        },
+    )
+    .await?;
 
-    Ok(Json(BaseViewEvaluateResponse {
-        output,
-        revision,
-        member_creation,
-    }))
+    Ok(Json(response))
 }
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -662,12 +682,15 @@ pub fn router() -> Router<Arc<AppState>> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::fs;
     use std::io;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{BaseViewEvaluateRequest, document_error, prepare_embedded_evaluation};
+    use super::{BaseViewEvaluateRequest, document_error, evaluate_embedded_view_with};
     use crate::vault::base::{BaseDefinition, BaseFile, Filter, Op, ViewDefinition};
     use crate::vault::base_document::{BaseDocumentError, StoredBase};
+    use crate::vault::query::{QueryOutput, QueryRow};
 
     #[test]
     fn published_but_not_durable_maps_to_distinct_internal_error() {
@@ -684,14 +707,22 @@ mod tests {
         assert_eq!(error.hint, None);
     }
 
-    #[test]
-    fn evaluate_embedded_preparation_loads_exactly_one_snapshot() {
-        let calls = Cell::new(0);
+    #[tokio::test]
+    async fn evaluate_embedded_full_response_uses_one_injected_snapshot() {
+        let ambient = tempfile::tempdir().unwrap();
+        fs::create_dir_all(ambient.path().join("bases")).unwrap();
+        fs::write(
+            ambient.path().join("bases/embedded.base.toml"),
+            "name = \"Ambient disk Base\"\n[[views]]\nname = \"Ambient View\"\nlayout = \"table\"\n",
+        )
+        .unwrap();
+        let load_calls = Arc::new(AtomicUsize::new(0));
+        let evaluation_calls = Arc::new(AtomicUsize::new(0));
         let snapshot = StoredBase {
             definition: BaseDefinition {
-                slug: "embedded".to_string(),
+                slug: "injected".to_string(),
                 file: BaseFile {
-                    name: "Snapshot".to_string(),
+                    name: "Injected Snapshot".to_string(),
                     description: None,
                     filter: None,
                     properties: Vec::new(),
@@ -707,35 +738,62 @@ mod tests {
                 },
             },
             diagnostics: Vec::new(),
-            revision: "snapshot-revision".to_string(),
+            revision: "injected-revision".to_string(),
         };
         let request = BaseViewEvaluateRequest {
             filter: Some(Filter::Cmp {
                 field: "title".to_string(),
                 op: Op::Eq,
-                value: serde_json::json!("Snapshot"),
+                value: serde_json::json!("Injected Snapshot"),
             }),
             sort: None,
             limit: Some(1),
         };
+        let counted_loads = Arc::clone(&load_calls);
+        let counted_evaluations = Arc::clone(&evaluation_calls);
 
-        let prepared = prepare_embedded_evaluation(
-            std::path::Path::new("unused"),
+        let response = evaluate_embedded_view_with(
+            ambient.path(),
             "embedded",
             "CONFIGURED VIEW",
             request,
-            |_, _| {
-                calls.set(calls.get() + 1);
+            move |_, _| {
+                counted_loads.fetch_add(1, Ordering::SeqCst);
                 Ok(snapshot)
             },
+            move |base, spec| async move {
+                counted_evaluations.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(base.slug, "injected");
+                assert_eq!(base.file.name, "Injected Snapshot");
+                assert_eq!(spec.columns, vec!["title"]);
+                assert_eq!(spec.limit, Some(1));
+                Ok(QueryOutput::Flat {
+                    rows: vec![QueryRow {
+                        id: base.slug.clone(),
+                        path: format!("{}.md", base.slug),
+                        title: Some(base.file.name.clone()),
+                        kind: "NOTE".to_string(),
+                        project: None,
+                        columns: serde_json::Map::new(),
+                    }],
+                    total: 1,
+                })
+            },
         )
+        .await
         .unwrap();
+        let serialized = serde_json::to_value(response).unwrap();
 
-        assert_eq!(calls.get(), 1);
-        assert_eq!(prepared.base.file.name, "Snapshot");
-        assert_eq!(prepared.revision, "snapshot-revision");
-        assert_eq!(prepared.member_creation.view, "Configured View");
-        assert_eq!(prepared.spec.columns, vec!["title"]);
-        assert_eq!(prepared.spec.limit, Some(1));
+        assert_eq!(load_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(evaluation_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(serialized["output"]["rows"][0]["id"], "injected");
+        assert_eq!(
+            serialized["output"]["rows"][0]["title"],
+            "Injected Snapshot"
+        );
+        assert_eq!(serialized["revision"], "injected-revision");
+        assert_eq!(serialized["member_creation"]["view"], "Configured View");
+        assert_eq!(serialized["member_creation"]["fields"][0]["field"], "title");
+        assert_eq!(serialized["member_creation"]["fields"][0]["embed"], true);
     }
 }
