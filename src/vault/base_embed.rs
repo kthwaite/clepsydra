@@ -729,6 +729,103 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rejects_invalid_operator_and_value_shapes_with_stable_diagnostics() {
+        let base = base();
+        let cases = [
+            (
+                "number field with string",
+                cmp("rating", Op::Eq, json!("4")),
+                "rating",
+                "filter.value",
+                "invalid value for field `rating`: expected a number",
+            ),
+            (
+                "bool field with string",
+                cmp("done", Op::Eq, json!("true")),
+                "done",
+                "filter.value",
+                "invalid value for field `done`: expected a boolean",
+            ),
+            (
+                "in with scalar",
+                cmp("status", Op::In, json!("reading")),
+                "status",
+                "filter.value",
+                "op `in` expects an array",
+            ),
+            (
+                "in with invalid typed element",
+                cmp("rating", Op::In, json!([4, "5"])),
+                "rating",
+                "filter.value",
+                "invalid value for field `rating`: expected a number",
+            ),
+            (
+                "links_to on non-relation",
+                cmp("text", Op::LinksTo, json!("Target")),
+                "text",
+                "filter.op",
+                "op `links_to` is not valid for field `text`",
+            ),
+            (
+                "links_to with non-string target",
+                cmp("series", Op::LinksTo, json!(42)),
+                "series",
+                "filter.value",
+                "op `links_to` expects a string target",
+            ),
+            (
+                "ordering on bool",
+                cmp("done", Op::Gt, json!(true)),
+                "done",
+                "filter.op",
+                "op `gt` is not valid for field `done`",
+            ),
+            (
+                "ordering on non-ordered select",
+                cmp("status", Op::Lte, json!("reading")),
+                "status",
+                "filter.op",
+                "op `lte` is not valid for field `status`",
+            ),
+            (
+                "is_empty with value",
+                cmp("text", Op::IsEmpty, json!("unexpected")),
+                "text",
+                "filter.value",
+                "op `is_empty` does not accept a value",
+            ),
+            (
+                "not_empty with value",
+                cmp("text", Op::NotEmpty, json!(false)),
+                "text",
+                "filter.value",
+                "op `not_empty` does not accept a value",
+            ),
+            (
+                "unknown explicit system field",
+                cmp("sys.missing", Op::Eq, json!("x")),
+                "missing",
+                "filter.field",
+                "unknown system field `missing`",
+            ),
+        ];
+
+        for (name, filter, field, filter_path, message) in cases {
+            let result = validate_filter(&base, &filter);
+            let diagnostics = result.expect_err(name);
+            assert_eq!(diagnostics.len(), 1, "{name}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].field.as_deref(), Some(field), "{name}");
+            assert_eq!(
+                diagnostics[0].filter_path.as_deref(),
+                Some(filter_path),
+                "{name}"
+            );
+            assert_eq!(diagnostics[0].message, message, "{name}");
+        }
+    }
+
     fn nested_not(depth: usize) -> Filter {
         let mut filter = cmp("title", Op::Eq, json!("x"));
         for _ in 1..depth {

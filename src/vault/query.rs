@@ -894,6 +894,7 @@ fn fetch_rows(
     let mut column_params: Vec<SqlValue> = Vec::new();
     // Requested column name → position among the appended (json) columns.
     let mut json_columns: Vec<String> = Vec::new();
+    let mut system_columns: Vec<(String, SysField)> = Vec::new();
     for (i, name) in spec.columns.iter().enumerate() {
         match resolve_field(name, ctx)? {
             ResolvedField::Sys(SysField::Tags) => {
@@ -904,7 +905,7 @@ fn fetch_rows(
                 select_cols.push_str(", json_extract(p.meta_json, '$.aliases')");
                 json_columns.push(name.clone());
             }
-            ResolvedField::Sys(_) => {} // already in the fixed select list
+            ResolvedField::Sys(sys) => system_columns.push((name.clone(), sys)),
             ResolvedField::Prop { key, .. } => {
                 let alias = format!("c{i}");
                 column_joins.push_str(&format!(
@@ -987,9 +988,12 @@ fn fetch_rows(
             ("journal_date", sql_value_to_json(row.get(8)?)),
             ("word_count", sql_value_to_json(row.get(9)?)),
         ];
-        for name in &spec.columns {
-            if let Some((_, v)) = sys_pairs.iter().find(|(n, _)| n == name) {
-                columns.insert(name.clone(), v.clone());
+        for (requested_name, system_field) in &system_columns {
+            if let Some((_, value)) = sys_pairs
+                .iter()
+                .find(|(canonical_name, _)| *canonical_name == system_field.as_str())
+            {
+                columns.insert(requested_name.clone(), value.clone());
             }
         }
         for (i, name) in json_columns.iter().enumerate() {
@@ -1677,5 +1681,113 @@ moment  = { type = "datetime" }
         let e = rows.iter().find(|r| r.path == "e.md").unwrap();
         assert_eq!(e.columns["tags"], serde_json::Value::Null);
         assert_eq!(e.columns["aliases"], serde_json::Value::Null);
+    }
+
+    fn encryption_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        const ARMOR: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAuLi4K\n-----END AGE ENCRYPTED FILE-----\n";
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        std::fs::write(
+            tmp.path().join("unprotected.md"),
+            page(
+                "0190f8a0-0000-7000-8000-0000000000e0",
+                "BOOK",
+                "Unprotected",
+                "",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("protected.md"),
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e1\"\ntitle = \"Protected\"\ntype = \"BOOK\"\nencryption = {{ format = \"age\", version = 1, key_id = \"test-key\" }}\n+++\n{ARMOR}"
+            ),
+        )
+        .unwrap();
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    #[test]
+    fn encryption_system_field_filters_and_materializes_boolean_aliases() {
+        let (_tmp, index, base) = encryption_fixture();
+        let protected_spec = QuerySpec {
+            filter: Some(Filter::Cmp {
+                field: "encryption".into(),
+                op: Op::Eq,
+                value: serde_json::json!(true),
+            }),
+            columns: vec!["encryption".into()],
+            ..Default::default()
+        };
+        let protected = evaluate(
+            index.connection(),
+            &protected_spec,
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat {
+            rows: protected_rows,
+            ..
+        } = protected
+        else {
+            panic!("expected flat");
+        };
+        assert_eq!(
+            protected_rows
+                .iter()
+                .map(|row| row.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["protected.md"]
+        );
+        assert_eq!(
+            protected_rows[0].columns["encryption"],
+            serde_json::Value::Bool(true)
+        );
+
+        let unprotected_spec = QuerySpec {
+            filter: Some(Filter::Cmp {
+                field: "sys.encryption".into(),
+                op: Op::Eq,
+                value: serde_json::json!(false),
+            }),
+            columns: vec!["encryption".into(), "sys.encryption".into()],
+            ..Default::default()
+        };
+        let unprotected = evaluate(
+            index.connection(),
+            &unprotected_spec,
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat {
+            rows: unprotected_rows,
+            ..
+        } = unprotected
+        else {
+            panic!("expected flat");
+        };
+        assert_eq!(
+            unprotected_rows
+                .iter()
+                .map(|row| row.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unprotected.md"]
+        );
+        assert_eq!(
+            unprotected_rows[0].columns["encryption"],
+            serde_json::Value::Bool(false)
+        );
+        assert_eq!(
+            unprotected_rows[0].columns["sys.encryption"],
+            serde_json::Value::Bool(false)
+        );
     }
 }
