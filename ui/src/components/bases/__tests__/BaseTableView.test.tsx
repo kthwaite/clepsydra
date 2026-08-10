@@ -75,6 +75,7 @@ const memberDraftFields: BaseMemberDraftField[] = [
     kind: "title",
     membership: true,
     viewOnly: false,
+    embedOnly: false,
   },
 ];
 

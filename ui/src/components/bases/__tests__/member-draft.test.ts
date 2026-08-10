@@ -59,9 +59,10 @@ describe("composeMemberDraftFields", () => {
       "continues",
       makeCapability({
         fields: [
-          { field: "kind", membership: true, view: false },
-          { field: "status", membership: false, view: true },
-          { field: "author", membership: true, view: false },
+          { field: "kind", membership: true, view: false, embed: false },
+          { field: "status", membership: false, view: true, embed: false },
+          { field: "status", membership: false, view: false, embed: true },
+          { field: "author", membership: true, view: false, embed: false },
         ],
       }),
     );
@@ -78,10 +79,12 @@ describe("composeMemberDraftFields", () => {
       definition: authorDefinition,
       membership: true,
       viewOnly: false,
+      embedOnly: false,
     });
     expect(fields.find((field) => field.key === "status")).toMatchObject({
       membership: false,
       viewOnly: true,
+      embedOnly: true,
     });
   });
 
@@ -92,8 +95,8 @@ describe("composeMemberDraftFields", () => {
       makeCapability({
         view: "Inbox",
         fields: [
-          { field: "project", membership: true, view: false },
-          { field: "status", membership: false, view: true },
+          { field: "project", membership: true, view: false, embed: false },
+          { field: "status", membership: false, view: true, embed: false },
         ],
       }),
     );
@@ -125,9 +128,14 @@ describe("composeMemberDraftFields", () => {
       "Continues",
       makeCapability({
         fields: [
-          { field: "kind", membership: true, view: false },
-          { field: "status", membership: false, view: true },
-          { field: "updated_at", membership: false, view: true },
+          { field: "kind", membership: true, view: false, embed: false },
+          { field: "status", membership: false, view: true, embed: false },
+          {
+            field: "updated_at",
+            membership: false,
+            view: true,
+            embed: false,
+          },
         ],
       }),
     );
@@ -161,10 +169,20 @@ describe("composeMemberDraftFields", () => {
       "Continues",
       makeCapability({
         fields: [
-          { field: "kind", membership: true, view: false },
-          { field: "prop.kind", membership: false, view: true },
-          { field: "prop.word_count", membership: false, view: true },
-          { field: "prop.journal_date", membership: false, view: true },
+          { field: "kind", membership: true, view: false, embed: false },
+          { field: "prop.kind", membership: false, view: true, embed: false },
+          {
+            field: "prop.word_count",
+            membership: false,
+            view: true,
+            embed: false,
+          },
+          {
+            field: "prop.journal_date",
+            membership: false,
+            view: true,
+            embed: false,
+          },
         ],
       }),
     );
@@ -176,14 +194,17 @@ describe("composeMemberDraftFields", () => {
       { key: "prop.word_count", kind: "property" },
       { key: "prop.journal_date", kind: "property" },
     ]);
-    expect(fields.slice(1).map(({ membership, viewOnly }) => ({
-      membership,
-      viewOnly,
-    }))).toEqual([
-      { membership: true, viewOnly: false },
-      { membership: false, viewOnly: true },
-      { membership: false, viewOnly: true },
-      { membership: false, viewOnly: true },
+    expect(
+      fields.slice(1).map(({ membership, viewOnly, embedOnly }) => ({
+        membership,
+        viewOnly,
+        embedOnly,
+      })),
+    ).toEqual([
+      { membership: true, viewOnly: false, embedOnly: false },
+      { membership: false, viewOnly: true, embedOnly: false },
+      { membership: false, viewOnly: true, embedOnly: false },
+      { membership: false, viewOnly: true, embedOnly: false },
     ]);
   });
 
@@ -196,7 +217,12 @@ describe("composeMemberDraftFields", () => {
       "Continues",
       makeCapability({
         fields: [
-          { field: "constructor", membership: true, view: false },
+          {
+            field: "constructor",
+            membership: true,
+            view: false,
+            embed: false,
+          },
         ],
       }),
     );
@@ -220,7 +246,9 @@ describe("composeMemberDraftFields", () => {
   it("does not turn undeclared filter keys into controls or consume their diagnostics", () => {
     const capability = makeCapability({
       enabled: false,
-      fields: [{ field: "missing", membership: true, view: false }],
+      fields: [
+        { field: "missing", membership: true, view: false, embed: false },
+      ],
       blockers: [
         {
           scope: "field",
@@ -244,6 +272,7 @@ describe("composeMemberDraftFields", () => {
         kind: "title",
         membership: false,
         viewOnly: false,
+        embedOnly: false,
       },
     ]);
     expect(capability).toEqual(before);
@@ -252,7 +281,9 @@ describe("composeMemberDraftFields", () => {
   it("does not mutate generated definition or capability objects", () => {
     const definition = makeDefinition();
     const capability = makeCapability({
-      fields: [{ field: "status", membership: false, view: true }],
+      fields: [
+        { field: "status", membership: false, view: true, embed: false },
+      ],
     });
     const definitionBefore = structuredClone(definition);
     const capabilityBefore = structuredClone(capability);

@@ -54,7 +54,15 @@ export const queryKeys = {
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },
   index: { pathPrefix: "/api/vault/index" },
-  bases: { pathPrefix: "/api/vault/bases" },
+  bases: {
+    pathPrefix: "/api/vault/bases",
+    evaluation: (identity: string) =>
+      [
+        "post",
+        "/api/vault/bases/{slug}/views/{view}/evaluate",
+        identity,
+      ] as const,
+  },
   query: { pathPrefix: "/api/vault/query" },
 } as const;
 

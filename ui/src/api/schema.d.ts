@@ -347,6 +347,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/bases/{slug}/views/{view}/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate a saved view with request-owned embed overrides. */
+        post: operations["evaluate_embedded_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/bcl": {
         parameters: {
             query?: never;
@@ -1555,6 +1572,7 @@ export interface components {
         };
         BaseMemberCreateRequest: {
             base_revision: string;
+            embed_filter?: null | components["schemas"]["Filter"];
             fields?: {
                 [key: string]: unknown;
             };
@@ -1574,12 +1592,13 @@ export interface components {
             scope: components["schemas"]["BaseMemberScope"];
         };
         BaseMemberFieldRequirement: {
+            embed: boolean;
             field: string;
             membership: boolean;
             view: boolean;
         };
         /** @enum {string} */
-        BaseMemberScope: "membership" | "view" | "field";
+        BaseMemberScope: "membership" | "view" | "field" | "embed";
         BaseMemberValidationDetail: {
             diagnostics: components["schemas"]["BaseMemberDiagnostic"][];
         };
@@ -1609,6 +1628,17 @@ export interface components {
             name: string;
             slug: string;
             views: string[];
+        };
+        BaseViewEvaluateRequest: {
+            filter?: null | components["schemas"]["Filter"];
+            /** Format: int32 */
+            limit?: number | null;
+            sort?: components["schemas"]["SortKey"][] | null;
+        };
+        BaseViewEvaluateResponse: {
+            member_creation: components["schemas"]["BaseMemberCapability"];
+            output: components["schemas"]["QueryOutput"];
+            revision: string;
         };
         BclResponse: {
             /** @description Computed Brimley-Cocoon Line date, `YYYY-MM-DD`. `None` when unconfigured. */
@@ -3899,6 +3929,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    evaluate_embedded_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Base slug */
+                slug: string;
+                /** @description Saved view name */
+                view: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaseViewEvaluateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseViewEvaluateResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
             };
         };
     };
