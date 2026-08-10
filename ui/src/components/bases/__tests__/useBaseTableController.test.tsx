@@ -308,19 +308,19 @@ describe("useBaseTableController embedded mode", () => {
 
   it.each([
     {
-      label: "discards conflicting old-key rows",
-      staleResult: { data: evaluation({ output: output([]) }) },
-      currentOutput: output(),
-      expectedFocus: "created",
-      expectedNotice: undefined,
-    },
-    {
-      label: "discards an old-key refresh error",
-      staleResult: { error: { error: "stale A refresh failed" } },
+      label: "discards focus-producing old-key rows",
+      staleResult: { data: evaluation({ output: output() }) },
       currentOutput: output([]),
       expectedFocus: undefined,
       expectedNotice:
         "The member was created, but it is not included in the current view.",
+    },
+    {
+      label: "discards an old-key refresh error",
+      staleResult: { error: { error: "stale A refresh failed" } },
+      currentOutput: output(),
+      expectedFocus: "created",
+      expectedNotice: undefined,
     },
   ])(
     "$label after the old refetch is already in flight",
@@ -379,7 +379,9 @@ describe("useBaseTableController embedded mode", () => {
         sort: newSort,
         limit: EMBED_DEFAULT_LIMIT,
       });
+      expect(result.current.focusCreatedId).toBeUndefined();
       expect(result.current.memberNotice).toBeUndefined();
+      expect(result.current.memberError).toBeUndefined();
 
       currentRefresh.resolve({
         data: evaluation({ output: currentOutput }),
