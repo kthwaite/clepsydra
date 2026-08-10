@@ -26,6 +26,7 @@ pub enum Kind {
     Person,
     Task,
     Cycle,
+    #[schema(rename = "AI_CONVERSATION")]
     AiConversation,
 }
 
