@@ -159,6 +159,52 @@ async fn raw_host_id_is_absent_from_file_and_response() {
     let bytes = fs::read_to_string(tmp.path().join("vault").join(path)).unwrap();
     assert!(!bytes.contains(RAW_HOST_ID));
 }
+#[tokio::test]
+async fn property_patch_response_hides_conversation_ledger() {
+    let (server, _tmp) = setup_server();
+    let (_status, captured) = capture(&server, payload(turns(&[("user", "Hello")]))).await;
+    let page_id = captured["page_id"].as_str().unwrap();
+    let detail: Value = server
+        .get(&format!("/api/vault/pages/by-id/{page_id}"))
+        .await
+        .json();
+    let response = server
+        .patch(&format!("/api/vault/pages/by-id/{page_id}/properties"))
+        .json(&json!({
+            "set": {"mood": "focused"},
+            "expected_revision": detail["revision"],
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: Value = response.json();
+    assert!(body["properties"].get("conversation").is_none());
+    assert_eq!(body["properties"]["mood"], "focused");
+}
+
+#[tokio::test]
+async fn property_patch_rejects_conversation_ledger_mutation() {
+    let (server, tmp) = setup_server();
+    let (_status, captured) = capture(&server, payload(turns(&[("user", "Hello")]))).await;
+    let page_id = captured["page_id"].as_str().unwrap();
+    let path = captured["path"].as_str().unwrap();
+    let detail: Value = server
+        .get(&format!("/api/vault/pages/by-id/{page_id}"))
+        .await
+        .json();
+    let before = fs::read(tmp.path().join("vault").join(path)).unwrap();
+    for patch in [
+        json!({"set": {"conversation": {"provider": "other"}}, "expected_revision": detail["revision"]}),
+        json!({"clear": ["conversation"], "expected_revision": detail["revision"]}),
+    ] {
+        server
+            .patch(&format!("/api/vault/pages/by-id/{page_id}/properties"))
+            .json(&patch)
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(fs::read(tmp.path().join("vault").join(path)).unwrap(), before);
+    }
+}
+
 
 #[tokio::test]
 async fn identical_recapture_is_unchanged_without_second_notification() {
