@@ -585,7 +585,7 @@ describe("Base embed keyboard ownership", () => {
       }) as HTMLInputElement;
       await user.click(memberTitle);
       expect(ReactEditor.isFocused(editor)).toBe(false);
-      memberTitle.setSelectionRange(...selection);
+      memberTitle.setSelectionRange(selection[0], selection[1]);
       const editableTargetSpy = vi
         .spyOn(ReactEditor, "hasEditableTarget")
         .mockReturnValueOnce(true);
