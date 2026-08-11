@@ -159,6 +159,9 @@ describe("NewTaskModal — render", () => {
 
   it("defaults PRIORITY to P2 and supports arrow-key selection", async () => {
     wrap();
+    await waitFor(() =>
+      expect(screen.getByTestId("new-task-title")).toHaveFocus(),
+    );
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
     const p2 = within(priority).getByRole("radio", { name: "P2" });
     expect(p2).toBeChecked();
@@ -167,6 +170,7 @@ describe("NewTaskModal — render", () => {
 
     const user = userEvent.setup();
     p2.focus();
+    expect(p2).toHaveFocus();
     await user.keyboard("{ArrowLeft}");
     expect(within(priority).getByRole("radio", { name: "P1" })).toBeChecked();
   });
