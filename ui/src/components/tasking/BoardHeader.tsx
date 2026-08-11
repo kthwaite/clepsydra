@@ -3,7 +3,7 @@ import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { HealthDot, MODES } from "./board-constants";
+import { HealthDot, MODES, healthColor } from "./board-constants";
 
 // ── mode glyphs ──────────────────────────────────────────────────────────────
 
@@ -159,12 +159,7 @@ export function BoardHeader({
   const inField = tasks.filter((t) => t.status === "FIELD").length;
   const onHold = tasks.filter((t) => Boolean(t.hold)).length;
 
-  const healthColor =
-    activeOp?.health === "AMBER"
-      ? "var(--warn)"
-      : activeOp?.health === "RED"
-        ? "var(--hot)"
-        : "var(--cool)";
+  const opHealthColor = healthColor(activeOp?.health ?? "");
 
   return (
     <header className="flex-none overflow-hidden border-b border-[var(--rule)] bg-[var(--paper-2)]">
@@ -288,7 +283,7 @@ export function BoardHeader({
           <span className="text-[var(--ink-faint)]">·</span>
           <span>
             HEALTH
-            <b className="ml-[5px] font-medium" style={{ color: healthColor }}>
+            <b className="ml-[5px] font-medium" style={{ color: opHealthColor }}>
               {activeOp.health}
             </b>
           </span>

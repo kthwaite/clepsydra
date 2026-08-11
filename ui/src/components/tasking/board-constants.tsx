@@ -70,6 +70,19 @@ export const MODES = [
   { id: "timeline", label: "TIMELINE", gl: "tl" },
 ] as const;
 
+// ── health color helper ──────────────────────────────────────────────────────
+
+/**
+ * Returns the CSS color variable for a health status.
+ * GREEN → var(--cool), AMBER → var(--warn), RED → var(--hot), else → var(--ink-mute).
+ */
+export function healthColor(health: string): string {
+  if (health === "GREEN") return "var(--cool)";
+  if (health === "AMBER") return "var(--warn)";
+  if (health === "RED") return "var(--hot)";
+  return "var(--ink-mute)";
+}
+
 // ── micro-chip components ────────────────────────────────────────────────────
 
 /** Small coloured priority badge: P0=hot P1=warn P2=cool P3=ink-mute */
@@ -125,14 +138,7 @@ export function StatePip({ col }: { col: string }) {
  * Matches .op-dot in styles-board.css.
  */
 export function HealthDot({ health }: { health: string }) {
-  const color =
-    health === "GREEN"
-      ? "var(--cool)"
-      : health === "AMBER"
-        ? "var(--warn)"
-        : health === "RED"
-          ? "var(--hot)"
-          : "var(--ink-mute)";
+  const color = healthColor(health);
   return (
     <span
       className={`inline-block h-[7px] w-[7px] flex-shrink-0${health === "RED" ? " animate-pulse" : ""}`}

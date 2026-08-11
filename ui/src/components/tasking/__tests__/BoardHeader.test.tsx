@@ -261,4 +261,19 @@ describe("BoardHeader", () => {
     // Style attribute should contain the warn token
     expect(amberEl.getAttribute("style")).toContain("var(--warn)");
   });
+
+  it("op-meta HEALTH value uses muted color for unknown health status", () => {
+    const noneOp = { ...operations[0], health: "NONE" as const };
+    wrap(
+      <BoardHeader
+        operations={[noneOp]}
+        cycles={cycles}
+        tasks={tasks}
+        activeOp={noneOp}
+      />,
+    );
+    const healthEl = screen.getByText("NONE") as HTMLElement;
+    expect(healthEl.tagName).toBe("B");
+    expect(healthEl.style.color).toBe("var(--ink-mute)");
+  });
 });
