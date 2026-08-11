@@ -414,6 +414,42 @@ describe("KanbanView — card interactions", () => {
   });
 });
 
+// ── inline priority/status editing ────────────────────────────────────────────
+
+describe("TaskCard — inline editing", () => {
+  it("priority trigger patches priority without opening the edit panel", async () => {
+    const stub = makeStub();
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+      stub,
+    );
+
+    const user = userEvent.setup();
+    // t1 is P1 — pick P0 in the popover
+    await user.click(screen.getByTestId("kb-inline-priority-t1"));
+    await user.click(screen.getByTestId("inline-priority-P0"));
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter((args) => {
+        const opts = args[1] as RequestInit | undefined;
+        return opts?.method === "PATCH";
+      });
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const opts = patchCalls[0][1] as RequestInit;
+      const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+      expect(body).toEqual({ priority: "P0" });
+    });
+
+    // The edit panel must NOT have opened for this click sequence.
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+});
+
 // ── + button opens taskModal with status preset ───────────────────────────────
 
 describe("KanbanView — column + button", () => {

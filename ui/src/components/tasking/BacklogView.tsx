@@ -6,7 +6,8 @@
  * - Groups by priority P0→P3 (PRI_ORDER), empty groups dropped.
  * - Within each group: sorted by COL_ORDER index, then by due date asc;
  *   tasks with no due date sort last.
- * - Each row is a button; click → setEditTaskId(task.id).
+ * - Each row is a div[role=button]; click → setEditTaskId(task.id). Priority
+ *   and disposition cells nest their own InlineEditPopover trigger.
  * - Checklist mini-dots: small squares, done=filled cool accent.
  *
  * Design source: docs/pkm-redesign/project/board-modes.jsx lines 128-193
@@ -23,9 +24,11 @@ import {
   HoldTag,
   PRI_LABEL,
   PRI_ORDER,
+  PriChip,
   StatePip,
 } from "./board-constants";
 import { checklistProgress } from "./board-stats";
+import { InlineEditPopover } from "./InlineEditPopover";
 
 /** Shared grid tracks for the header row and task rows (.bk-row). */
 const BK_COLS = "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px";
@@ -161,8 +164,10 @@ export function BacklogView({ tasks }: BacklogViewProps) {
             const { done, total } = checklistProgress(t.checks);
 
             return (
-              <button
+              <div
                 key={t.id}
+                role="button"
+                tabIndex={0}
                 data-testid={`bk-row-${t.id}`}
                 className="cl-mono grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad,12px)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
                 style={{
@@ -172,14 +177,27 @@ export function BacklogView({ tasks }: BacklogViewProps) {
                   minHeight: "var(--row-h, 32px)",
                 }}
                 onClick={() => setEditTaskId(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setEditTaskId(t.id);
+                  }
+                }}
               >
                 {/* FILE-ID */}
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap tracking-[0.04em] text-[var(--ink)] [font-variant-numeric:tabular-nums]">
                   {t.code}
                 </span>
 
-                {/* TASKING — title with optional HOLD tag */}
+                {/* TASKING — priority chip · title with optional HOLD tag */}
                 <span className="flex items-center gap-[8px] overflow-hidden text-[var(--ink)]">
+                  <InlineEditPopover
+                    task={t}
+                    field="priority"
+                    testIdPrefix="bk"
+                  >
+                    <PriChip pri={t.priority} />
+                  </InlineEditPopover>
                   {t.hold && (
                     <span
                       data-testid={`bk-hold-tag-${t.id}`}
@@ -200,10 +218,14 @@ export function BacklogView({ tasks }: BacklogViewProps) {
 
                 {/* DISPOSITION */}
                 <span className="flex items-center gap-[7px] tracking-[0.1em] text-[var(--ink-2)]">
-                  <StatePip col={t.status} />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                    {COL_LABEL[t.status] ?? t.status}
-                  </span>
+                  <InlineEditPopover task={t} field="status" testIdPrefix="bk">
+                    <span className="flex items-center gap-[7px]">
+                      <StatePip col={t.status} />
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                        {COL_LABEL[t.status] ?? t.status}
+                      </span>
+                    </span>
+                  </InlineEditPopover>
                 </span>
 
                 {/* OPR */}
@@ -249,7 +271,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
                     ))}
                   </span>
                 </span>
-              </button>
+              </div>
             );
           })}
         </div>

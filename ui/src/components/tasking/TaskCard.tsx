@@ -6,8 +6,10 @@
  */
 
 import type { BoardTask } from "#/api/board";
+import { StatePip } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
+import { InlineEditPopover } from "./InlineEditPopover";
 
 // ── priority colour maps ──────────────────────────────────────────────────────
 
@@ -97,12 +99,17 @@ export function TaskCard({
         <span className="cl-mono font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-2)]">
           {t.code}
         </span>
-        <span
-          className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
-          style={{ color: priColor, borderColor: priColor }}
-        >
-          {t.priority}
-        </span>
+        <InlineEditPopover task={t} field="priority" testIdPrefix="kb">
+          <span
+            className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
+            style={{ color: priColor, borderColor: priColor }}
+          >
+            {t.priority}
+          </span>
+        </InlineEditPopover>
+        <InlineEditPopover task={t} field="status" testIdPrefix="kb">
+          <StatePip col={t.status} />
+        </InlineEditPopover>
         {showOp && t.project && (
           <span className="cl-mono ml-auto border border-[var(--rule)] px-[4px] text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-3)]">
             {t.project}

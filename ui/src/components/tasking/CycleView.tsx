@@ -28,6 +28,7 @@ import {
   StatePip,
 } from "./board-constants";
 import { checklistProgress, cycleStats } from "./board-stats";
+import { InlineEditPopover } from "./InlineEditPopover";
 
 // ── resolveCycle ──────────────────────────────────────────────────────────────
 
@@ -301,14 +302,25 @@ export function CycleView({
                 NOT APPLICABLE
               </span>
             ) : burndownPending ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">LOADING</span>
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                LOADING
+              </span>
             ) : burndownError ? (
-              <span className="text-[var(--fs-xs)] text-[var(--hot)]">UNAVAILABLE</span>
+              <span className="text-[var(--fs-xs)] text-[var(--hot)]">
+                UNAVAILABLE
+              </span>
             ) : burndown.length === 0 ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">NO HISTORY</span>
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                NO HISTORY
+              </span>
             ) : (
               <div aria-label={`Cycle burndown: ${burndown.join(", ")}`}>
-                <Spark data={burndown} width={150} height={30} accent="var(--hot)" />
+                <Spark
+                  data={burndown}
+                  width={150}
+                  height={30}
+                  accent="var(--hot)"
+                />
               </div>
             )}
           </div>
@@ -372,21 +384,45 @@ export function CycleView({
                 const { done: d, total } = checklistProgress(t.checks);
 
                 return (
-                  <button
+                  <div
                     key={t.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     data-testid={`cv-row-${t.id}`}
                     className="flex w-full cursor-pointer items-center gap-[8px] border-b border-dotted border-[var(--rule)] py-[5px] px-[2px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
                     onClick={() => handleEditTask(t.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleEditTask(t.id);
+                      }
+                    }}
                   >
                     {/* Priority chip */}
                     <span className="flex-shrink-0">
-                      <PriChip pri={t.priority} />
+                      <InlineEditPopover
+                        task={t}
+                        field="priority"
+                        testIdPrefix="cv"
+                      >
+                        <PriChip pri={t.priority} />
+                      </InlineEditPopover>
                     </span>
 
                     {/* Code */}
                     <span className="flex-shrink-0 text-[var(--fs-s)] [font-variant-numeric:tabular-nums] text-[var(--ink)]">
                       {t.code}
+                    </span>
+
+                    {/* Status pip */}
+                    <span className="flex-shrink-0">
+                      <InlineEditPopover
+                        task={t}
+                        field="status"
+                        testIdPrefix="cv"
+                      >
+                        <StatePip col={t.status} />
+                      </InlineEditPopover>
                     </span>
 
                     {/* Title + HOLD tag */}
@@ -418,7 +454,7 @@ export function CycleView({
                     <span className="flex-shrink-0 text-right text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]">
                       {total ? `${d}/${total}` : "—"}
                     </span>
-                  </button>
+                  </div>
                 );
               })}
             </div>

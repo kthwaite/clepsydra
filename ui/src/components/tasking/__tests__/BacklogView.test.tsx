@@ -5,13 +5,43 @@
  * BacklogView  — render/interaction tests.
  */
 
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { BacklogView, groupBacklog } from "../BacklogView";
 import { BOARD_FIXTURE } from "./fixtures";
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/** BacklogView rows nest InlineEditPopover, which needs a QueryClient. */
+function wrap(ui: React.ReactElement, fetchStub?: ReturnType<typeof vi.fn>) {
+  if (fetchStub) vi.stubGlobal("fetch", fetchStub);
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+function makePatchStub() {
+  return vi.fn((_url: string, opts?: RequestInit) => {
+    if (opts?.method === "PATCH") {
+      const patch = JSON.parse(opts.body as string);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ id: "patched", ...patch }),
+      } as Response);
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(BOARD_FIXTURE),
+    } as Response);
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ── shared fixture slices ─────────────────────────────────────────────────────
 
@@ -230,7 +260,7 @@ beforeEach(() => {
 
 describe("BacklogView — header columns", () => {
   it("renders all 8 header columns", () => {
-    render(<BacklogView tasks={[]} />);
+    wrap(<BacklogView tasks={[]} />);
     for (const label of [
       "FILE-ID",
       "TASKING",
@@ -248,14 +278,15 @@ describe("BacklogView — header columns", () => {
 
 describe("BacklogView — grouping", () => {
   it("renders a group header for each non-empty priority", () => {
-    render(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD]} />);
-    expect(screen.getByText("P0")).toBeInTheDocument();
-    expect(screen.getByText("P1")).toBeInTheDocument();
+    wrap(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD]} />);
+    // Scoped to the group header — rows also carry a PriChip showing "P0"/"P1".
+    expect(screen.getByTestId("bk-grp-hd-P0")).toHaveTextContent("P0");
+    expect(screen.getByTestId("bk-grp-hd-P1")).toHaveTextContent("P1");
   });
 
   it("does not render a group header for empty priorities", () => {
     // Only P0 and P1 tasks; P2 and P3 should not appear as group headers
-    render(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD]} />);
     // P2 and P3 chips would each appear as a priority group — verify absent
     // by checking group headers specifically (they have bk-grp-pri role)
     const allPriTexts = screen
@@ -266,9 +297,7 @@ describe("BacklogView — grouping", () => {
   });
 
   it("renders CRITICAL / HIGH / NORMAL / LOW labels for visible groups", () => {
-    render(
-      <BacklogView tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS, tasks[3]]} />,
-    );
+    wrap(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS, tasks[3]]} />);
     expect(screen.getByText("CRITICAL")).toBeInTheDocument();
     expect(screen.getByText("HIGH")).toBeInTheDocument();
     expect(screen.getByText("NORMAL")).toBeInTheDocument();
@@ -276,7 +305,7 @@ describe("BacklogView — grouping", () => {
   });
 
   it("zero-pads group count to 2 digits (01 ITEMS, 10 ITEMS etc.)", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(screen.getByText("01 ITEMS")).toBeInTheDocument();
   });
 
@@ -286,12 +315,12 @@ describe("BacklogView — grouping", () => {
       id: `p0-${i}`,
       code: `TSK-20${String(i).padStart(2, "0")}`,
     }));
-    render(<BacklogView tasks={ten} />);
+    wrap(<BacklogView tasks={ten} />);
     expect(screen.getByText("10 ITEMS")).toBeInTheDocument();
   });
 
   it("first group header has no top border; subsequent group headers do", () => {
-    render(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS]} />);
     // jsdom expands the border-top shorthand — assert on borderTopStyle
     expect(screen.getByTestId("bk-grp-hd-P0")).toHaveStyle({
       borderTopStyle: "none",
@@ -309,22 +338,22 @@ describe("BacklogView — grouping", () => {
 
 describe("BacklogView — row rendering", () => {
   it("renders the task code as FILE-ID", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(screen.getByText("TSK-1000")).toBeInTheDocument();
   });
 
   it("renders the task title", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(screen.getByText("Critical with due")).toBeInTheDocument();
   });
 
   it("renders the project in the OP column", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(screen.getByText("alpha")).toBeInTheDocument();
   });
 
   it("renders HOLD tag inline in the title cell when task has hold", () => {
-    render(<BacklogView tasks={[T_P1_HOLD]} />);
+    wrap(<BacklogView tasks={[T_P1_HOLD]} />);
     // The HOLD tag should be in the same title cell as the task title
     const holdTag = screen.getByTestId("bk-hold-tag-bk-p1-hold");
     expect(holdTag).toBeInTheDocument();
@@ -334,39 +363,39 @@ describe("BacklogView — row rendering", () => {
   });
 
   it("does not render HOLD tag when task has no hold", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(
       screen.queryByTestId("bk-hold-tag-bk-p0-due"),
     ).not.toBeInTheDocument();
   });
 
   it("renders the due date when set", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(screen.getByText("2026-07-01")).toBeInTheDocument();
   });
 
   it("renders em-dash when due is not set", () => {
-    render(<BacklogView tasks={[T_P0_NODUE]} />);
+    wrap(<BacklogView tasks={[T_P0_NODUE]} />);
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("renders state pip + column label in the DISPOSITION cell", () => {
     // T_P0_DUE is FIELD → label "IN-FIELD"
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     expect(screen.getByText("IN-FIELD")).toBeInTheDocument();
   });
 });
 
 describe("BacklogView — checklist dots", () => {
   it("renders total number of dots equal to checklist total", () => {
-    render(<BacklogView tasks={[T_P2_CHECKS]} />);
+    wrap(<BacklogView tasks={[T_P2_CHECKS]} />);
     const row = screen.getByTestId("bk-row-bk-p2-checks");
     const dots = row.querySelectorAll("[data-testid^='bk-dot-']");
     expect(dots).toHaveLength(5); // total=5
   });
 
   it("renders done count of dots with 'on' data attribute", () => {
-    render(<BacklogView tasks={[T_P2_CHECKS]} />);
+    wrap(<BacklogView tasks={[T_P2_CHECKS]} />);
     const row = screen.getByTestId("bk-row-bk-p2-checks");
     const onDots = row.querySelectorAll(
       "[data-testid^='bk-dot-'][data-done='true']",
@@ -375,7 +404,7 @@ describe("BacklogView — checklist dots", () => {
   });
 
   it("all dots are done when checks=[n,n]", () => {
-    render(<BacklogView tasks={[T_P2_DONE]} />);
+    wrap(<BacklogView tasks={[T_P2_DONE]} />);
     const row = screen.getByTestId("bk-row-bk-p2-done");
     const allDots = row.querySelectorAll("[data-testid^='bk-dot-']");
     const onDots = row.querySelectorAll(
@@ -386,7 +415,7 @@ describe("BacklogView — checklist dots", () => {
   });
 
   it("renders no dots when checks=[]", () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     const row = screen.getByTestId("bk-row-bk-p0-due");
     const dots = row.querySelectorAll("[data-testid^='bk-dot-']");
     expect(dots).toHaveLength(0);
@@ -395,23 +424,49 @@ describe("BacklogView — checklist dots", () => {
 
 describe("BacklogView — row click sets editTaskId", () => {
   it("clicking a row calls setEditTaskId with the task id", async () => {
-    render(<BacklogView tasks={[T_P0_DUE]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
     const row = screen.getByTestId("bk-row-bk-p0-due");
     await userEvent.click(row);
     expect(useBoardStore.getState().editTaskId).toBe("bk-p0-due");
   });
 
   it("clicking different rows sets the correct id each time", async () => {
-    render(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD]} />);
+    wrap(<BacklogView tasks={[T_P0_DUE, T_P1_HOLD]} />);
     await userEvent.click(screen.getByTestId("bk-row-bk-p1-hold"));
     expect(useBoardStore.getState().editTaskId).toBe("bk-p1-hold");
+  });
+});
+
+describe("BacklogView — inline editing", () => {
+  it("status trigger patches status without opening the edit panel", async () => {
+    const stub = makePatchStub();
+    wrap(<BacklogView tasks={[T_P0_DUE]} />, stub);
+
+    const user = userEvent.setup();
+    // T_P0_DUE is FIELD — pick REVIEW in the popover
+    await user.click(screen.getByTestId(`bk-inline-status-${T_P0_DUE.id}`));
+    await user.click(screen.getByTestId("inline-status-REVIEW"));
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter((args) => {
+        const opts = args[1] as RequestInit | undefined;
+        return opts?.method === "PATCH";
+      });
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const opts = patchCalls[0][1] as RequestInit;
+      const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+      expect(body).toEqual({ status: "REVIEW" });
+    });
+
+    // The edit panel must NOT have opened for this click sequence.
+    expect(useBoardStore.getState().editTaskId).toBeNull();
   });
 });
 
 describe("BacklogView — within-group sort order in DOM", () => {
   it("renders rows in COL_ORDER then due order within each group", () => {
     // T_P2_INTAKE is INTAKE (index 0), T_P2_CHECKS is FIELD (index 2) with due
-    render(<BacklogView tasks={[T_P2_CHECKS, T_P2_INTAKE]} />);
+    wrap(<BacklogView tasks={[T_P2_CHECKS, T_P2_INTAKE]} />);
     const rows = screen.getAllByTestId(/^bk-row-/);
     const ids = rows.map((r) => r.dataset.testid?.replace("bk-row-", ""));
     const intakeIdx = ids.indexOf("bk-p2-intake");
@@ -427,7 +482,7 @@ describe("BacklogView — within-group sort order in DOM", () => {
       id: "bk-withdue-early",
       due: "2026-06-01",
     };
-    render(<BacklogView tasks={[noDue, withDue]} />);
+    wrap(<BacklogView tasks={[noDue, withDue]} />);
     const rows = screen.getAllByTestId(/^bk-row-/);
     const ids = rows.map((r) => r.dataset.testid?.replace("bk-row-", ""));
     expect(ids.indexOf("bk-withdue-early")).toBeLessThan(
@@ -438,7 +493,7 @@ describe("BacklogView — within-group sort order in DOM", () => {
 
 describe("BacklogView — empty state", () => {
   it("renders only the header when no tasks are provided", () => {
-    render(<BacklogView tasks={[]} />);
+    wrap(<BacklogView tasks={[]} />);
     // Header should be present
     expect(screen.getByText("FILE-ID")).toBeInTheDocument();
     // No group headers
