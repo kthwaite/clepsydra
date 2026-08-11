@@ -57,6 +57,11 @@ it trusts the server's own mkcert certificate. It refuses a non-loopback
 | `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
 | `vault_journal_capture` | write | Quick-capture into today's journal |
 | `vault_capture_conversation` | write | Create or safely append a visible user/assistant chat as an `AI_CONVERSATION` Folio |
+| `vault_board` | read | The TASKING kanban board: columns with WIP limits, tasks with TSK codes, cycles with S codes, operations; optional `project` filter |
+| `vault_task_create` | write | New board task; reserves the next `TSK-NNNN` code and files the page under `tasks/<project>/` |
+| `vault_task_update` | write | Patch a task addressed by TSK code, path, or id; tri-state clearing for cycle, assignee, estimate, due, hold, link |
+| `vault_cycle_create` | write | New sprint cycle (a CYCLE page under `cycles/`); code auto-generates as `S-{n}` |
+| `vault_cycle_update` | write | Patch a cycle addressed by S code, path, or id; sealing with `carry_to` re-homes unsealed tasks |
 | `vault_assign` | organise | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organise | Explicit rename/relocate with link rewriting |
 | `vault_folder` | organise | Create / delete (`recursive` opt-in) / move folders |
@@ -93,6 +98,31 @@ cannot be silently overwritten. `vault_create_page`
 declares kind/project inside the create mutation itself, and its `folder`
 parameter is constrained to locations the metadata-projected layout
 (ADR-0001) would not immediately move the page out of.
+
+## Tasking
+
+The board tools mirror the TASKING kanban HTTP API. Statuses move through
+INTAKE → TRIAGE → FIELD → REVIEW → SEALED; priorities are P0–P3. Create
+tasks with `vault_task_create` rather than `vault_create_page`: the board
+reserves the next `TSK-NNNN` code and files the page under
+`tasks/<project>/`. Status defaults to INTAKE, priority to P2, checklist
+items become `- [ ]` body lines, and the `ai-generated` tag requirement
+applies to LLM-authored tasks.
+
+The update tools accept a code (`TSK-0012`, `S-13`), a vault path, or a
+page UUID; look codes up with `vault_board`. On `vault_task_update` the
+plain fields (title, project, status, priority, tags) update when present —
+`clear_project: true` clears the project — while the clearable fields
+(cycle, assignee, estimate, due, hold, link) are tri-state: absent keeps
+the value, `null` or `""` clears it, a value sets it. The cycle sentinel
+`"BACKLOG"` also clears (a task with no cycle sits in the backlog).
+
+Cycles cannot be created CLOSED (`vault_cycle_create` accepts PLANNED, the
+default, or ACTIVE). Seal a finished cycle with `vault_cycle_update` by
+setting `state: "CLOSED"` and pass `carry_to` to re-home its unsealed
+tasks — `"BACKLOG"` clears their cycle, a cycle code (e.g. `"S-14"`)
+re-assigns them. `carry_to` is only valid with state CLOSED; without it, a
+sealed cycle leaves its tasks untouched.
 
 ## Capture a conversation
 

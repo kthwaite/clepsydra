@@ -17,12 +17,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::client::{ApiClient, encode_vault_path};
+use super::tasking::{
+    BoardKind, TaskRef, classify_ref, deserialize_tri_state, filter_board_project, find_board_id,
+    insert_tri_state, normalize_tri_state, page_meta_id, resolve_project_patch,
+};
 use crate::vault::kind::Kind;
 
 /// The `/pages/{path}` endpoint URL for a vault-relative path.
 fn pages_url(path: &str) -> String {
     format!("/api/vault/pages/{}", encode_vault_path(path))
 }
+
+/// The TASKING board read endpoint.
+const BOARD_URL: &str = "/api/vault/board";
 
 /// Resolve where a new page lands, enforcing the metadata-projected layout
 /// (ADR-0001) so a freshly created page is never in a folder the reconcile
@@ -162,8 +169,13 @@ project documentation must wikilink its project or hub page. Use vault_journal_c
 vault_capture_conversation for those dedicated intents instead of vault_create_page. Make \
 targeted edits with vault_edit_page or vault_append_page. The vault relocates pages filed by \
 kind/project itself; vault_preview_mutation dry-runs moves and deletes before they touch linked \
-pages. Page paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical \
-top-level folders. On a conflict error, re-read the page and re-apply the change.";
+pages. Orient on the TASKING board with vault_board; it lists task TSK codes and cycle S codes. \
+Create board tasks with vault_task_create rather than vault_create_page so they receive TSK \
+codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move tasks through INTAKE → \
+TRIAGE → FIELD → REVIEW → SEALED with vault_task_update, addressing them by code, path, or id. \
+Seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks. Page \
+paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
+folders. On a conflict error, re-read the page and re-apply the change.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -371,6 +383,123 @@ pub struct CaptureConversationParams {
     pub provider: Option<String>,
     pub host_conversation_id: Option<String>,
     pub turns: Vec<CaptureConversationTurnParams>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BoardParams {
+    /// Only board tasks and operations declaring exactly this project.
+    /// Columns and cycles always come back in full.
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TaskCreateParams {
+    /// Task title.
+    pub title: String,
+    /// Project slug; the task files under tasks/<project>/.
+    pub project: Option<String>,
+    /// Board column (INTAKE, TRIAGE, FIELD, REVIEW, SEALED). Defaults to
+    /// INTAKE.
+    pub status: Option<String>,
+    /// Priority (P0, P1, P2, P3). Defaults to P2.
+    pub priority: Option<String>,
+    /// Cycle code the task belongs to; must match an existing cycle (e.g.
+    /// "S-13"). "BACKLOG" means no cycle, same as omitting the field.
+    pub cycle: Option<String>,
+    /// Assignee name.
+    pub assignee: Option<String>,
+    /// Effort estimate (free-form, e.g. "3d").
+    pub estimate: Option<String>,
+    /// Due date (YYYY-MM-DD).
+    pub due: Option<String>,
+    /// Related link (URL or wikilink target).
+    pub link: Option<String>,
+    /// Frontmatter tags. Include `ai-generated` for LLM-authored tasks.
+    pub tags: Option<Vec<String>>,
+    /// Checklist items; each becomes a `- [ ]` line in the task body.
+    pub checklist: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TaskUpdateParams {
+    /// Task reference: TSK code (e.g. "TSK-0012"), vault path, or page UUID.
+    pub task: String,
+    /// New title. Absent = keep.
+    pub title: Option<String>,
+    /// New project slug (refiles the task under tasks/<project>/). Absent =
+    /// keep. Mutually exclusive with clear_project.
+    pub project: Option<String>,
+    /// Clear the project instead of setting one.
+    pub clear_project: Option<bool>,
+    /// Board column (INTAKE, TRIAGE, FIELD, REVIEW, SEALED). Absent = keep.
+    pub status: Option<String>,
+    /// Priority (P0, P1, P2, P3). Absent = keep.
+    pub priority: Option<String>,
+    /// Replacement tag list (replaces ALL existing tags). Absent = keep.
+    pub tags: Option<Vec<String>>,
+    /// Tri-state: absent = keep, null or "" = clear (task returns to the
+    /// backlog; "BACKLOG" also clears), a cycle code = assign to that cycle.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub cycle: Option<Option<String>>,
+    /// Tri-state: absent = keep, null or "" = clear, value = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub assignee: Option<Option<String>>,
+    /// Tri-state: absent = keep, null or "" = clear, value = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub estimate: Option<Option<String>>,
+    /// Due date (YYYY-MM-DD). Tri-state: absent = keep, null or "" = clear,
+    /// value = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub due: Option<Option<String>>,
+    /// Hold reason. Tri-state: absent = keep, null or "" = clear, value = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub hold: Option<Option<String>>,
+    /// Related link. Tri-state: absent = keep, null or "" = clear, value =
+    /// set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    #[schemars(with = "Option<String>")]
+    pub link: Option<Option<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CycleCreateParams {
+    /// Human-readable label — stored as the cycle page title.
+    pub label: String,
+    /// Start date (YYYY-MM-DD).
+    pub start: String,
+    /// End date (YYYY-MM-DD).
+    pub end: String,
+    /// Explicit cycle code (e.g. "S-20"); conflicts if it already exists.
+    /// Absent = auto-generated as S-{max+1}.
+    pub code: Option<String>,
+    /// Sprint goal.
+    pub goal: Option<String>,
+    /// Initial state: PLANNED (default) or ACTIVE. CLOSED is rejected at
+    /// creation time — seal a cycle later with vault_cycle_update.
+    pub state: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CycleUpdateParams {
+    /// Cycle reference: S code (e.g. "S-13"), vault path, or page UUID.
+    pub cycle: String,
+    /// Lifecycle state (PLANNED, ACTIVE, CLOSED). Absent = keep.
+    pub state: Option<String>,
+    /// New sprint goal. Absent = keep.
+    pub goal: Option<String>,
+    /// New start date (YYYY-MM-DD). Absent = keep.
+    pub start: Option<String>,
+    /// New end date (YYYY-MM-DD). Absent = keep.
+    pub end: Option<String>,
+    /// Carryover target for the cycle's unsealed tasks when sealing; only
+    /// valid with state CLOSED. "BACKLOG" clears their cycle, a cycle code
+    /// (e.g. "S-14") re-assigns them. Absent = leave tasks untouched.
+    pub carry_to: Option<String>,
 }
 
 /// If `value` carries an oversized `body` string, truncate it in place (on a
@@ -1009,6 +1138,232 @@ impl VaultMcpServer {
         render(&value)
     }
 
+    #[tool(
+        name = "vault_board",
+        description = "Orient on the TASKING kanban board: columns INTAKE → TRIAGE → FIELD → REVIEW → SEALED (with WIP limits), tasks with their TSK codes, cycles with their S codes, and board operations. The place to look up task and cycle codes before vault_task_update or vault_cycle_update. Optional 'project' filters tasks and operations to that exact project; columns and cycles always come back in full.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_board(
+        &self,
+        Parameters(params): Parameters<BoardParams>,
+    ) -> Result<String, String> {
+        let mut value = self
+            .client
+            .get_json(BOARD_URL, &[])
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(project) = &params.project {
+            filter_board_project(&mut value, project);
+        }
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_task_create",
+        description = "Create a task on the TASKING board — preferred over vault_create_page for tasks: the board reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to INTAKE, priority to P2; a given cycle must match an existing cycle code (\"BACKLOG\" means none); checklist items become `- [ ]` body lines. Include `ai-generated` in tags for LLM-authored tasks.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_task_create(
+        &self,
+        Parameters(params): Parameters<TaskCreateParams>,
+    ) -> Result<String, String> {
+        let title = params.title.trim();
+        if title.is_empty() {
+            return Err("title must not be empty".to_string());
+        }
+        let create_body = serde_json::json!({
+            "title": title,
+            "project": params.project,
+            "status": params.status,
+            "priority": params.priority,
+            "cycle": params.cycle,
+            "assignee": params.assignee,
+            "estimate": params.estimate,
+            "due": params.due,
+            "link": params.link,
+            "tags": params.tags,
+            "checklist": params.checklist,
+        });
+        let value = self
+            .client
+            .post_json(&format!("{BOARD_URL}/tasks"), &create_body)
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_task_update",
+        description = "Update a task on the TASKING board, addressed by TSK code, vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; clear_project: true clears the project instead. Clearable fields (cycle, assignee, estimate, due, hold, link) are tri-state: absent = keep, null or \"\" = clear, value = set; cycle \"BACKLOG\" also clears. Status moves through INTAKE, TRIAGE, FIELD, REVIEW, SEALED.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_task_update(
+        &self,
+        Parameters(params): Parameters<TaskUpdateParams>,
+    ) -> Result<String, String> {
+        let project = resolve_project_patch(params.project, params.clear_project.unwrap_or(false))?;
+
+        let mut patch_body = serde_json::Map::new();
+        if let Some(title) = params.title {
+            patch_body.insert("title".to_string(), Value::String(title));
+        }
+        if let Some(project) = project {
+            patch_body.insert("project".to_string(), Value::String(project));
+        }
+        if let Some(status) = params.status {
+            patch_body.insert("status".to_string(), Value::String(status));
+        }
+        if let Some(priority) = params.priority {
+            patch_body.insert("priority".to_string(), Value::String(priority));
+        }
+        if let Some(tags) = params.tags {
+            patch_body.insert("tags".to_string(), serde_json::json!(tags));
+        }
+        insert_tri_state(&mut patch_body, "cycle", normalize_tri_state(params.cycle));
+        insert_tri_state(
+            &mut patch_body,
+            "assignee",
+            normalize_tri_state(params.assignee),
+        );
+        insert_tri_state(
+            &mut patch_body,
+            "estimate",
+            normalize_tri_state(params.estimate),
+        );
+        insert_tri_state(&mut patch_body, "due", normalize_tri_state(params.due));
+        insert_tri_state(&mut patch_body, "hold", normalize_tri_state(params.hold));
+        insert_tri_state(&mut patch_body, "link", normalize_tri_state(params.link));
+        if patch_body.is_empty() {
+            return Err("nothing to update — provide at least one field to change".to_string());
+        }
+
+        let id = self
+            .resolve_board_ref(&params.task, BoardKind::Task)
+            .await?;
+        let value = self
+            .client
+            .patch_json(
+                &format!("{BOARD_URL}/tasks/{id}"),
+                &Value::Object(patch_body),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_cycle_create",
+        description = "Create a sprint cycle for the TASKING board (a CYCLE page under cycles/). Omit 'code' to auto-generate the next S-{n}; an explicit code conflicts if it already exists. State defaults to PLANNED (ACTIVE also allowed); CLOSED is rejected at creation — seal a finished cycle with vault_cycle_update instead.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_cycle_create(
+        &self,
+        Parameters(params): Parameters<CycleCreateParams>,
+    ) -> Result<String, String> {
+        let label = params.label.trim();
+        if label.is_empty() {
+            return Err("label must not be empty".to_string());
+        }
+        let create_body = serde_json::json!({
+            "code": params.code,
+            "label": label,
+            "start": params.start,
+            "end": params.end,
+            "goal": params.goal,
+            "state": params.state,
+        });
+        let value = self
+            .client
+            .post_json(&format!("{BOARD_URL}/cycles"), &create_body)
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_cycle_update",
+        description = "Update a cycle on the TASKING board, addressed by S code, vault path, or page UUID. Fields update when present (state PLANNED/ACTIVE/CLOSED, goal, start, end). Sealing with carryover: set state CLOSED and pass carry_to to re-home the cycle's unsealed tasks — \"BACKLOG\" clears their cycle, a cycle code (e.g. \"S-14\") re-assigns them. carry_to is only valid with state CLOSED; without it, sealed cycles leave their tasks untouched.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_cycle_update(
+        &self,
+        Parameters(params): Parameters<CycleUpdateParams>,
+    ) -> Result<String, String> {
+        let mut patch_body = serde_json::Map::new();
+        if let Some(state) = params.state {
+            patch_body.insert("state".to_string(), Value::String(state));
+        }
+        if let Some(goal) = params.goal {
+            patch_body.insert("goal".to_string(), Value::String(goal));
+        }
+        if let Some(start) = params.start {
+            patch_body.insert("start".to_string(), Value::String(start));
+        }
+        if let Some(end) = params.end {
+            patch_body.insert("end".to_string(), Value::String(end));
+        }
+        if let Some(carry_to) = params.carry_to {
+            patch_body.insert("carry_to".to_string(), Value::String(carry_to));
+        }
+        if patch_body.is_empty() {
+            return Err("nothing to update — provide at least one field to change".to_string());
+        }
+
+        let id = self
+            .resolve_board_ref(&params.cycle, BoardKind::Cycle)
+            .await?;
+        let value = self
+            .client
+            .patch_json(
+                &format!("{BOARD_URL}/cycles/{id}"),
+                &Value::Object(patch_body),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    /// Resolve a free-form task/cycle reference to its page UUID: a UUID
+    /// passes through, a vault path reads the page's `meta.id`, and a code
+    /// looks itself up on the board.
+    async fn resolve_board_ref(&self, input: &str, kind: BoardKind) -> Result<String, String> {
+        match classify_ref(input) {
+            TaskRef::Id(id) => Ok(id.to_string()),
+            TaskRef::Path(path) => {
+                let page = self.fetch_page(&path).await?;
+                page_meta_id(&page, &path)
+            }
+            TaskRef::Code(code) => {
+                let board = self
+                    .client
+                    .get_json(BOARD_URL, &[])
+                    .await
+                    .map_err(|e| e.to_string())?;
+                find_board_id(&board, kind, &code)
+            }
+        }
+    }
+
     /// Fetch the current full page response for a read-modify-write tool.
     async fn fetch_page(&self, path: &str) -> Result<Value, String> {
         self.client
@@ -1097,6 +1452,48 @@ mod tests {
     }
 
     #[test]
+    fn server_instructions_define_tasking_workflow() {
+        let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
+        let instructions = VaultMcpServer::new(Arc::new(client))
+            .get_info()
+            .instructions
+            .expect("server instructions");
+        let normalized = instructions
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+
+        for (policy, required_clause) in [
+            (
+                "board orientation",
+                "orient on the tasking board with vault_board",
+            ),
+            (
+                "task creation routes through the board",
+                "create board tasks with vault_task_create rather than vault_create_page so they receive tsk codes",
+            ),
+            (
+                "task provenance",
+                "the `ai-generated` tag policy applies to llm-authored tasks",
+            ),
+            (
+                "status progression",
+                "move tasks through intake → triage → field → review → sealed with vault_task_update, addressing them by code, path, or id",
+            ),
+            (
+                "cycle sealing with carryover",
+                "seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks",
+            ),
+        ] {
+            assert!(
+                normalized.contains(required_clause),
+                "server instructions are missing the {policy} policy: {required_clause:?}"
+            );
+        }
+    }
+
+    #[test]
     fn truncate_body_leaves_small_bodies_alone() {
         let mut value = json!({"body": "short", "path": "a.md"});
         truncate_body(&mut value, 100);
@@ -1135,8 +1532,11 @@ mod tests {
             [
                 "vault_append_page",
                 "vault_assign",
+                "vault_board",
                 "vault_capture_conversation",
                 "vault_create_page",
+                "vault_cycle_create",
+                "vault_cycle_update",
                 "vault_delete_page",
                 "vault_edit_page",
                 "vault_folder",
@@ -1148,6 +1548,8 @@ mod tests {
                 "vault_preview_mutation",
                 "vault_search",
                 "vault_tags",
+                "vault_task_create",
+                "vault_task_update",
                 "vault_tree",
                 "vault_update_page",
             ]
@@ -2212,6 +2614,405 @@ mod tests {
             .await
             .expect_err("move preview without destination should be rejected");
         assert!(err.contains("destination"), "{err}");
+    }
+
+    #[test]
+    fn task_update_params_distinguish_absent_null_and_value() {
+        let params: TaskUpdateParams = serde_json::from_value(json!({
+            "task": "TSK-0001",
+            "cycle": null,
+            "assignee": "kit",
+        }))
+        .unwrap();
+        assert_eq!(params.cycle, Some(None), "null clears");
+        assert_eq!(params.assignee, Some(Some("kit".to_string())), "value sets");
+        assert_eq!(params.estimate, None, "absent keeps");
+        assert_eq!(params.due, None, "absent keeps");
+        assert_eq!(params.hold, None, "absent keeps");
+        assert_eq!(params.link, None, "absent keeps");
+    }
+
+    #[test]
+    fn task_update_schema_advertises_tri_state_fields_as_nullable_strings() {
+        let tool = VaultMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "vault_task_update")
+            .expect("task update tool should be registered");
+        let schema = &*tool.input_schema;
+        for field in ["cycle", "assignee", "estimate", "due", "hold", "link"] {
+            assert_eq!(
+                schema["properties"][field]["type"],
+                json!(["string", "null"]),
+                "tri-state field {field} should stay a nullable string"
+            );
+        }
+    }
+
+    /// Serve a seeded vault and create one cycle + one task in it through the
+    /// board tools, returning the server for follow-up assertions.
+    async fn serve_board_vault() -> (VaultMcpServer, tempfile::TempDir) {
+        let (server, tmp) = serve_seeded_vault().await;
+        server
+            .client
+            .post_json(
+                "/api/vault/board/cycles",
+                &json!({"label": "Sprint One", "start": "2026-08-10", "end": "2026-08-24"}),
+            )
+            .await
+            .expect("cycle create should succeed");
+        (server, tmp)
+    }
+
+    fn task_create_params(title: &str) -> TaskCreateParams {
+        TaskCreateParams {
+            title: title.to_string(),
+            project: None,
+            status: None,
+            priority: None,
+            cycle: None,
+            assignee: None,
+            estimate: None,
+            due: None,
+            link: None,
+            tags: None,
+            checklist: None,
+        }
+    }
+
+    fn task_update_params(task: &str) -> TaskUpdateParams {
+        TaskUpdateParams {
+            task: task.to_string(),
+            title: None,
+            project: None,
+            clear_project: None,
+            status: None,
+            priority: None,
+            tags: None,
+            cycle: None,
+            assignee: None,
+            estimate: None,
+            due: None,
+            hold: None,
+            link: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn task_create_reserves_a_code_and_applies_defaults() {
+        let (server, _tmp) = serve_board_vault().await;
+        let value = parse(
+            server
+                .vault_task_create(Parameters(TaskCreateParams {
+                    project: Some("xxii".to_string()),
+                    checklist: Some(vec!["first step".to_string()]),
+                    ..task_create_params("Wire the board")
+                }))
+                .await,
+        );
+        assert_eq!(value["code"], "TSK-0001");
+        assert_eq!(value["path"], "tasks/xxii/TSK-0001.md");
+        assert_eq!(value["status"], "INTAKE");
+        assert_eq!(value["priority"], "P2");
+        assert_eq!(value["checks"], json!([0, 1]), "checklist becomes - [ ]");
+    }
+
+    #[tokio::test]
+    async fn task_create_rejects_an_unknown_cycle() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_task_create(Parameters(TaskCreateParams {
+                cycle: Some("S-99".to_string()),
+                ..task_create_params("Orphan")
+            }))
+            .await
+            .expect_err("unknown cycle should be rejected");
+        assert!(err.contains("unknown cycle"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn board_filters_tasks_and_operations_to_the_project() {
+        let (server, _tmp) = serve_board_vault().await;
+        server
+            .vault_task_create(Parameters(TaskCreateParams {
+                project: Some("xxii".to_string()),
+                ..task_create_params("In scope")
+            }))
+            .await
+            .unwrap();
+        server
+            .vault_task_create(Parameters(TaskCreateParams {
+                project: Some("other".to_string()),
+                ..task_create_params("Out of scope")
+            }))
+            .await
+            .unwrap();
+
+        let full = parse(
+            server
+                .vault_board(Parameters(BoardParams { project: None }))
+                .await,
+        );
+        assert_eq!(full["tasks"].as_array().unwrap().len(), 2);
+
+        let filtered = parse(
+            server
+                .vault_board(Parameters(BoardParams {
+                    project: Some("xxii".to_string()),
+                }))
+                .await,
+        );
+        assert_eq!(filtered["tasks"].as_array().unwrap().len(), 1);
+        assert_eq!(filtered["tasks"][0]["title"], "In scope");
+        // Columns and cycles are never filtered away.
+        assert_eq!(filtered["columns"].as_array().unwrap().len(), 5);
+        assert_eq!(filtered["cycles"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn task_update_by_code_sets_and_clears_tri_state_fields() {
+        let (server, _tmp) = serve_board_vault().await;
+        server
+            .vault_task_create(Parameters(TaskCreateParams {
+                cycle: Some("S-1".to_string()),
+                assignee: Some("kit".to_string()),
+                ..task_create_params("Move me")
+            }))
+            .await
+            .unwrap();
+
+        // Address by lowercase code; move the column, clear the cycle via
+        // null, clear the assignee via the empty-string fallback.
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    status: Some("TRIAGE".to_string()),
+                    cycle: Some(None),
+                    assignee: Some(Some(String::new())),
+                    ..task_update_params("tsk-0001")
+                }))
+                .await,
+        );
+        assert_eq!(value["status"], "TRIAGE");
+        assert_eq!(value["cycle"], Value::Null);
+        assert_eq!(value["assignee"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn task_update_resolves_paths_and_rejects_unknown_codes() {
+        let (server, _tmp) = serve_board_vault().await;
+        server
+            .vault_task_create(Parameters(task_create_params("By path")))
+            .await
+            .unwrap();
+
+        let value = parse(
+            server
+                .vault_task_update(Parameters(TaskUpdateParams {
+                    priority: Some("P0".to_string()),
+                    ..task_update_params("tasks/TSK-0001.md")
+                }))
+                .await,
+        );
+        assert_eq!(value["priority"], "P0");
+
+        let err = server
+            .vault_task_update(Parameters(TaskUpdateParams {
+                status: Some("TRIAGE".to_string()),
+                ..task_update_params("TSK-9999")
+            }))
+            .await
+            .expect_err("unknown code should be rejected");
+        assert!(err.contains("no task with code 'TSK-9999'"), "{err}");
+        assert!(err.contains("vault_board"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn task_update_rejects_project_combined_with_clear_project() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_task_update(Parameters(TaskUpdateParams {
+                project: Some("xxii".to_string()),
+                clear_project: Some(true),
+                ..task_update_params("TSK-0001")
+            }))
+            .await
+            .expect_err("contradictory project directives should be rejected");
+        assert!(err.contains("mutually exclusive"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn task_update_with_no_fields_is_rejected() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_task_update(Parameters(task_update_params("TSK-0001")))
+            .await
+            .expect_err("empty update should be rejected");
+        assert!(err.contains("nothing to update"), "{err}");
+    }
+
+    fn cycle_create_params(label: &str) -> CycleCreateParams {
+        CycleCreateParams {
+            label: label.to_string(),
+            start: "2026-08-10".to_string(),
+            end: "2026-08-24".to_string(),
+            code: None,
+            goal: None,
+            state: None,
+        }
+    }
+
+    fn cycle_update_params(cycle: &str) -> CycleUpdateParams {
+        CycleUpdateParams {
+            cycle: cycle.to_string(),
+            state: None,
+            goal: None,
+            start: None,
+            end: None,
+            carry_to: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cycle_create_auto_generates_sequential_codes() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let first = parse(
+            server
+                .vault_cycle_create(Parameters(cycle_create_params("Sprint One")))
+                .await,
+        );
+        assert_eq!(first["code"], "S-1");
+        assert_eq!(first["state"], "PLANNED");
+        assert_eq!(first["label"], "Sprint One");
+
+        let second = parse(
+            server
+                .vault_cycle_create(Parameters(CycleCreateParams {
+                    state: Some("ACTIVE".to_string()),
+                    ..cycle_create_params("Sprint Two")
+                }))
+                .await,
+        );
+        assert_eq!(second["code"], "S-2");
+        assert_eq!(second["state"], "ACTIVE");
+    }
+
+    #[tokio::test]
+    async fn cycle_create_rejects_closed_and_duplicate_codes() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_cycle_create(Parameters(CycleCreateParams {
+                state: Some("CLOSED".to_string()),
+                ..cycle_create_params("Stillborn")
+            }))
+            .await
+            .expect_err("CLOSED at creation should be rejected");
+        assert!(err.contains("CLOSED"), "{err}");
+
+        server
+            .vault_cycle_create(Parameters(CycleCreateParams {
+                code: Some("S-7".to_string()),
+                ..cycle_create_params("Explicit")
+            }))
+            .await
+            .unwrap();
+        let err = server
+            .vault_cycle_create(Parameters(CycleCreateParams {
+                code: Some("S-7".to_string()),
+                ..cycle_create_params("Duplicate")
+            }))
+            .await
+            .expect_err("duplicate explicit code should conflict");
+        assert!(err.contains("409"), "{err}");
+        assert!(err.contains("S-7"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cycle_update_by_code_sets_fields() {
+        let (server, _tmp) = serve_board_vault().await;
+        let value = parse(
+            server
+                .vault_cycle_update(Parameters(CycleUpdateParams {
+                    state: Some("ACTIVE".to_string()),
+                    goal: Some("Ship the board tools".to_string()),
+                    ..cycle_update_params("s-1")
+                }))
+                .await,
+        );
+        assert_eq!(value["code"], "S-1");
+        assert_eq!(value["state"], "ACTIVE");
+        assert_eq!(value["goal"], "Ship the board tools");
+    }
+
+    #[tokio::test]
+    async fn cycle_seal_with_carry_to_rehomes_unsealed_tasks() {
+        let (server, _tmp) = serve_board_vault().await;
+        server
+            .vault_cycle_create(Parameters(cycle_create_params("Sprint Two")))
+            .await
+            .unwrap();
+        server
+            .vault_task_create(Parameters(TaskCreateParams {
+                cycle: Some("S-1".to_string()),
+                ..task_create_params("Unfinished work")
+            }))
+            .await
+            .unwrap();
+
+        let sealed = parse(
+            server
+                .vault_cycle_update(Parameters(CycleUpdateParams {
+                    state: Some("CLOSED".to_string()),
+                    carry_to: Some("S-2".to_string()),
+                    ..cycle_update_params("S-1")
+                }))
+                .await,
+        );
+        assert_eq!(sealed["state"], "CLOSED");
+
+        let board = parse(
+            server
+                .vault_board(Parameters(BoardParams { project: None }))
+                .await,
+        );
+        assert_eq!(
+            board["tasks"][0]["cycle"], "S-2",
+            "unsealed task should carry over: {board}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cycle_update_rejects_carry_to_without_closed() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_cycle_update(Parameters(CycleUpdateParams {
+                carry_to: Some("BACKLOG".to_string()),
+                ..cycle_update_params("S-1")
+            }))
+            .await
+            .expect_err("carry_to without CLOSED should be rejected");
+        assert!(err.contains("carry_to"), "{err}");
+        assert!(err.contains("CLOSED"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cycle_update_rejects_unknown_codes_and_empty_updates() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_cycle_update(Parameters(CycleUpdateParams {
+                state: Some("ACTIVE".to_string()),
+                ..cycle_update_params("S-99")
+            }))
+            .await
+            .expect_err("unknown code should be rejected");
+        assert!(err.contains("no cycle with code 'S-99'"), "{err}");
+        assert!(err.contains("vault_board"), "{err}");
+
+        let err = server
+            .vault_cycle_update(Parameters(cycle_update_params("S-1")))
+            .await
+            .expect_err("empty update should be rejected");
+        assert!(err.contains("nothing to update"), "{err}");
     }
 
     #[tokio::test]
