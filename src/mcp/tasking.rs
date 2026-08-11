@@ -8,6 +8,7 @@
 //! HTTP layer — the MCP side only speaks to the server over HTTP.
 
 use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 use uuid::Uuid;
 
 /// Deserialize a tri-state PATCH field into `Option<Option<T>>`:
@@ -66,6 +67,114 @@ pub fn classify_ref(input: &str) -> TaskRef {
         return TaskRef::Path(input.to_string());
     }
     TaskRef::Code(input.to_uppercase())
+}
+
+/// Which board collection a code resolves against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardKind {
+    Task,
+    Cycle,
+}
+
+impl BoardKind {
+    /// The `BoardResponse` array carrying this kind's entries.
+    fn collection(self) -> &'static str {
+        match self {
+            BoardKind::Task => "tasks",
+            BoardKind::Cycle => "cycles",
+        }
+    }
+
+    /// The noun used in agent-facing error messages.
+    fn noun(self) -> &'static str {
+        match self {
+            BoardKind::Task => "task",
+            BoardKind::Cycle => "cycle",
+        }
+    }
+}
+
+/// Find the page UUID for `code` in a `GET /board` response, matching the
+/// `code` field of the kind's collection (`tasks` or `cycles`)
+/// case-insensitively. A miss names the unknown code and points at
+/// vault_board for the live code list.
+pub fn find_board_id(board: &Value, kind: BoardKind, code: &str) -> Result<String, String> {
+    board
+        .get(kind.collection())
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|entry| {
+            entry
+                .get("code")
+                .and_then(Value::as_str)
+                .is_some_and(|c| c.eq_ignore_ascii_case(code))
+        })
+        .and_then(|entry| entry.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "no {} with code '{code}' — list codes with vault_board",
+                kind.noun()
+            )
+        })
+}
+
+/// Extract the page UUID (`meta.id`) from a `GET /pages/{path}` response.
+pub fn page_meta_id(value: &Value, path: &str) -> Result<String, String> {
+    value
+        .get("meta")
+        .and_then(|meta| meta.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("page response for {path} carried no meta.id field"))
+}
+
+/// Insert a normalized tri-state field into a PATCH body: absent = omit the
+/// key entirely (keep), cleared = JSON null (clear), set = the string value.
+pub fn insert_tri_state(
+    body: &mut serde_json::Map<String, Value>,
+    key: &str,
+    field: Option<Option<String>>,
+) {
+    match field {
+        None => {}
+        Some(None) => {
+            body.insert(key.to_string(), Value::Null);
+        }
+        Some(Some(value)) => {
+            body.insert(key.to_string(), Value::String(value));
+        }
+    }
+}
+
+/// Resolve the `project` / `clear_project` parameter pair into the PATCH
+/// body's `project` value: `clear_project` maps to the API's empty-string
+/// clear sentinel, and combining it with an explicit project is a
+/// contradiction that errors instead of guessing.
+pub fn resolve_project_patch(
+    project: Option<String>,
+    clear_project: bool,
+) -> Result<Option<String>, String> {
+    match (project, clear_project) {
+        (Some(_), true) => Err(
+            "'project' and clear_project: true are mutually exclusive — pass one or the other"
+                .to_string(),
+        ),
+        (None, true) => Ok(Some(String::new())),
+        (project, false) => Ok(project),
+    }
+}
+
+/// Filter a board response in place to one project: `tasks` and `operations`
+/// keep only entries declaring exactly `project`; `columns` and `cycles` are
+/// always left untouched.
+pub fn filter_board_project(board: &mut Value, project: &str) {
+    for key in ["tasks", "operations"] {
+        if let Some(entries) = board.get_mut(key).and_then(Value::as_array_mut) {
+            entries.retain(|entry| entry.get("project").and_then(Value::as_str) == Some(project));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -153,6 +262,106 @@ mod tests {
             normalize_tri_state(Some(Some("S-13".to_string()))),
             Some(Some("S-13".to_string()))
         );
+    }
+
+    /// A minimal `GET /board` response for resolution tests.
+    fn board_fixture() -> serde_json::Value {
+        json!({
+            "columns": [{"id": "INTAKE"}],
+            "operations": [
+                {"id": "op-1", "code": "SIG3", "project": "sigil"},
+                {"id": "op-2", "code": "XXII", "project": "xxii"},
+            ],
+            "cycles": [
+                {"id": "cy-13", "code": "S-13", "state": "ACTIVE"},
+            ],
+            "tasks": [
+                {"id": "tk-1", "code": "TSK-0001", "project": "xxii"},
+                {"id": "tk-2", "code": "TSK-0002", "project": null},
+            ],
+        })
+    }
+
+    #[test]
+    fn find_board_id_matches_codes_case_insensitively() {
+        let board = board_fixture();
+        assert_eq!(
+            find_board_id(&board, BoardKind::Task, "TSK-0001").unwrap(),
+            "tk-1"
+        );
+        assert_eq!(
+            find_board_id(&board, BoardKind::Task, "tsk-0002").unwrap(),
+            "tk-2"
+        );
+        assert_eq!(
+            find_board_id(&board, BoardKind::Cycle, "s-13").unwrap(),
+            "cy-13"
+        );
+    }
+
+    #[test]
+    fn find_board_id_miss_names_the_code_and_hints_at_vault_board() {
+        let board = board_fixture();
+        let err = find_board_id(&board, BoardKind::Task, "TSK-9999").unwrap_err();
+        assert!(err.contains("no task with code 'TSK-9999'"), "{err}");
+        assert!(err.contains("vault_board"), "{err}");
+
+        // A task code never resolves against cycles and vice versa.
+        let err = find_board_id(&board, BoardKind::Cycle, "TSK-0001").unwrap_err();
+        assert!(err.contains("no cycle with code 'TSK-0001'"), "{err}");
+    }
+
+    #[test]
+    fn page_meta_id_reads_the_pages_response_shape() {
+        let page = json!({"path": "tasks/TSK-0001.md", "meta": {"id": "abc-123"}});
+        assert_eq!(page_meta_id(&page, "tasks/TSK-0001.md").unwrap(), "abc-123");
+
+        let err = page_meta_id(&json!({"path": "x.md"}), "x.md").unwrap_err();
+        assert!(err.contains("no meta.id"), "{err}");
+    }
+
+    #[test]
+    fn insert_tri_state_omits_nulls_and_sets_values() {
+        let mut body = serde_json::Map::new();
+        insert_tri_state(&mut body, "cycle", None);
+        insert_tri_state(&mut body, "assignee", Some(None));
+        insert_tri_state(&mut body, "due", Some(Some("2026-08-15".to_string())));
+        assert_eq!(
+            serde_json::Value::Object(body),
+            json!({"assignee": null, "due": "2026-08-15"})
+        );
+    }
+
+    #[test]
+    fn resolve_project_patch_maps_clear_to_the_empty_string_sentinel() {
+        assert_eq!(resolve_project_patch(None, false).unwrap(), None);
+        assert_eq!(
+            resolve_project_patch(Some("xxii".to_string()), false).unwrap(),
+            Some("xxii".to_string())
+        );
+        assert_eq!(
+            resolve_project_patch(None, true).unwrap(),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn resolve_project_patch_rejects_project_combined_with_clear() {
+        let err = resolve_project_patch(Some("xxii".to_string()), true).unwrap_err();
+        assert!(err.contains("mutually exclusive"), "{err}");
+    }
+
+    #[test]
+    fn filter_board_project_keeps_columns_and_cycles() {
+        let mut board = board_fixture();
+        filter_board_project(&mut board, "xxii");
+        assert_eq!(board["tasks"].as_array().unwrap().len(), 1);
+        assert_eq!(board["tasks"][0]["code"], "TSK-0001");
+        assert_eq!(board["operations"].as_array().unwrap().len(), 1);
+        assert_eq!(board["operations"][0]["code"], "XXII");
+        // Columns and cycles survive untouched.
+        assert_eq!(board["columns"].as_array().unwrap().len(), 1);
+        assert_eq!(board["cycles"].as_array().unwrap().len(), 1);
     }
 
     #[test]
