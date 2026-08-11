@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
+import { feedDisclosureStorageKey } from "#/store/feedDisclosure";
 
 type FeedList = components["schemas"]["FeedListResponse"];
 type FeedListWithCounts = FeedList & {
@@ -117,12 +118,53 @@ const feedList: FeedListWithCounts = {
   counts: { unread: 1, all: 1, saved: 0 },
 };
 
+const disclosureFeedList: FeedListWithCounts = {
+  ...feedList,
+  diagnostics: [],
+  groups: [
+    feedList.groups[0],
+    {
+      name: "Research",
+      feeds: [
+        {
+          id: 8,
+          title: "Two Example",
+          title_override: null,
+          url: "https://two.example/feed.xml",
+          fetch_url: "https://two.example/feed.xml",
+          site_url: "https://two.example",
+          group: "Research",
+          tags: ["design"],
+          last_fetch_at: "2026-08-09T12:15:00Z",
+          next_fetch_at: "2026-08-09T13:15:00Z",
+          error_count: 0,
+          last_error: null,
+        },
+      ],
+    },
+  ],
+  counts: { unread: 1, all: 2, saved: 0 },
+};
+
+function groupDisclosure(name: string) {
+  return screen.getByRole("button", {
+    name: new RegExp(`${name} group`, "i"),
+  });
+}
+
+function feedDisclosure(title: string) {
+  return screen.getByRole("button", {
+    name: new RegExp(`${title} feed`, "i"),
+  });
+}
+
 function renderManagement() {
   return render(<FeedManagement />);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   managementMocks.subscribeState.isPending = false;
   managementMocks.subscribeState.error = null;
   managementMocks.updateState.isPending = false;
@@ -741,5 +783,234 @@ describe("FeedManagement", () => {
     );
     expect(managementMocks.importOpml).toHaveBeenLastCalledWith({ opml });
     expect(input).toHaveValue("");
+  });
+
+  it("starts every group and feed expanded when storage is absent", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+
+    renderManagement();
+
+    await waitFor(() => {
+      expect(groupDisclosure("Engineering")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+    expect(groupDisclosure("Research")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("Two Example")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("operates group and feed disclosures by pointer, Enter, and Space", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    renderManagement();
+
+    const group = groupDisclosure("Engineering");
+    await user.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    await user.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    group.focus();
+    await user.keyboard("{Enter}");
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard(" ");
+    expect(group).toHaveAttribute("aria-expanded", "true");
+
+    const feed = feedDisclosure("One Example");
+    await user.click(feed);
+    expect(feed).toHaveAttribute("aria-expanded", "false");
+    await user.click(feed);
+    expect(feed).toHaveAttribute("aria-expanded", "true");
+    feed.focus();
+    await user.keyboard(" ");
+    expect(feed).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{Enter}");
+    expect(feed).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("hides a collapsed group without discarding its nested feed preference", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(feedDisclosure("One Example"));
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await user.click(groupDisclosure("Engineering"));
+
+    expect(
+      screen.queryByRole("list", { name: /engineering feeds/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /one example feed/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(groupDisclosure("Engineering"));
+
+    expect(
+      screen.getByRole("list", { name: /engineering feeds/i }),
+    ).toBeVisible();
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("restores collapsed state on remount only for the same namespace", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    const first = renderManagement();
+
+    await user.click(groupDisclosure("Research"));
+    await user.click(feedDisclosure("One Example"));
+    first.unmount();
+
+    const second = renderManagement();
+    await waitFor(() => {
+      expect(groupDisclosure("Research")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    second.unmount();
+
+    managementMocks.feedsQuery.data = {
+      ...disclosureFeedList,
+      preference_namespace: "another-vault",
+    };
+    renderManagement();
+
+    await waitFor(() => {
+      expect(groupDisclosure("Research")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("prunes obsolete preferences after each successful manifest", async () => {
+    const key = feedDisclosureStorageKey(
+      disclosureFeedList.preference_namespace,
+    );
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        groups: ["engineering", "research", "obsolete"],
+        feeds: [7, 8, 99],
+      }),
+    );
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const view = renderManagement();
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(key) ?? "{}")).toEqual({
+        version: 1,
+        groups: ["engineering", "research"],
+        feeds: [7, 8],
+      });
+    });
+
+    managementMocks.feedsQuery.data = {
+      ...disclosureFeedList,
+      groups: disclosureFeedList.groups.slice(0, 1),
+      counts: { unread: 1, all: 1, saved: 0 },
+    };
+    view.rerender(<FeedManagement />);
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(key) ?? "{}")).toEqual({
+        version: 1,
+        groups: ["engineering"],
+        feeds: [7],
+      });
+    });
+  });
+
+  it("does not prune stored preferences while the manifest loads or errors", () => {
+    const key = feedDisclosureStorageKey(
+      disclosureFeedList.preference_namespace,
+    );
+    const stored = JSON.stringify({
+      version: 1,
+      groups: ["possibly-live"],
+      feeds: [44],
+    });
+    window.localStorage.setItem(key, stored);
+    managementMocks.feedsQuery.data = undefined;
+    managementMocks.feedsQuery.isPending = true;
+    managementMocks.feedsQuery.isLoading = true;
+    const view = renderManagement();
+
+    expect(window.localStorage.getItem(key)).toBe(stored);
+
+    managementMocks.feedsQuery.isPending = false;
+    managementMocks.feedsQuery.isLoading = false;
+    managementMocks.feedsQuery.isError = true;
+    managementMocks.feedsQuery.error = new Error("manifest unavailable");
+    view.rerender(<FeedManagement />);
+
+    expect(window.localStorage.getItem(key)).toBe(stored);
+  });
+
+  it("keeps summary metadata collapsed and details in the expanded feed panel", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(feedDisclosure("One Example"));
+    const item = screen.getByText("One Example").closest("li");
+    expect(item).not.toBeNull();
+    const collapsed = within(item as HTMLElement);
+
+    expect(collapsed.getByText("One Example")).toBeVisible();
+    expect(
+      collapsed.getByText("https://one.example/feed.xml"),
+    ).toBeVisible();
+    expect(collapsed.getByLabelText(/degraded feed health/i)).toBeVisible();
+    expect(collapsed.getByText(/last fetch/i)).toBeVisible();
+    expect(collapsed.getByText(/next fetch/i)).toBeVisible();
+    expect(collapsed.getByText(/2 errors/i)).toBeVisible();
+    expect(collapsed.getByText("#rust")).toBeVisible();
+    expect(collapsed.getByText("#systems")).toBeVisible();
+    expect(
+      collapsed.queryByRole("button", { name: /edit one example/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      collapsed.queryByRole("button", { name: /unsubscribe one example/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      collapsed.queryByText("Timeout contacting origin"),
+    ).not.toBeVisible();
+
+    await user.click(feedDisclosure("One Example"));
+
+    expect(
+      collapsed.getByRole("button", { name: /edit one example/i }),
+    ).toBeVisible();
+    expect(
+      collapsed.getByRole("button", { name: /unsubscribe one example/i }),
+    ).toBeVisible();
+    expect(collapsed.getByText("Timeout contacting origin")).toBeVisible();
   });
 });
