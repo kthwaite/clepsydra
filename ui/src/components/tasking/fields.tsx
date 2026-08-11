@@ -50,13 +50,13 @@ export const SELECT_CLS =
 // ── radio-row classes / styles ────────────────────────────────────────────────
 
 export const RADIO_CLS_BASE =
-  "cl-mono border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] cursor-pointer flex-1 text-center transition-[background,color,border-color] duration-[120ms]";
+  "cl-mono border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] cursor-pointer flex-1 text-center transition-[background,color,border-color] duration-[120ms] ml-0 data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink-3)] data-[selected]:border-[var(--rule)] data-[selected]:bg-transparent data-[selected]:font-normal data-[selected]:text-[var(--ink-3)]";
 
 export const RADIO_CLS_ON =
-  "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)]";
+  "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)] data-[hovered]:bg-[var(--ink)] data-[hovered]:text-[var(--bg)] data-[hovered]:border-[var(--ink)] data-[selected]:bg-[var(--ink)] data-[selected]:text-[var(--bg)] data-[selected]:border-[var(--ink)]";
 
 const RADIO_CLS_OFF_HOVER =
-  "hover:text-[var(--ink)] hover:border-[var(--ink-3)]";
+  "hover:text-[var(--ink)] hover:border-[var(--ink-3)] data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink)] data-[hovered]:border-[var(--ink-3)]";
 
 /** Priority on-state fills with the priority colour (cap-radio.pri-*.on). */
 export const PRI_ON_STYLE: Record<string, React.CSSProperties> = {

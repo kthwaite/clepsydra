@@ -131,8 +131,22 @@ describe("NewTaskModal — render", () => {
       name: /in-field/i,
     });
     expect(fieldRadio).toBeChecked();
+    const fieldLabel = fieldRadio.closest("label");
+    expect(fieldLabel).toHaveClass(
+      "ml-0",
+      "data-[selected]:border-[var(--ink)]",
+      "data-[selected]:bg-[var(--ink)]",
+      "data-[selected]:font-normal",
+      "data-[selected]:text-[var(--bg)]",
+    );
+    expect(fieldLabel).not.toHaveClass(
+      "-ml-px",
+      "data-[hovered]:bg-accent",
+      "data-[selected]:bg-accent",
+      "data-[selected]:font-bold",
+    );
     // Active state: has bg-[var(--ink)] class from RADIO_CLS_ON
-    expect(fieldRadio.closest("label")?.className).toContain(
+    expect(fieldLabel?.className).toContain(
       "bg-[var(--ink)]",
     );
   });
@@ -165,8 +179,21 @@ describe("NewTaskModal — render", () => {
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
     const p2 = within(priority).getByRole("radio", { name: "P2" });
     expect(p2).toBeChecked();
+    const p2Label = p2.closest("label");
     // Active state: has cool background
-    expect(p2.closest("label")).toHaveStyle({ background: "var(--cool)" });
+    expect(p2Label).toHaveStyle({ background: "var(--cool)" });
+    expect(p2Label).toHaveClass(
+      "ml-0",
+      "data-[hovered]:bg-transparent",
+      "data-[selected]:bg-transparent",
+      "data-[selected]:font-normal",
+    );
+    expect(p2Label).not.toHaveClass(
+      "-ml-px",
+      "data-[hovered]:bg-accent",
+      "data-[selected]:bg-accent",
+      "data-[selected]:font-bold",
+    );
 
     const user = userEvent.setup();
     p2.focus();
