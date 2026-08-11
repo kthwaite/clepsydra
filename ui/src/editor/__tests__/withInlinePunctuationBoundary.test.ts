@@ -1,8 +1,11 @@
-import { createEditor, type Descendant } from "slate";
+import { createEditor, Editor, Transforms, type Descendant } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
-import { withInlinePunctuationBoundary } from "#/editor/plugins/withInlinePunctuationBoundary";
+import {
+  exitTerminalInlineCode,
+  withInlinePunctuationBoundary,
+} from "#/editor/plugins/withInlinePunctuationBoundary";
 import { withSchema } from "#/editor/schema/withSchema";
 
 function makeEditor(children: Descendant[]) {
@@ -171,6 +174,127 @@ describe("withInlinePunctuationBoundary", () => {
 
     expect(slateToMarkdown(editor.children).trim()).toBe(
       "[labelx](https://example.test)",
+    );
+  });
+});
+
+describe("exitTerminalInlineCode", () => {
+  it("exits a terminal inline-code leaf before the next insertion", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [{ text: "code", code: true }],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 4 });
+
+    expect(exitTerminalInlineCode(editor)).toBe(true);
+    editor.insertText(" next");
+
+    expect(slateToMarkdown(editor.children).trim()).toBe("`code` next");
+  });
+
+  it("does not exit from inside an inline-code leaf", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [{ text: "code", code: true }],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 2 });
+
+    expect(exitTerminalInlineCode(editor)).toBe(false);
+    editor.insertText("X");
+
+    expect(slateToMarkdown(editor.children).trim()).toBe("`coXde`");
+  });
+
+  it("does not exit inline code when ordinary text follows it", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [
+          { text: "code", code: true },
+          { text: " follows" },
+        ],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 4 });
+
+    expect(exitTerminalInlineCode(editor)).toBe(false);
+    editor.insertText("X");
+
+    expect(slateToMarkdown(editor.children).trim()).toBe("`codeX` follows");
+  });
+
+  it("does not exit terminal text without the code mark", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [{ text: "plain" }],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 5 });
+
+    expect(exitTerminalInlineCode(editor)).toBe(false);
+    editor.insertText(" text");
+
+    expect(slateToMarkdown(editor.children).trim()).toBe("plain text");
+  });
+
+  it("does not exit inline code for an expanded selection", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [{ text: "code", code: true }],
+      },
+    ]);
+    Transforms.select(editor, {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 4 },
+    });
+
+    expect(exitTerminalInlineCode(editor)).toBe(false);
+
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 4 },
+    });
+  });
+
+  it("does not exit from a code block", () => {
+    const editor = makeEditor([
+      {
+        type: "code-block",
+        language: "typescript",
+        children: [{ text: "code" }],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 4 });
+
+    expect(exitTerminalInlineCode(editor)).toBe(false);
+    editor.insertText(" next");
+
+    expect(slateToMarkdown(editor.children).trim()).toBe(
+      "```typescript\ncode next\n```",
+    );
+  });
+
+  it("removes only code from a terminal leaf with mixed marks", () => {
+    const editor = makeEditor([
+      {
+        type: "paragraph",
+        children: [{ text: "code", code: true, bold: true }],
+      },
+    ]);
+    Transforms.select(editor, { path: [0, 0], offset: 4 });
+
+    expect(exitTerminalInlineCode(editor)).toBe(true);
+    expect(Editor.marks(editor)).toEqual({ bold: true });
+
+    editor.insertText(" bold");
+    expect(slateToMarkdown(editor.children).trim()).toBe(
+      "`code`**&#x20;bold**",
     );
   });
 });

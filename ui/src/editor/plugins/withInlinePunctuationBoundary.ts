@@ -2,6 +2,26 @@ import { Editor, Element as SlateElement, Range, Transforms } from "slate";
 
 const TRAILING_PUNCTUATION = /^[,.;:!?]$/;
 
+export function exitTerminalInlineCode(editor: Editor): boolean {
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+
+  const [leaf] = Editor.leaf(editor, selection.anchor);
+  if (leaf.code !== true || selection.anchor.offset !== leaf.text.length) {
+    return false;
+  }
+
+  const block = Editor.above(editor, {
+    at: selection.anchor,
+    match: (node) =>
+      SlateElement.isElement(node) && Editor.isBlock(editor, node),
+  });
+  if (!block || !Editor.isEnd(editor, selection.anchor, block[1])) return false;
+
+  Editor.removeMark(editor, "code");
+  return true;
+}
+
 export function withInlinePunctuationBoundary(editor: Editor): Editor {
   const { insertText } = editor;
 

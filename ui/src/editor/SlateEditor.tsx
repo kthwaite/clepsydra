@@ -42,7 +42,10 @@ import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
 import { MathEditingProvider, useMathEditingController } from "./mathEditing";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
-import { withInlinePunctuationBoundary } from "./plugins/withInlinePunctuationBoundary";
+import {
+  exitTerminalInlineCode,
+  withInlinePunctuationBoundary,
+} from "./plugins/withInlinePunctuationBoundary";
 import { withMarkdownPaste } from "./plugins/withMarkdownPaste";
 import { withMathClipboard } from "./plugins/withMathClipboard";
 import {
@@ -553,6 +556,10 @@ export function SlateEditor({
       return;
     }
     if (vim.handleKeyDown(event)) {
+      return;
+    }
+    if (event.key === "ArrowRight" && exitTerminalInlineCode(editor)) {
+      event.preventDefault();
       return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
