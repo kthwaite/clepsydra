@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Descendant } from "slate";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { markdownToSlate } from "#/editor/convert";
+import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { serializeRecipeMarkdown } from "#/recipe/recipeCodec";
 
 const canonicalRecipeMarkdown =
@@ -88,13 +88,14 @@ vi.mock("#/editor/SlateEditor", () => ({
     readOnly?: boolean;
   }) => (
     <div data-testid="slate-editor" data-readonly={String(readOnly)}>
-      <textarea aria-label="Page body" readOnly={readOnly} defaultValue="Generic Markdown" />
-      <button
-        type="button"
-        onClick={() => onChange(initialValue, {} as never)}
-      >
-        Change generic body
-      </button>
+      <textarea
+        aria-label="Page body"
+        readOnly={readOnly}
+        defaultValue={slateToMarkdown(initialValue)}
+        onChange={(event) =>
+          onChange(markdownToSlate(event.currentTarget.value), {} as never)
+        }
+      />
       <button type="button" onClick={() => void onSaveNow()}>
         Editor save
       </button>
@@ -240,9 +241,10 @@ describe("Folio recipe presentation", () => {
     await waitFor(() => expect(editor.saveNow).toHaveBeenCalledOnce());
   });
 
-  it("preserves malformed Markdown in the generic editor without normalizing it", async () => {
-    const user = userEvent.setup();
+  it("preserves and edits malformed Markdown only through the Slate boundary", () => {
     const malformed = "Keep this exact body without recipe sections.\n";
+    const editedMalformed =
+      "Keep this exact body without recipe sections.\nStill malformed.\n";
     const editor = pageEditor({
       bodyMarkdown: malformed,
       initialValue: markdownToSlate(malformed),
@@ -252,11 +254,15 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "original Markdown is preserved",
     );
-    expect(screen.getByTestId("slate-editor")).toBeVisible();
+    const fallback = screen.getByRole("textbox", { name: "Page body" });
+    expect(fallback).toHaveValue(malformed);
     expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Change generic body" }));
+    fireEvent.change(fallback, { target: { value: editedMalformed } });
     expect(editor.onSlateChange).toHaveBeenCalledOnce();
+    expect(
+      slateToMarkdown(editor.onSlateChange.mock.calls[0]?.[0] as Descendant[]),
+    ).toBe(editedMalformed);
     expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
   });
 
@@ -266,6 +272,10 @@ describe("Folio recipe presentation", () => {
     const view = renderFolio(editor);
 
     await user.click(screen.getByRole("radio", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Local conflict draft." },
+    });
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
     expect(screen.getByRole("textbox", { name: "Description" })).toBeVisible();
 
     editor.revisionConflict = {
@@ -279,8 +289,9 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByText("Page changed on disk")).toBeVisible();
     expect(screen.getByRole("radio", { name: "Edit" })).toBeChecked();
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
-      "A bright dish.",
+      "Local conflict draft.",
     );
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
   });
 
   it("resets to Read and reparses when the path changes", async () => {
@@ -309,6 +320,10 @@ describe("Folio recipe presentation", () => {
       <Folio tabId="t1" path="recipes/lemon-pasta.md" />,
     );
     await user.click(screen.getByRole("radio", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Only page one." },
+    });
+    expect(first.setBodyMarkdown).toHaveBeenCalledOnce();
 
     view.rerender(<Folio tabId="t1" path="recipes/tomato-soup.md" />);
 
@@ -317,7 +332,38 @@ describe("Folio recipe presentation", () => {
     );
     expect(screen.getByText("A warming soup.")).toBeVisible();
     expect(screen.getByText("tomatoes")).toBeVisible();
+    expect(screen.queryByText("Only page one.")).toBeNull();
+    expect(first.setBodyMarkdown).toHaveBeenCalledOnce();
     expect(second.setBodyMarkdown).not.toHaveBeenCalled();
+  });
+
+  it("reparses a new editor revision without normalizing the transition", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    const view = renderFolio(editor);
+
+    await user.click(screen.getByRole("radio", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Stale local draft." },
+    });
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+
+    const reloadedMarkdown =
+      "Server revision.\n\nINGREDIENTS\n• fresh ingredient\n\nSTEPS\n1. Start again.\n\nNOTES\nReloaded.\n";
+    editor.bodyMarkdown = reloadedMarkdown;
+    editor.initialValue = markdownToSlate(reloadedMarkdown);
+    editor.editorValue = markdownToSlate(reloadedMarkdown);
+    editor.editorRevision = 2;
+    view.rerender(<Folio tabId="t1" path="recipes/lemon-pasta.md" />);
+
+    expect(screen.getByRole("radio", { name: "Edit" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+      "Server revision.",
+    );
+    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
+      "fresh ingredient",
+    );
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
   });
 
   it("renders a locked encrypted Folio before recipe controls", () => {
