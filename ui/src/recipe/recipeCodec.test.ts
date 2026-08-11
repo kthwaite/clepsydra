@@ -148,6 +148,27 @@ NOTES
       },
     });
   });
+
+  it("keeps task-like step text opaque in the demonstrated format", () => {
+    expect(
+      parseRecipeMarkdown(
+        `INGREDIENTS
+• broth
+STEPS
+1. [ ] Prepare broth.
+2. [x] Strain broth.
+NOTES
+`,
+        "Recipe",
+      ),
+    ).toMatchObject({
+      ok: true,
+      sourceFormat: "example",
+      value: {
+        steps: ["[ ] Prepare broth.", "[x] Strain broth."],
+      },
+    });
+  });
   it.each([
     {
       name: "missing marker",
@@ -260,6 +281,48 @@ NOTES
 Keep this continuation.
 STEPS
 First, simmer.
+NOTES
+`,
+      reason: "invalid-step",
+    },
+    {
+      name: "unchecked ordered task-list step",
+      source: `## Ingredients
+- broth
+## Steps
+1. [ ] Prepare broth.
+## Notes
+`,
+      reason: "unsupported-content",
+    },
+    {
+      name: "checked ordered task-list step",
+      source: `## Ingredients
+- broth
+## Steps
+1. [x] Prepare broth.
+## Notes
+`,
+      reason: "unsupported-content",
+    },
+    {
+      name: "invalid ingredient with unsupported nested structure",
+      source: `INGREDIENTS
+chicken
+  nested detail
+STEPS
+1. Simmer.
+NOTES
+`,
+      reason: "invalid-ingredient",
+    },
+    {
+      name: "invalid step with unsupported nested structure",
+      source: `INGREDIENTS
+• chicken
+STEPS
+First, simmer.
+  nested detail
 NOTES
 `,
       reason: "invalid-step",

@@ -115,9 +115,7 @@ const parseListLines = (
 
   if (
     hasInvalidItem ||
-    (values.length === 0 &&
-      hasUnrecognizedContent &&
-      !hasUnsupportedStructure)
+    (values.length === 0 && hasUnrecognizedContent)
   ) {
     return { ok: false, reason: invalidReason };
   }
@@ -195,7 +193,7 @@ export function parseRecipeMarkdown(
     lines.slice(stepMarker.index + 1, notesMarker.index),
     /^\d+[.)]\s+(.+)$/u,
     "invalid-step",
-    false,
+    sourceFormat === "markdown",
   );
   if (!ingredients.ok && ingredients.reason !== "unsupported-content") {
     return ingredients;
