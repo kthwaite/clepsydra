@@ -90,6 +90,7 @@ interface PageEditorState {
   saveStatus: SaveStatus;
   saveError: string | null;
   onSlateChange: (value: Descendant[], editor: Editor) => void;
+  setBodyMarkdown: (markdown: string) => void;
   saveNow: () => Promise<void>;
   revisionConflict: RevisionConflict | null;
   reloadAfterConflict: () => Promise<void>;
@@ -143,6 +144,7 @@ export function usePageEditor(
   const updatePageMutateAsync = updatePage.mutateAsync;
 
   const editorValueRef = useRef<Descendant[]>([]);
+  const bodyOverrideRef = useRef<string | null>(null);
 
   const [title, setTitleState] = useState("");
   const [tags, setTagsState] = useState<string[]>([]);
@@ -236,6 +238,7 @@ export function usePageEditor(
     setAliasesState([]);
     savedRef.current = { title: "", tags: [], aliases: [], body: "" };
     editorValueRef.current = [];
+    bodyOverrideRef.current = null;
     revisionRef.current = "";
     savePathRef.current = path;
     bodyEditGenRef.current = 0;
@@ -259,6 +262,7 @@ export function usePageEditor(
     previousLockEpochRef.current = lockEpoch;
     lifecycleRef.current += 1;
     editorValueRef.current = [];
+    bodyOverrideRef.current = null;
     savedRef.current = { ...savedRef.current, body: "" };
     bodyEditGenRef.current = 0;
     savedBodyGenRef.current = 0;
@@ -286,6 +290,7 @@ export function usePageEditor(
       editorValueRef.current.length === 0 ||
       savedRef.current.body !== plainBody;
     const nextValue = initialValue;
+    bodyOverrideRef.current = null;
     savedRef.current = { title: t, tags: tg, aliases: al, body: plainBody };
     revisionRef.current = page.revision;
     editorValueRef.current = nextValue;
@@ -334,6 +339,7 @@ export function usePageEditor(
       const saveBodyGen = bodyEditGenRef.current;
       const saveMetaGen = metaEditGenRef.current;
       const bodyDirty = saveBodyGen > savedBodyGenRef.current;
+      const bodyOverrideAtSave = bodyOverrideRef.current;
       // Read synchronously: the reset effect clears revisionRef, so the request
       // must not re-read it across an await.
       let expectedRevision = revisionRef.current;
@@ -344,7 +350,7 @@ export function usePageEditor(
       // Only serialize the Slate tree when the user actually edited body content.
       // This prevents metadata-only edits from losing unsupported markdown nodes.
       const body = bodyDirty
-        ? slateToMarkdown(editorValueRef.current)
+        ? (bodyOverrideAtSave ?? slateToMarkdown(editorValueRef.current))
         : savedRef.current.body;
       const bodyChanged = bodyDirty && body !== savedRef.current.body;
       const titleChanged = currentTitle !== savedRef.current.title;
@@ -357,6 +363,12 @@ export function usePageEditor(
       if (!bodyChanged && !titleChanged && !tagsChanged && !aliasesChanged) {
         savedBodyGenRef.current = saveBodyGen;
         savedMetaGenRef.current = saveMetaGen;
+        if (
+          bodyEditGenRef.current === saveBodyGen &&
+          bodyOverrideRef.current === bodyOverrideAtSave
+        ) {
+          bodyOverrideRef.current = null;
+        }
         setSaveStatus("saved");
         return;
       }
@@ -456,6 +468,12 @@ export function usePageEditor(
         };
         savedBodyGenRef.current = saveBodyGen;
         savedMetaGenRef.current = saveMetaGen;
+        if (
+          bodyEditGenRef.current === saveBodyGen &&
+          bodyOverrideRef.current === bodyOverrideAtSave
+        ) {
+          bodyOverrideRef.current = null;
+        }
         setSaveError(null);
 
         const stillDirty =
@@ -533,6 +551,7 @@ export function usePageEditor(
         }
       }
       const nextValue = markdownToSlate(latestBody);
+      bodyOverrideRef.current = null;
       titleRef.current = nextTitle;
       tagsRef.current = nextTags;
       aliasesRef.current = nextAliases;
@@ -588,6 +607,7 @@ export function usePageEditor(
         (op) => op.type !== "set_selection",
       );
       if (isAstChange) {
+        bodyOverrideRef.current = null;
         bodyEditGenRef.current += 1;
         scheduleSave();
       }
@@ -629,6 +649,16 @@ export function usePageEditor(
     [scheduleSave],
   );
 
+  const setBodyMarkdown = useCallback(
+    (markdown: string) => {
+      bodyOverrideRef.current = markdown;
+      editorValueRef.current = markdownToSlate(markdown);
+      bodyEditGenRef.current += 1;
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
   const encrypted = page?.encrypted === true;
   useEffect(() => {
     if (!encrypted || !encryptionActions) return;
@@ -653,7 +683,7 @@ export function usePageEditor(
   const getPlaintext = useCallback(() => {
     const bodyDirty = bodyEditGenRef.current > savedBodyGenRef.current;
     return bodyDirty
-      ? slateToMarkdown(editorValueRef.current)
+      ? (bodyOverrideRef.current ?? slateToMarkdown(editorValueRef.current))
       : savedRef.current.body;
   }, []);
 
@@ -680,6 +710,7 @@ export function usePageEditor(
     revisionConflict,
     reloadAfterConflict,
     onSlateChange,
+    setBodyMarkdown,
     saveNow: doSave,
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
