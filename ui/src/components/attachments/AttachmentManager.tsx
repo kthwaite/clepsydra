@@ -1,5 +1,5 @@
 import { File, Image, Paperclip, Trash2, Upload } from "lucide-react";
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, useMemo, useRef, useState } from "react";
 import {
   type AttachmentInfo,
   attachmentMarkdown,
@@ -9,6 +9,7 @@ import {
   useUploadAttachment,
 } from "#/api/attachments";
 import { formatApiError } from "#/api/error";
+import { attachmentReferences } from "#/lib/markdown/attachmentReferences";
 import { CopyButton } from "#/components/ui/CopyButton";
 import {
   type PendingAttachmentAction,
@@ -18,6 +19,7 @@ import {
 interface AttachmentManagerProps {
   onInsertMarkdown?: (markdown: string) => void;
   protectedPage?: boolean;
+  pageMarkdown?: string;
 }
 
 function formatSize(bytes: number): string {
@@ -32,6 +34,7 @@ function isImage(attachment: AttachmentInfo): boolean {
 
 export function AttachmentManager({
   onInsertMarkdown,
+  pageMarkdown,
   protectedPage = false,
 }: AttachmentManagerProps) {
   const { data: attachments, isLoading, error } = useAttachments();
@@ -43,6 +46,10 @@ export function AttachmentManager({
     useState<PendingAttachmentAction | null>(null);
   const pendingActionInFlight = useRef<PendingAttachmentAction | null>(null);
   const [isPendingAction, setIsPendingAction] = useState(false);
+  const existingReferences = useMemo(
+    () => (protectedPage ? attachmentReferences(pageMarkdown ?? "") : []),
+    [pageMarkdown, protectedPage],
+  );
 
   const uploadFile = async (file: File): Promise<AttachmentInfo | null> => {
     setActionError(null);
@@ -121,6 +128,21 @@ export function AttachmentManager({
           Attachments are not encrypted. Only the note body is protected.
         </p>
       ) : null}
+      {existingReferences.length ? (
+        <section
+          aria-label="Plaintext attachment references"
+          className="mb-2 border-l-2 border-warning pl-2 text-warning"
+        >
+          <p className="font-semibold">Plaintext attachment references</p>
+          <p>These referenced attachment files are not encrypted:</p>
+          <ul className="m-0 list-disc pl-4">
+            {existingReferences.map((reference) => (
+              <li key={reference.path}>{reference.path}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
 
       <div className="mb-2">
         <label className="inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">

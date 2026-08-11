@@ -580,6 +580,7 @@ export function Folio({ tabId, path }: FolioProps) {
                 <div className="mt-2">
                   <AttachmentManager
                     protectedPage={encrypted}
+                    pageMarkdown={editor.bodyMarkdown}
                     onInsertMarkdown={requestAttachmentInsertion}
                   />
                 </div>

@@ -274,6 +274,31 @@ describe("AttachmentManager", () => {
     });
   });
 
+  it("audits existing plaintext references only for protected notes", () => {
+    const pageMarkdown = [
+      "![Diagram](/api/vault/attachments/research/diagram%201.png)",
+      "[Paper](/api/vault/attachments/paper.pdf)",
+    ].join("\n");
+
+    const view = render(
+      <AttachmentManager protectedPage pageMarkdown={pageMarkdown} />,
+    );
+
+    const audit = screen.getByRole("region", {
+      name: "Plaintext attachment references",
+    });
+    expect(audit).toBeVisible();
+    expect(within(audit).getByText("research/diagram 1.png")).toBeVisible();
+    expect(within(audit).getByText("paper.pdf")).toBeVisible();
+
+    view.rerender(<AttachmentManager pageMarkdown={pageMarkdown} />);
+    expect(
+      screen.queryByRole("region", {
+        name: "Plaintext attachment references",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("warns when used from a protected note", () => {
     render(<AttachmentManager protectedPage />);
     expect(screen.getByText(/attachments are not encrypted/i)).toBeVisible();
