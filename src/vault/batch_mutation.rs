@@ -213,6 +213,16 @@ pub enum BatchMutationError {
         #[source]
         source: super::atomic_file::AtomicPublicationError,
     },
+    #[error(
+        "batch preparation failed and cleanup failed for transaction {directory}: preparation error: {source}; cleanup error: {cleanup}"
+    )]
+    PreparationCleanup {
+        directory: PathBuf,
+        retained: bool,
+        source: Box<BatchMutationError>,
+        #[source]
+        cleanup: Box<BatchMutationError>,
+    },
 }
 
 impl BatchMutationError {
@@ -227,6 +237,17 @@ impl BatchMutationError {
     pub(crate) fn stale_vault_path(&self) -> Option<VaultPath> {
         match self {
             Self::Stale(path) => VaultPath::new(path).ok(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn retained_directory(&self) -> Option<&Path> {
+        match self {
+            Self::PreparationCleanup {
+                directory,
+                retained: true,
+                ..
+            } => Some(directory),
             _ => None,
         }
     }
@@ -386,12 +407,11 @@ pub(crate) fn prepare(
     create_synced_directory_tree(root, &transactions)?;
     let directory = transactions.join(Uuid::now_v7().to_string());
     create_synced_directory(&directory)?;
-    let staged = directory.join("staged");
-    let rollback = directory.join("rollback");
-    create_synced_directory(&staged)?;
-    create_synced_directory(&rollback)?;
-
     let result = (|| {
+        let staged = directory.join("staged");
+        let rollback = directory.join("rollback");
+        create_synced_directory(&staged)?;
+        create_synced_directory(&rollback)?;
         let mut manifest_intents = Vec::with_capacity(command.intents.len());
         for (index, intent) in command.intents.iter().enumerate() {
             let staged_path = staged.join(index.to_string());
@@ -477,11 +497,21 @@ pub(crate) fn prepare(
         })
     })();
 
-    if result.is_err() {
-        let _ = fs::remove_dir_all(&directory);
-        let _ = sync_directory(&transactions);
+    match result {
+        Ok(prepared) => Ok(prepared),
+        Err(source) => match remove_workspace(&directory) {
+            Ok(()) => Err(source),
+            Err(cleanup) => {
+                let retained = directory.is_dir();
+                Err(BatchMutationError::PreparationCleanup {
+                    directory,
+                    retained,
+                    source: Box::new(source),
+                    cleanup: Box::new(cleanup),
+                })
+            }
+        },
     }
-    result
 }
 
 pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutationError> {
@@ -1066,8 +1096,8 @@ enum TestFailpoint {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_FAILPOINT: std::cell::RefCell<Option<TestFailpoint>> =
-        const { std::cell::RefCell::new(None) };
+    static TEST_FAILPOINTS: std::cell::RefCell<Vec<TestFailpoint>> =
+        const { std::cell::RefCell::new(Vec::new()) };
     static WORKSPACE_PARENT_SYNC_PENDING: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }
@@ -1099,13 +1129,22 @@ pub(crate) struct TestFailpointGuard;
 #[cfg(test)]
 impl Drop for TestFailpointGuard {
     fn drop(&mut self) {
-        TEST_FAILPOINT.with(|failpoint| *failpoint.borrow_mut() = None);
+        TEST_FAILPOINTS.with(|failpoints| failpoints.borrow_mut().clear());
     }
 }
 
 #[cfg(test)]
 pub(crate) fn fail_once_at(failpoint: TestFailpoint) -> TestFailpointGuard {
-    TEST_FAILPOINT.with(|current| *current.borrow_mut() = Some(failpoint));
+    fail_at(&[failpoint])
+}
+
+#[cfg(test)]
+pub(crate) fn fail_at(failpoints: &[TestFailpoint]) -> TestFailpointGuard {
+    TEST_FAILPOINTS.with(|current| {
+        let mut current = current.borrow_mut();
+        current.clear();
+        current.extend_from_slice(failpoints);
+    });
     TestFailpointGuard
 }
 
@@ -1114,9 +1153,10 @@ fn hit_test_failpoint(
     failpoint: TestFailpoint,
     path: &Path,
 ) -> Result<(), BatchMutationError> {
-    let should_fail = TEST_FAILPOINT.with(|current| {
-        if current.borrow().as_ref() == Some(&failpoint) {
-            current.borrow_mut().take();
+    let should_fail = TEST_FAILPOINTS.with(|current| {
+        let mut current = current.borrow_mut();
+        if let Some(index) = current.iter().position(|candidate| candidate == &failpoint) {
+            current.remove(index);
             true
         } else {
             false
@@ -1477,6 +1517,33 @@ mod tests {
         assert!(prepare(fixture.root(), &replace("a.md", b"before", b"after")).is_err());
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
         assert!(recover_pending(fixture.root()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn preparation_cleanup_failure_reports_retained_directory_and_both_errors() {
+        let fixture = fixture_with_file("a.md", b"before");
+        let _failure = fail_at(&[
+            TestFailpoint::ManifestFlush,
+            TestFailpoint::WorkspaceRemoval,
+        ]);
+
+        let error =
+            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap_err();
+
+        let (directory, retained, source, cleanup) = match error {
+            BatchMutationError::PreparationCleanup {
+                directory,
+                retained,
+                source,
+                cleanup,
+            } => (directory, retained, source, cleanup),
+            error => panic!("expected preparation cleanup error, got {error:?}"),
+        };
+        assert!(directory.is_dir());
+        assert!(retained);
+        assert!(source.to_string().contains("ManifestFlush"));
+        assert!(cleanup.to_string().contains("WorkspaceRemoval"));
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
     }
 
     #[test]

@@ -29,6 +29,10 @@ type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
 type CreatePublicationHook =
     dyn Fn(&Path, &[u8]) -> Result<(), AtomicPublicationError> + Send + Sync;
 type CreateRollbackSyncHook = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
+#[cfg(test)]
+type BeforeLockAcquireHook = dyn Fn(&VaultPath) + Send + Sync;
+#[cfg(test)]
+type BeforeBatchLockHook = dyn Fn(&[VaultPath]) + Send + Sync;
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
@@ -37,6 +41,10 @@ pub struct MutationCoordinator {
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
     create_publication_hook: parking_lot::Mutex<Option<Arc<CreatePublicationHook>>>,
     create_rollback_sync_hook: parking_lot::Mutex<Option<Arc<CreateRollbackSyncHook>>>,
+    #[cfg(test)]
+    before_lock_acquire_hook: parking_lot::Mutex<Option<Arc<BeforeLockAcquireHook>>>,
+    #[cfg(test)]
+    before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -183,6 +191,7 @@ pub enum MutationError {
     },
     #[error("batch preparation failed: {source}")]
     BatchPrepare {
+        directory: Option<PathBuf>,
         #[source]
         source: BatchMutationError,
     },
@@ -278,7 +287,10 @@ where
 fn batch_prepare_error(source: BatchMutationError) -> MutationError {
     match source.stale_vault_path() {
         Some(path) => MutationError::Stale(path),
-        None => MutationError::BatchPrepare { source },
+        None => {
+            let directory = source.retained_directory().map(Path::to_path_buf);
+            MutationError::BatchPrepare { directory, source }
+        }
     }
 }
 
@@ -366,6 +378,10 @@ impl MutationCoordinator {
             after_page_id_lookup_hook: parking_lot::Mutex::new(None),
             create_publication_hook: parking_lot::Mutex::new(None),
             create_rollback_sync_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            before_lock_acquire_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            before_batch_lock_hook: parking_lot::Mutex::new(None),
         }
     }
 
@@ -402,6 +418,16 @@ impl MutationCoordinator {
         }
     }
 
+    #[cfg(test)]
+    fn set_before_lock_acquire_hook(&self, hook: Option<Arc<BeforeLockAcquireHook>>) {
+        *self.before_lock_acquire_hook.lock() = hook;
+    }
+
+    #[cfg(test)]
+    fn set_before_batch_lock_hook(&self, hook: Option<Arc<BeforeBatchLockHook>>) {
+        *self.before_batch_lock_hook.lock() = hook;
+    }
+
     /// Lock the requested paths for mutation and every ancestor for subtree
     /// exclusion. Ancestors use shared locks, so mutations in sibling
     /// subtrees proceed concurrently while a folder deletion excludes all
@@ -423,6 +449,8 @@ impl MutationCoordinator {
                 .into_iter()
                 .map(|(key, write)| {
                     let key = VaultPath::new(&key).expect("normalized path prefix");
+                    #[cfg(test)]
+                    let observed_path = key.clone();
                     let lock = if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
                         lock
                     } else {
@@ -430,27 +458,36 @@ impl MutationCoordinator {
                         table.insert(key, Arc::downgrade(&lock));
                         lock
                     };
-                    (lock, write)
+                    MutationLockRequest {
+                        #[cfg(test)]
+                        observed_path,
+                        lock,
+                        write,
+                    }
                 })
                 .collect::<Vec<_>>()
         };
 
         let mut guards = Vec::with_capacity(locks.len());
-        for (lock, write) in &locks {
-            guards.push(if *write {
+        for request in &locks {
+            #[cfg(test)]
+            if let Some(hook) = self.before_lock_acquire_hook.lock().clone() {
+                hook(&request.observed_path);
+            }
+            guards.push(if request.write {
                 MutationLockGuard::Write {
-                    _guard: Arc::clone(lock).write_owned().await,
+                    _guard: Arc::clone(&request.lock).write_owned().await,
                 }
             } else {
                 MutationLockGuard::Read {
-                    _guard: Arc::clone(lock).read_owned().await,
+                    _guard: Arc::clone(&request.lock).read_owned().await,
                 }
             });
         }
 
         MutationGuard {
             _guards: guards,
-            _locks: locks.into_iter().map(|(lock, _)| lock).collect(),
+            _locks: locks.into_iter().map(|request| request.lock).collect(),
         }
     }
 
@@ -468,6 +505,10 @@ impl MutationCoordinator {
         notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
     ) -> Result<MutationNotification, MutationError> {
         let affected_paths = command.affected_paths();
+        #[cfg(test)]
+        if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
+            hook(&affected_paths);
+        }
         let guard = self.lock_paths(&affected_paths).await;
         let root = vault.root().to_path_buf();
         let shield_path = root.clone();
@@ -514,33 +555,30 @@ impl MutationCoordinator {
             let reconciliation = index
                 .with_index(move |vault_index, index_vault| -> Result<(), IndexError> {
                     for (old_path, new_path) in &moved_pages {
-                        if let Ok(page_id) = vault_index
-                            .connection()
-                            .query_row(
-                                "SELECT id FROM pages WHERE path = ?1",
-                                rusqlite::params![old_path.as_str()],
-                                |row| row.get::<_, String>(0),
+                        let page_id = match vault_index.connection().query_row(
+                            "SELECT id FROM pages WHERE path = ?1",
+                            rusqlite::params![old_path.as_str()],
+                            |row| row.get::<_, String>(0),
+                        ) {
+                            Ok(value) => value.parse::<uuid::Uuid>().map_err(|source| {
+                                IndexError::Other(format!(
+                                    "invalid indexed page UUID for {}: {source}",
+                                    old_path.as_str()
+                                ))
+                            })?,
+                            // A page absent from the index has no stable hook target.
+                            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                            Err(source) => return Err(IndexError::Sqlite(source)),
+                        };
+                        for hook in hooks.iter() {
+                            hook.on_page_moved(
+                                old_path,
+                                new_path,
+                                &page_id,
+                                index_vault,
+                                vault_index,
                             )
-                            .and_then(|value| {
-                                value.parse::<uuid::Uuid>().map_err(|error| {
-                                    rusqlite::Error::FromSqlConversionFailure(
-                                        0,
-                                        rusqlite::types::Type::Text,
-                                        Box::new(error),
-                                    )
-                                })
-                            })
-                        {
-                            for hook in hooks.iter() {
-                                hook.on_page_moved(
-                                    old_path,
-                                    new_path,
-                                    &page_id,
-                                    index_vault,
-                                    vault_index,
-                                )
-                                .map_err(|error| IndexError::Other(error.to_string()))?;
-                            }
+                            .map_err(|error| IndexError::Other(error.to_string()))?;
                         }
                     }
                     SyncEngine::process_events(&index_events, index_vault, vault_index)?;
@@ -1223,6 +1261,13 @@ impl Default for MutationCoordinator {
     }
 }
 
+struct MutationLockRequest {
+    #[cfg(test)]
+    observed_path: VaultPath,
+    lock: Arc<RwLock<()>>,
+    write: bool,
+}
+
 /// An owned set of path locks. The locks are released when this guard drops.
 enum MutationLockGuard {
     Read { _guard: OwnedRwLockReadGuard<()> },
@@ -1298,6 +1343,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn batch_prepare_cleanup_error_exposes_retained_directory() {
+        let directory = PathBuf::from("/vault/.clepsydra/transactions/test");
+        let error = batch_prepare_error(BatchMutationError::PreparationCleanup {
+            directory: directory.clone(),
+            retained: true,
+            source: Box::new(BatchMutationError::Validation("prepare failed".to_owned())),
+            cleanup: Box::new(BatchMutationError::Validation("cleanup failed".to_owned())),
+        });
+
+        assert!(matches!(
+            error,
+            MutationError::BatchPrepare {
+                directory: Some(retained),
+                ..
+            } if retained == directory
+        ));
+    }
+
     #[tokio::test]
     async fn batch_revalidates_every_path_after_lock_acquisition() {
         let original_a = batch_page(
@@ -1320,6 +1384,18 @@ mod tests {
             .coordinator
             .lock_paths(&[VaultPath::new("a.md").unwrap()])
             .await;
+        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+        let waiting_tx = Arc::new(parking_lot::Mutex::new(Some(waiting_tx)));
+        let observed_wait = Arc::clone(&waiting_tx);
+        fixture
+            .coordinator
+            .set_before_lock_acquire_hook(Some(Arc::new(move |path| {
+                if path.as_str() == "a.md"
+                    && let Some(waiting_tx) = observed_wait.lock().take()
+                {
+                    let _ = waiting_tx.send(());
+                }
+            })));
         let coordinator = Arc::clone(&fixture.coordinator);
         let vault = fixture.vault.clone();
         let index = fixture.index.clone();
@@ -1339,7 +1415,9 @@ mod tests {
                 .await
         });
 
-        tokio::task::yield_now().await;
+        waiting_rx
+            .await
+            .expect("batch did not reach the held path lock");
         fs::write(fixture.root().join("b.md"), &external_b).unwrap();
         drop(held);
         let error = pending.await.unwrap().unwrap_err();
@@ -1495,6 +1573,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn batch_invalid_indexed_move_uuid_retains_workspace_without_notification() {
+        let seeded_source = batch_page(
+            "019fd000-0000-7000-8000-000000000029",
+            "Source",
+            "body",
+        );
+        let fixture = BatchFixture::new(&[("source.md", &seeded_source)]);
+        let source_content =
+            fs::read_to_string(fixture.root().join("source.md")).unwrap();
+        fixture
+            .index
+            .with_index(|index, _| {
+                index.connection().execute_batch(
+                    "PRAGMA foreign_keys = OFF;
+                     UPDATE pages SET id = 'not-a-uuid' WHERE path = 'source.md';
+                     PRAGMA foreign_keys = ON;",
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let source = VaultPath::new("source.md").unwrap();
+        let destination = VaultPath::new("destination.md").unwrap();
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                BatchMutationCommand {
+                    intents: vec![BatchPathIntent::Move {
+                        source: source.clone(),
+                        destination: destination.clone(),
+                        expected_source: source_content.as_bytes().to_vec(),
+                    }],
+                    index_events: vec![
+                        ChangeEvent::Remove(source.clone()),
+                        ChangeEvent::Upsert(destination.clone()),
+                    ],
+                    moved_pages: vec![(source.clone(), destination.clone())],
+                },
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        let directory = match error {
+            MutationError::BatchRecovery { directory, .. } => directory,
+            error => panic!("expected retained batch recovery error, got {error:?}"),
+        };
+        assert!(directory.is_dir());
+        assert!(!fixture.root().join(source.as_str()).exists());
+        assert_eq!(
+            fs::read_to_string(fixture.root().join(destination.as_str())).unwrap(),
+            source_content
+        );
+        assert!(notifications.lock().is_empty());
+    }
+
+    #[tokio::test]
     async fn batch_overlaps_with_reversed_input_order_without_deadlock() {
         let original_a = batch_page(
             "019fd000-0000-7000-8000-000000000031",
@@ -1513,6 +1654,18 @@ mod tests {
         let first_b = original_b.replace("zero", "first");
         let second_a = original_a.replace("zero", "second");
         let second_b = original_b.replace("zero", "second");
+        let lock_requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed_requests = Arc::clone(&lock_requests);
+        fixture
+            .coordinator
+            .set_before_batch_lock_hook(Some(Arc::new(move |paths| {
+                observed_requests.lock().push(
+                    paths
+                        .iter()
+                        .map(|path| path.as_str().to_owned())
+                        .collect::<Vec<_>>(),
+                );
+            })));
         let notify_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let first_notify_count = Arc::clone(&notify_count);
         let second_notify_count = Arc::clone(&notify_count);
@@ -1572,6 +1725,13 @@ mod tests {
         };
         assert!(matches!(stale, MutationError::Stale(_)));
         assert_eq!(notify_count.load(Ordering::SeqCst), 1);
+        let requests = lock_requests.lock();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .all(|paths| paths == &["a.md".to_string(), "b.md".to_string()])
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
