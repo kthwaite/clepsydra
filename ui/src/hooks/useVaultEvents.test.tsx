@@ -55,4 +55,30 @@ describe("useVaultEvents", () => {
     expect(client.getQueryState(burndownKey)?.isInvalidated).toBe(true);
     unmount();
   });
+
+  it("invalidates the board query on index_changed", async () => {
+    const client = new QueryClient();
+    const boardKey = queryKeys.board.all;
+    client.setQueryData(boardKey, {});
+
+    const { unmount } = renderHook(() => useVaultEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source?.onmessage?.({
+        data: JSON.stringify({
+          type: "index_changed",
+          upserted: ["*"],
+          removed: [],
+        }),
+      } as MessageEvent<string>);
+    });
+
+    expect(client.getQueryState(boardKey)?.isInvalidated).toBe(true);
+    unmount();
+  });
 });
