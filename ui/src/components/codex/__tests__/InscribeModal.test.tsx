@@ -121,6 +121,7 @@ describe("InscribeModal", () => {
       screen.getByRole("listbox", { name: "Tag suggestions" }),
     ).toBeVisible();
     await user.keyboard("{Tab}");
+    expect(screen.getByText("#rust")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /commit to archive/ }));
     const [vars] = createMutate.mock.calls[0];
     expect(vars.body.tags).toEqual(["rust"]);

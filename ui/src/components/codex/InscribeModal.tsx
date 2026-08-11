@@ -4,7 +4,7 @@ import { useAssignPage, useCreatePage } from "#/api/pages";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
-import { TagsInput } from "#/components/codex/TagsInput";
+import { TagInput } from "#/components/ui/tag-input";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
@@ -21,7 +21,7 @@ export function InscribeModal() {
   const [project, setProject] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [tags, setTags] = useState<string[]>([]);
-  // TagsInput commits a pending draft on blur; when that blur is caused by the
+  // TagInput commits a pending draft on blur; when that blur is caused by the
   // submit click the state update hasn't propagated by the time the submit
   // handler runs, so reads go through this ref.
   const tagsRef = useRef<string[]>(tags);
@@ -169,11 +169,16 @@ export function InscribeModal() {
             />
           </Field>
           <Field label="04 · Tags">
-            <TagsInput
-              value={tags}
+            <TagInput
+              label="Tags"
+              ariaLabel="Tags"
+              values={tags}
+              suggestions={(tagIndex ?? []).map((tag) => tag.tag)}
               onChange={updateTags}
-              suggestions={(tagIndex ?? []).map((t) => t.tag)}
               placeholder="⇥ to complete"
+              variant="codex"
+              valuePrefix="#"
+              maxSuggestions={8}
             />
           </Field>
           <div className="cl-mono mb-2.5 text-[9px] uppercase tracking-[0.14em] text-ink-mute">

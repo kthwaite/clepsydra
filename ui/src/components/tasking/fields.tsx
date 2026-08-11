@@ -6,6 +6,8 @@
  * docs/pkm-redesign/project/styles-board.css, translated to Tailwind tokens.
  */
 
+import { useLayoutEffect, useRef } from "react";
+import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { COL_LABEL, COL_ORDER, PRI_ORDER } from "./board-constants";
 
 // ── EdField ───────────────────────────────────────────────────────────────────
@@ -48,13 +50,13 @@ export const SELECT_CLS =
 // ── radio-row classes / styles ────────────────────────────────────────────────
 
 export const RADIO_CLS_BASE =
-  "cl-mono border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] cursor-pointer flex-1 text-center transition-[background,color,border-color] duration-[120ms]";
+  "cl-mono border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] cursor-pointer flex-1 text-center transition-[background,color,border-color] duration-[120ms] ml-0 data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink-3)] data-[selected]:border-[var(--rule)] data-[selected]:bg-transparent data-[selected]:font-normal data-[selected]:text-[var(--ink-3)]";
 
 export const RADIO_CLS_ON =
-  "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)]";
+  "bg-[var(--ink)] text-[var(--bg)] border-[var(--ink)] data-[hovered]:bg-[var(--ink)] data-[hovered]:text-[var(--bg)] data-[hovered]:border-[var(--ink)] data-[selected]:bg-[var(--ink)] data-[selected]:text-[var(--bg)] data-[selected]:border-[var(--ink)]";
 
 const RADIO_CLS_OFF_HOVER =
-  "hover:text-[var(--ink)] hover:border-[var(--ink-3)]";
+  "hover:text-[var(--ink)] hover:border-[var(--ink-3)] data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink)] data-[hovered]:border-[var(--ink-3)]";
 
 /** Priority on-state fills with the priority colour (cap-radio.pri-*.on). */
 export const PRI_ON_STYLE: Record<string, React.CSSProperties> = {
@@ -75,6 +77,37 @@ export const PRI_OFF_STYLE: Record<string, React.CSSProperties> = {
   P3: { color: "var(--ink-mute)", borderColor: "var(--rule)" },
 };
 
+function TaskRadio({
+  value,
+  className,
+  style,
+  children,
+  "data-testid": testId,
+}: {
+  value: string;
+  className: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+  "data-testid": string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useLayoutEffect(() => {
+    inputRef.current?.setAttribute("data-testid", testId);
+  }, [testId]);
+
+  return (
+    <Radio
+      value={value}
+      className={className}
+      style={style}
+      inputRef={inputRef}
+    >
+      {children}
+    </Radio>
+  );
+}
+
 // ── radio rows ────────────────────────────────────────────────────────────────
 
 /**
@@ -91,19 +124,23 @@ export function DispositionRow({
   testIdPrefix: string;
 }) {
   return (
-    <div className="flex gap-[6px]">
+    <RadioGroup
+      aria-label="Disposition"
+      value={value}
+      onChange={onChange}
+      optionsClassName="gap-[6px]"
+    >
       {COL_ORDER.map((colId) => (
-        <button
+        <TaskRadio
           key={colId}
-          type="button"
+          value={colId}
           className={`${RADIO_CLS_BASE} ${value === colId ? RADIO_CLS_ON : RADIO_CLS_OFF_HOVER}`}
-          onClick={() => onChange(colId)}
           data-testid={`${testIdPrefix}-status-${colId}`}
         >
           {COL_LABEL[colId] ?? colId}
-        </button>
+        </TaskRadio>
       ))}
-    </div>
+    </RadioGroup>
   );
 }
 
@@ -121,19 +158,23 @@ export function PriorityRow({
   testIdPrefix: string;
 }) {
   return (
-    <div className="flex gap-[6px]">
+    <RadioGroup
+      aria-label="Priority"
+      value={value}
+      onChange={onChange}
+      optionsClassName="gap-[6px]"
+    >
       {PRI_ORDER.map((p) => (
-        <button
+        <TaskRadio
           key={p}
-          type="button"
+          value={p}
           className={RADIO_CLS_BASE}
           style={value === p ? PRI_ON_STYLE[p] : PRI_OFF_STYLE[p]}
-          onClick={() => onChange(p)}
           data-testid={`${testIdPrefix}-priority-${p}`}
         >
           {p}
-        </button>
+        </TaskRadio>
       ))}
-    </div>
+    </RadioGroup>
   );
 }

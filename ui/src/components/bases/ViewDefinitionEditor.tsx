@@ -1,6 +1,8 @@
+import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { Aggregate, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -221,8 +223,8 @@ export function ViewDefinitionEditor({
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
                 {column}
               </span>
-              <Button
-                size="sm"
+              <IconButton
+                aria-label={`Move ${column} up`}
                 variant="ghost"
                 isDisabled={index === 0}
                 onPress={() =>
@@ -232,10 +234,10 @@ export function ViewDefinitionEditor({
                   })
                 }
               >
-                Move {column} up
-              </Button>
-              <Button
-                size="sm"
+                <ArrowUp />
+              </IconButton>
+              <IconButton
+                aria-label={`Move ${column} down`}
                 variant="ghost"
                 isDisabled={index === view.columns.length - 1}
                 onPress={() =>
@@ -245,10 +247,10 @@ export function ViewDefinitionEditor({
                   })
                 }
               >
-                Move {column} down
-              </Button>
-              <Button
-                size="sm"
+                <ArrowDown />
+              </IconButton>
+              <IconButton
+                aria-label={`Remove ${column} column`}
                 variant="ghost"
                 onPress={() =>
                   onChange({
@@ -259,8 +261,8 @@ export function ViewDefinitionEditor({
                   })
                 }
               >
-                Remove {column} column
-              </Button>
+                <Trash2 />
+              </IconButton>
             </li>
           ))}
         </ol>
