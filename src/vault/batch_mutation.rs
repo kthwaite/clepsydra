@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::atomic_file::install_noreplace;
+
 use super::path::VaultPath;
 use super::sync::ChangeEvent;
 
@@ -295,14 +297,26 @@ impl PreparedBatch {
                 });
             }
         }
-        for path in self.manifest.create_directories.clone() {
-            if self.manifest.created_directories.contains(&path) {
+        let created = self.directory.join("created");
+        for (index, path) in self.manifest.create_directories.clone().into_iter().enumerate() {
+            let staged_directory = created.join(index.to_string());
+            if !self.manifest.created_directories.contains(&path) {
+                self.manifest.created_directories.push(path.clone());
+                write_manifest(&self.directory, &self.manifest, false)?;
+                sync_manifest_and_directory(&self.directory)?;
+            }
+            if !staged_directory.exists() {
                 continue;
             }
-            create_synced_directory(&self.root.join(&path))?;
-            self.manifest.created_directories.push(path);
-            write_manifest(&self.directory, &self.manifest, false)?;
-            sync_manifest_and_directory(&self.directory)?;
+            let absolute = self.root.join(&path);
+            install_noreplace(&staged_directory, &absolute).map_err(|source| {
+                BatchMutationError::filesystem("publish prepared directory", &absolute, source)
+            })?;
+            hit_test_failpoint(
+                TestFailpoint::DirectoryOwnershipPublication(index),
+                &self.directory,
+            )?;
+            sync_directory_parent(&absolute)?;
         }
         for index in 0..self.manifest.intents.len() {
             hit_test_failpoint(TestFailpoint::Publication(index), &self.directory)?;
@@ -449,6 +463,11 @@ pub(crate) fn prepare(
         let rollback = directory.join("rollback");
         create_synced_directory(&staged)?;
         create_synced_directory(&rollback)?;
+        let created = directory.join("created");
+        create_synced_directory(&created)?;
+        for index in 0..command.create_directories.len() {
+            create_synced_directory(&created.join(index.to_string()))?;
+        }
         let mut manifest_intents = Vec::with_capacity(command.intents.len());
         for (index, intent) in command.intents.iter().enumerate() {
             let staged_path = staged.join(index.to_string());
@@ -827,6 +846,16 @@ fn rollback_manifest(
         }
     }
     for path in manifest.created_directories.iter().rev() {
+        let Some(index) = manifest
+            .create_directories
+            .iter()
+            .position(|candidate| candidate == path)
+        else {
+            continue;
+        };
+        if directory.join("created").join(index.to_string()).exists() {
+            continue;
+        }
         let absolute = root.join(path);
         match fs::remove_dir(&absolute) {
             Ok(()) => sync_directory_parent(&absolute)?,
@@ -1200,6 +1229,7 @@ fn remove_workspace(directory: &Path) -> Result<(), BatchMutationError> {
 pub(crate) enum TestFailpoint {
     ManifestFlush,
     Publication(usize),
+    DirectoryOwnershipPublication(usize),
     PhasePublication(TransactionPhase),
     PhaseFlush(TransactionPhase),
     RollbackPublication(usize),
@@ -1213,6 +1243,7 @@ pub(crate) enum TestFailpoint {
 enum TestFailpoint {
     ManifestFlush,
     Publication(usize),
+    DirectoryOwnershipPublication(usize),
     PhaseFlush(TransactionPhase),
     RollbackPublication(usize),
     WorkspaceParentSync,
@@ -1469,6 +1500,38 @@ mod tests {
             .root()
             .join(destination_directory.as_str())
             .is_dir());
+    }
+
+    #[test]
+    fn recovery_removes_directory_when_crash_follows_atomic_ownership_publication() {
+        let fixture = fixture_with_file("source.md", b"source");
+        let destination_directory = VaultPath::new("destination").unwrap();
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::Move {
+                source: VaultPath::new("source.md").unwrap(),
+                destination: VaultPath::new("destination/source.md").unwrap(),
+                expected_source: b"source".to_vec(),
+            }],
+            create_directories: vec![destination_directory.clone()],
+            remove_directories: vec![],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        let _failure = fail_once_at(TestFailpoint::DirectoryOwnershipPublication(0));
+
+        assert!(prepared.publish().is_err());
+        assert!(fixture
+            .root()
+            .join(destination_directory.as_str())
+            .is_dir());
+        drop(prepared);
+
+        assert!(recover_pending(fixture.root()).unwrap().is_empty());
+        assert!(!fixture
+            .root()
+            .join(destination_directory.as_str())
+            .exists());
     }
 
     #[test]

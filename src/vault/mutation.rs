@@ -48,6 +48,33 @@ fn collect_missing_parent_directories(
     Ok(())
 }
 
+fn collect_source_directories(
+    vault: &Vault,
+    source: &VaultPath,
+    directories: &mut Vec<VaultPath>,
+) -> Result<(), IndexError> {
+    let source_absolute = vault.resolve(source);
+    if !directories.contains(source) {
+        directories.push(source.clone());
+    }
+    for entry in walkdir::WalkDir::new(&source_absolute)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_dir())
+    {
+        let relative = entry
+            .path()
+            .strip_prefix(vault.root())
+            .map_err(|error| IndexError::Other(error.to_string()))?;
+        let directory = VaultPath::new(&relative.to_string_lossy()).map_err(vp_err)?;
+        if !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    Ok(())
+}
+
 fn is_protected_content(content: &str) -> bool {
     let (meta, _, _, _) = parse_or_repair_frontmatter(content);
     meta.encryption.is_some()
@@ -198,10 +225,25 @@ impl MutationPlan {
         }
     }
 
-    /// Convert this coherent planner snapshot into a durable atomic batch command.
-    ///
-    /// Expected bytes are captured by the planner in the same reads used to
-    /// compute rewrites. Conversion never resamples file contents.
+    fn expose_create_directories(&mut self) {
+        for directory in &self.create_directories {
+            if !self.file_ops.iter().any(|operation| {
+                matches!(operation.kind, FileOpKind::CreateDir)
+                    && operation.path == directory.as_str()
+            }) {
+                self.file_ops.push(PlannedFileOp {
+                    kind: FileOpKind::CreateDir,
+                    path: directory.as_str().to_string(),
+                    destination: None,
+                });
+            }
+        }
+    }
+
+    /// Planner-produced expected bytes are captured in the same reads used to
+    /// compute rewrites, so conversion never resamples a coherent plan.
+    /// Manually assembled public file operations are snapshotted here because
+    /// they have no planner-owned primary intent.
     pub fn into_batch_command(self, vault: &Vault) -> Result<BatchMutationCommand, IndexError> {
         let MutationPlan {
             file_ops,
@@ -210,10 +252,11 @@ impl MutationPlan {
             moved_pages,
             primary_intents,
             mut create_directories,
-            remove_directories,
+            mut remove_directories,
             ..
         } = self;
-        let mut intents = Vec::with_capacity(staged_writes.len() + primary_intents.len());
+        let mut intents =
+            Vec::with_capacity(staged_writes.len() + primary_intents.len() + file_ops.len());
 
         for write in staged_writes {
             let relative = write.path.strip_prefix(vault.root()).map_err(vp_err)?;
@@ -229,19 +272,112 @@ impl MutationPlan {
                 content: write.content.into_bytes(),
             });
         }
-        intents.extend(primary_intents);
 
         for op in file_ops {
-            if matches!(op.kind, FileOpKind::CreateDir) {
-                let directory = VaultPath::new(&op.path).map_err(vp_err)?;
-                collect_missing_parent_directories(vault, &directory, &mut create_directories)?;
-                if !vault.resolve(&directory).exists()
-                    && !create_directories.contains(&directory)
-                {
-                    create_directories.push(directory);
+            match op.kind {
+                FileOpKind::CreateDir => {
+                    let directory = VaultPath::new(&op.path).map_err(vp_err)?;
+                    collect_missing_parent_directories(vault, &directory, &mut create_directories)?;
+                    if !vault.resolve(&directory).exists()
+                        && !create_directories.contains(&directory)
+                    {
+                        create_directories.push(directory);
+                    }
+                }
+                FileOpKind::Rename => {
+                    let source = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let destination = VaultPath::new(
+                        op.destination
+                            .as_deref()
+                            .ok_or_else(|| IndexError::Other("rename missing destination".into()))?,
+                    )
+                    .map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(|intent| {
+                        matches!(
+                            intent,
+                            BatchPathIntent::Move {
+                                source: planned_source,
+                                ..
+                            } if planned_source == &source
+                                || planned_source
+                                    .as_str()
+                                    .strip_prefix(source.as_str())
+                                    .is_some_and(|suffix| suffix.starts_with('/'))
+                        )
+                    });
+                    if !represented {
+                        let source_absolute = vault.resolve(&source);
+                        if source_absolute.is_dir() {
+                            for entry in walkdir::WalkDir::new(&source_absolute)
+                                .into_iter()
+                                .filter_map(Result::ok)
+                                .filter(|entry| entry.file_type().is_file())
+                            {
+                                let relative = entry.path().strip_prefix(&source_absolute).map_err(
+                                    |error| IndexError::Other(error.to_string()),
+                                )?;
+                                let destination_absolute = vault.resolve(&destination).join(relative);
+                                let destination_file = VaultPath::new(
+                                    &destination_absolute
+                                        .strip_prefix(vault.root())
+                                        .map_err(|error| IndexError::Other(error.to_string()))?
+                                        .to_string_lossy(),
+                                )
+                                .map_err(vp_err)?;
+                                collect_missing_parent_directories(
+                                    vault,
+                                    &destination_file,
+                                    &mut create_directories,
+                                )?;
+                                intents.push(BatchPathIntent::Move {
+                                    source: VaultPath::new(
+                                        &entry
+                                            .path()
+                                            .strip_prefix(vault.root())
+                                            .map_err(|error| {
+                                                IndexError::Other(error.to_string())
+                                            })?
+                                            .to_string_lossy(),
+                                    )
+                                    .map_err(vp_err)?,
+                                    destination: destination_file,
+                                    expected_source: fs::read(entry.path())?,
+                                });
+                            }
+                            collect_source_directories(
+                                vault,
+                                &source,
+                                &mut remove_directories,
+                            )?;
+                        } else {
+                            collect_missing_parent_directories(
+                                vault,
+                                &destination,
+                                &mut create_directories,
+                            )?;
+                            intents.push(BatchPathIntent::Move {
+                                source,
+                                destination,
+                                expected_source: fs::read(source_absolute)?,
+                            });
+                        }
+                    }
+                }
+                FileOpKind::Delete => {
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(
+                        |intent| matches!(intent, BatchPathIntent::Delete { path: planned, .. } if planned == &path),
+                    );
+                    if !represented {
+                        intents.push(BatchPathIntent::Delete {
+                            expected: fs::read(vault.resolve(&path))?,
+                            path,
+                        });
+                    }
                 }
             }
         }
+        intents.extend(primary_intents);
 
         Ok(BatchMutationCommand {
             create_directories,
@@ -394,6 +530,7 @@ impl<'a> MutationPlanner<'a> {
             .push(ChangeEvent::Remove(source_vp.clone()));
         plan.index_events.push(ChangeEvent::Upsert(dest_vp));
 
+        plan.expose_create_directories();
         Ok(plan)
     }
 
@@ -668,6 +805,7 @@ impl<'a> MutationPlanner<'a> {
             }
         }
 
+        plan.expose_create_directories();
         Ok(plan)
     }
 

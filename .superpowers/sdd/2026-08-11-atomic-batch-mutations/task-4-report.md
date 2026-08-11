@@ -69,10 +69,10 @@ No known functional concerns. Folder batches deliberately reject non-empty sourc
 
 ### Fixes
 
-- `StagedWrite` now owns the exact bytes read to compute each rewrite. `into_batch_command` never rereads content; stale concurrent primary or backlink updates are rejected.
+- `StagedWrite` owns the exact bytes read to compute each rewrite. Conversion never resamples planner-produced content; manually assembled public file operations are snapshotted during conversion because they have no planner-owned intent.
 - Folder planning performs one inventory walk. Exact file bytes, per-file move intents, directory preparation metadata, markdown index events, and move-hook metadata all derive from that inventory.
 - Explicit `FileOpKind::CreateDir` entries add their missing path and ancestors to preparation metadata, and directory-only batches publish successfully.
-- The manifest durably records `created_directories` after each successful directory creation. Rollback and crash recovery remove only transaction-owned directories; a path created externally after preparation remains untouched.
+- Directory ownership uses a durable claim plus an atomically published prepared directory. Recovery distinguishes an unpublished claim from a published transaction-owned path by whether its prepared directory still exists, while preserving paths created externally after preparation.
 - Added exact semantic affected-path equality tests for move, delete, and nested folder plans.
 - Added coordinator failure injection proving a plan-derived backlink write is rolled back when the following primary move fails, with unchanged index and no notification.
 - Added nested folder cleanup/recovery coverage for unexpected source content and interrupted publication.
@@ -85,3 +85,23 @@ No known functional concerns. Folder batches deliberately reject non-empty sourc
 - `cargo test --lib vault::batch_mutation::tests -- --nocapture`: 28 passed, 832 filtered out.
 - `cargo test --lib rolls_back_ -- --nocapture`: 2 passed, 858 filtered out.
 - Legacy executor search remains empty.
+
+## Review round 2 fixes
+
+### RED evidence
+
+- `cargo test --test mutation_test move_plan_batch_intents_cover_every_previewed_path_with_exact_expected_bytes -- --nocapture` failed with the preview-derived set missing `archive`, proving the test no longer passed through a hard-coded expected set.
+- `cargo test --test mutation_test public_rename_and_delete_file_ops_are_converted_to_batch_intents -- --nocapture` failed because neither public file operation produced a logical intent.
+- `cargo test --lib recovery_removes_directory_when_crash_follows_atomic_ownership_publication -- --nocapture` initially failed to compile because the deterministic ownership-publication failpoint did not exist.
+
+### Fixes
+
+- Planner previews now include missing destination directories as `CreateDir` file operations, while batch commands continue to carry those paths only as preparation metadata. The page-move equality test derives its complete expected path set from `MutationPlan.file_ops` and `MutationPlan.text_edits`.
+- `into_batch_command` converts public `Rename` and `Delete` file operations that lack planner-owned primary intents; planner-produced intents remain authoritative and are not duplicated or resampled.
+- Missing directories are prepared inside the transaction workspace. The manifest durably claims each path before `install_noreplace` atomically publishes its prepared directory. A surviving prepared directory means publication never occurred; its absence means recovery owns and removes the published directory. This closes the former create-before-manifest crash gap without deleting externally created paths.
+
+### Final GREEN evidence
+
+- `cargo test --test mutation_test -- --nocapture`: 46 passed.
+- `cargo test --lib vault::batch_mutation::tests -- --nocapture`: 29 passed, 832 filtered out.
+- `cargo test --lib rolls_back_ -- --nocapture`: 2 passed, 859 filtered out.

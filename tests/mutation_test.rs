@@ -40,6 +40,16 @@ fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
     (tmp, vault)
 }
 
+fn preview_paths(plan: &MutationPlan) -> BTreeSet<String> {
+    plan.file_ops
+        .iter()
+        .flat_map(|operation| {
+            std::iter::once(operation.path.clone()).chain(operation.destination.clone())
+        })
+        .chain(plan.text_edits.iter().map(|edit| edit.path.clone()))
+        .collect()
+}
+
 #[tokio::test]
 async fn batch_publication_failure_rolls_back_without_notification() {
     let source_content = "+++\nid = \"019fd000-0000-7000-8000-000000000041\"\ntitle = \"Source\"\n+++\nbody\n";
@@ -187,13 +197,15 @@ Content.
         })
         .unwrap();
 
-    // Should have 1 file op (rename beta.md -> archive/beta.md)
-    assert_eq!(plan.file_ops.len(), 1);
+    // The preview includes the rename and its missing destination directory.
+    assert_eq!(plan.file_ops.len(), 2);
     assert_eq!(plan.file_ops[0].path, "beta.md");
     assert_eq!(
         plan.file_ops[0].destination.as_deref(),
         Some("archive/beta.md")
     );
+    assert!(matches!(plan.file_ops[1].kind, FileOpKind::CreateDir));
+    assert_eq!(plan.file_ops[1].path, "archive");
 
     // Should have index events
     assert!(!plan.index_events.is_empty());
@@ -236,13 +248,7 @@ Another link to [Beta](beta.md).
         })
         .unwrap();
     assert_eq!(plan.staged_writes.len(), 2);
-    let preview_paths = BTreeSet::from([
-        "alpha.md".to_string(),
-        "archive".to_string(),
-        "archive/renamed.md".to_string(),
-        "beta.md".to_string(),
-        "gamma.md".to_string(),
-    ]);
+    let preview_paths = preview_paths(&plan);
 
     let command = plan.into_batch_command(&vault).unwrap();
     let command_paths = command
@@ -272,6 +278,46 @@ Another link to [Beta](beta.md).
             }
         }
     }
+}
+
+#[test]
+fn public_rename_and_delete_file_ops_are_converted_to_batch_intents() {
+    let (_tmp, vault) = setup_vault(&[
+        ("source.md", "source snapshot"),
+        ("obsolete.md", "obsolete snapshot"),
+    ]);
+    let mut plan = MutationPlan::empty();
+    plan.file_ops.push(PlannedFileOp {
+        kind: FileOpKind::Rename,
+        path: "source.md".to_string(),
+        destination: Some("archive/source.md".to_string()),
+    });
+    plan.file_ops.push(PlannedFileOp {
+        kind: FileOpKind::Delete,
+        path: "obsolete.md".to_string(),
+        destination: None,
+    });
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert!(command.intents.iter().any(|intent| {
+        matches!(
+            intent,
+            BatchPathIntent::Move {
+                source,
+                destination,
+                expected_source,
+            } if source.as_str() == "source.md"
+                && destination.as_str() == "archive/source.md"
+                && expected_source == b"source snapshot"
+        )
+    }));
+    assert!(command.intents.iter().any(|intent| {
+        matches!(
+            intent,
+            BatchPathIntent::Delete { path, expected }
+                if path.as_str() == "obsolete.md" && expected == b"obsolete snapshot"
+        )
+    }));
 }
 
 #[test]
@@ -348,6 +394,8 @@ fn folder_plan_batch_uses_the_planner_inventory_without_rewalking() {
             "notes/alpha.md".to_string(),
         ])
     );
+    assert!(!paths.contains("notes/late.md"));
+    assert!(!paths.contains("archive/notes/late.md"));
 }
 
 #[test]
@@ -390,6 +438,7 @@ fn delete_plan_batch_paths_and_expected_bytes_match_the_planner_snapshot() {
         .unwrap();
     fs::write(vault.root().join("target.md"), "concurrent target").unwrap();
     fs::write(vault.root().join("linker.md"), "concurrent linker").unwrap();
+    let preview_paths = preview_paths(&plan);
     let command = plan.into_batch_command(&vault).unwrap();
 
     assert_eq!(
@@ -398,7 +447,7 @@ fn delete_plan_batch_paths_and_expected_bytes_match_the_planner_snapshot() {
             .into_iter()
             .map(|path| path.as_str().to_string())
             .collect::<BTreeSet<_>>(),
-        BTreeSet::from(["linker.md".to_string(), "target.md".to_string()])
+        preview_paths
     );
     for intent in command.intents {
         match intent {
@@ -437,7 +486,10 @@ No links here.
         })
         .unwrap();
 
-    assert_eq!(plan.file_ops.len(), 1);
+    assert_eq!(plan.file_ops.len(), 2);
+    assert!(plan.file_ops.iter().any(|operation| {
+        matches!(operation.kind, FileOpKind::CreateDir) && operation.path == "archive"
+    }));
     assert!(plan.text_edits.is_empty());
     assert!(plan.staged_writes.is_empty());
 }
