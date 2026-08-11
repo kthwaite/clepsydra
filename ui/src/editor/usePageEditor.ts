@@ -527,9 +527,12 @@ export function usePageEditor(
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    const reloadEpoch = lifecycleRef.current;
+
 
     try {
       const result = await refetchPage();
+      if (lifecycleRef.current !== reloadEpoch) return;
       const latest = result.data;
       if (!latest) {
         setSaveStatus("error");
@@ -546,10 +549,12 @@ export function usePageEditor(
         if (!identity) throw new Error("Vault is locked.");
         try {
           latestBody = await decryptMarkdown(latest.body, identity);
+          if (lifecycleRef.current !== reloadEpoch) return;
         } catch {
           throw new Error("Unable to authenticate encrypted note.");
         }
       }
+      if (lifecycleRef.current !== reloadEpoch) return;
       const nextValue = markdownToSlate(latestBody);
       bodyOverrideRef.current = null;
       titleRef.current = nextTitle;
@@ -575,6 +580,7 @@ export function usePageEditor(
       setSaveStatus("saved");
       setEditorRevision((revision) => revision + 1);
     } catch (err) {
+      if (lifecycleRef.current !== reloadEpoch) return;
       setSaveStatus("error");
       setSaveError(
         isApiError(err)

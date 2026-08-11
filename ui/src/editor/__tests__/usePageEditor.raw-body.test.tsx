@@ -294,6 +294,76 @@ describe("usePageEditor raw Markdown body", () => {
     expect(result.current.getPlaintext()).toBe("server body\n");
   });
 
+  it("ignores a conflict reload that resolves after navigation", async () => {
+    const pageAPath = "notes/page-a.md";
+    const pageBPath = "notes/page-b.md";
+    const pageA = makePage("page A\n", "a-rev-a", pageAPath);
+    const pageB = makePage("page B\n", "b-rev-a", pageBPath);
+    const reload = deferred<{ data: MockPage }>();
+    usePageMock.mockImplementation((path: string) => ({
+      data: path === pageAPath ? pageA : pageB,
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    }));
+    refetchPageMock.mockReturnValue(reload.promise);
+    mutateAsyncMock
+      .mockRejectedValueOnce(revisionConflict("a-rev-b"))
+      .mockImplementation(async (request: UpdateRequest) =>
+        makePage(
+          request.body.body as string,
+          "b-rev-b",
+          request.params.path.path,
+        ),
+      );
+    const { result, rerender } = renderHook(
+      ({ path }: { path: string }) => usePageEditor(path),
+      { initialProps: { path: pageAPath } },
+    );
+
+    act(() => result.current.setBodyMarkdown("local page A\n"));
+    await act(async () => {
+      await expect(result.current.saveNow()).rejects.toMatchObject({
+        detail: { code: "revision_conflict" },
+      });
+    });
+
+    let reloadPromise!: Promise<void>;
+    act(() => {
+      reloadPromise = result.current.reloadAfterConflict();
+    });
+    expect(refetchPageMock).toHaveBeenCalledOnce();
+
+    rerender({ path: pageBPath });
+    act(() => result.current.setBodyMarkdown("local page B exact"));
+    expect(result.current.getPlaintext()).toBe("local page B exact");
+    expect(result.current.getRevision()).toBe("b-rev-a");
+
+    await act(async () => {
+      reload.resolve({
+        data: makePage("server page A\n", "a-rev-b", pageAPath),
+      });
+      await reloadPromise;
+    });
+
+    expect(result.current.getPlaintext()).toBe("local page B exact");
+    expect(result.current.getRevision()).toBe("b-rev-a");
+    expect(result.current.saveStatus).toBe("unsaved");
+
+    await act(async () => {
+      await result.current.saveNow();
+    });
+    expect(mutateAsyncMock.mock.calls[1]?.[0]).toEqual({
+      params: { path: { path: pageBPath } },
+      body: {
+        expected_revision: "b-rev-a",
+        body: "local page B exact",
+      },
+    });
+    expect(result.current.getPlaintext()).toBe("local page B exact");
+    expect(result.current.getRevision()).toBe("b-rev-b");
+  });
+
   it("never drains an outgoing raw body into the page selected next", async () => {
     const oldPath = "notes/old.md";
     const newPath = "notes/new.md";
