@@ -12,9 +12,10 @@ export const blockquoteDescriptor: ElementDescriptor<BlockquoteElement> = {
     children,
     ...rest,
   }),
-  render: ({ attributes, children }) => (
+  render: ({ attributes, children, element }) => (
     <blockquote
       {...attributes}
+      data-block-id={element.blockId}
       className="my-4 border-l-2 border-accent bg-paper-2 py-2 pl-4 pr-3 text-[0.97em] italic text-ink-2"
     >
       {children}

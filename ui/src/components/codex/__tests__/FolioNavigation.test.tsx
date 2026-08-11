@@ -6,7 +6,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Folio } from "#/components/codex/Folio";
@@ -60,7 +60,12 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: () => ({ activeIndex: -1, scrollTo: vi.fn() }),
 }));
 vi.mock("#/editor/SlateEditor", () => ({
-  SlateEditor: () => <textarea aria-label="Page body" defaultValue="Editable body" />,
+  SlateEditor: () => (
+    <div>
+      <p data-block-id="abc123DEF0">Focused source block</p>
+      <textarea aria-label="Page body" defaultValue="Editable body" />
+    </div>
+  ),
 }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: () => ({
@@ -99,12 +104,25 @@ vi.mock("#/editor/usePageEditor", () => ({
   }),
 }));
 
-function OpenAlpha({ origin }: { origin: string }) {
+function OpenAlpha({
+  origin,
+  blockId,
+}: {
+  origin: string;
+  blockId?: string;
+}) {
   const openTab = useOpenTab();
   return (
     <button
       type="button"
-      onClick={() => openTab("page", "notes/alpha.md", "Alpha")}
+      onClick={() =>
+        openTab(
+          "page",
+          "notes/alpha.md",
+          "Alpha",
+          blockId ? { blockId } : undefined,
+        )
+      }
     >
       Open Alpha from {origin}
     </button>
@@ -116,6 +134,7 @@ function AtriumOrigin() {
     <section>
       <h1>Atrium origin</h1>
       <OpenAlpha origin="Atrium" />
+      <OpenAlpha origin="source reference" blockId="abc123DEF0" />
     </section>
   );
 }
@@ -183,9 +202,16 @@ function pageTabStillExists() {
 }
 
 describe("mobile Folio Back", () => {
+  const scrollIntoView = vi.fn();
+
   beforeEach(() => {
     window.localStorage.clear();
     window.scrollTo = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    scrollIntoView.mockReset();
     useWorkspaceStore.setState({
       tabs: [],
       activeTabId: null,
@@ -207,6 +233,89 @@ describe("mobile Folio Back", () => {
       orphansVisible: true,
       mode: "graph",
     });
+  });
+
+  it("focuses a source block after its page opens in a new tab", async () => {
+    const user = userEvent.setup();
+    const router = renderNavigation("/");
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Open Alpha from source reference",
+      }),
+    );
+
+    const target = await screen.findByText("Focused source block");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(target).toHaveFocus();
+    expect(router.state.location.pathname).toBe("/workspace");
+    const state = useWorkspaceStore.getState();
+    expect(
+      state.tabs.find((tab) => tab.id === state.activeTabId)?.focusBlockId,
+    ).toBeUndefined();
+  });
+
+  it("focuses a source block when reopening an existing page tab", async () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    const target = await screen.findByText("Focused source block");
+
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "abc123DEF0",
+        });
+    });
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(target).toHaveFocus();
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "alpha")
+        ?.focusBlockId,
+    ).toBeUndefined();
+  });
+
+  it("consumes a focus request when the source block is missing", async () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    await screen.findByText("Focused source block");
+
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "missing123",
+        });
+    });
+
+    await waitFor(() =>
+      expect(
+        useWorkspaceStore.getState().tabs.find((tab) => tab.id === "alpha")
+          ?.focusBlockId,
+      ).toBeUndefined(),
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("returns to Atrium through history without closing the page tab", async () => {

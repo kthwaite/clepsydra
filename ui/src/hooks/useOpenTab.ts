@@ -1,6 +1,10 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { type TabType, useWorkspaceStore } from "#/store/workspace";
+import {
+  type OpenTabTarget,
+  type TabType,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 declare module "@tanstack/history" {
   interface HistoryState {
@@ -15,10 +19,15 @@ export function useOpenTab() {
   const navigate = useNavigate();
 
   return useCallback(
-    (type: TabType, path?: string, label?: string) => {
+    (
+      type: TabType,
+      path?: string,
+      label?: string,
+      target?: OpenTabTarget,
+    ) => {
       const folioOriginTabId =
         pathname === "/workspace" ? activeTabId : null;
-      openTab(type, path, label);
+      openTab(type, path, label, target);
       navigate({
         to: "/workspace",
         state: (state) => ({ ...state, folioOriginTabId }),

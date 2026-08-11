@@ -69,6 +69,76 @@ describe("useWorkspaceStore openTab wiring", () => {
   });
 });
 
+describe("useWorkspaceStore block focus requests", () => {
+  it("updates the focus request when reopening an existing page tab", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+    const store = useWorkspaceStore.getState();
+    store.openTab("page", "source.md", "Source");
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.find((tab) => tab.id === state.activeTabId)?.focusBlockId).toBe(
+      "abc123DEF0",
+    );
+  });
+
+  it("sets and clears a focus request on a newly opened page tab", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+
+    const opened = useWorkspaceStore.getState();
+    const activeTab = opened.tabs.find((tab) => tab.id === opened.activeTabId);
+    expect(activeTab?.focusBlockId).toBe("abc123DEF0");
+
+    useWorkspaceStore.getState().clearTabFocus(activeTab!.id);
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === activeTab!.id)
+        ?.focusBlockId,
+    ).toBeUndefined();
+  });
+
+  it("does not persist transient block focus requests", () => {
+    window.localStorage.clear();
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "source",
+          type: "page",
+          path: "source.md",
+          label: "Source",
+          focusBlockId: "abc123DEF0",
+        },
+      ],
+      activeTabId: "source",
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+
+    const persisted = JSON.parse(
+      window.localStorage.getItem("clepsydra.workspace") ?? "{}",
+    );
+    expect(persisted.state.tabs[0].focusBlockId).toBeUndefined();
+  });
+});
+
 describe("useWorkspaceStore clearActiveTab", () => {
   it("clears the active tab without removing any tabs", () => {
     useWorkspaceStore.setState({

@@ -122,6 +122,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
                     "page",
                     block.page_path,
                     block.page_title || block.page_path,
+                    { blockId },
                   );
                 }}
               />

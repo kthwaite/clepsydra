@@ -27,7 +27,11 @@ export const headingDescriptor: ElementDescriptor<HeadingElement> = {
   render: ({ attributes, children, element }) => {
     const Tag = `h${element.level}` as const;
     return (
-      <Tag {...attributes} className={HEADING_CLASSES[element.level]}>
+      <Tag
+        {...attributes}
+        data-block-id={element.blockId}
+        className={HEADING_CLASSES[element.level]}
+      >
         {children}
       </Tag>
     );

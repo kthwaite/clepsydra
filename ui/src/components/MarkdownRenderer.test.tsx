@@ -202,7 +202,9 @@ w = z^2
       }),
     );
 
-    expect(openTabMock).toHaveBeenCalledWith("page", "source.md", "Source");
+    expect(openTabMock).toHaveBeenCalledWith("page", "source.md", "Source", {
+      blockId: "abc123DEF0",
+    });
   });
 
   it("renders malformed private block URLs as inert text", () => {

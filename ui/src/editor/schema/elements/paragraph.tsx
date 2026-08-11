@@ -13,7 +13,11 @@ export const paragraphDescriptor: ElementDescriptor<ParagraphElement> = {
     children,
     ...rest,
   }),
-  render: ({ attributes, children }) => <p {...attributes}>{children}</p>,
+  render: ({ attributes, children, element }) => (
+    <p {...attributes} data-block-id={element.blockId}>
+      {children}
+    </p>
+  ),
   toMdast: (node, ctx) => {
     const children = ctx.inlineChildren(node.children);
     ctx.appendBlockMetadata(children, node);

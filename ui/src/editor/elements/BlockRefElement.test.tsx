@@ -119,6 +119,7 @@ describe("BlockRefElement", () => {
       "page",
       "notes/source.md",
       "Source",
+      { blockId: "abc123DEF0" },
     );
   });
 

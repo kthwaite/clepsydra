@@ -10,6 +10,9 @@ import {
 
 export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
+export interface OpenTabTarget {
+  blockId?: string;
+}
 
 export interface OpenHistoryEntry {
   path: string;
@@ -56,6 +59,8 @@ export interface TabDescriptor {
   lastActiveAt?: number;
   /** Membership in a quire (tab group). Members are kept contiguous. */
   quireId?: string;
+  /** One-shot request to reveal a source block. Never persisted. */
+  focusBlockId?: string;
 }
 
 interface WorkspaceState {
@@ -67,13 +72,19 @@ interface WorkspaceState {
 }
 
 interface WorkspaceActions {
-  openTab: (type: TabType, path?: string, label?: string) => void;
+  openTab: (
+    type: TabType,
+    path?: string,
+    label?: string,
+    target?: OpenTabTarget,
+  ) => void;
   addTab: (tab: TabDescriptor) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
   activateTab: (tabId: string) => void;
   /** Drop focus without closing any tab — surfaces the empty-state launcher. */
   clearActiveTab: () => void;
+  clearTabFocus: (tabId: string) => void;
   togglePin: (tabId: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   updateTabLabel: (tabId: string, label: string) => void;
@@ -113,7 +124,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       openHistory: [],
       quires: {},
 
-      openTab(type, path, label) {
+      openTab(type, path, label, target) {
         const state = get();
         const key = tabKey(type, path);
 
@@ -129,7 +140,14 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           set({
             activeTabId: existing.id,
             tabs: state.tabs.map((t) =>
-              t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
+              t.id === existing.id
+                ? {
+                    ...t,
+                    lastActiveAt: Date.now(),
+                    focusBlockId:
+                      existing.type === "page" ? target?.blockId : undefined,
+                  }
+                : t,
             ),
             quires: quire?.collapsed
               ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
@@ -163,6 +181,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           path: type === "page" ? path : undefined,
           label: label ?? path ?? "Graph",
           lastActiveAt: Date.now(),
+          focusBlockId: type === "page" ? target?.blockId : undefined,
         };
 
         const nextHistory =
@@ -261,6 +280,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
       clearActiveTab() {
         set({ activeTabId: null });
+      },
+
+      clearTabFocus(tabId) {
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.id === tabId && tab.focusBlockId !== undefined
+              ? { ...tab, focusBlockId: undefined }
+              : tab,
+          ),
+        }));
       },
 
       togglePin(tabId) {
@@ -456,6 +485,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       version: 3,
       migrate: (persisted, version): Partial<WorkspaceState> =>
         migrateWorkspace(persisted, version),
+      partialize: (state) => ({
+        ...state,
+        tabs: state.tabs.map(({ focusBlockId: _, ...tab }) => tab),
+      }),
     },
   ),
 );

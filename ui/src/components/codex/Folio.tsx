@@ -97,6 +97,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const focusBlockId = useWorkspaceStore(
+    (state) => state.tabs.find((tab) => tab.id === tabId)?.focusBlockId,
+  );
+  const clearTabFocus = useWorkspaceStore((state) => state.clearTabFocus);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       void navigate({ to: "/" });
@@ -183,6 +187,30 @@ export function Folio({ tabId, path }: FolioProps) {
   useEffect(() => {
     if (editor.title) updateTabLabel(tabId, editor.title);
   }, [tabId, editor.title, updateTabLabel]);
+
+  useEffect(() => {
+    if (!focusBlockId || editor.isLoading) return;
+
+    const target = Array.from(
+      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
+    ).find((element) => element.dataset.blockId === focusBlockId);
+
+    if (target) {
+      target.scrollIntoView({ block: "center", inline: "nearest" });
+      const hadTabIndex = target.hasAttribute("tabindex");
+      if (!hadTabIndex) target.tabIndex = -1;
+      target.focus({ preventScroll: true });
+      if (!hadTabIndex) target.removeAttribute("tabindex");
+    }
+
+    clearTabFocus(tabId);
+  }, [
+    clearTabFocus,
+    editor.editorRevision,
+    editor.isLoading,
+    focusBlockId,
+    tabId,
+  ]);
 
   useEffect(() => {
     setProgress(0);

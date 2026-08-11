@@ -17,6 +17,7 @@ export function BlockRefElement({ attributes, children, element }: Props) {
             "page",
             block.page_path,
             block.page_title || block.page_path,
+            { blockId: element.blockId },
           );
         }}
       />

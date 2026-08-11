@@ -60,7 +60,18 @@ export const codeBlockDescriptor: ElementDescriptor<CodeBlockElementType> = {
     children,
     ...rest,
   }),
-  render: (props) => <CodeBlockElement {...props} element={props.element} />,
+  render: (props) => (
+    <CodeBlockElement
+      {...props}
+      attributes={
+        {
+          ...props.attributes,
+          "data-block-id": props.element.blockId,
+        } as typeof props.attributes
+      }
+      element={props.element}
+    />
+  ),
   normalize: normalizeCodeBlock,
   toMdast: (node) => {
     const value = node.children.map((c) => (c as CustomText).text).join("");
