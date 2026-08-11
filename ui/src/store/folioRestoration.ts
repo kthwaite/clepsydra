@@ -72,12 +72,13 @@ export function snapshotTextPoint(
 export function validateTextPointSnapshot(
   editor: Editor,
   snapshot: TextPointSnapshot,
+  requireTextMatch = true,
 ): Point | null {
   try {
     const [node] = Editor.node(editor, snapshot.path);
     if (
       !Text.isText(node) ||
-      node.text !== snapshot.text ||
+      (requireTextMatch && node.text !== snapshot.text) ||
       snapshot.offset < 0 ||
       snapshot.offset > node.text.length
     ) {

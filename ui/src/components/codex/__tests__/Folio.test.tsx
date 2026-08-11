@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo } from "react";
 import { createEditor, type Descendant, type Editor } from "slate";
@@ -18,6 +18,7 @@ const {
   routerHistory,
   useCollapsibleRailMock,
   usePageEditorMock,
+  useTagSuggestionsMock,
   useTagsMock,
   useScrollSpyMock,
 } = vi.hoisted(() => ({
@@ -36,6 +37,7 @@ const {
     toggle: vi.fn(),
     onResizeStart: vi.fn(),
   })),
+  useTagSuggestionsMock: vi.fn(),
   useTagsMock: vi.fn<
     () => { data: TagCount[] | undefined; error?: Error }
   >(() => ({
@@ -70,6 +72,7 @@ vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
   useOutlinks: () => ({ data: undefined }),
   useSimilar: () => ({ data: undefined }),
+  useTagSuggestions: useTagSuggestionsMock,
   useTags: useTagsMock,
 }));
 vi.mock("#/api/pages", () => ({
@@ -140,13 +143,29 @@ vi.mock("#/lib/useProjects", () => ({
 }));
 
 import { useWorkspaceStore } from "#/store/workspace";
-import { clearFolioRestoration } from "#/store/folioRestoration";
+import {
+  clearFolioRestoration,
+  type FolioRestoration,
+  readFolioRestoration,
+  saveFolioRestoration,
+} from "#/store/folioRestoration";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
   clearFolioRestoration("t1");
   mountedSlateEditors.length = 0;
   restorationFrames.length = 0;
+  useTagSuggestionsMock.mockImplementation((query: string) => ({
+    data: query.startsWith("clep")
+      ? [{ tag: "clepsydra", count: 9 }]
+      : [
+          { tag: "research", count: 4 },
+          { tag: "ritual", count: 1 },
+        ],
+    error: null,
+    isLoading: false,
+    refetch: vi.fn(),
+  }));
   useTagsMock.mockReturnValue({
     data: [
       { tag: "research", count: 4 },
@@ -242,6 +261,20 @@ function flushRestorationFrame() {
   });
 }
 
+function restorationRecord(
+  overrides: Partial<FolioRestoration> = {},
+): FolioRestoration {
+  return {
+    tabId: "t1",
+    path: "notes/alpha.md",
+    revision: "revision-1",
+    scrollTop: 48,
+    anchor: { path: [0, 0], offset: 2, text: "Editable body" },
+    focus: { path: [0, 0], offset: 7, text: "Editable body" },
+    ...overrides,
+  };
+}
+
 describe("Folio invalid-tab recovery", () => {
   beforeEach(() => {
     mobileLayoutState.matches = false;
@@ -277,17 +310,45 @@ describe("Folio invalid-tab recovery", () => {
     );
 
     expect(
-      screen.getByRole("option", { name: "research" }),
+      await screen.findByRole("option", { name: "research" }),
     ).toBeInTheDocument();
+  });
+
+  it("queries a bounded suggestion set as the Folio draft changes", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useTagsMock.mockClear();
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "clep");
+
+    await waitFor(() =>
+      expect(useTagSuggestionsMock).toHaveBeenCalledWith("clep", 12, true),
+    );
+    expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
+    expect(useTagsMock).not.toHaveBeenCalled();
+
+    await user.type(input, "sydra");
+    await waitFor(() =>
+      expect(useTagSuggestionsMock).toHaveBeenCalledWith(
+        "clepsydra",
+        12,
+        true,
+      ),
+    );
+    expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
   });
 
   it("keeps raw tag editing and blur-save operational without a tag index", async () => {
     const user = userEvent.setup();
     const editor = editableEditor();
     usePageEditorMock.mockReturnValue(editor);
-    useTagsMock.mockReturnValue({
+    useTagSuggestionsMock.mockReturnValue({
       data: undefined,
-      error: new Error("tag index unavailable"),
+      error: new Error("tag suggestions unavailable"),
+      isLoading: false,
+      refetch: vi.fn(),
     });
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
@@ -457,6 +518,8 @@ describe("Folio in-session restoration", () => {
     firstMount.unmount();
 
     const returning = editableEditor();
+    returning.initialValue[0].children[0].text =
+      "Edited leaf, unchanged revision";
     returning.getRevision.mockReturnValue("revision-1");
     usePageEditorMock.mockReturnValue(returning);
     render(<Folio tabId="t1" path="notes/alpha.md" />);
@@ -495,5 +558,83 @@ describe("Folio in-session restoration", () => {
 
     expect(restoredScroller.scrollTop).toBe(64);
     expect(restoredEditor.selection).toBeNull();
+  });
+
+  it("clears restoration when the same tab is repointed to another path", () => {
+    saveFolioRestoration(restorationRecord());
+    const departing = editableEditor();
+    departing.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(departing);
+    const mounted = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    activeSlateEditor().selection = {
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    };
+    folioScrollContainer().scrollTop = 88;
+    useWorkspaceStore
+      .getState()
+      .updateTabPath("t1", "notes/beta.md", "Beta");
+    mounted.unmount();
+
+    expect(readFolioRestoration("t1", "notes/alpha.md")).toBeNull();
+  });
+
+  it("restores the mobile document scroll container", () => {
+    mobileLayoutState.matches = true;
+    saveFolioRestoration(
+      restorationRecord({ scrollTop: 72, anchor: null, focus: null }),
+    );
+    const returning = editableEditor();
+    returning.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(returning);
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+    flushRestorationFrame();
+
+    expect(restoredScroller).toHaveClass("overflow-y-auto");
+    expect(restoredScroller.scrollTop).toBe(72);
+  });
+
+  it("clears restoration when the page is unavailable", () => {
+    saveFolioRestoration(restorationRecord());
+    usePageEditorMock.mockReturnValue(errorEditor());
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(readFolioRestoration("t1", "notes/alpha.md")).toBeNull();
+  });
+
+  it("clears restoration when its tab is deleted", () => {
+    saveFolioRestoration(restorationRecord());
+
+    useWorkspaceStore.getState().closeTab("t1");
+
+    expect(readFolioRestoration("t1", "notes/alpha.md")).toBeNull();
+  });
+
+  it("restores selection without taking focus from an explicit control", () => {
+    saveFolioRestoration(restorationRecord());
+    const returning = editableEditor();
+    returning.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(returning);
+    render(
+      <>
+        <button type="button">Dialog action</button>
+        <Folio tabId="t1" path="notes/alpha.md" />
+      </>,
+    );
+    const dialogAction = screen.getByRole("button", {
+      name: "Dialog action",
+    });
+    dialogAction.focus();
+
+    flushRestorationFrame();
+
+    expect(activeSlateEditor().selection).toEqual({
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    });
+    expect(dialogAction).toHaveFocus();
   });
 });

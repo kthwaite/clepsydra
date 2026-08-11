@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { clearFolioRestoration } from "#/store/folioRestoration";
 import {
   nearestVisibleTabId,
   nextQuireColor,
@@ -171,6 +172,12 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             : state.openHistory;
 
         if (state.navigationMode === "replace" && state.activeTabId) {
+          if (
+            activeTab &&
+            (activeTab.type !== type || activeTab.path !== path)
+          ) {
+            clearFolioRestoration(activeTab.id);
+          }
           // Replace the active tab's content; the slot keeps its quire.
           set(
             normalized(
@@ -210,6 +217,8 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const state = get();
         const idx = state.tabs.findIndex((t) => t.id === tabId);
         if (idx === -1) return;
+
+        clearFolioRestoration(tabId);
 
         const nextTabs = state.tabs.filter((t) => t.id !== tabId);
         let nextActive = state.activeTabId;
@@ -287,6 +296,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       updateTabPath(tabId, path, label) {
+        const currentTab = get().tabs.find((tab) => tab.id === tabId);
+        if (currentTab && currentTab.path !== path) {
+          clearFolioRestoration(tabId);
+        }
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
           const oldPath = tab?.path;

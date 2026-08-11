@@ -10,7 +10,12 @@ import {
   useState,
 } from "react";
 import { Transforms } from "slate";
-import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
+import {
+  useBacklinks,
+  useOutlinks,
+  useSimilar,
+  useTagSuggestions,
+} from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
@@ -37,6 +42,7 @@ import { SlateEditor } from "#/editor/SlateEditor";
 import { usePageEditor } from "#/editor/usePageEditor";
 import type { CustomEditor } from "#/editor/types";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
+import { useDebounce } from "#/hooks/useDebounce";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 import { todayJournalPath } from "#/lib/journal";
@@ -98,10 +104,22 @@ export function Folio({ tabId, path }: FolioProps) {
   const { data: backlinks } = useBacklinks(path);
   const { data: outlinks } = useOutlinks(path);
   const { data: similar } = useSimilar(path);
-  const { data: tagIndex } = useTags();
+  const [tagSuggestionQuery, setTagSuggestionQuery] = useState("");
+  const debouncedTagSuggestionQuery = useDebounce(tagSuggestionQuery, 200);
+  const tagSuggestionEnabled = debouncedTagSuggestionQuery.length > 0;
+  const tagSuggestionRequest = useTagSuggestions(
+    debouncedTagSuggestionQuery,
+    12,
+    tagSuggestionEnabled,
+  );
+  const tagSuggestionsCurrent =
+    tagSuggestionQuery === debouncedTagSuggestionQuery;
   const tagSuggestions = useMemo(
-    () => (tagIndex ?? []).map(({ tag }) => tag),
-    [tagIndex],
+    () =>
+      tagSuggestionsCurrent
+        ? (tagSuggestionRequest.data ?? []).map(({ tag }) => tag)
+        : [],
+    [tagSuggestionRequest.data, tagSuggestionsCurrent],
   );
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
@@ -282,6 +300,14 @@ export function Folio({ tabId, path }: FolioProps) {
 
   useLayoutEffect(
     () => () => {
+      const currentTab = useWorkspaceStore
+        .getState()
+        .tabs.find((tab) => tab.id === tabId);
+      if (currentTab?.path !== path) {
+        clearFolioRestoration(tabId);
+        return;
+      }
+
       const state = restorationStateRef.current;
       if (
         !state ||
@@ -328,17 +354,30 @@ export function Folio({ tabId, path }: FolioProps) {
 
       scrollContainer.scrollTop = restoration.scrollTop;
       if (!restoration.anchor || !restoration.focus) return;
+      const requireTextMatch =
+        restoration.revision !== editor.getRevision();
       const anchor = validateTextPointSnapshot(
         slateEditor,
         restoration.anchor,
+        requireTextMatch,
       );
-      const focus = validateTextPointSnapshot(slateEditor, restoration.focus);
+      const focus = validateTextPointSnapshot(
+        slateEditor,
+        restoration.focus,
+        requireTextMatch,
+      );
       if (!anchor || !focus) return;
       Transforms.select(slateEditor, { anchor, focus });
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [editor.editorRevision, path, restorationAvailable, tabId]);
+  }, [
+    editor.editorRevision,
+    editor.getRevision,
+    path,
+    restorationAvailable,
+    tabId,
+  ]);
   const editableTags = useMemo(
     () =>
       isJournal
@@ -464,6 +503,15 @@ export function Folio({ tabId, path }: FolioProps) {
             tags={editableTags}
             derivedTags={isJournal ? ["journal"] : []}
             tagSuggestions={tagSuggestions}
+            onTagSuggestionQueryChange={setTagSuggestionQuery}
+            tagSuggestionsLoading={
+              tagSuggestionQuery.length > 0 &&
+              (!tagSuggestionsCurrent || tagSuggestionRequest.isLoading)
+            }
+            tagSuggestionsError={
+              tagSuggestionsCurrent ? tagSuggestionRequest.error : null
+            }
+            onRetryTagSuggestions={tagSuggestionRequest.refetch}
             onTagsChange={editor.setTags}
             aliases={editor.aliases}
             onAliasesChange={editor.setAliases}
