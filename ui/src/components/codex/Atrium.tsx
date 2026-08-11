@@ -33,7 +33,7 @@ export function Atrium() {
   const navigate = useNavigate();
   const { data: tags } = useTags();
   const { data: stats } = useStats();
-  const { data: content } = useContentIndex(500);
+  const { data: content } = useContentIndex({ limit: 500 });
   const { data: bcl } = useBcl();
 
   const { data: journalToday } = useJournalToday();
@@ -279,7 +279,7 @@ export function Atrium() {
                 onClick={() =>
                   navigate({
                     to: "/gazetteer",
-                    search: { tag: t.tag } as never,
+                    search: { tags: [t.tag] } as never,
                   })
                 }
                 className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(60px,1fr)_32px] items-center gap-2 text-left md:grid-cols-[120px_1fr_36px]"

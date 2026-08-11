@@ -54,7 +54,8 @@ export function DesktopCodexFrame({
 
   const onNav = (target: CodexView) => {
     if (target === "atrium") navigate({ to: "/" });
-    else if (target === "gazetteer") navigate({ to: "/gazetteer" });
+    else if (target === "gazetteer")
+      navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } });
     else if (target === "academic") navigate({ to: "/academic" });
     else if (target === "bases") navigate({ to: "/bases" });
     else if (target === "feeds") navigate({ to: "/feeds" } as never);

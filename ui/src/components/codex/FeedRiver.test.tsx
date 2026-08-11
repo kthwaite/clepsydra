@@ -33,7 +33,7 @@ const riverMocks = vi.hoisted(() => {
 
   type Page = {
     entries: FeedEntry[];
-    next_cursor: string | null;
+    next_cursor?: string | null;
   };
 
   const entriesQuery: {
@@ -344,17 +344,16 @@ describe("FeedRiver", () => {
     expect(screen.getByRole("region", { name: /feed river/i })).toBeVisible();
   });
 
-  it.each([
-    "unread",
-    "all",
-    "saved",
-  ] as const)("requests the %s river mode through the generated query boundary", (view) => {
-    renderRiver({ view });
+  it.each(["unread", "all", "saved"] as const)(
+    "requests the %s river mode through the generated query boundary",
+    (view) => {
+      renderRiver({ view });
 
-    expect(riverMocks.feedEntriesInfiniteOptions).toHaveBeenCalledWith(
-      expect.objectContaining({ view }),
-    );
-  });
+      expect(riverMocks.feedEntriesInfiniteOptions).toHaveBeenCalledWith(
+        expect.objectContaining({ view }),
+      );
+    },
+  );
 
   it("toggles an entry bookmark from the expanded controls", async () => {
     const user = userEvent.setup();
@@ -735,22 +734,27 @@ describe("FeedRiver", () => {
   it.each([
     [/mark unread/i, "Read state failed"],
     [/bookmark cache semantics/i, "Bookmark failed"],
-  ] as const)("surfaces a failed expanded-entry action and disables it while pending", async (actionName, message) => {
-    const user = userEvent.setup();
-    setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" });
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    await user.click(screen.getByRole("button", { name: actionName }));
+  ] as const)(
+    "surfaces a failed expanded-entry action and disables it while pending",
+    async (actionName, message) => {
+      const user = userEvent.setup();
+      setEntries([entry({ read: true })]);
+      const view = renderRiver({ view: "all" });
+      await user.click(
+        screen.getByRole("button", { name: /cache semantics/i }),
+      );
+      await user.click(screen.getByRole("button", { name: actionName }));
 
-    riverMocks.patchState.isPending = true;
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
-    expect(screen.getByRole("button", { name: actionName })).toBeDisabled();
+      riverMocks.patchState.isPending = true;
+      view.rerender(<FeedRiver filters={{ view: "all" }} />);
+      expect(screen.getByRole("button", { name: actionName })).toBeDisabled();
 
-    riverMocks.patchState.isPending = false;
-    riverMocks.patchState.error = new Error(message);
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
-    expect(screen.getByRole("alert")).toHaveTextContent(message);
-  });
+      riverMocks.patchState.isPending = false;
+      riverMocks.patchState.error = new Error(message);
+      view.rerender(<FeedRiver filters={{ view: "all" }} />);
+      expect(screen.getByRole("alert")).toHaveTextContent(message);
+    },
+  );
 
   it("retains the tag draft and editor through pending and failure, closing only on success", async () => {
     let resolvePatch!: () => void;

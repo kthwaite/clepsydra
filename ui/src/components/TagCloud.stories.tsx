@@ -12,11 +12,11 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   args: {
     tags: [
-      { tag: "rust", count: 12 },
-      { tag: "react", count: 8 },
-      { tag: "typescript", count: 6 },
-      { tag: "database", count: 4 },
-      { tag: "architecture", count: 3 },
+      { tag: "rust", count: 12, computed_count: 0 },
+      { tag: "react", count: 8, computed_count: 0 },
+      { tag: "typescript", count: 6, computed_count: 0 },
+      { tag: "database", count: 4, computed_count: 0 },
+      { tag: "architecture", count: 3, computed_count: 0 },
     ],
   },
 };

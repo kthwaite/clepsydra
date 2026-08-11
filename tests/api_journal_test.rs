@@ -200,7 +200,7 @@ async fn get_today_reads_existing_journal() {
 
 #[tokio::test]
 async fn post_today_creates_with_template() {
-    let (server, _tmp) = setup_server();
+    let (server, tmp) = setup_server();
     let res = server.post("/api/vault/journal/today").await;
     res.assert_status(StatusCode::CREATED);
     let body: serde_json::Value = res.json();
@@ -217,12 +217,18 @@ async fn post_today_creates_with_template() {
         path.rsplit('/').next().unwrap()
     ));
     assert_eq!(body["meta"]["title"].as_str().unwrap(), today_str());
+    assert_eq!(
+        body["computed_tags"],
+        serde_json::json!(["journal"]),
+        "journal creation must return its kind-derived tag"
+    );
+    let stored = std::fs::read_to_string(tmp.path().join("vault").join(path)).unwrap();
+    let (stored_meta, _) = clepsydra::vault::page::parse_frontmatter(&stored).unwrap();
     assert!(
-        body["meta"]["tags"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|t| t == "journal")
+        stored_meta.tags.iter().all(|tag| {
+            !clepsydra::vault::kind::is_computed_tag(clepsydra::vault::kind::Kind::Journal, tag)
+        }),
+        "journal creation must not persist its kind-derived tag"
     );
     assert_eq!(body["body"].as_str().unwrap(), "");
     assert!(body["revision"].as_str().is_some());

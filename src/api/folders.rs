@@ -268,7 +268,10 @@ fn filesystem_authoritative_page_summaries(
                 "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
                         p.project, p.encrypted,
                         COALESCE((SELECT group_concat(t.tag, char(31))
-                                    FROM tags t WHERE t.page_id = p.id), '')
+                                    FROM tags t WHERE t.page_id = p.id), ''),
+                        COALESCE((SELECT group_concat(t.tag, char(31))
+                                    FROM tags t
+                                   WHERE t.page_id = p.id AND t.computed = 1), '')
                    FROM pages p WHERE p.path = ?1",
                 params![vault_path.as_str()],
                 page_summary_from_row,
@@ -285,15 +288,18 @@ fn filesystem_authoritative_page_summaries(
 
 /// Synthetic page summary for an md file that has no index row yet.
 fn build_page_summary_fallback(name: &str, vp: &VaultPath) -> PageSummary {
+    let (kind, inferred) = crate::vault::kind::resolve(vp.as_str(), None);
+    let computed_tag = kind.computed_tag().to_string();
     PageSummary {
         id: String::new(),
         path: vp.as_str().to_string(),
         title: None,
         canonical_name: name.trim_end_matches(".md").to_string(),
-        kind: "NOTE".to_string(),
-        inferred: true,
+        kind: kind.as_str().to_string(),
+        inferred,
         project: None,
-        tags: Vec::new(),
+        tags: vec![computed_tag.clone()],
+        computed_tags: vec![computed_tag],
         encrypted: false,
     }
 }
@@ -379,7 +385,8 @@ mod tests {
         assert_eq!(summary.kind, "NOTE");
         assert!(summary.inferred);
         assert!(summary.project.is_none());
-        assert!(summary.tags.is_empty());
+        assert_eq!(summary.tags, vec!["note"]);
+        assert_eq!(summary.computed_tags, vec!["note"]);
     }
 
     #[test]
@@ -404,6 +411,7 @@ mod tests {
                 inferred: true,
                 project: None,
                 tags: Vec::new(),
+                computed_tags: Vec::new(),
                 encrypted: false,
             },
             PageSummary {
@@ -415,6 +423,7 @@ mod tests {
                 inferred: true,
                 project: None,
                 tags: Vec::new(),
+                computed_tags: Vec::new(),
                 encrypted: false,
             },
         ];

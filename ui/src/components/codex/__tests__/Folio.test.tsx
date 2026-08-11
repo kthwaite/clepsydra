@@ -1,7 +1,13 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo } from "react";
-import { createEditor, type Descendant, type Editor } from "slate";
+import { createEditor, type Descendant, type Editor, Node } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
@@ -38,14 +44,14 @@ const {
     onResizeStart: vi.fn(),
   })),
   useTagSuggestionsMock: vi.fn(),
-  useTagsMock: vi.fn<
-    () => { data: TagCount[] | undefined; error?: Error }
-  >(() => ({
-    data: [
-      { tag: "research", count: 4 },
-      { tag: "ritual", count: 1 },
-    ],
-  })),
+  useTagsMock: vi.fn<() => { data: TagCount[] | undefined; error?: Error }>(
+    () => ({
+      data: [
+        { tag: "research", count: 4, computed_count: 0 },
+        { tag: "ritual", count: 1, computed_count: 0 },
+      ],
+    }),
+  ),
   usePageEditorMock: vi.fn(),
   useScrollSpyMock: vi.fn(() => ({
     activeIndex: -1,
@@ -120,7 +126,7 @@ vi.mock("#/editor/SlateEditor", () => ({
       <textarea
         aria-label="Page body"
         data-testid="slate-editor"
-        defaultValue={initialValue[0]?.children?.[0]?.text ?? ""}
+        defaultValue={initialValue[0] ? Node.string(initialValue[0]) : ""}
         onChange={(event) =>
           onChange([
             {
@@ -142,13 +148,13 @@ vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],
 }));
 
-import { useWorkspaceStore } from "#/store/workspace";
 import {
   clearFolioRestoration,
   type FolioRestoration,
   readFolioRestoration,
   saveFolioRestoration,
 } from "#/store/folioRestoration";
+import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
@@ -157,10 +163,10 @@ beforeEach(() => {
   restorationFrames.length = 0;
   useTagSuggestionsMock.mockImplementation((query: string) => ({
     data: query.startsWith("clep")
-      ? [{ tag: "clepsydra", count: 9 }]
+      ? [{ tag: "clepsydra", count: 9, computed_count: 0 }]
       : [
-          { tag: "research", count: 4 },
-          { tag: "ritual", count: 1 },
+          { tag: "research", count: 4, computed_count: 0 },
+          { tag: "ritual", count: 1, computed_count: 0 },
         ],
     error: null,
     isLoading: false,
@@ -168,8 +174,8 @@ beforeEach(() => {
   }));
   useTagsMock.mockReturnValue({
     data: [
-      { tag: "research", count: 4 },
-      { tag: "ritual", count: 1 },
+      { tag: "research", count: 4, computed_count: 0 },
+      { tag: "ritual", count: 1, computed_count: 0 },
     ],
   });
 });
@@ -178,6 +184,8 @@ function errorEditor() {
   return {
     isLoading: false,
     error: new Error("404"),
+    tags: [],
+    computedTags: [],
     title: undefined,
     saveNow: vi.fn(),
     kind: undefined,
@@ -304,10 +312,7 @@ describe("Folio invalid-tab recovery", () => {
     usePageEditorMock.mockReturnValue(editableEditor());
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
-    await user.type(
-      screen.getByRole("combobox", { name: "Add tags" }),
-      "res",
-    );
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "res");
 
     expect(
       await screen.findByRole("option", { name: "research" }),
@@ -331,11 +336,7 @@ describe("Folio invalid-tab recovery", () => {
 
     await user.type(input, "sydra");
     await waitFor(() =>
-      expect(useTagSuggestionsMock).toHaveBeenCalledWith(
-        "clepsydra",
-        12,
-        true,
-      ),
+      expect(useTagSuggestionsMock).toHaveBeenCalledWith("clepsydra", 12, true),
     );
     expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
   });
@@ -426,7 +427,9 @@ describe("Folio mobile presentation", () => {
     ).toBeVisible();
     expect(screen.getByText("notes/alpha.md")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Page relationships" }));
+    await user.click(
+      screen.getByRole("button", { name: "Page relationships" }),
+    );
     expect(
       screen.getByRole("dialog", { name: "Page relationships" }),
     ).toBeVisible();
@@ -438,9 +441,7 @@ describe("Folio mobile presentation", () => {
     const editor = editableEditor();
     usePageEditorMock.mockReturnValue(editor);
     mobileLayoutState.matches = false;
-    const { rerender } = render(
-      <Folio tabId="t1" path="notes/alpha.md" />,
-    );
+    const { rerender } = render(<Folio tabId="t1" path="notes/alpha.md" />);
 
     const desktopBody = screen.getByRole("textbox", { name: "Page body" });
     await user.clear(desktopBody);
@@ -468,9 +469,7 @@ describe("Folio mobile presentation", () => {
     const editor = editableEditor();
     usePageEditorMock.mockReturnValue(editor);
     mobileLayoutState.matches = false;
-    const { rerender } = render(
-      <Folio tabId="t1" path="notes/alpha.md" />,
-    );
+    const { rerender } = render(<Folio tabId="t1" path="notes/alpha.md" />);
     expect(useScrollSpyMock).toHaveBeenLastCalledWith(
       expect.anything(),
       1,
@@ -571,9 +570,7 @@ describe("Folio in-session restoration", () => {
       focus: { path: [0, 0], offset: 7 },
     };
     folioScrollContainer().scrollTop = 88;
-    useWorkspaceStore
-      .getState()
-      .updateTabPath("t1", "notes/beta.md", "Beta");
+    useWorkspaceStore.getState().updateTabPath("t1", "notes/beta.md", "Beta");
     mounted.unmount();
 
     expect(readFolioRestoration("t1", "notes/alpha.md")).toBeNull();

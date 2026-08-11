@@ -3,6 +3,7 @@ import {
   type Editor,
   type Element,
   Node,
+  type NodeEntry,
   Element as SlateElement,
   Transforms,
 } from "slate";

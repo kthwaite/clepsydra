@@ -41,6 +41,12 @@ vi.mock("#/api/index", () => ({
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),
+  useTagSuggestions: () => ({
+    data: [],
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),

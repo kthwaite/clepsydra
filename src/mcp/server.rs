@@ -554,7 +554,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_tags",
-        description = "List every tag in the vault with its usage count, most-used first. Consult this before tagging so new pages reuse the existing vocabulary.",
+        description = "List every effective tag in the vault with its distinct page count and computed_count provenance, most-used first. Consult this before tagging so new pages reuse the existing editable vocabulary.",
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     pub async fn vault_tags(&self) -> Result<String, String> {
@@ -1415,6 +1415,29 @@ mod tests {
             tags.iter()
                 .any(|t| t["tag"] == "testing" && t["count"] == 2),
             "expected 'testing' tag with count 2: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tags_include_computed_classifications() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let mut params = create_params("Computed classification");
+        params.kind = Some("JOURNAL".to_string());
+        params.tags = Some(vec!["journal".to_string(), "research".to_string()]);
+        parse(server.vault_create_page(Parameters(params)).await);
+
+        let value = parse(server.vault_tags().await);
+        let journal = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tag| tag["tag"] == "journal")
+            .expect("vault_tags should include the computed JOURNAL classification");
+
+        assert_eq!(journal["count"], 1, "the effective tag is counted once");
+        assert_eq!(
+            journal["computed_count"], 1,
+            "vault_tags must preserve computed provenance"
         );
     }
 

@@ -143,9 +143,7 @@ describe("TagInput", () => {
   it("preserves an ordinary value that matches another caller's derived tag", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
-      <TagInput label="Tags" values={["journal"]} onChange={onChange} />,
-    );
+    render(<TagInput label="Tags" values={["journal"]} onChange={onChange} />);
 
     await user.type(screen.getByRole("textbox"), "daily{Enter}");
 
@@ -358,6 +356,92 @@ describe("TagInput", () => {
     expect(screen.getAllByRole("option")).toHaveLength(8);
   });
 
+  it("reports each query and renders responsive server suggestions", async () => {
+    const user = userEvent.setup();
+    const onSuggestionQueryChange = vi.fn();
+    const view = render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["clep-note"]}
+        onSuggestionQueryChange={onSuggestionQueryChange}
+        onChange={() => {}}
+      />,
+    );
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+
+    await user.type(input, "clep");
+    expect(onSuggestionQueryChange).toHaveBeenLastCalledWith("clep");
+    expect(screen.getByRole("option", { name: "clep-note" })).toBeVisible();
+
+    view.rerender(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["clepsydra"]}
+        onSuggestionQueryChange={onSuggestionQueryChange}
+        onChange={() => {}}
+      />,
+    );
+    await user.type(input, "sydra");
+
+    expect(onSuggestionQueryChange).toHaveBeenLastCalledWith("clepsydra");
+    expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "clep-note" })).toBeNull();
+  });
+
+  it("announces suggestion loading without presenting stale options", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={[]}
+        suggestionsLoading
+        onSuggestionQueryChange={() => {}}
+        onChange={() => {}}
+      />,
+    );
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "clep");
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /loading tag suggestions/i,
+    );
+    expect(
+      screen.queryByRole("listbox", { name: "Tag suggestions" }),
+    ).toBeNull();
+  });
+
+  it("exposes suggestion errors and retry while preserving raw commit", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const onRetrySuggestions = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={[]}
+        suggestionsError={new Error("tag suggestions unavailable")}
+        onRetrySuggestions={onRetrySuggestions}
+        onSuggestionQueryChange={() => {}}
+        onChange={onChange}
+      />,
+    );
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "ad-hoc");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /tag suggestions unavailable/i,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /retry tag suggestions/i }),
+    );
+    expect(onRetrySuggestions).toHaveBeenCalledOnce();
+
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenCalledWith(["ad-hoc"]);
+  });
+
   it("links the combobox to its listbox and active option across navigation", async () => {
     const user = userEvent.setup();
     render(
@@ -375,10 +459,7 @@ describe("TagInput", () => {
     const initialOption = screen.getByRole("option", { selected: true });
 
     expect(combobox).toHaveAttribute("aria-controls", listbox.id);
-    expect(combobox).toHaveAttribute(
-      "aria-activedescendant",
-      initialOption.id,
-    );
+    expect(combobox).toHaveAttribute("aria-activedescendant", initialOption.id);
 
     await user.keyboard("{ArrowDown}");
     const navigatedOption = screen.getByRole("option", { selected: true });

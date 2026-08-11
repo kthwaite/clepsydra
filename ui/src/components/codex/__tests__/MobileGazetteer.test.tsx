@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ContentEntry, TagCount } from "#/api/types";
+import { KINDS, kindLabel } from "#/lib/kind";
 import { MobileGazetteer } from "../MobileGazetteer";
 
 const rows: ContentEntry[] = [
@@ -14,6 +15,7 @@ const rows: ContentEntry[] = [
     path: "notes/alpha.md",
     project: "Atlas",
     tags: ["research", "active"],
+    computed_tags: [],
     title: "Alpha",
     updated_at: "2026-08-08T12:00:00Z",
     word_count: 321,
@@ -27,6 +29,7 @@ const rows: ContentEntry[] = [
     path: "notes/beta.md",
     project: null,
     tags: [],
+    computed_tags: [],
     title: "Beta",
     updated_at: "2026-08-07T12:00:00Z",
     word_count: 89,
@@ -34,15 +37,18 @@ const rows: ContentEntry[] = [
 ];
 
 const tags: TagCount[] = [
-  { tag: "research", count: 4 },
-  { tag: "active", count: 2 },
+  { tag: "research", count: 4, computed_count: 0 },
+  { tag: "active", count: 2, computed_count: 0 },
 ];
 
-function renderGazetteer(overrides: Partial<React.ComponentProps<typeof MobileGazetteer>> = {}) {
+function renderGazetteer(
+  overrides: Partial<React.ComponentProps<typeof MobileGazetteer>> = {},
+) {
   const props: React.ComponentProps<typeof MobileGazetteer> = {
     query: "",
     selectedTags: [],
     sort: "ts",
+    projects: ["atlas", "clepsydra"],
     rows,
     tags,
     totalCount: 2,
@@ -51,6 +57,8 @@ function renderGazetteer(overrides: Partial<React.ComponentProps<typeof MobileGa
     pageCount: 1,
     onQueryChange: vi.fn(),
     onSelectedTagsChange: vi.fn(),
+    onKindChange: vi.fn(),
+    onProjectChange: vi.fn(),
     onSortChange: vi.fn(),
     onPageChange: vi.fn(),
     onOpen: vi.fn(),
@@ -99,16 +107,58 @@ describe("MobileGazetteer", () => {
     const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
     expect(dialog).toBeVisible();
 
-    await user.type(within(dialog).getByRole("searchbox", { name: "Search pages" }), "a");
+    await user.type(
+      within(dialog).getByRole("searchbox", { name: "Search pages" }),
+      "a",
+    );
     expect(onQueryChange).toHaveBeenCalledWith("a");
 
-    await user.click(within(dialog).getByRole("button", { name: "Filter by research" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "Filter by research" }),
+    );
     expect(onSelectedTagsChange).toHaveBeenCalledWith(["research"]);
 
     await user.click(within(dialog).getByRole("radio", { name: "Title" }));
     expect(onSortChange).toHaveBeenCalledWith("title");
 
-    await user.click(within(dialog).getByRole("button", { name: "Close filters" }));
-    expect(screen.queryByRole("dialog", { name: "Gazetteer filters" })).not.toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Close filters" }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Gazetteer filters" }),
+    ).not.toBeInTheDocument();
+  });
+  it("emits controlled Kind and Project changes from the shared vocabularies", async () => {
+    const user = userEvent.setup();
+    const onKindChange = vi.fn();
+    const onProjectChange = vi.fn();
+    renderGazetteer({
+      kind: "PROJECT",
+      project: "clepsydra",
+      onKindChange,
+      onProjectChange,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Filters · 2" }));
+    const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Filter by kind" }),
+    );
+    for (const kind of KINDS) {
+      expect(
+        screen.getByRole("option", { name: kindLabel(kind) }),
+      ).toBeVisible();
+    }
+    await user.click(screen.getByRole("option", { name: "NOTE" }));
+    expect(onKindChange).toHaveBeenCalledWith("NOTE");
+
+    const project = within(dialog).getByRole("combobox", {
+      name: "Filter by project",
+    });
+    await user.click(project);
+    expect(screen.getByRole("option", { name: "atlas" })).toBeVisible();
+    await user.click(screen.getByRole("option", { name: "atlas" }));
+    expect(onProjectChange).toHaveBeenCalledWith("atlas");
   });
 });

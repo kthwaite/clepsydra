@@ -44,7 +44,7 @@ export function MobileCodexFrame({
     if (root === "atrium") {
       navigate({ to: "/" });
     } else if (root === "gazetteer") {
-      navigate({ to: "/gazetteer" });
+      navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } });
     } else if (root === "academic") {
       navigate({ to: "/academic" });
     } else if (root === "bases") {

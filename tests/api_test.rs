@@ -1359,7 +1359,8 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
     assert_eq!(indexed["title"], "Indexed title");
     assert_eq!(indexed["canonical_name"], "indexed title");
     assert_eq!(indexed["project"], "alpha");
-    assert_eq!(indexed["tags"], serde_json::json!(["indexed"]));
+    assert_eq!(indexed["tags"], serde_json::json!(["indexed", "note"]));
+    assert_eq!(indexed["computed_tags"], serde_json::json!(["note"]));
 
     let filesystem_only = pages
         .iter()
@@ -1375,7 +1376,8 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
             "kind": "NOTE",
             "inferred": true,
             "encrypted": false,
-            "tags": []
+            "tags": ["note"],
+            "computed_tags": ["note"]
         }),
         "filesystem-only pages should use the deterministic fallback summary"
     );
@@ -1751,7 +1753,7 @@ async fn index_stats() {
 
     assert_eq!(body["pages"], 2);
     assert!(body["links_total"].as_i64().unwrap() >= 1);
-    assert_eq!(body["tags"], 2); // t1 and t2
+    assert_eq!(body["tags"], 3); // t1, t2, and the computed note tag
 }
 
 #[tokio::test]
@@ -1833,17 +1835,13 @@ async fn similar_returns_pages_sharing_tags() {
 
     assert_eq!(
         paths,
-        vec!["b.md", "c.md"],
-        "expected b then c (more shared tags first); got {paths:?}"
-    );
-    assert!(
-        !paths.contains(&"d.md"),
-        "d has no shared tags and must not appear"
+        vec!["b.md", "c.md", "d.md"],
+        "expected stored-tag matches before the computed Kind-only match; got {paths:?}"
     );
 }
 
 #[tokio::test]
-async fn similar_returns_empty_for_untagged_page() {
+async fn similar_uses_computed_kind_tag_for_pages_without_stored_tags() {
     let (server, _tmp) = setup_server();
 
     server
@@ -1865,13 +1863,10 @@ async fn similar_returns_empty_for_untagged_page() {
     let res = server.get("/api/vault/index/similar/a.md").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
-    assert!(
-        body["items"]
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(false),
-        "expected empty items for untagged page; got {body:?}",
-    );
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "expected the computed note tag to match");
+    assert_eq!(items[0]["path"], "b.md");
+    assert_eq!(items[0]["shared_tags"], serde_json::json!(["note"]));
 }
 
 #[tokio::test]
@@ -3297,11 +3292,28 @@ async fn content_index_groups_tags_and_links_per_page() {
     };
     let mut a_tags = tags_of("page-a.md");
     a_tags.sort();
-    assert_eq!(a_tags, vec!["alpha".to_string(), "shared".to_string()]);
-    assert_eq!(tags_of("page-b.md"), vec!["beta".to_string()]);
+    assert_eq!(
+        a_tags,
+        vec![
+            "alpha".to_string(),
+            "note".to_string(),
+            "shared".to_string()
+        ]
+    );
+    assert_eq!(
+        tags_of("page-b.md"),
+        vec!["beta".to_string(), "note".to_string()]
+    );
     let mut c_tags = tags_of("page-c.md");
     c_tags.sort();
-    assert_eq!(c_tags, vec!["gamma".to_string(), "shared".to_string()]);
+    assert_eq!(
+        c_tags,
+        vec![
+            "gamma".to_string(),
+            "note".to_string(),
+            "shared".to_string()
+        ]
+    );
 
     let links_of = |p: &str| -> Vec<String> {
         by_path[p]["links"]

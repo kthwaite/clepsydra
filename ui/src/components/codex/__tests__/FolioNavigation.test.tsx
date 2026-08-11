@@ -22,6 +22,12 @@ vi.mock("#/api/index", () => ({
   useOutlinks: () => ({ data: undefined }),
   useSimilar: () => ({ data: undefined }),
   useTags: () => ({ data: [] }),
+  useTagSuggestions: () => ({
+    data: [],
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useGraph: () => ({
     data: {
       nodes: [
@@ -60,7 +66,9 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: () => ({ activeIndex: -1, scrollTo: vi.fn() }),
 }));
 vi.mock("#/editor/SlateEditor", () => ({
-  SlateEditor: () => <textarea aria-label="Page body" defaultValue="Editable body" />,
+  SlateEditor: () => (
+    <textarea aria-label="Page body" defaultValue="Editable body" />
+  ),
 }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: () => ({
@@ -85,9 +93,7 @@ vi.mock("#/editor/usePageEditor", () => ({
     initialValue: [
       { type: "paragraph", children: [{ text: "Editable body" }] },
     ],
-    editorValue: [
-      { type: "paragraph", children: [{ text: "Editable body" }] },
-    ],
+    editorValue: [{ type: "paragraph", children: [{ text: "Editable body" }] }],
     onSlateChange: vi.fn(),
     editorRevision: 1,
     createdAt: "2026-08-08T00:00:00Z",
@@ -127,7 +133,8 @@ function GazetteerOrigin() {
     <section>
       <h1>Gazetteer origin</h1>
       <p>
-        {state.query} · {state.selectedTags.join(",")} · {state.sort} · page {page}
+        {state.query} · {state.selectedTags.join(",")} · {state.sort} · page{" "}
+        {page}
       </p>
       <OpenAlpha origin="Gazetteer" />
     </section>
@@ -219,7 +226,9 @@ describe("mobile Folio Back", () => {
     await user.click(await screen.findByRole("button", { name: "Back" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(screen.getByRole("heading", { name: "Atrium origin" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Atrium origin" }),
+    ).toBeVisible();
     expect(pageTabStillExists()).toBe(true);
   });
 
@@ -275,7 +284,9 @@ describe("mobile Folio Back", () => {
       "true",
     );
     expect(screen.getByRole("switch", { name: "Hide journals" })).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Show orphans" })).not.toBeChecked();
+    expect(
+      screen.getByRole("switch", { name: "Show orphans" }),
+    ).not.toBeChecked();
     expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -301,7 +312,9 @@ describe("mobile Folio Back", () => {
     await user.click(await screen.findByRole("button", { name: "Back" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(screen.getByRole("heading", { name: "Atrium origin" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Atrium origin" }),
+    ).toBeVisible();
     expect(pageTabStillExists()).toBe(true);
   });
 });

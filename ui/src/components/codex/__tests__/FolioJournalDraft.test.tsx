@@ -55,6 +55,12 @@ vi.mock("#/api/index", () => ({
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),
+  useTagSuggestions: () => ({
+    data: [],
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
@@ -110,6 +116,7 @@ function draftEditor() {
     title: "",
     setTitle: vi.fn(),
     tags: [],
+    computedTags: [],
     setTags: vi.fn(),
     aliases: [],
     setAliases: vi.fn(),
@@ -139,8 +146,7 @@ describe("Folio journal draft", () => {
   });
 
   it("repoints a stale draft tab when today's journal already exists", () => {
-    const canonicalPath =
-      "journals/20260808T005500Z--2026-08-08--a1b2c3.md";
+    const canonicalPath = "journals/20260808T005500Z--2026-08-08--a1b2c3.md";
     useJournalTodayMock.mockReturnValue({
       data: { path: canonicalPath, meta: { title: "2026-08-08" } },
       isLoading: false,
@@ -174,6 +180,7 @@ describe("Folio journal draft", () => {
     usePageEditorMock.mockReturnValue({
       ...draftEditor(),
       kind: "JOURNAL",
+      computedTags: ["journal"],
     });
 
     render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
@@ -192,6 +199,7 @@ describe("Folio journal draft", () => {
       return {
         ...draftEditor(),
         kind: "JOURNAL",
+        computedTags: ["journal"],
         tags,
         setTags: (nextTags: string[]) => {
           setTags(nextTags);
@@ -211,8 +219,7 @@ describe("Folio journal draft", () => {
     expect(within(editableTags).getByText("daily")).toBeInTheDocument();
     expect(within(editableTags).getByRole("button")).toBeInTheDocument();
     await waitFor(() => {
-      expect(setTags).toHaveBeenCalledOnce();
-      expect(setTags).toHaveBeenCalledWith(["daily"]);
+      expect(setTags).not.toHaveBeenCalled();
     });
   });
 
@@ -221,6 +228,7 @@ describe("Folio journal draft", () => {
     let editor: Record<string, unknown> = {
       ...draftEditor(),
       kind: "JOURNAL",
+      computedTags: ["journal"],
       tags: ["journal", "daily"],
       setTags,
       encrypted: true,
@@ -228,9 +236,7 @@ describe("Folio journal draft", () => {
     };
     usePageEditorMock.mockImplementation(() => editor);
 
-    const view = render(
-      <Folio tabId="t1" path="journals/2026-08-07.md" />,
-    );
+    const view = render(<Folio tabId="t1" path="journals/2026-08-07.md" />);
 
     expect(setTags).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Tags")).toHaveTextContent("#daily");
@@ -253,8 +259,7 @@ describe("Folio journal draft", () => {
     view.rerender(<Folio tabId="t1" path="journals/2026-08-07.md" />);
 
     await waitFor(() => {
-      expect(setTags).toHaveBeenCalledOnce();
-      expect(setTags).toHaveBeenCalledWith(["daily"]);
+      expect(setTags).not.toHaveBeenCalled();
     });
   });
 
@@ -269,9 +274,7 @@ describe("Folio journal draft", () => {
 
     render(<Folio tabId="t1" path="notes/note.md" />);
 
-    expect(
-      screen.queryByRole("grid", { name: "Read-only Tags" }),
-    ).toBeNull();
+    expect(screen.queryByRole("grid", { name: "Read-only Tags" })).toBeNull();
     const editableTags = screen.getByRole("grid", { name: "Tags" });
     expect(within(editableTags).getByText("journal")).toBeInTheDocument();
     expect(within(editableTags).getByRole("button")).toBeInTheDocument();
@@ -288,15 +291,11 @@ describe("Folio journal draft", () => {
     expect(editor.onSlateChange).not.toHaveBeenCalled();
     expect(editor.saveNow).not.toHaveBeenCalled();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit journal body" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit journal body" }));
     expect(editor.onSlateChange).toHaveBeenCalledOnce();
     expect(editor.saveNow).not.toHaveBeenCalled();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save journal body" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save journal body" }));
     expect(editor.saveNow).toHaveBeenCalledOnce();
   });
 

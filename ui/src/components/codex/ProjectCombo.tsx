@@ -14,6 +14,7 @@ export interface ProjectComboProps {
   options: string[];
   ariaLabel?: string;
   ariaDescribedBy?: string;
+  menuTrigger?: "focus" | "input" | "manual";
   onAssign: (slug: string) => void;
   onClear: () => void;
 }
@@ -23,6 +24,7 @@ export function ProjectCombo({
   options,
   ariaLabel,
   ariaDescribedBy,
+  menuTrigger,
   onAssign,
   onClear,
 }: ProjectComboProps) {
@@ -59,6 +61,7 @@ export function ProjectCombo({
       <ComboBox
         aria-label={ariaLabel ?? "Project"}
         aria-describedby={ariaDescribedBy}
+        menuTrigger={menuTrigger}
         allowsCustomValue
         inputValue={draft}
         onInputChange={setDraft}

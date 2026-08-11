@@ -55,7 +55,10 @@ export function useGlobalShortcuts() {
       "nav.atrium": { run: () => navigate({ to: "/" }) },
       "journal.today": { run: openTodayJournal },
       "nav.constellation": { run: () => openTab("graph") },
-      "nav.gazetteer": { run: () => navigate({ to: "/gazetteer" }) },
+      "nav.gazetteer": {
+        run: () =>
+          navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } }),
+      },
       "nav.tasking": { run: () => navigate({ to: "/tasking" }) },
       "app.inscribe": { run: openInscribe },
       "journal.capture": { run: openCaptureAside },

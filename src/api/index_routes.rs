@@ -13,7 +13,7 @@ use utoipa::{IntoParams, ToSchema};
 use super::AppState;
 use super::error::{ApiError, parse_internal_path};
 use super::pages::page_detail;
-use super::pagination::{PaginatedResponse, PaginationParams};
+use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
@@ -89,6 +89,16 @@ pub struct AmbiguousName {
 pub struct TagCount {
     tag: String,
     count: i64,
+    computed_count: i64,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TagQuery {
+    /// Case-insensitive substring used to filter tag suggestions.
+    pub q: Option<String>,
+    /// Maximum suggestions to return when `q` is present (default 12, max 50).
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -461,33 +471,93 @@ pub async fn warnings(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Str
     Ok(Json(warnings.clone()))
 }
 
+const DEFAULT_TAG_SUGGESTION_LIMIT: u32 = 12;
+const MAX_TAG_SUGGESTION_LIMIT: u32 = 50;
+
+fn escape_like_pattern(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 #[utoipa::path(
     get,
     path = "/index/tags",
     context_path = "/api/vault",
     tag = "Index",
+    params(TagQuery),
     responses(
         (status = 200, description = "Tag counts", body = [TagCount]),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
-pub async fn tags(State(state): State<Arc<AppState>>) -> Result<Json<Vec<TagCount>>, ApiError> {
+pub async fn tags(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TagQuery>,
+) -> Result<Json<Vec<TagCount>>, ApiError> {
+    let q = query.q.map(|value| value.trim().to_owned());
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_TAG_SUGGESTION_LIMIT)
+        .clamp(1, MAX_TAG_SUGGESTION_LIMIT);
     let tag_counts = state
         .index
         .with_index(move |index, _vault| {
-            let mut stmt = index.connection().prepare(
-                "SELECT tag, COUNT(*) as count FROM tags GROUP BY tag ORDER BY count DESC",
-            )?;
-
-            let tag_counts: Vec<TagCount> = stmt
-                .query_map([], |row| {
+            let tag_counts = if let Some(q) = q {
+                let escaped = escape_like_pattern(&q);
+                let contains = format!("%{escaped}%");
+                let prefix = format!("{escaped}%");
+                let mut stmt = index.connection().prepare(
+                    "SELECT tag,
+                            COUNT(DISTINCT page_id) AS count,
+                            COUNT(DISTINCT CASE WHEN computed = 1 THEN page_id END)
+                                AS computed_count
+                     FROM tags
+                     WHERE tag LIKE ?1 ESCAPE '\\'
+                     GROUP BY tag
+                     ORDER BY
+                       CASE
+                         WHEN tag = ?2 COLLATE NOCASE THEN 0
+                         WHEN tag LIKE ?3 ESCAPE '\\' THEN 1
+                         ELSE 2
+                       END,
+                       count DESC,
+                       tag COLLATE NOCASE ASC,
+                       tag ASC
+                     LIMIT ?4",
+                )?;
+                stmt.query_map(params![contains, q, prefix, i64::from(limit)], |row| {
                     Ok(TagCount {
                         tag: row.get(0)?,
                         count: row.get(1)?,
+                        computed_count: row.get(2)?,
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?
+            } else {
+                let mut stmt = index.connection().prepare(
+                    "SELECT tag,
+                            COUNT(DISTINCT page_id) AS count,
+                            COUNT(DISTINCT CASE WHEN computed = 1 THEN page_id END)
+                                AS computed_count
+                       FROM tags
+                      GROUP BY tag
+                      ORDER BY count DESC, tag COLLATE NOCASE ASC, tag ASC",
+                )?;
+                stmt.query_map([], |row| {
+                    Ok(TagCount {
+                        tag: row.get(0)?,
+                        count: row.get(1)?,
+                        computed_count: row.get(2)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+            };
 
             Ok::<_, rusqlite::Error>(tag_counts)
         })
@@ -831,6 +901,7 @@ pub struct ContentEntry {
     path: String,
     title: Option<String>,
     tags: Vec<String>,
+    computed_tags: Vec<String>,
     links: Vec<String>,
     created_at: Option<String>,
     updated_at: Option<String>,
@@ -844,36 +915,150 @@ pub struct ContentEntry {
     project: Option<String>,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ContentIndexQuery {
+    /// Case-insensitive substring matched against title, path, and body.
+    pub q: Option<String>,
+    /// Canonical page Kind token.
+    pub kind: Option<String>,
+    /// Exact project slug.
+    pub project: Option<String>,
+    /// Comma-encoded tags; every tag must match.
+    pub tags: Option<String>,
+    /// Maximum number of entries.
+    pub limit: Option<u32>,
+    /// Entry offset.
+    pub offset: Option<u32>,
+}
+
 #[utoipa::path(
     get,
     path = "/index/content-index",
     context_path = "/api/vault",
     tag = "Index",
-    params(
-        ("limit" = Option<u32>, Query, description = "Maximum number of entries"),
-        ("offset" = Option<u32>, Query, description = "Entry offset")
-    ),
+    params(ContentIndexQuery),
     responses(
         (status = 200, description = "Content index", body = ContentIndexResponse),
+        (status = 400, description = "Invalid Kind filter", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
 pub async fn content_index(
     State(state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
+    Query(query): Query<ContentIndexQuery>,
 ) -> Result<Json<PaginatedResponse<ContentEntry>>, ApiError> {
-    let entries = state
+    let kind = query
+        .kind
+        .as_deref()
+        .map(|token| {
+            crate::vault::kind::Kind::from_token(token)
+                .map(|kind| kind.as_str().to_string())
+                .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))
+        })
+        .transpose()?;
+    let q = query
+        .q
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+    let project = query
+        .project
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let tags = query
+        .tags
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let limit = query.limit;
+    let offset = query.offset.unwrap_or(0);
+
+    let (entries, total) = state
         .index
         .with_index(move |index, vault| {
             let conn = index.connection();
+            let mut conditions = Vec::new();
+            let mut filter_params = Vec::<rusqlite::types::Value>::new();
 
+            if let Some(q) = q {
+                let like = format!(
+                    "%{}%",
+                    q.replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                );
+                conditions.push(
+                    "EXISTS (
+                        SELECT 1
+                          FROM pages_fts f
+                         WHERE f.page_id = p.id
+                           AND (
+                               LOWER(COALESCE(f.title, '')) LIKE ? ESCAPE '\\'
+                            OR LOWER(f.path) LIKE ? ESCAPE '\\'
+                            OR LOWER(f.body) LIKE ? ESCAPE '\\'
+                           )
+                    )"
+                    .to_string(),
+                );
+                filter_params.push(rusqlite::types::Value::Text(like.clone()));
+                filter_params.push(rusqlite::types::Value::Text(like.clone()));
+                filter_params.push(rusqlite::types::Value::Text(like));
+            }
+            if let Some(kind) = kind {
+                conditions.push("p.kind = ?".to_string());
+                filter_params.push(rusqlite::types::Value::Text(kind));
+            }
+            if let Some(project) = project {
+                conditions.push("p.project = ?".to_string());
+                filter_params.push(rusqlite::types::Value::Text(project));
+            }
+            for tag in tags {
+                conditions.push(
+                    "EXISTS (
+                        SELECT 1
+                          FROM tags selected_tag
+                         WHERE selected_tag.page_id = p.id
+                           AND selected_tag.tag = ?
+                    )"
+                    .to_string(),
+                );
+                filter_params.push(rusqlite::types::Value::Text(tag));
+            }
+
+            let where_clause = if conditions.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", conditions.join(" AND "))
+            };
+            let total = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM pages p{where_clause}"),
+                    rusqlite::params_from_iter(filter_params.iter()),
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+
+            let mut page_params = filter_params;
+            page_params.push(rusqlite::types::Value::Integer(
+                limit.map(i64::from).unwrap_or(-1),
+            ));
+            page_params.push(rusqlite::types::Value::Integer(i64::from(offset)));
             let mut page_stmt = conn
-                .prepare("SELECT id, path, title, kind, kind_inferred, project FROM pages")
+                .prepare(&format!(
+                    "SELECT p.id, p.path, p.title, p.kind, p.kind_inferred, p.project
+                       FROM pages p{where_clause}
+                      ORDER BY p.path COLLATE NOCASE, p.id
+                      LIMIT ? OFFSET ?"
+                ))
                 .map_err(|error| ApiError::internal(error.to_string()))?;
 
             type PageRow = (String, String, Option<String>, String, i64, Option<String>);
-            let pages: Vec<PageRow> = page_stmt
-                .query_map([], |row| {
+            let pages = page_stmt
+                .query_map(rusqlite::params_from_iter(page_params.iter()), |row| {
                     Ok((
                         row.get(0)?,
                         row.get(1)?,
@@ -884,65 +1069,91 @@ pub async fn content_index(
                     ))
                 })
                 .map_err(|error| ApiError::internal(error.to_string()))?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<Result<Vec<PageRow>, _>>()
+                .map_err(|error| ApiError::internal(error.to_string()))?;
 
-            // Bulk-load tags grouped by page_id (was N+1 per page).
             let mut tags_by_page: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::with_capacity(pages.len());
-            {
-                let mut stmt = conn
-                    .prepare("SELECT page_id, tag FROM tags")
-                    .map_err(|error| ApiError::internal(error.to_string()))?;
-                let rows = stmt
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })
-                    .map_err(|error| ApiError::internal(error.to_string()))?;
-                for (pid, tag) in rows.flatten() {
-                    tags_by_page.entry(pid).or_default().push(tag);
-                }
-            }
-
-            // Bulk-load distinct outbound links grouped by source_id (was N+1 per page).
+            let mut computed_tags_by_page: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::with_capacity(pages.len());
             let mut links_by_page: std::collections::HashMap<String, Vec<String>> =
                 std::collections::HashMap::with_capacity(pages.len());
-            {
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT DISTINCT source_id, target_path FROM links \
-                         WHERE target_path IS NOT NULL",
+
+            if !pages.is_empty() {
+                let placeholders = (0..pages.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+                let page_ids = pages.iter().map(|page| &page.0).collect::<Vec<_>>();
+
+                let mut tag_stmt = conn
+                    .prepare(&format!(
+                        "SELECT page_id, tag, computed
+                           FROM tags
+                          WHERE page_id IN ({placeholders})
+                          ORDER BY page_id, computed, rowid"
+                    ))
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                let tag_rows = tag_stmt
+                    .query_map(
+                        rusqlite::params_from_iter(page_ids.iter().copied()),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, i64>(2)?,
+                            ))
+                        },
                     )
                     .map_err(|error| ApiError::internal(error.to_string()))?;
-                let rows = stmt
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })
+                for row in tag_rows {
+                    let (page_id, tag, computed) =
+                        row.map_err(|error| ApiError::internal(error.to_string()))?;
+                    if computed != 0 {
+                        computed_tags_by_page
+                            .entry(page_id.clone())
+                            .or_default()
+                            .push(tag.clone());
+                    }
+                    tags_by_page.entry(page_id).or_default().push(tag);
+                }
+
+                let mut link_stmt = conn
+                    .prepare(&format!(
+                        "SELECT DISTINCT source_id, target_path
+                           FROM links
+                          WHERE target_path IS NOT NULL
+                            AND source_id IN ({placeholders})"
+                    ))
                     .map_err(|error| ApiError::internal(error.to_string()))?;
-                for (sid, target) in rows.flatten() {
-                    links_by_page.entry(sid).or_default().push(target);
+                let link_rows = link_stmt
+                    .query_map(
+                        rusqlite::params_from_iter(page_ids.iter().copied()),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    )
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                for row in link_rows {
+                    let (page_id, target) =
+                        row.map_err(|error| ApiError::internal(error.to_string()))?;
+                    links_by_page.entry(page_id).or_default().push(target);
                 }
             }
 
             let mut entries = Vec::with_capacity(pages.len());
-
             for (page_id, path, title, kind, kind_inferred, project) in &pages {
                 let tags = tags_by_page.remove(page_id).unwrap_or_default();
+                let computed_tags = computed_tags_by_page.remove(page_id).unwrap_or_default();
                 let links = links_by_page.remove(page_id).unwrap_or_default();
-
                 let vault_path = parse_internal_path(path, "invalid stored path")?;
                 let abs_path = vault.resolve(&vault_path);
                 let (created_at, updated_at, description, word_count) = if abs_path.exists() {
                     match Page::from_file(&abs_path, vault_path) {
                         Ok(page) => {
-                            let created = page.meta.created_at.map(|d| d.to_rfc3339());
-                            let updated = page.meta.updated_at.map(|d| d.to_rfc3339());
+                            let created = page.meta.created_at.map(|date| date.to_rfc3339());
+                            let updated = page.meta.updated_at.map(|date| date.to_rfc3339());
                             if page.is_encrypted() {
                                 (created, updated, String::new(), None)
                             } else {
-                                let desc = page.body.chars().take(200).collect::<String>();
+                                let description = page.body.chars().take(200).collect::<String>();
                                 let words = page.body.split_whitespace().count() as i64;
-                                (created, updated, desc, Some(words))
+                                (created, updated, description, Some(words))
                             }
                         }
                         Err(_) => (None, None, String::new(), None),
@@ -955,6 +1166,7 @@ pub async fn content_index(
                     path: path.clone(),
                     title: title.clone(),
                     tags,
+                    computed_tags,
                     links,
                     created_at,
                     updated_at,
@@ -966,12 +1178,17 @@ pub async fn content_index(
                 });
             }
 
-            Ok::<_, ApiError>(entries)
+            Ok::<_, ApiError>((entries, total))
         })
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))??;
+        .map_err(|error| ApiError::internal(error.to_string()))??;
 
-    Ok(Json(PaginatedResponse::from_vec(entries, &pagination)))
+    Ok(Json(PaginatedResponse {
+        items: entries,
+        total: u32::try_from(total).unwrap_or(u32::MAX),
+        limit,
+        offset,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -983,7 +1200,6 @@ mod tests {
     use axum::extract::{Query, State};
 
     use super::*;
-    use crate::api::pagination::PaginationParams;
     use crate::state_test_support::make_state;
     use crate::vault::index::IndexError;
     use crate::vault::path::VaultPath;
@@ -1020,7 +1236,11 @@ Some quoted text.\n";
         // Call the handler
         let resp = content_index(
             State(state),
-            Query(PaginationParams {
+            Query(ContentIndexQuery {
+                q: None,
+                kind: None,
+                project: None,
+                tags: None,
                 limit: None,
                 offset: None,
             }),
@@ -1041,6 +1261,96 @@ Some quoted text.\n";
             item.project.as_deref(),
             Some("clepsydra"),
             "project should be clepsydra"
+        );
+    }
+
+    #[tokio::test]
+    async fn content_index_filters_combined_query_before_pagination() {
+        let (state, _tmp) = make_state().await;
+        let project_dir = state.vault.root().join("projects");
+        let note_dir = state.vault.root().join("notes");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::create_dir_all(&note_dir).unwrap();
+        std::fs::write(
+            project_dir.join("atlas-alpha.md"),
+            "---\n\
+id: 01900000-0000-7000-8000-000000000020\n\
+title: Atlas Alpha\n\
+type: project\n\
+project: clepsydra\n\
+tags: [research]\n\
+---\n\
+\n\
+Atlas planning.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            project_dir.join("atlas-beta.md"),
+            "---\n\
+id: 01900000-0000-7000-8000-000000000021\n\
+title: Atlas Beta\n\
+type: project\n\
+project: clepsydra\n\
+tags: [research]\n\
+---\n\
+\n\
+Atlas delivery.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            note_dir.join("atlas-note.md"),
+            "---\n\
+id: 01900000-0000-7000-8000-000000000022\n\
+title: Atlas Note\n\
+type: note\n\
+project: clepsydra\n\
+tags: [research]\n\
+---\n\
+\n\
+Atlas notes.\n",
+        )
+        .unwrap();
+
+        let paths = [
+            VaultPath::new("projects/atlas-alpha.md").unwrap(),
+            VaultPath::new("projects/atlas-beta.md").unwrap(),
+            VaultPath::new("notes/atlas-note.md").unwrap(),
+        ];
+        state
+            .index
+            .with_index(move |index, vault| {
+                for path in paths {
+                    index.index_page(vault, &path)?;
+                }
+                Ok::<_, IndexError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        let response = content_index(
+            State(state),
+            Query(ContentIndexQuery {
+                q: Some("atlas".to_string()),
+                kind: Some("PROJECT".to_string()),
+                project: Some("clepsydra".to_string()),
+                tags: Some("project,research".to_string()),
+                limit: Some(1),
+                offset: Some(0),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response.total, 2);
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].path, "projects/atlas-alpha.md");
+        assert!(response.items[0].tags.contains(&"project".to_string()));
+        assert!(
+            response.items[0]
+                .computed_tags
+                .contains(&"project".to_string())
         );
     }
 

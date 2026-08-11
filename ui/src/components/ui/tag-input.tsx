@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { Button, Tag, TagGroup, TagList } from "react-aria-components";
+import { formatApiError } from "#/api/error";
 import { cn } from "#/lib/cn";
 
 export type TagInputVariant = "default" | "codex";
@@ -17,6 +18,10 @@ export interface TagInputProps {
   values: string[];
   readOnlyValues?: string[];
   suggestions?: string[];
+  onSuggestionQueryChange?: (query: string) => void;
+  suggestionsLoading?: boolean;
+  suggestionsError?: unknown;
+  onRetrySuggestions?: () => void;
   ariaLabel?: string;
   ariaDescribedBy?: string;
   onChange: (values: string[]) => void;
@@ -34,6 +39,10 @@ export function TagInput({
   values,
   readOnlyValues = [],
   suggestions,
+  onSuggestionQueryChange,
+  suggestionsLoading = false,
+  suggestionsError = null,
+  onRetrySuggestions,
   ariaLabel,
   ariaDescribedBy,
   onChange,
@@ -48,7 +57,8 @@ export function TagInput({
   const [highlight, setHighlight] = useState(0);
   const [navigated, setNavigated] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const hasSuggestions = suggestions !== undefined;
+  const hasSuggestions =
+    suggestions !== undefined || onSuggestionQueryChange !== undefined;
   const listId = useId();
   const stripValuePrefix = useCallback(
     (value: string) =>
@@ -59,16 +69,17 @@ export function TagInput({
   );
   const query = stripValuePrefix(inputValue.trim());
   const queryLower = query.toLowerCase();
-  const matches = query
-    ? (suggestions ?? [])
-        .filter(
-          (suggestion) =>
-            suggestion.toLowerCase().includes(queryLower) &&
-            !values.includes(suggestion) &&
-            !readOnlyValues.includes(suggestion),
-        )
-        .slice(0, maxSuggestions)
-    : [];
+  const matches =
+    query && !suggestionsLoading && !suggestionsError
+      ? (suggestions ?? [])
+          .filter(
+            (suggestion) =>
+              suggestion.toLowerCase().includes(queryLower) &&
+              !values.includes(suggestion) &&
+              !readOnlyValues.includes(suggestion),
+          )
+          .slice(0, maxSuggestions)
+      : [];
   const open = !dismissed && matches.length > 0;
   const selected = Math.min(highlight, Math.max(matches.length - 1, 0));
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,8 +98,9 @@ export function TagInput({
       setHighlight(0);
       setNavigated(false);
       setDismissed(false);
+      onSuggestionQueryChange?.("");
     },
-    [values, readOnlyValues, onChange],
+    [values, readOnlyValues, onChange, onSuggestionQueryChange],
   );
 
   const handleRemove = useCallback(
@@ -235,10 +247,12 @@ export function TagInput({
         }
         aria-autocomplete={hasSuggestions ? "list" : undefined}
         onChange={(e) => {
-          setInputValue(e.target.value);
+          const nextValue = e.target.value;
+          setInputValue(nextValue);
           setHighlight(0);
           setNavigated(false);
           setDismissed(false);
+          onSuggestionQueryChange?.(stripValuePrefix(nextValue.trim()));
         }}
         onKeyDown={handleKeyDown}
         onBlur={() => {
@@ -256,6 +270,33 @@ export function TagInput({
             "cl-mono min-w-[8ch] border-none p-[2px] text-[12px] text-ink placeholder:text-ink-mute",
         )}
       />
+      {query && suggestionsLoading ? (
+        <span role="status" className="text-xs text-muted-foreground">
+          Loading tag suggestions…
+        </span>
+      ) : null}
+      {query && suggestionsError ? (
+        <span className="flex items-center gap-2 text-xs text-destructive">
+          <span role="alert">
+            {formatApiError(suggestionsError, "Tag suggestions unavailable")}
+          </span>
+          {onRetrySuggestions ? (
+            <button
+              type="button"
+              aria-label="Retry tag suggestions"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRetrySuggestions();
+                inputRef.current?.focus();
+              }}
+              className="underline"
+            >
+              Retry
+            </button>
+          ) : null}
+        </span>
+      ) : null}
       {open && (
         <ul
           id={listId}

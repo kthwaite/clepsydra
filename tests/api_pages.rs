@@ -112,3 +112,249 @@ async fn filtered_page_total_is_stable_across_ordered_page_boundaries() {
     assert_eq!(beyond["total"], 3);
     assert!(item_paths(&beyond).is_empty());
 }
+
+#[tokio::test]
+async fn computed_tag_cutover_create_omits_redundant_stored_tag() {
+    let fixture = ApiFixture::builder().build();
+
+    let response = fixture
+        .server
+        .post("/api/vault/pages/journals/created.md")
+        .json(&serde_json::json!({
+            "title": "Created journal",
+            "kind": "JOURNAL",
+            "tags": ["journal", "research"],
+            "body": "created body"
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+
+    let stored =
+        std::fs::read_to_string(fixture.state.vault.root().join("journals/created.md")).unwrap();
+    let (stored_meta, _) = clepsydra::vault::page::parse_frontmatter(&stored).unwrap();
+    assert_eq!(stored_meta.tags, ["research"]);
+    assert_eq!(created["meta"]["tags"], serde_json::json!(["research"]));
+    assert_eq!(
+        created["computed_tags"],
+        serde_json::json!(["journal"]),
+        "the mutation response must retain the computed journal classification"
+    );
+}
+
+#[tokio::test]
+async fn computed_tag_cutover_update_strips_legacy_tag_without_rewriting_unrelated_pages() {
+    const LEGACY: &str = "---\n\
+id: 01951234-0000-7000-8000-000000000401\n\
+title: Legacy journal\n\
+type: JOURNAL\n\
+tags:\n\
+  - journal\n\
+  - research\n\
+---\n\
+legacy body\n";
+    const UNTOUCHED: &str = "---\n\
+id: 01951234-0000-7000-8000-000000000402\n\
+title: Untouched journal\n\
+type: JOURNAL\n\
+tags:\n\
+  - journal\n\
+---\n\
+untouched body\n";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            std::fs::create_dir_all(root.join("journals")).unwrap();
+            std::fs::write(root.join("journals/legacy.md"), LEGACY).unwrap();
+            std::fs::write(root.join("journals/untouched.md"), UNTOUCHED).unwrap();
+        })
+        .build();
+    let untouched_path = fixture.state.vault.root().join("journals/untouched.md");
+    let untouched_before = std::fs::read(&untouched_path).unwrap();
+
+    let legacy_response = fixture
+        .server
+        .get("/api/vault/pages/journals/legacy.md")
+        .await;
+    legacy_response.assert_status_ok();
+    let legacy_before: serde_json::Value = legacy_response.json();
+    let revision = legacy_before["revision"].as_str().unwrap();
+    let updated_response = fixture
+        .server
+        .put("/api/vault/pages/journals/legacy.md")
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "body": "rewritten body"
+        }))
+        .await;
+    updated_response.assert_status_ok();
+    let updated: serde_json::Value = updated_response.json();
+
+    assert_eq!(
+        std::fs::read(&untouched_path).unwrap(),
+        untouched_before,
+        "rewriting one legacy page must not mass-rewrite another page"
+    );
+    let rewritten =
+        std::fs::read_to_string(fixture.state.vault.root().join("journals/legacy.md")).unwrap();
+    let (rewritten_meta, rewritten_body) =
+        clepsydra::vault::page::parse_frontmatter(&rewritten).unwrap();
+    assert_eq!(rewritten_meta.tags, ["research"]);
+    assert_eq!(rewritten_body, "rewritten body");
+    assert_eq!(
+        legacy_before["meta"]["tags"],
+        serde_json::json!(["research"]),
+        "legacy computed metadata must not be exposed as editable"
+    );
+    assert_eq!(
+        legacy_before["computed_tags"],
+        serde_json::json!(["journal"]),
+        "legacy stored metadata must remain readable through the computed projection"
+    );
+    assert_eq!(updated["meta"]["tags"], serde_json::json!(["research"]));
+    assert_eq!(
+        updated["computed_tags"],
+        serde_json::json!(["journal"]),
+        "the rewritten page must still expose its computed journal tag"
+    );
+}
+
+#[tokio::test]
+async fn computed_tags_are_effective_in_detail_summary_content_and_tag_queries() {
+    const JOURNAL: &str = "---\n\
+id: 01951234-0000-7000-8000-000000000301\n\
+title: Legacy journal\n\
+type: JOURNAL\n\
+tags:\n\
+  - journal\n\
+  - research\n\
+---\n\
+legacy body\n";
+    const NOTE: &str = "---\n\
+id: 01951234-0000-7000-8000-000000000302\n\
+title: Ordinary note\n\
+type: NOTE\n\
+tags:\n\
+  - journal\n\
+---\n\
+note body\n";
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            std::fs::create_dir_all(root.join("journals")).unwrap();
+            std::fs::create_dir_all(root.join("notes")).unwrap();
+            std::fs::write(root.join("journals/legacy.md"), JOURNAL).unwrap();
+            std::fs::write(root.join("notes/ordinary.md"), NOTE).unwrap();
+        })
+        .build();
+    let journal_path = fixture.state.vault.root().join("journals/legacy.md");
+    let before = std::fs::read(&journal_path).unwrap();
+
+    let detail: serde_json::Value = fixture
+        .server
+        .get("/api/vault/pages/journals/legacy.md")
+        .await
+        .json();
+    assert_eq!(detail["meta"]["tags"], serde_json::json!(["research"]));
+    assert_eq!(detail["computed_tags"], serde_json::json!(["journal"]));
+    assert_eq!(std::fs::read(journal_path).unwrap(), before);
+
+    let listed: serde_json::Value = fixture
+        .server
+        .get("/api/vault/pages?tag=journal")
+        .await
+        .json();
+    let items = listed["items"].as_array().unwrap();
+    let journal = items
+        .iter()
+        .find(|item| item["path"] == "journals/legacy.md")
+        .unwrap();
+    assert_eq!(journal["tags"], serde_json::json!(["research", "journal"]));
+    assert_eq!(journal["computed_tags"], serde_json::json!(["journal"]));
+    assert_eq!(
+        journal["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tag| tag.as_str() == Some("journal"))
+            .count(),
+        1
+    );
+    let note = items
+        .iter()
+        .find(|item| item["path"] == "notes/ordinary.md")
+        .unwrap();
+    assert!(
+        note["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("journal"))
+    );
+    assert!(
+        !note["computed_tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("journal"))
+    );
+
+    let content: serde_json::Value = fixture
+        .server
+        .get("/api/vault/index/content-index")
+        .await
+        .json();
+    let journal = content["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "journals/legacy.md")
+        .unwrap();
+    assert_eq!(journal["tags"], serde_json::json!(["research", "journal"]));
+    assert_eq!(journal["computed_tags"], serde_json::json!(["journal"]));
+
+    let counts: serde_json::Value = fixture.server.get("/api/vault/index/tags").await.json();
+    let journal = counts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tag| tag["tag"] == "journal")
+        .unwrap();
+    assert_eq!(journal["count"], 2);
+    assert_eq!(journal["computed_count"], 1);
+}
+
+#[tokio::test]
+async fn computed_tags_cannot_be_removed_by_replacing_editable_tags() {
+    let fixture = ApiFixture::builder().build();
+    let created: serde_json::Value = fixture
+        .server
+        .post("/api/vault/pages/journals/removal.md")
+        .json(&serde_json::json!({
+            "title": "Removal",
+            "kind": "JOURNAL",
+            "tags": ["research"]
+        }))
+        .await
+        .json();
+    assert_eq!(created["meta"]["tags"], serde_json::json!(["research"]));
+    assert_eq!(created["computed_tags"], serde_json::json!(["journal"]));
+
+    let updated: serde_json::Value = fixture
+        .server
+        .put("/api/vault/pages/journals/removal.md")
+        .json(&serde_json::json!({
+            "expected_revision": created["revision"],
+            "tags": []
+        }))
+        .await
+        .json();
+    assert!(
+        updated["meta"]
+            .get("tags")
+            .is_none_or(|tags| tags == &serde_json::json!([])),
+        "empty editable tags may be omitted by PageMeta serialization"
+    );
+    assert_eq!(updated["computed_tags"], serde_json::json!(["journal"]));
+
+    let stored =
+        std::fs::read_to_string(fixture.state.vault.root().join("journals/removal.md")).unwrap();
+    let (meta, _) = clepsydra::vault::page::parse_frontmatter(&stored).unwrap();
+    assert!(meta.tags.is_empty(), "only editable tags may be persisted");
+}

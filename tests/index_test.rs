@@ -8,6 +8,7 @@ use clepsydra::vault::derivation::{Deriver, IndexedPage};
 use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_code_number};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
+use clepsydra::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
 use clepsydra::vault::tree::load_note_meta;
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -321,12 +322,15 @@ Back to [[Hello]].
         .unwrap();
     assert_eq!(link_count, 2, "expected 2 wiki links from body text");
 
-    // Verify tags
+    // Verify stored and computed Kind tags
     let tag_count: i64 = index
         .connection()
         .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(tag_count, 2, "expected 2 tags total (greeting + place)");
+    assert_eq!(
+        tag_count, 4,
+        "expected two stored tags plus one computed Kind tag per page"
+    );
 
     // Verify canonical_names entries exist for titles and filenames
     let cn_count: i64 = index
@@ -561,12 +565,12 @@ Back to [[Hello]].
     // Page B: tags=["place"] -> 1 prop ref
     assert_eq!(prop_count, 3, "expected 3 property ref links");
 
-    // Tags: 2 tags total
+    // Tags: two stored tags plus one computed Kind tag per page.
     let tag_count: i64 = index
         .connection()
         .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(tag_count, 2);
+    assert_eq!(tag_count, 4);
 
     // Link resolution: [[World]] from page A should resolve to page B
     let target_id: Option<String> = index
@@ -781,12 +785,12 @@ Content here.
         .unwrap();
     assert_eq!(page_count, 1);
 
-    // Verify tags derived
+    // Verify the stored tag and computed Kind tag are derived.
     let tag_count: i64 = index
         .connection()
         .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(tag_count, 1, "expected 1 tag (solo)");
+    assert_eq!(tag_count, 2, "expected stored solo and computed note tags");
 
     // Verify canonical_names derived
     let cn_count: i64 = index
@@ -1314,6 +1318,219 @@ Same dir design.
     assert_eq!(
         ranked[0].path, "notes/design.md",
         "same directory should rank first"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Computed Kind tags: index projection, query visibility, and migration
+// -----------------------------------------------------------------------
+
+fn computed_tags_fixture() -> (TempDir, Vault, VaultIndex) {
+    let journal = r#"+++
+id = "019fd000-0000-7000-8000-000000000101"
+title = "Research journal"
+type = "JOURNAL"
+tags = ["research"]
++++
+Journal body.
+"#;
+    let note = r#"+++
+id = "019fd000-0000-7000-8000-000000000102"
+title = "Cross-kind note"
+type = "NOTE"
+tags = ["journal"]
++++
+Note body.
+"#;
+    let legacy_journal = r#"+++
+id = "019fd000-0000-7000-8000-000000000103"
+title = "Legacy journal"
+type = "JOURNAL"
+tags = ["JOURNAL"]
++++
+Legacy body.
+"#;
+
+    let (tmp, vault) = setup_vault(&[
+        ("journals/research.md", journal),
+        ("notes/cross-kind.md", note),
+        ("journals/legacy.md", legacy_journal),
+    ]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    (tmp, vault, index)
+}
+
+fn indexed_tag_rows(index: &VaultIndex) -> Vec<(String, String, i64)> {
+    index
+        .connection()
+        .prepare(
+            "SELECT p.path, t.tag, t.computed
+             FROM tags t
+             JOIN pages p ON p.id = t.page_id
+             ORDER BY p.path, t.tag",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[test]
+fn computed_tags_index_with_provenance_and_count_once() {
+    let (_tmp, _vault, index) = computed_tags_fixture();
+
+    assert_eq!(
+        indexed_tag_rows(&index),
+        vec![
+            ("journals/legacy.md".into(), "journal".into(), 1),
+            ("journals/research.md".into(), "journal".into(), 1),
+            ("journals/research.md".into(), "research".into(), 0),
+            ("notes/cross-kind.md".into(), "journal".into(), 0),
+            ("notes/cross-kind.md".into(), "note".into(), 1),
+        ],
+        "legacy case variants must collapse into the canonical computed row, while same-spelling tags on another Kind stay editable",
+    );
+
+    let counts: Vec<(String, i64)> = index
+        .connection()
+        .prepare("SELECT tag, COUNT(*) FROM tags GROUP BY tag ORDER BY tag")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        counts,
+        vec![
+            ("journal".into(), 3),
+            ("note".into(), 1),
+            ("research".into(), 1),
+        ],
+        "tag counts must count each effective page/tag pair exactly once",
+    );
+}
+
+#[test]
+fn computed_tags_are_searchable_and_project_as_effective_tags() {
+    let (_tmp, _vault, index) = computed_tags_fixture();
+    let spec = QuerySpec {
+        filter: Some(
+            serde_json::from_value(
+                serde_json::json!({ "field": "tags", "op": "contains", "value": "journal" }),
+            )
+            .unwrap(),
+        ),
+        columns: vec!["tags".into()],
+        ..Default::default()
+    };
+
+    let QueryOutput::Flat { rows, total } =
+        evaluate(index.connection(), &spec, &QueryContext::default()).unwrap()
+    else {
+        panic!("tag search should return flat query rows");
+    };
+    assert_eq!(
+        total, 3,
+        "computed and ordinary tags must both be searchable"
+    );
+
+    let projected: Vec<(String, Vec<String>)> = rows
+        .into_iter()
+        .map(|row| {
+            let mut tags: Vec<String> = row.columns["tags"]
+                .as_array()
+                .expect("tags projection must be an array")
+                .iter()
+                .map(|tag| tag.as_str().unwrap().to_owned())
+                .collect();
+            tags.sort();
+            (row.path, tags)
+        })
+        .collect();
+    assert_eq!(
+        projected,
+        vec![
+            ("journals/legacy.md".into(), vec!["journal".into()]),
+            (
+                "journals/research.md".into(),
+                vec!["journal".into(), "research".into()],
+            ),
+            (
+                "notes/cross-kind.md".into(),
+                vec!["journal".into(), "note".into()],
+            ),
+        ],
+        "requested tags columns must expose effective index rows rather than stored frontmatter arrays",
+    );
+}
+
+#[test]
+fn computed_tags_migration_rederives_unchanged_pages_once() {
+    let journal = r#"+++
+id = "019fd000-0000-7000-8000-000000000104"
+title = "Unchanged journal"
+type = "JOURNAL"
+tags = ["research"]
++++
+Stable body.
+"#;
+    let (_tmp, vault) = setup_vault(&[("journals/research.md", journal)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    let page_before = fs::read_to_string(vault.root().join("journals/research.md")).unwrap();
+
+    index
+        .connection()
+        .execute_batch(
+            "DROP TABLE tags;
+             CREATE TABLE tags (
+                 page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                 tag TEXT NOT NULL,
+                 PRIMARY KEY (page_id, tag)
+             );
+             INSERT INTO tags (page_id, tag)
+             SELECT id, 'research' FROM pages WHERE path = 'journals/research.md';
+             DELETE FROM derivation_meta WHERE key = 'tag_derivation_version';",
+        )
+        .unwrap();
+    drop(index);
+
+    let mut reopened = VaultIndex::open(&db_path).unwrap();
+    let migration = reopened.build(&vault).unwrap();
+    assert_eq!(
+        (migration.pages_indexed, migration.pages_skipped),
+        (1, 0),
+        "a missing derivation version must bypass the unchanged-page skip",
+    );
+    assert_eq!(
+        indexed_tag_rows(&reopened),
+        vec![
+            ("journals/research.md".into(), "journal".into(), 1),
+            ("journals/research.md".into(), "research".into(), 0),
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(vault.root().join("journals/research.md")).unwrap(),
+        page_before,
+        "index migration must not persist the computed tag into frontmatter",
+    );
+
+    let unchanged = reopened.build(&vault).unwrap();
+    assert_eq!(
+        (unchanged.pages_indexed, unchanged.pages_skipped),
+        (0, 1),
+        "the stored derivation version must restore unchanged-page skipping",
+    );
+    assert_eq!(
+        indexed_tag_rows(&reopened),
+        vec![
+            ("journals/research.md".into(), "journal".into(), 1),
+            ("journals/research.md".into(), "research".into(), 0),
+        ],
+        "a skipped rebuild must preserve the effective tag projection",
     );
 }
 

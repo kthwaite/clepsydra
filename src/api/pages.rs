@@ -42,6 +42,7 @@ pub struct PageSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     pub tags: Vec<String>,
+    pub computed_tags: Vec<String>,
     pub encrypted: bool,
 }
 
@@ -50,6 +51,7 @@ pub struct PageDetail {
     pub path: String,
     pub canonical_name: String,
     pub meta: PageMeta,
+    pub computed_tags: Vec<String>,
     pub body: String,
     pub revision: String,
     pub kind: String,
@@ -90,6 +92,7 @@ pub struct PageDetailResponse {
     pub path: String,
     pub canonical_name: String,
     pub meta: PageMetaResponse,
+    pub computed_tags: Vec<String>,
     pub body: String,
     pub revision: String,
     #[schema(value_type = crate::vault::kind::Kind)]
@@ -297,6 +300,13 @@ pub fn assign_router() -> Router<Arc<AppState>> {
 // Canonical PageDetail mapping
 // ---------------------------------------------------------------------------
 
+fn sanitize_editable_tags(kind: crate::vault::kind::Kind, tags: &mut Vec<String>) {
+    *tags = crate::vault::kind::editable_tags(kind, tags)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+}
+
 /// Map a complete page returned by reads and mutations into the public detail
 /// response without cloning page contents.
 pub(crate) fn page_detail(page: Page) -> PageDetail {
@@ -317,6 +327,7 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
     let encrypted = encryption.is_some();
     let conversation = super::conversations::conversation_summary(&page.meta);
     let mut meta = page.meta;
+    sanitize_editable_tags(kind, &mut meta.tags);
     // Conversation identity and ledger hashes are operational metadata, not
     // public page metadata. Keep ordinary reads non-destructive by sanitizing
     // only this response-owned copy.
@@ -326,6 +337,7 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         path: page.path.as_str().to_string(),
         canonical_name: canonical.as_str().to_string(),
         meta,
+        computed_tags: vec![kind.computed_tag().to_owned()],
         body: page.body,
         revision,
         kind: kind.as_str().to_string(),
@@ -345,16 +357,26 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
 /// listing query rely on this shared mapper, so their SELECT statements MUST
 /// use the same column order:
 /// `id, path, title, canonical_name, kind, kind_inferred, project, encrypted,
-/// <tags subquery>`.
-/// The tags subquery is a `group_concat` joined by the unit separator (`char(31)`)
-/// so commas in tag text don't fragment the split.
+/// <effective tags subquery>, <computed tags subquery>`.
+/// Tag subqueries are `group_concat` values joined by the unit separator
+/// (`char(31)`) so commas in tag text don't fragment the split.
 pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageSummary> {
-    let tags_raw: String = row.get(8)?;
-    let tags = if tags_raw.is_empty() {
-        Vec::new()
-    } else {
-        tags_raw.split('\u{1f}').map(str::to_string).collect()
-    };
+    fn split_tags(tags_raw: String) -> Vec<String> {
+        if tags_raw.is_empty() {
+            Vec::new()
+        } else {
+            tags_raw.split('\u{1f}').map(str::to_string).collect()
+        }
+    }
+    let computed_tags = split_tags(row.get(9)?);
+    let mut tags = split_tags(row.get(8)?);
+    tags.retain(|tag| {
+        !computed_tags
+            .iter()
+            .any(|computed| tag.trim().eq_ignore_ascii_case(computed.trim()))
+    });
+    tags.extend(computed_tags.iter().cloned());
+
     Ok(PageSummary {
         id: row.get(0)?,
         path: row.get(1)?,
@@ -365,6 +387,7 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
         project: row.get(6)?,
         encrypted: row.get::<_, i64>(7)? != 0,
         tags,
+        computed_tags,
     })
 }
 
@@ -441,7 +464,10 @@ pub async fn list_pages(
                 "SELECT p.id, p.path, p.title, p.canonical_name, p.kind, p.kind_inferred,
                         p.project, p.encrypted,
                         COALESCE((SELECT group_concat(t.tag, char(31))
-                                    FROM tags t WHERE t.page_id = p.id), '')
+                                    FROM tags t WHERE t.page_id = p.id), ''),
+                        COALESCE((SELECT group_concat(t.tag, char(31))
+                                    FROM tags t
+                                   WHERE t.page_id = p.id AND t.computed = 1), '')
                    FROM pages p",
             );
             page_sql.push_str(&where_sql);
@@ -1532,7 +1558,11 @@ Some quoted text.\n";
         );
         let mut actual_tags = item.tags.clone();
         actual_tags.sort();
-        assert_eq!(actual_tags, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            actual_tags,
+            vec!["a".to_string(), "b".to_string(), "quote".to_string()]
+        );
+        assert_eq!(item.computed_tags, vec!["quote".to_string()]);
     }
 
     #[tokio::test]

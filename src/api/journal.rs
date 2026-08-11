@@ -148,7 +148,6 @@ async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath,
     meta.created_at = Some(now);
     meta.updated_at = Some(now);
     meta.title = Some(date.to_string());
-    meta.tags = vec!["journal".to_string()];
 
     let notify = super::mutation_notifier(state);
     match state

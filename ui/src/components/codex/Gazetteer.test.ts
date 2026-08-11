@@ -1,33 +1,52 @@
-import { createElement, useState } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createElement, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { KINDS, kindLabel } from "#/lib/kind";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { Gazetteer, toggleInSet } from "./Gazetteer";
 
-const { contentState, openTabMock, routeBridge } = vi.hoisted(() => ({
-  contentState: { items: [] as Array<Record<string, unknown>> },
+const {
+  contentState,
+  layoutState,
+  openTabMock,
+  routeBridge,
+  useContentIndexMock,
+} = vi.hoisted(() => ({
+  contentState: {
+    items: [] as Array<Record<string, unknown>>,
+    total: 0,
+  },
+  layoutState: { mobile: true },
   openTabMock: vi.fn(),
   routeBridge: { openWorkspace: undefined as (() => void) | undefined },
+  useContentIndexMock: vi.fn(),
 }));
 
 vi.mock("#/api/index", () => ({
-  useContentIndex: () => ({
-    data: contentState,
-  }),
+  useContentIndex: (...args: unknown[]) => {
+    useContentIndexMock(...args);
+    return { data: contentState };
+  },
   useTags: () => ({ data: [{ tag: "research", count: 1 }] }),
 }));
 vi.mock("#/api/pages", () => ({
   useAssignBulk: () => ({ isPending: false, mutate: vi.fn() }),
 }));
-vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => true }));
-vi.mock("#/hooks/useOpenTab", () => ({
-  useOpenTab: () => (...args: unknown[]) => {
-    openTabMock(...args);
-    routeBridge.openWorkspace?.();
-  },
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => layoutState.mobile,
 }));
-vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
+vi.mock("#/hooks/useOpenTab", () => ({
+  useOpenTab:
+    () =>
+    (...args: unknown[]) => {
+      openTabMock(...args);
+      routeBridge.openWorkspace?.();
+    },
+}));
+vi.mock("#/lib/useProjects", () => ({
+  useProjects: () => ["atlas", "clepsydra"],
+}));
 
 function GazetteerNavigationHarness() {
   const [route, setRoute] = useState<"gazetteer" | "workspace">("gazetteer");
@@ -62,6 +81,8 @@ function makeContentEntry(index: number) {
 
 beforeEach(() => {
   openTabMock.mockClear();
+  layoutState.mobile = true;
+  useContentIndexMock.mockClear();
   routeBridge.openWorkspace = undefined;
   contentState.items = Array.from({ length: 25 }, (_, index) =>
     makeContentEntry(index),
@@ -114,11 +135,7 @@ describe("Gazetteer controller", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Open Alpha" }));
-    expect(openTabMock).toHaveBeenCalledWith(
-      "page",
-      "notes/alpha.md",
-      "Alpha",
-    );
+    expect(openTabMock).toHaveBeenCalledWith("page", "notes/alpha.md", "Alpha");
 
     await user.click(
       screen.getByRole("button", { name: "Return to Gazetteer" }),
@@ -151,9 +168,10 @@ describe("Gazetteer controller", () => {
         "listitem",
       ),
     ).toHaveLength(20);
-    expect(
-      screen.getByRole("button", { name: "Previous page" }),
-    ).toHaveClass("min-h-11", "min-w-11");
+    expect(screen.getByRole("button", { name: "Previous page" })).toHaveClass(
+      "min-h-11",
+      "min-w-11",
+    );
     expect(screen.getByRole("button", { name: "Next page" })).toHaveClass(
       "min-h-11",
       "min-w-11",
@@ -196,8 +214,30 @@ describe("Gazetteer controller", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Page 1 of 1 · 1 match",
     );
-    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Previous page" }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Open Alpha" })).toBeVisible();
+  });
+  it("offers the shared Kind and Project vocabularies through accessible desktop filters", async () => {
+    const user = userEvent.setup();
+    layoutState.mobile = false;
+    render(createElement(Gazetteer));
+
+    await user.click(screen.getByRole("button", { name: "Filter by kind" }));
+    for (const kind of KINDS) {
+      expect(
+        screen.getByRole("option", { name: kindLabel(kind) }),
+      ).toBeVisible();
+    }
+    await user.click(screen.getByRole("option", { name: "PROJECT" }));
+
+    const project = screen.getByRole("combobox", {
+      name: "Filter by project",
+    });
+    await user.click(project);
+    expect(screen.getByRole("option", { name: "atlas" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
   });
 });

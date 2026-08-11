@@ -117,7 +117,8 @@ function CommandPaletteContent() {
         kind: "cmd",
         id: formatChord(SHORTCUTS["nav.gazetteer"].chord),
         title: "Open Gazetteer (index)",
-        action: () => navigate({ to: "/gazetteer" }),
+        action: () =>
+          navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } }),
       },
       {
         kind: "cmd",
@@ -214,7 +215,10 @@ function CommandPaletteContent() {
       id: `tag.${t.tag}`,
       title: `${t.tag} · ${t.count ?? 0}`,
       action: () =>
-        navigate({ to: "/gazetteer", search: { tag: t.tag } as never }),
+        navigate({
+          to: "/gazetteer",
+          search: { tags: [t.tag], sort: "ts", page: 1 },
+        }),
     }));
   }, [tags, navigate]);
 

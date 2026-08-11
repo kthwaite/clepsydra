@@ -152,6 +152,24 @@ export function useTags(enabled = true) {
   return $api.useQuery("get", "/api/vault/index/tags", {}, { enabled });
 }
 
+export function useTagSuggestions(query: string, limit = 12, enabled = true) {
+  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(Math.trunc(limit), 50))
+    : 12;
+
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/tags",
+    {
+      params: {
+        query: { q: normalizedQuery, limit: normalizedLimit },
+      },
+    },
+    { enabled: enabled && normalizedQuery.length > 0 },
+  );
+}
+
 export function useStats() {
   return $api.useQuery("get", "/api/vault/index/stats");
 }
@@ -169,9 +187,33 @@ export function useSearch(query: string, limit?: number) {
   );
 }
 
-export function useContentIndex(limit?: number, offset?: number) {
+export interface ContentIndexOptions {
+  q?: string;
+  tags?: string[];
+  kind?: string;
+  project?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function useContentIndex({
+  q,
+  tags,
+  kind,
+  project,
+  limit,
+  offset,
+}: ContentIndexOptions = {}) {
+  const query = {
+    q,
+    tags: tags && tags.length > 0 ? tags.join(",") : undefined,
+    kind,
+    project,
+    limit,
+    offset,
+  };
   return $api.useQuery("get", "/api/vault/index/content-index", {
-    params: { query: { limit, offset } },
+    params: { query },
   });
 }
 

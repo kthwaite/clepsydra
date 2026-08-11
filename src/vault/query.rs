@@ -899,9 +899,8 @@ fn fetch_rows(
     limit: Option<u32>,
     offset: u32,
 ) -> Result<Vec<QueryRow>, QueryError> {
-    // Column joins for requested property columns. Multi-valued system
-    // columns (tags, aliases) come from the exact meta_json arrays; scalar
-    // system columns are already in the fixed select list.
+    // Column joins for requested property columns. Tags come from their
+    // effective index projection; aliases still come from meta_json.
     let mut select_cols =
         "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.encrypted, p.journal_date, p.word_count"
             .to_string();
@@ -913,7 +912,10 @@ fn fetch_rows(
     for (i, name) in spec.columns.iter().enumerate() {
         match resolve_field(name, ctx)? {
             ResolvedField::Sys(SysField::Tags) => {
-                select_cols.push_str(", json_extract(p.meta_json, '$.tags')");
+                select_cols.push_str(
+                    ", (SELECT json_group_array(tag) FROM
+                       (SELECT tag FROM tags WHERE page_id = p.id ORDER BY computed, rowid))",
+                );
                 json_columns.push(name.clone());
             }
             ResolvedField::Sys(SysField::Aliases) => {
@@ -1347,6 +1349,14 @@ moment  = { type = "datetime" }
             ),
             (
                 serde_json::json!({ "field": "series", "op": "contains", "value": "[[Solar Cycle]]" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "tags", "op": "contains", "value": "book" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "tags", "op": "contains", "value": "sf" }),
                 true,
             ),
             (
@@ -1824,11 +1834,11 @@ moment  = { type = "datetime" }
         assert_eq!(a.columns["path"], serde_json::json!("a.md"));
         assert_eq!(a.columns["kind"], serde_json::json!("BOOK"));
         assert_eq!(a.columns["project"], serde_json::Value::Null);
-        assert_eq!(a.columns["tags"], serde_json::json!(["sf"]));
+        assert_eq!(a.columns["tags"], serde_json::json!(["sf", "book"]));
         assert!(a.columns["word_count"].is_number());
-        // A tagless page carries an empty/absent array, not a missing key.
+        // A page with no stored tags still exposes its computed Kind tag.
         let e = rows.iter().find(|r| r.path == "e.md").unwrap();
-        assert_eq!(e.columns["tags"], serde_json::Value::Null);
+        assert_eq!(e.columns["tags"], serde_json::json!(["book"]));
         assert_eq!(e.columns["aliases"], serde_json::Value::Null);
     }
 

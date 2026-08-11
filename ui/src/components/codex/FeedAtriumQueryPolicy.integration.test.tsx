@@ -109,6 +109,11 @@ import { FeedRiver } from "#/components/codex/FeedRiver";
 import { queryClient as productionQueryClient } from "#/lib/queryClient";
 
 const feedsKey = ["get", "/api/vault/feeds"] as const;
+const allEntriesKey = [
+  "get",
+  "/api/vault/feeds/entries",
+  { params: { query: { view: "all" } } },
+] as const;
 const unreadEntriesKey = [
   "get",
   "/api/vault/feeds/entries",
@@ -269,7 +274,7 @@ describe("Atrium feed query policy", () => {
     const client = productionPolicyClient();
     client.setQueryData(feedsKey, feedList, { updatedAt: 0 });
     client.setQueryData(
-      unreadEntriesKey,
+      allEntriesKey,
       {
         pages: [{ entries: [cachedEntry], next_cursor: null }],
         pageParams: [undefined],
@@ -299,7 +304,7 @@ describe("Atrium feed query policy", () => {
     const client = productionPolicyClient();
     client.setQueryData(feedsKey, feedList, { updatedAt: Date.now() });
     client.setQueryData(
-      unreadEntriesKey,
+      allEntriesKey,
       {
         pages: [{ entries: [cachedEntry], next_cursor: null }],
         pageParams: [undefined],

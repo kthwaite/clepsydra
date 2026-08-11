@@ -4,8 +4,8 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useMemo,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -39,8 +39,8 @@ import { insertConversationTurn } from "#/editor/conversation/transforms";
 import { PageEditorHeader } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
-import { usePageEditor } from "#/editor/usePageEditor";
 import type { CustomEditor } from "#/editor/types";
+import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
@@ -237,11 +237,8 @@ export function Folio({ tabId, path }: FolioProps) {
     [path, editor.kind, editor.bodyMarkdown],
   );
   const presentation = presentationFor(kind);
-  const isAiConversation =
-    presentation.bodyPresentation === "ai-conversation";
-  const conversationReadOnly =
-    isAiConversation && conversationMode === "read";
-  const isJournal = kind === "JOURNAL";
+  const isAiConversation = presentation.bodyPresentation === "ai-conversation";
+  const conversationReadOnly = isAiConversation && conversationMode === "read";
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
@@ -354,8 +351,7 @@ export function Folio({ tabId, path }: FolioProps) {
 
       scrollContainer.scrollTop = restoration.scrollTop;
       if (!restoration.anchor || !restoration.focus) return;
-      const requireTextMatch =
-        restoration.revision !== editor.getRevision();
+      const requireTextMatch = restoration.revision !== editor.getRevision();
       const anchor = validateTextPointSnapshot(
         slateEditor,
         restoration.anchor,
@@ -378,31 +374,19 @@ export function Folio({ tabId, path }: FolioProps) {
     restorationAvailable,
     tabId,
   ]);
-  const editableTags = useMemo(
-    () =>
-      isJournal
-        ? editor.tags.filter((tag) => tag.toLowerCase() !== "journal")
-        : editor.tags,
-    [isJournal, editor.tags],
+  const computedTags = useMemo(
+    () => [...new Set(editor.computedTags)],
+    [editor.computedTags],
   );
-  const hasPersistedJournalTag =
-    isJournal && editableTags.length !== editor.tags.length;
-  useEffect(() => {
-    if (
-      editor.isLoading ||
-      (encrypted && encryptionState.status !== "plain") ||
-      !hasPersistedJournalTag
-    )
-      return;
-    editor.setTags(editableTags);
-  }, [
-    editor.isLoading,
-    editor.setTags,
-    editableTags,
-    encrypted,
-    encryptionState.status,
-    hasPersistedJournalTag,
-  ]);
+  const computedTagSet = useMemo(() => new Set(computedTags), [computedTags]);
+  const editableTags = useMemo(
+    () => editor.tags.filter((tag) => !computedTagSet.has(tag)),
+    [computedTagSet, editor.tags],
+  );
+  const effectiveTags = useMemo(
+    () => [...editableTags, ...computedTags],
+    [computedTags, editableTags],
+  );
   const inferred = editor.inferred;
   const project = editor.project;
 
@@ -448,7 +432,7 @@ export function Folio({ tabId, path }: FolioProps) {
         path={path}
         title={editor.title}
         tags={editableTags}
-        derivedTags={isJournal ? ["journal"] : []}
+        derivedTags={computedTags}
         state={encryptionState}
       />
     );
@@ -489,7 +473,7 @@ export function Folio({ tabId, path }: FolioProps) {
         <ReadOnlyPageHeader
           path={path}
           title={editor.title}
-          tags={editableTags}
+          tags={effectiveTags}
           aliases={editor.aliases}
           encrypted={encrypted}
         />
@@ -501,15 +485,21 @@ export function Folio({ tabId, path }: FolioProps) {
             onTitleChange={editor.setTitle}
             readOnlyTitle={presentation.readOnlyTitle?.(path, editor.title)}
             tags={editableTags}
-            derivedTags={isJournal ? ["journal"] : []}
+            derivedTags={computedTags}
             tagSuggestions={tagSuggestions}
             onTagSuggestionQueryChange={setTagSuggestionQuery}
             tagSuggestionsLoading={
               tagSuggestionQuery.length > 0 &&
-              (!tagSuggestionsCurrent || tagSuggestionRequest.isLoading)
+              (!tagSuggestionsCurrent ||
+                tagSuggestionRequest.isLoading ||
+                tagSuggestionRequest.isFetching)
             }
             tagSuggestionsError={
-              tagSuggestionsCurrent ? tagSuggestionRequest.error : null
+              tagSuggestionsCurrent &&
+              !tagSuggestionRequest.isFetching &&
+              tagSuggestionRequest.error
+                ? new Error(tagSuggestionRequest.error.error)
+                : null
             }
             onRetryTagSuggestions={tagSuggestionRequest.refetch}
             onTagsChange={editor.setTags}
@@ -547,10 +537,7 @@ export function Folio({ tabId, path }: FolioProps) {
                     )} could not be read. The original text is preserved.`
                   : "This AI conversation has no valid conversation markers. The original Markdown is preserved."}
               </span>
-              <button
-                type="button"
-                onClick={() => setConversationMode("edit")}
-              >
+              <button type="button" onClick={() => setConversationMode("edit")}>
                 Edit
               </button>
             </div>
@@ -563,17 +550,14 @@ export function Folio({ tabId, path }: FolioProps) {
       <article
         className={cn(
           "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
-          isAiConversation &&
-            `ai-conversation--${conversationMode}`,
+          isAiConversation && `ai-conversation--${conversationMode}`,
         )}
       >
         <WikilinkResolutionProvider path={path}>
           <ConversationPresentationProvider
             value={{
               mode: isAiConversation ? conversationMode : "generic",
-              provider: isAiConversation
-                ? editor.conversationProvider
-                : null,
+              provider: isAiConversation ? editor.conversationProvider : null,
             }}
           >
             <SlateEditor
@@ -716,9 +700,7 @@ export function Folio({ tabId, path }: FolioProps) {
             {attachmentsOpen ? (
               <Suspense
                 fallback={
-                  <p className="cl-marg mt-2 mb-0">
-                    Loading attachment tools…
-                  </p>
+                  <p className="cl-marg mt-2 mb-0">Loading attachment tools…</p>
                 }
               >
                 <div className="mt-2">
@@ -1099,16 +1081,17 @@ function ReadOnlyPageHeader({
           encrypted
         </span>
       ) : null}
-      <h1 className="w-full font-heading text-2xl font-bold">
-        {displayTitle}
-      </h1>
+      <h1 className="w-full font-heading text-2xl font-bold">{displayTitle}</h1>
       <dl className="cl-mono mt-2 grid gap-2 text-[10px]">
         <div className="flex flex-wrap items-baseline gap-2">
           <dt className="uppercase tracking-[0.12em] text-ink-mute">Tags</dt>
           <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
             {tags.length > 0
               ? tags.map((tag) => (
-                  <span key={tag} className="border border-rule px-1.5 py-[1px]">
+                  <span
+                    key={tag}
+                    className="border border-rule px-1.5 py-[1px]"
+                  >
                     {tag}
                   </span>
                 ))

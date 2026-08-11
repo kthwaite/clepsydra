@@ -76,6 +76,12 @@ pub struct UpdatePageCommand {
     pub reconcile: bool,
 }
 
+fn strip_redundant_computed_tag(path: &VaultPath, meta: &mut PageMeta) {
+    let (kind, _) = super::kind::resolve(path.as_str(), meta.kind);
+    meta.tags
+        .retain(|tag| !super::kind::is_computed_tag(kind, tag));
+}
+
 /// An exact-content replacement for adapters that mutate source spans without
 /// reserializing page metadata (for example block ID assignment).
 #[derive(Debug)]
@@ -391,6 +397,7 @@ impl MutationCoordinator {
         if command.meta.kind == Some(super::kind::Kind::Task) {
             initialize_task_history(&mut command.meta);
         }
+        strip_redundant_computed_tag(&command.path, &mut command.meta);
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
@@ -753,6 +760,8 @@ impl MutationCoordinator {
             .map(VaultPath::new)
             .transpose()
             .map_err(|error| MutationError::InvalidInput(error.to_string()))?;
+        let resulting_path = projected_path.as_ref().unwrap_or(&command.path);
+        strip_redundant_computed_tag(resulting_path, &mut command.meta);
         let mut locked_paths = vec![command.path.clone()];
         if let Some(destination) = &projected_path {
             locked_paths.push(destination.clone());
@@ -1432,6 +1441,101 @@ mod tests {
         assert_eq!(
             std::fs::metadata(destination).unwrap().permissions().mode() & 0o777,
             0o600
+        );
+    }
+    #[tokio::test]
+    async fn rewrites_strip_redundant_computed_tags() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut raw_index =
+            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        raw_index.build(&vault).unwrap();
+        let index = IndexHandle::spawn(raw_index, vault.clone());
+        let coordinator = MutationCoordinator::new();
+        let path = VaultPath::new("transition.md").unwrap();
+        let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new(|_| {});
+        let hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostMoveHook>>> = Arc::new(Vec::new());
+
+        let mut note_meta = PageMeta::new();
+        note_meta.kind = Some(crate::vault::kind::Kind::Note);
+        note_meta.tags = vec!["journal".to_string(), "research".to_string()];
+        let note = coordinator
+            .create_page(
+                &vault,
+                &index,
+                CreatePageCommand {
+                    path: path.clone(),
+                    meta: note_meta,
+                    body: "note body".to_string(),
+                },
+                Arc::clone(&notify),
+            )
+            .await
+            .unwrap();
+        assert_eq!(note.meta.tags, ["journal", "research"]);
+        assert_eq!(
+            crate::vault::kind::effective_tags(crate::vault::kind::Kind::Note, &note.meta.tags),
+            ["journal", "research", "note"]
+        );
+
+        let mut journal_meta = note.meta.clone();
+        journal_meta.kind = Some(crate::vault::kind::Kind::Journal);
+        let journal = coordinator
+            .update_page(
+                &vault,
+                &index,
+                Arc::clone(&hooks),
+                UpdatePageCommand {
+                    path: path.clone(),
+                    expected_content: note.raw_content,
+                    meta: journal_meta,
+                    body: note.body,
+                    project: ProjectAssignment::Unchanged,
+                    reconcile: false,
+                },
+                &|_| {},
+            )
+            .await
+            .unwrap();
+        let journal_stored = std::fs::read_to_string(root.join(path.as_str())).unwrap();
+        let (journal_stored_meta, _) =
+            crate::vault::page::parse_frontmatter(&journal_stored).unwrap();
+        assert_eq!(journal_stored_meta.tags, ["research"]);
+        assert_eq!(
+            crate::vault::kind::effective_tags(
+                crate::vault::kind::Kind::Journal,
+                &journal_stored_meta.tags,
+            ),
+            ["research", "journal"]
+        );
+
+        let mut note_meta = journal.meta;
+        note_meta.kind = Some(crate::vault::kind::Kind::Note);
+        let note = coordinator
+            .update_page(
+                &vault,
+                &index,
+                hooks,
+                UpdatePageCommand {
+                    path: path.clone(),
+                    expected_content: journal.raw_content,
+                    meta: note_meta,
+                    body: journal.body,
+                    project: ProjectAssignment::Unchanged,
+                    reconcile: false,
+                },
+                &|_| {},
+            )
+            .await
+            .unwrap();
+        let note_stored = std::fs::read_to_string(root.join(path.as_str())).unwrap();
+        let (note_stored_meta, _) = crate::vault::page::parse_frontmatter(&note_stored).unwrap();
+        assert_eq!(note_stored_meta.tags, ["research"]);
+        assert_eq!(
+            crate::vault::kind::effective_tags(crate::vault::kind::Kind::Note, &note.meta.tags),
+            ["research", "note"]
         );
     }
 }

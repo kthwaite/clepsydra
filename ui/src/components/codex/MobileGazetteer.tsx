@@ -3,20 +3,34 @@ import {
   Button as AriaButton,
   Dialog,
   Heading,
+  ListBox,
+  ListBoxItem,
   Modal,
   ModalOverlay,
+  Popover,
+  Select,
 } from "react-aria-components";
 import type { ContentEntry, TagCount } from "#/api/types";
+import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { Button } from "#/components/ui/button";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { TextField } from "#/components/ui/text-field";
-import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import {
+  KINDS,
+  type Kind,
+  kindColorVar,
+  kindLabel,
+  resolveKind,
+} from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import type { GazetteerSort } from "./gazetteer-filter";
 
 export interface MobileGazetteerProps {
   query: string;
   selectedTags: string[];
+  kind?: Kind;
+  project?: string;
+  projects: string[];
   sort: GazetteerSort;
   rows: ContentEntry[];
   tags: TagCount[];
@@ -26,6 +40,8 @@ export interface MobileGazetteerProps {
   pageCount: number;
   onQueryChange: (query: string) => void;
   onSelectedTagsChange: (tags: string[]) => void;
+  onKindChange: (kind?: Kind) => void;
+  onProjectChange: (project?: string) => void;
   onSortChange: (sort: GazetteerSort) => void;
   onPageChange: (page: number) => void;
   onOpen: (path: string, title: string) => void;
@@ -44,6 +60,9 @@ const sheetButtonClass =
 export function MobileGazetteer({
   query,
   selectedTags,
+  kind,
+  project,
+  projects,
   sort,
   rows,
   tags,
@@ -53,6 +72,8 @@ export function MobileGazetteer({
   pageCount,
   onQueryChange,
   onSelectedTagsChange,
+  onKindChange,
+  onProjectChange,
   onSortChange,
   onPageChange,
   onOpen,
@@ -66,6 +87,8 @@ export function MobileGazetteer({
         : [...selectedTags, tag],
     );
   };
+  const activeFilterCount =
+    selectedTags.length + (query ? 1 : 0) + (kind ? 1 : 0) + (project ? 1 : 0);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-paper text-ink">
@@ -78,8 +101,11 @@ export function MobileGazetteer({
             {filteredCount} of {totalCount}
           </span>
         </div>
-        <AriaButton className={sheetButtonClass} onPress={() => setFiltersOpen(true)}>
-          Filters{selectedTags.length > 0 || query ? ` · ${selectedTags.length + (query ? 1 : 0)}` : ""}
+        <AriaButton
+          className={sheetButtonClass}
+          onPress={() => setFiltersOpen(true)}
+        >
+          Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
         </AriaButton>
       </header>
 
@@ -119,7 +145,9 @@ export function MobileGazetteer({
                         />
                         {kindLabel(kind)}
                       </span>
-                      <span aria-hidden="true" className="text-ink-faint">·</span>
+                      <span aria-hidden="true" className="text-ink-faint">
+                        ·
+                      </span>
                       <span>{row.project || "No project"}</span>
                     </div>
 
@@ -134,12 +162,18 @@ export function MobileGazetteer({
                           </span>
                         ))
                       ) : (
-                        <span className="cl-mono text-[9px] text-ink-mute">No tags</span>
+                        <span className="cl-mono text-[9px] text-ink-mute">
+                          No tags
+                        </span>
                       )}
                     </div>
 
                     <div className="col-span-2 flex items-center justify-between border-t border-dotted border-rule-soft pt-2 cl-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
-                      <span>{wordCount == null ? "Words unavailable" : `${wordCount} ${wordCount === 1 ? "word" : "words"}`}</span>
+                      <span>
+                        {wordCount == null
+                          ? "Words unavailable"
+                          : `${wordCount} ${wordCount === 1 ? "word" : "words"}`}
+                      </span>
                       <span>Edited {formatRelativeTime(row.updated_at)}</span>
                     </div>
                   </article>
@@ -222,6 +256,49 @@ export function MobileGazetteer({
                 onChange={onQueryChange}
                 placeholder="Title, path, description, or tag"
               />
+              <section
+                aria-label="Kind and Project filters"
+                className="grid gap-4 sm:grid-cols-2"
+              >
+                <Select
+                  aria-label="Filter by kind"
+                  selectedKey={kind ?? "all"}
+                  onSelectionChange={(key) =>
+                    onKindChange(key === "all" ? undefined : (key as Kind))
+                  }
+                >
+                  <AriaButton className="cl-mono flex min-h-11 w-full items-center border border-rule px-3 text-left text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent">
+                    {kind ? kindLabel(kind) : "All kinds"}
+                  </AriaButton>
+                  <Popover className="border border-rule bg-paper outline-none">
+                    <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
+                      <ListBoxItem
+                        id="all"
+                        className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focused]:bg-highlight"
+                      >
+                        All kinds
+                      </ListBoxItem>
+                      {KINDS.map((option) => (
+                        <ListBoxItem
+                          key={option}
+                          id={option}
+                          className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focused]:bg-highlight"
+                        >
+                          {kindLabel(option)}
+                        </ListBoxItem>
+                      ))}
+                    </ListBox>
+                  </Popover>
+                </Select>
+                <ProjectCombo
+                  value={project ?? null}
+                  options={projects}
+                  ariaLabel="Filter by project"
+                  menuTrigger="focus"
+                  onAssign={onProjectChange}
+                  onClear={() => onProjectChange(undefined)}
+                />
+              </section>
 
               <section aria-labelledby="gazetteer-tags-heading">
                 <h2
@@ -234,7 +311,9 @@ export function MobileGazetteer({
                   <Button
                     aria-label="Show all tags"
                     aria-pressed={selectedTags.length === 0}
-                    variant={selectedTags.length === 0 ? "primary" : "secondary"}
+                    variant={
+                      selectedTags.length === 0 ? "primary" : "secondary"
+                    }
                     onPress={() => onSelectedTagsChange([])}
                   >
                     All · {totalCount}
@@ -264,7 +343,11 @@ export function MobileGazetteer({
                 className="[&>div]:flex-wrap"
               >
                 {sortOptions.map((option) => (
-                  <Radio key={option.value} value={option.value} className="min-h-11">
+                  <Radio
+                    key={option.value}
+                    value={option.value}
+                    className="min-h-11"
+                  >
                     {option.label}
                   </Radio>
                 ))}

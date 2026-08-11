@@ -94,6 +94,12 @@ vi.mock("#/api/index", () => ({
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),
+  useTagSuggestions: () => ({
+    data: [],
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useStats: () => ({
     data: { pages: 2, links_total: 1, last_indexed_at: null },
     isError: false,
@@ -256,37 +262,38 @@ describe("CodexFrame real breakpoint transitions", () => {
     });
   });
 
-  it.each([
-    768, 1024,
-  ])("keeps desktop-only routes and actions reachable at %ipx", async (width) => {
-    const user = userEvent.setup();
-    matchMediaController.setWidth(width);
-    render(
-      <CodexFrame forceView="atrium">
-        <div>Responsive content</div>
-      </CodexFrame>,
-    );
+  it.each([768, 1024])(
+    "keeps desktop-only routes and actions reachable at %ipx",
+    async (width) => {
+      const user = userEvent.setup();
+      matchMediaController.setWidth(width);
+      render(
+        <CodexFrame forceView="atrium">
+          <div>Responsive content</div>
+        </CodexFrame>,
+      );
 
-    expect(matchMediaController.query).toHaveBeenCalledWith(
-      "(max-width: 767px)",
-    );
-    const primary = screen.getByRole("navigation", {
-      name: "Primary navigation",
-    });
-    expect(
-      within(primary).getByRole("button", { name: /07.*feeds/i }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("navigation", { name: "Mobile roots" }),
-    ).not.toBeInTheDocument();
+      expect(matchMediaController.query).toHaveBeenCalledWith(
+        "(max-width: 767px)",
+      );
+      const primary = screen.getByRole("navigation", {
+        name: "Primary navigation",
+      });
+      expect(
+        within(primary).getByRole("button", { name: /07.*feeds/i }),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("navigation", { name: "Mobile roots" }),
+      ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /08.*status/i }));
-    await user.click(
-      screen.getByRole("button", { name: "Switch to dark mode" }),
-    );
-    expect(openSettingsMock).toHaveBeenCalledWith("appearance");
-    expect(toggleThemeMock).toHaveBeenCalledOnce();
-  });
+      await user.click(screen.getByRole("button", { name: /08.*status/i }));
+      await user.click(
+        screen.getByRole("button", { name: "Switch to dark mode" }),
+      );
+      expect(openSettingsMock).toHaveBeenCalledWith("appearance");
+      expect(toggleThemeMock).toHaveBeenCalledOnce();
+    },
+  );
 
   it("switches to mobile roots at the shared 767px boundary", () => {
     matchMediaController.setWidth(767);

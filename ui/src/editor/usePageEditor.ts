@@ -84,6 +84,7 @@ interface PageEditorState {
   title: string;
   setTitle: (t: string) => void;
   tags: string[];
+  computedTags: string[];
   setTags: (t: string[]) => void;
   aliases: string[];
   setAliases: (a: string[]) => void;
@@ -672,6 +673,7 @@ export function usePageEditor(
     title,
     setTitle,
     tags,
+    computedTags: page?.computed_tags ?? [],
     setTags,
     aliases,
     setAliases,

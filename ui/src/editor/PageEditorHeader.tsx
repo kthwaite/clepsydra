@@ -7,6 +7,10 @@ interface PageEditorHeaderProps {
   onTitleChange: (title: string) => void;
   tags: string[];
   tagSuggestions: string[];
+  onTagSuggestionQueryChange?: (query: string) => void;
+  tagSuggestionsLoading?: boolean;
+  tagSuggestionsError?: Error | null;
+  onRetryTagSuggestions?: () => void;
   derivedTags?: string[];
   onTagsChange: (tags: string[]) => void;
   aliases: string[];
@@ -31,6 +35,10 @@ export function PageEditorHeader({
   onTitleChange,
   tags,
   tagSuggestions,
+  onTagSuggestionQueryChange,
+  tagSuggestionsLoading = false,
+  tagSuggestionsError = null,
+  onRetryTagSuggestions,
   derivedTags = [],
   onTagsChange,
   aliases,
@@ -106,6 +114,10 @@ export function PageEditorHeader({
         values={tags}
         readOnlyValues={derivedTags}
         suggestions={tagSuggestions}
+        onSuggestionQueryChange={onTagSuggestionQueryChange}
+        suggestionsLoading={tagSuggestionsLoading}
+        suggestionsError={tagSuggestionsError}
+        onRetrySuggestions={onRetryTagSuggestions}
         onChange={onTagsChange}
         onBlur={flush}
         placeholder="Add tag..."

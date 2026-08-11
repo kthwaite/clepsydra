@@ -31,6 +31,7 @@ const pages: PageSummary[] = [
     inferred: true,
     encrypted: false,
     tags: [],
+    computed_tags: [],
   },
 ];
 function renderCombobox(
@@ -49,13 +50,12 @@ function renderCombobox(
   );
 }
 
-
 describe("WikilinkCombobox", () => {
   it("does not render or create when no reference is available", () => {
     const onCreate = vi.fn();
     renderCombobox({ reference: null, onCreate });
 
-    expect(screen.queryByText('Create “New Topic”')).toBeNull();
+    expect(screen.queryByText("Create “New Topic”")).toBeNull();
     fireEvent.keyDown(document, { key: "Enter" });
     fireEvent.keyDown(document, { key: "Tab" });
     expect(onCreate).not.toHaveBeenCalled();
@@ -63,7 +63,7 @@ describe("WikilinkCombobox", () => {
 
   it("offers creation only for a non-empty zero-match query", () => {
     renderCombobox();
-    expect(screen.getByText('Create “New Topic”')).toBeInTheDocument();
+    expect(screen.getByText("Create “New Topic”")).toBeInTheDocument();
   });
 
   it("does not offer creation when a partial match exists", () => {
@@ -92,7 +92,7 @@ describe("WikilinkCombobox", () => {
     const onCreate = vi.fn();
     const user = userEvent.setup();
     renderCombobox({ onCreate });
-    await user.click(screen.getByText('Create “New Topic”'));
+    await user.click(screen.getByText("Create “New Topic”"));
     expect(onCreate).toHaveBeenCalledOnce();
     expect(onCreate).toHaveBeenCalledWith("New Topic");
   });

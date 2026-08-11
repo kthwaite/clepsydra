@@ -100,7 +100,10 @@ describe("useGlobalShortcuts", () => {
     press("d", { metaKey: true, shiftKey: true });
     expect(useUiStore.getState().isCaptureAsideOpen).toBe(true);
     press("i", { metaKey: true });
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/gazetteer" });
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: "/gazetteer",
+      search: { sort: "ts", page: 1 },
+    });
     press("g", { metaKey: true });
     expect(openTabMock).toHaveBeenCalledWith("graph");
     press("\\", { metaKey: true });

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createEditor, Node, type Descendant, type Editor } from "slate";
@@ -52,6 +58,12 @@ vi.mock("#/api/index", () => ({
   useOutlinks: () => ({ data: [] }),
   useSimilar: () => ({ data: [] }),
   useTags: () => ({ data: [] }),
+  useTagSuggestions: () => ({
+    data: [],
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
@@ -157,17 +169,23 @@ vi.mock("#/editor/SlateEditor", () => ({
               if ("type" in node && node.type === "conversation-turn") {
                 const role = node.role as "user" | "assistant";
                 const provider = presentation.provider?.trim().toLowerCase();
-                const assistant = provider === "claude" ? "Claude" : "Assistant";
+                const assistant =
+                  provider === "claude" ? "Claude" : "Assistant";
                 return (
                   <article key={`${role}-${index}`} data-role={role}>
                     <span>{role === "user" ? "You" : assistant}</span>
                     {!readOnly ? (
                       <div>
-                        <select aria-label="Change participant" defaultValue={role}>
+                        <select
+                          aria-label="Change participant"
+                          defaultValue={role}
+                        >
                           <option value="user">You</option>
                           <option value="assistant">{assistant}</option>
                         </select>
-                        <button type="button" aria-label="Add turn after">+</button>
+                        <button type="button" aria-label="Add turn after">
+                          +
+                        </button>
                       </div>
                     ) : null}
                     <textarea
@@ -213,7 +231,9 @@ vi.mock("#/editor/SlateEditor", () => ({
               );
             })
           : null}
-        <button type="button" onClick={() => void onSaveNow()}>Editor save</button>
+        <button type="button" onClick={() => void onSaveNow()}>
+          Editor save
+        </button>
       </div>
     );
   },
@@ -232,12 +252,20 @@ interface EditorHarness {
 }
 
 function pageEditor(overrides: Record<string, unknown> = {}): EditorHarness {
-  const body = (overrides.bodyMarkdown as string | undefined) ?? canonicalConversationMarkdown;
-  const initialValue = (overrides.initialValue as Descendant[] | undefined) ?? markdownToSlate(body);
+  const body =
+    (overrides.bodyMarkdown as string | undefined) ??
+    canonicalConversationMarkdown;
+  const initialValue =
+    (overrides.initialValue as Descendant[] | undefined) ??
+    markdownToSlate(body);
   let editorValue = initialValue;
   let saved: string | null = null;
-  const onSlateChange = vi.fn((value: Descendant[]) => { editorValue = value; });
-  const saveNow = vi.fn(async () => { saved = slateToMarkdown(editorValue); });
+  const onSlateChange = vi.fn((value: Descendant[]) => {
+    editorValue = value;
+  });
+  const saveNow = vi.fn(async () => {
+    saved = slateToMarkdown(editorValue);
+  });
   return {
     isLoading: false,
     error: null,
@@ -259,7 +287,9 @@ function pageEditor(overrides: Record<string, unknown> = {}): EditorHarness {
     inferred: false,
     project: null,
     initialValue,
-    get editorValue() { return editorValue; },
+    get editorValue() {
+      return editorValue;
+    },
     onSlateChange,
     editorRevision: 1,
     createdAt: "2026-08-09T00:00:00Z",
@@ -292,8 +322,14 @@ describe("Folio AI conversation presentation", () => {
   it("defaults to Read with a read-only Slate transcript and provider labels", () => {
     const editor = pageEditor();
     renderFolio(editor);
-    expect(screen.getByRole("button", { name: "Read" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("slate-editor")).toHaveAttribute("data-readonly", "true");
+    expect(screen.getByRole("button", { name: "Read" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("slate-editor")).toHaveAttribute(
+      "data-readonly",
+      "true",
+    );
     expect(screen.getByText("You")).toBeVisible();
     expect(screen.getByText("Claude")).toBeVisible();
     fireEvent.change(screen.getByRole("textbox", { name: "Turn 1" }), {
@@ -317,9 +353,7 @@ describe("Folio AI conversation presentation", () => {
     });
     renderFolio(editor);
 
-    expect(
-      screen.getByRole("heading", { name: "Conversation" }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Conversation" })).toBeVisible();
     expect(screen.getByText("research")).toBeVisible();
     expect(screen.getByText("thread")).toBeVisible();
     expect(screen.getByText("atlas")).toBeVisible();
@@ -333,9 +367,7 @@ describe("Folio AI conversation presentation", () => {
     expect(
       screen.queryByRole("button", { name: "Manage attachments" }),
     ).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Manage paths" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Manage paths" })).toBeNull();
     expect(editor.setTitle).not.toHaveBeenCalled();
     expect(editor.setTags).not.toHaveBeenCalled();
     expect(editor.setAliases).not.toHaveBeenCalled();
@@ -359,16 +391,28 @@ describe("Folio AI conversation presentation", () => {
   it("enables transcript role and action controls only in Edit", async () => {
     const user = userEvent.setup();
     renderFolio(pageEditor());
-    expect(screen.queryAllByRole("combobox", { name: "Change participant" })).toHaveLength(0);
+    expect(
+      screen.queryAllByRole("combobox", { name: "Change participant" }),
+    ).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    expect(screen.getByTestId("slate-editor")).toHaveAttribute("data-readonly", "false");
-    expect(screen.getAllByRole("combobox", { name: "Change participant" })).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: "Add turn after" })).toHaveLength(2);
+    expect(screen.getByTestId("slate-editor")).toHaveAttribute(
+      "data-readonly",
+      "false",
+    );
+    expect(
+      screen.getAllByRole("combobox", { name: "Change participant" }),
+    ).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", { name: "Add turn after" }),
+    ).toHaveLength(2);
   });
 
   it("adds a local assistant turn through the editor ref", async () => {
     const user = userEvent.setup();
-    const editor = pageEditor({ bodyMarkdown: "", initialValue: markdownToSlate("") });
+    const editor = pageEditor({
+      bodyMarkdown: "",
+      initialValue: markdownToSlate(""),
+    });
     renderFolio(editor);
     const modes = within(
       screen.getByRole("group", { name: "Conversation mode" }),
@@ -390,7 +434,9 @@ describe("Folio AI conversation presentation", () => {
     await user.clear(assistantTurn);
     await user.type(assistantTurn, "A revised answer");
     await user.click(screen.getByRole("button", { name: "Read" }));
-    expect(screen.getByRole("textbox", { name: "Turn 2" })).toHaveValue("A revised answer");
+    expect(screen.getByRole("textbox", { name: "Turn 2" })).toHaveValue(
+      "A revised answer",
+    );
     expect(editor.saveNow).not.toHaveBeenCalled();
   });
 
@@ -404,17 +450,22 @@ describe("Folio AI conversation presentation", () => {
     await user.type(assistantTurn, "A revised answer");
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     await waitFor(() => expect(editor.saveNow).toHaveBeenCalledOnce());
-    expect(editor.savedMarkdown()).toContain(`> [!AI-ASSISTANT source=sha256:${HASH} sequence=2]`);
+    expect(editor.savedMarkdown()).toContain(
+      `> [!AI-ASSISTANT source=sha256:${HASH} sequence=2]`,
+    );
     expect(editor.savedMarkdown()).toContain("> A revised answer");
   });
 
   it("shows malformed marker text with a warning and an Edit recovery action", async () => {
     const user = userEvent.setup();
-    const malformed = "> [!AI-ASSISTANT source=sha256:not-a-hash sequence=2]\n> keep this text";
+    const malformed =
+      "> [!AI-ASSISTANT source=sha256:not-a-hash sequence=2]\n> keep this text";
     renderFolio(pageEditor({ bodyMarkdown: malformed }));
     expect(screen.getByRole("alert")).toHaveTextContent("marker");
     expect(screen.getByText(/keep this text/)).toBeVisible();
-    await user.click(within(screen.getByRole("alert")).getByRole("button", { name: "Edit" }));
+    await user.click(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Edit" }),
+    );
     expect(
       within(
         screen.getByRole("group", { name: "Conversation mode" }),
@@ -423,8 +474,12 @@ describe("Folio AI conversation presentation", () => {
   });
 
   it("warns when an assigned AI page has no valid markers", () => {
-    renderFolio(pageEditor({ bodyMarkdown: "Ordinary markdown remains visible" }));
-    expect(screen.getByRole("alert")).toHaveTextContent(/no valid conversation markers/i);
+    renderFolio(
+      pageEditor({ bodyMarkdown: "Ordinary markdown remains visible" }),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /no valid conversation markers/i,
+    );
     expect(screen.getByText("Ordinary markdown remains visible")).toBeVisible();
   });
 
@@ -432,21 +487,40 @@ describe("Folio AI conversation presentation", () => {
     const user = userEvent.setup();
     const rendered = renderFolio(pageEditor(), "conversations/one.md");
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    usePageEditorMock.mockReturnValue(pageEditor({ title: "Second conversation" }));
+    usePageEditorMock.mockReturnValue(
+      pageEditor({ title: "Second conversation" }),
+    );
     rendered.rerender(<Folio tabId="t1" path="conversations/two.md" />);
-    expect(screen.getByRole("button", { name: "Read" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Read" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("keeps ordinary Note and Journal Folios on their existing editor surface", () => {
-    const note = pageEditor({ kind: "NOTE", bodyMarkdown: "Ordinary note", conversationProvider: null });
+    const note = pageEditor({
+      kind: "NOTE",
+      bodyMarkdown: "Ordinary note",
+      conversationProvider: null,
+    });
     const rendered = renderFolio(note, "notes/ordinary.md");
     expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
-    expect(screen.getByTestId("slate-editor")).toHaveAttribute("data-readonly", "false");
-    const journal = pageEditor({ kind: "JOURNAL", bodyMarkdown: "Journal body", conversationProvider: null });
+    expect(screen.getByTestId("slate-editor")).toHaveAttribute(
+      "data-readonly",
+      "false",
+    );
+    const journal = pageEditor({
+      kind: "JOURNAL",
+      bodyMarkdown: "Journal body",
+      conversationProvider: null,
+    });
     usePageEditorMock.mockReturnValue(journal);
     rendered.rerender(<Folio tabId="t1" path="journals/2026/08/09.md" />);
     expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
-    expect(screen.getByTestId("slate-editor")).toHaveAttribute("data-readonly", "false");
+    expect(screen.getByTestId("slate-editor")).toHaveAttribute(
+      "data-readonly",
+      "false",
+    );
   });
 
   it("opens canonical markers assigned as a Note with generic editable presentation and preserves them on save and reload", async () => {
@@ -462,15 +536,15 @@ describe("Folio AI conversation presentation", () => {
       "data-mode",
       "generic",
     );
-    expect(screen.queryByRole("group", { name: "Conversation mode" })).toBeNull();
+    expect(
+      screen.queryByRole("group", { name: "Conversation mode" }),
+    ).toBeNull();
     expect(
       screen.queryByRole("combobox", { name: "Change participant" }),
     ).toBeNull();
     expect(screen.queryByText("You")).toBeNull();
     expect(
-      screen.getByText(
-        `[!AI-USER source=sha256:${HASH} sequence=1]`,
-      ),
+      screen.getByText(`[!AI-USER source=sha256:${HASH} sequence=1]`),
     ).toBeVisible();
 
     const firstTurn = screen.getAllByRole("textbox", { name: "Page body" })[0];
@@ -479,15 +553,15 @@ describe("Folio AI conversation presentation", () => {
     await user.click(screen.getByRole("button", { name: "Editor save" }));
 
     const saved = note.savedMarkdown();
-    expect(saved).toContain(
-      `> [!AI-USER source=sha256:${HASH} sequence=1]`,
-    );
+    expect(saved).toContain(`> [!AI-USER source=sha256:${HASH} sequence=1]`);
     expect(saved).toContain("> A retained question");
     expect(slateToMarkdown(markdownToSlate(saved ?? ""))).toBe(saved);
   });
 
   it("renders locked AI Folios before any transcript UI", () => {
-    renderFolio(pageEditor({ encrypted: true, encryptionState: { status: "locked" } }));
+    renderFolio(
+      pageEditor({ encrypted: true, encryptionState: { status: "locked" } }),
+    );
     expect(screen.queryByTestId("slate-editor")).toBeNull();
     expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Conversation" })).toBeVisible();

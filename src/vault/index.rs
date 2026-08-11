@@ -138,6 +138,8 @@ pub struct BuildStats {
 // Schema
 // ---------------------------------------------------------------------------
 
+const TAG_DERIVATION_VERSION: &str = "1";
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS pages (
     id              TEXT PRIMARY KEY,
@@ -180,6 +182,7 @@ CREATE TABLE IF NOT EXISTS links (
 CREATE TABLE IF NOT EXISTS tags (
     page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     tag     TEXT NOT NULL,
+    computed INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (page_id, tag)
 );
 
@@ -321,6 +324,7 @@ impl VaultIndex {
         // 2. Run pre-schema migrations (column additions required before index creation)
         migrate_links_add_target_block_id(conn)?;
         migrate_pages_add_projection_columns(conn)?;
+        migrate_tags_add_computed(conn)?;
 
         // 3. Execute schema
         conn.execute_batch(SCHEMA)?;
@@ -471,8 +475,15 @@ impl VaultIndex {
                 |row| row.get(0),
             )
             .optional()?;
-        let force_rederive = stored_epoch.as_deref() != Some(epoch.as_str());
-
+        let stored_tag_derivation_version: Option<String> = tx
+            .query_row(
+                "SELECT value FROM derivation_meta WHERE key = 'tag_derivation_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let force_rederive = stored_epoch.as_deref() != Some(epoch.as_str())
+            || stored_tag_derivation_version.as_deref() != Some(TAG_DERIVATION_VERSION);
         let repair_frontmatter = self.repair_frontmatter;
         let (mut parsed_files, seen_paths) = collect_indexed_pages(
             vault,
@@ -491,6 +502,11 @@ impl VaultIndex {
             "INSERT INTO derivation_meta (key, value) VALUES ('linkable_epoch', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![epoch],
+        )?;
+        tx.execute(
+            "INSERT INTO derivation_meta (key, value) VALUES ('tag_derivation_version', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![TAG_DERIVATION_VERSION],
         )?;
         tx.commit()?;
         Ok(stats)
@@ -1584,6 +1600,39 @@ pub(crate) fn find_body_start(content: &str) -> usize {
     crate::vault::page::body_offset(content)
 }
 
+/// Add provenance to an existing tags table.
+///
+/// This runs before the main schema batch because `CREATE TABLE IF NOT EXISTS`
+/// cannot add columns to a legacy table.
+fn migrate_tags_add_computed(conn: &Connection) -> Result<(), IndexError> {
+    let table_exists = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tags'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+    if !table_exists {
+        return Ok(());
+    }
+
+    let has_computed = {
+        let mut stmt = conn.prepare("PRAGMA table_info(tags)")?;
+        let mut rows = stmt.query([])?;
+        let mut found = false;
+        while let Some(row) = rows.next()? {
+            if row.get::<_, String>(1)? == "computed" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+
+    if !has_computed {
+        conn.execute_batch("ALTER TABLE tags ADD COLUMN computed INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    Ok(())
+}
+
 /// Add page projection columns to `pages` if they do not exist.
 ///
 /// Must run BEFORE the main SCHEMA batch, since SCHEMA creates indexes on `kind`
@@ -2503,14 +2552,8 @@ mod tests {
     fn search_preserves_multi_token_and_unicode_prefixes() {
         let index = search_index();
 
-        assert_paths(
-            index.search("clep stray", 20).unwrap(),
-            &["notes/stray.md"],
-        );
-        assert_paths(
-            index.search("Éla", 20).unwrap(),
-            &["notes/unicode.md"],
-        );
+        assert_paths(index.search("clep stray", 20).unwrap(), &["notes/stray.md"]);
+        assert_paths(index.search("Éla", 20).unwrap(), &["notes/unicode.md"]);
     }
 }
 

@@ -55,10 +55,14 @@ beforeEach(() => {
 
 describe("feeds route controls", () => {
   it("defaults an omitted or unknown view to all", () => {
-    expect(Route.options.validateSearch?.({})).toMatchObject({ view: "all" });
-    expect(
-      Route.options.validateSearch?.({ view: "not-a-view" }),
-    ).toMatchObject({ view: "all" });
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    expect(validateSearch({})).toMatchObject({ view: "all" });
+    expect(validateSearch({ view: "not-a-view" })).toMatchObject({
+      view: "all",
+    });
   });
 
   it("maps Hide read to unread and toggles it off without changing other search state", async () => {

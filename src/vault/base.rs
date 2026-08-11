@@ -495,7 +495,9 @@ fn cmp_matches_meta(
     };
     match resolved {
         ResolvedField::Sys(SysField::Tags) => {
-            membership_matches(&context.meta.tags, op, value, false)
+            let kind = crate::vault::kind::resolve(context.path, context.meta.kind).0;
+            let effective = crate::vault::kind::effective_tags(kind, &context.meta.tags);
+            membership_matches(&effective, op, value, false)
         }
         ResolvedField::Sys(SysField::Aliases) => {
             membership_matches(&context.meta.aliases, op, value, true)

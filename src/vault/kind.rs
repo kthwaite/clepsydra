@@ -359,10 +359,7 @@ mod tests {
             " JOURNAL ".to_string(),
         ];
 
-        assert_eq!(
-            editable_tags(Kind::Note, &stored),
-            ["journal", "Research"]
-        );
+        assert_eq!(editable_tags(Kind::Note, &stored), ["journal", "Research"]);
         assert_eq!(
             effective_tags(Kind::Note, &stored),
             ["journal", "Research", "note"]
