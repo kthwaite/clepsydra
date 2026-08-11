@@ -194,6 +194,8 @@ pub enum BatchMutationError {
         expected: &'static str,
         actual: TransactionPhase,
     },
+    #[error("transaction phase publication is uncertain at {0}; recover before continuing")]
+    UncertainPhase(PathBuf),
     #[error("invalid transaction manifest at {path}: {message}")]
     InvalidManifest { path: PathBuf, message: String },
     #[error("transaction workspace file {path} does not match its manifest hash")]
@@ -228,6 +230,7 @@ pub(crate) struct PreparedBatch {
     root: PathBuf,
     directory: PathBuf,
     manifest: TransactionManifest,
+    phase_uncertain: bool,
 }
 
 impl PreparedBatch {
@@ -236,6 +239,7 @@ impl PreparedBatch {
     }
 
     pub(crate) fn publish(&mut self) -> Result<(), BatchMutationError> {
+        self.ensure_phase_certain()?;
         match self.manifest.phase {
             TransactionPhase::Prepared => self.change_phase(TransactionPhase::Committing)?,
             TransactionPhase::Committing => {}
@@ -260,6 +264,7 @@ impl PreparedBatch {
     }
 
     pub(crate) fn rollback(&mut self) -> Result<(), BatchMutationError> {
+        self.ensure_phase_certain()?;
         match self.manifest.phase {
             TransactionPhase::Prepared => {}
             TransactionPhase::Committing => {
@@ -276,6 +281,7 @@ impl PreparedBatch {
     }
 
     pub(crate) fn mark_filesystem_committed(&mut self) -> Result<(), BatchMutationError> {
+        self.ensure_phase_certain()?;
         if self.manifest.phase != TransactionPhase::Committing {
             return Err(BatchMutationError::InvalidPhase {
                 expected: "committing",
@@ -286,6 +292,7 @@ impl PreparedBatch {
     }
 
     pub(crate) fn finish(self) -> Result<(), BatchMutationError> {
+        self.ensure_phase_certain()?;
         if self.manifest.phase != TransactionPhase::FilesystemCommitted {
             return Err(BatchMutationError::InvalidPhase {
                 expected: "filesystem committed",
@@ -296,14 +303,40 @@ impl PreparedBatch {
     }
 
     fn change_phase(&mut self, phase: TransactionPhase) -> Result<(), BatchMutationError> {
-        self.manifest.phase = phase;
-        write_manifest(&self.directory, &self.manifest, false)?;
-        hit_test_failpoint(TestFailpoint::PhaseFlush(phase), &self.directory)?;
-        sync_manifest_and_directory(&self.directory)
+        let mut next_manifest = self.manifest.clone();
+        next_manifest.phase = phase;
+        hit_test_failpoint(TestFailpoint::PhasePublication(phase), &self.directory)?;
+        if let Err(error) = write_manifest(&self.directory, &next_manifest, false) {
+            if matches!(
+                &error,
+                BatchMutationError::Publication { source, .. } if source.filesystem_applied()
+            ) {
+                self.manifest = next_manifest;
+                self.phase_uncertain = true;
+            }
+            return Err(error);
+        }
+        if let Err(error) = hit_test_failpoint(TestFailpoint::PhaseFlush(phase), &self.directory)
+            .and_then(|()| sync_manifest_and_directory(&self.directory))
+        {
+            self.manifest = next_manifest;
+            self.phase_uncertain = true;
+            return Err(error);
+        }
+        self.manifest = next_manifest;
+        Ok(())
+    }
+
+    fn ensure_phase_certain(&self) -> Result<(), BatchMutationError> {
+        if self.phase_uncertain {
+            return Err(BatchMutationError::UncertainPhase(self.directory.clone()));
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     fn test_publish_first_intent_only(&mut self) -> Result<(), BatchMutationError> {
+        self.ensure_phase_certain()?;
         if self.manifest.phase == TransactionPhase::Prepared {
             self.change_phase(TransactionPhase::Committing)?;
         }
@@ -433,6 +466,7 @@ pub(crate) fn prepare(
             root: root.to_path_buf(),
             directory: directory.clone(),
             manifest,
+            phase_uncertain: false,
         })
     })();
 
@@ -456,6 +490,7 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
             ));
         }
     };
+    sync_transaction_directory(&transactions)?;
     let mut directories = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| {
@@ -472,7 +507,12 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
 
     let mut recovered = Vec::new();
     for directory in directories {
-        let manifest = read_manifest(&directory)?;
+        validate_transaction_directory_name(&directory)?;
+        let Some(manifest) = read_manifest_if_present(&directory)? else {
+            remove_workspace(&directory)?;
+            continue;
+        };
+        validate_manifest_paths(&directory, &manifest)?;
         match manifest.phase {
             TransactionPhase::Prepared => remove_workspace(&directory)?,
             TransactionPhase::Committing => {
@@ -480,20 +520,21 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
                 remove_workspace(&directory)?;
             }
             TransactionPhase::FilesystemCommitted => {
+                let manifest_path = directory.join("manifest.json");
                 recovered.push(RecoveredBatch {
                     phase: manifest.phase,
                     index_events: manifest
                         .index_events
                         .iter()
-                        .map(change_event_from_manifest)
+                        .map(|event| change_event_from_manifest(&manifest_path, event))
                         .collect::<Result<_, _>>()?,
                     moved_pages: manifest
                         .moved_pages
                         .iter()
                         .map(|(source, destination)| {
                             Ok((
-                                manifest_path(&directory, source)?,
-                                manifest_path(&directory, destination)?,
+                                manifest_path_value(&manifest_path, source)?,
+                                manifest_path_value(&manifest_path, destination)?,
                             ))
                         })
                         .collect::<Result<_, BatchMutationError>>()?,
@@ -516,26 +557,35 @@ impl From<&ChangeEvent> for ManifestChangeEvent {
 }
 
 fn change_event_from_manifest(
+    manifest_path: &Path,
     event: &ManifestChangeEvent,
 ) -> Result<ChangeEvent, BatchMutationError> {
     match event {
-        ManifestChangeEvent::Upsert(path) => Ok(ChangeEvent::Upsert(manifest_path(
-            Path::new("manifest.json"),
+        ManifestChangeEvent::Upsert(path) => Ok(ChangeEvent::Upsert(manifest_path_value(
+            manifest_path,
             path,
         )?)),
-        ManifestChangeEvent::Remove(path) => Ok(ChangeEvent::Remove(manifest_path(
-            Path::new("manifest.json"),
+        ManifestChangeEvent::Remove(path) => Ok(ChangeEvent::Remove(manifest_path_value(
+            manifest_path,
             path,
         )?)),
         ManifestChangeEvent::BaseChanged => Ok(ChangeEvent::BaseChanged),
     }
 }
 
-fn manifest_path(manifest: &Path, path: &str) -> Result<VaultPath, BatchMutationError> {
-    VaultPath::new(path).map_err(|error| BatchMutationError::InvalidManifest {
-        path: manifest.to_path_buf(),
-        message: error.to_string(),
-    })
+fn manifest_path_value(manifest: &Path, path: &str) -> Result<VaultPath, BatchMutationError> {
+    let validated =
+        VaultPath::new(path).map_err(|error| BatchMutationError::InvalidManifest {
+            path: manifest.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    if validated.as_str() != path {
+        return Err(BatchMutationError::InvalidManifest {
+            path: manifest.to_path_buf(),
+            message: format!("noncanonical vault path: {path}"),
+        });
+    }
+    Ok(validated)
 }
 
 fn validate_observed_state(
@@ -656,8 +706,8 @@ fn rollback_manifest(
                         message: "move destination was not recorded as missing".to_owned(),
                     });
                 }
-                remove_after_state(&root.join(destination), source_hash)?;
                 let content = read_verified(&rollback_path, source_hash)?;
+                remove_after_state(&root.join(destination), source_hash)?;
                 restore_missing_file(&root.join(source), source_hash, &content)?;
             }
             ManifestIntent::Delete { path, before_hash } => {
@@ -819,14 +869,89 @@ fn write_manifest(
     result.map_err(|source| BatchMutationError::Publication { path, source })
 }
 
-fn read_manifest(directory: &Path) -> Result<TransactionManifest, BatchMutationError> {
+fn read_manifest_if_present(
+    directory: &Path,
+) -> Result<Option<TransactionManifest>, BatchMutationError> {
     let path = directory.join("manifest.json");
-    let content = fs::read(&path)
-        .map_err(|source| BatchMutationError::filesystem("read manifest", &path, source))?;
-    serde_json::from_slice(&content).map_err(|error| BatchMutationError::InvalidManifest {
-        path,
-        message: error.to_string(),
-    })
+    let content = match fs::read(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(BatchMutationError::filesystem(
+                "read manifest",
+                &path,
+                source,
+            ));
+        }
+    };
+    serde_json::from_slice(&content)
+        .map(Some)
+        .map_err(|error| BatchMutationError::InvalidManifest {
+            path,
+            message: error.to_string(),
+        })
+}
+
+fn validate_transaction_directory_name(directory: &Path) -> Result<(), BatchMutationError> {
+    let name = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| BatchMutationError::InvalidManifest {
+            path: directory.to_path_buf(),
+            message: "transaction directory name is not valid UTF-8".to_owned(),
+        })?;
+    let uuid = Uuid::parse_str(name).map_err(|error| BatchMutationError::InvalidManifest {
+        path: directory.to_path_buf(),
+        message: format!("invalid transaction UUID: {error}"),
+    })?;
+    if uuid.to_string() != name {
+        return Err(BatchMutationError::InvalidManifest {
+            path: directory.to_path_buf(),
+            message: "transaction UUID is not canonical".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_manifest_paths(
+    directory: &Path,
+    manifest: &TransactionManifest,
+) -> Result<(), BatchMutationError> {
+    let path = directory.join("manifest.json");
+    for intent in &manifest.intents {
+        match intent {
+            ManifestIntent::Write {
+                path: intent_path, ..
+            }
+            | ManifestIntent::Delete {
+                path: intent_path, ..
+            } => {
+                manifest_path_value(&path, intent_path)?;
+            }
+            ManifestIntent::Move {
+                source,
+                destination,
+                ..
+            } => {
+                manifest_path_value(&path, source)?;
+                manifest_path_value(&path, destination)?;
+            }
+        }
+    }
+    for event in &manifest.index_events {
+        match event {
+            ManifestChangeEvent::Upsert(event_path)
+            | ManifestChangeEvent::Remove(event_path) => {
+                manifest_path_value(&path, event_path)?;
+            }
+            ManifestChangeEvent::BaseChanged => {}
+        }
+    }
+    for (source, destination) in &manifest.moved_pages {
+        manifest_path_value(&path, source)?;
+        manifest_path_value(&path, destination)?;
+    }
+    Ok(())
 }
 
 fn sync_manifest_and_directory(directory: &Path) -> Result<(), BatchMutationError> {
@@ -879,13 +1004,31 @@ fn sync_directory(_path: &Path) -> Result<(), BatchMutationError> {
     Ok(())
 }
 
+fn sync_transaction_directory(path: &Path) -> Result<(), BatchMutationError> {
+    let result = sync_directory(path);
+    if result.is_ok() {
+        clear_workspace_parent_sync_pending();
+    }
+    result
+}
+
 fn remove_workspace(directory: &Path) -> Result<(), BatchMutationError> {
     hit_test_failpoint(TestFailpoint::WorkspaceRemoval, directory)?;
-    fs::remove_dir_all(directory).map_err(|source| {
-        BatchMutationError::filesystem("remove transaction workspace", directory, source)
-    })?;
+    match fs::remove_dir_all(directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(BatchMutationError::filesystem(
+                "remove transaction workspace",
+                directory,
+                source,
+            ));
+        }
+    }
+    mark_workspace_parent_sync_pending();
+    hit_test_failpoint(TestFailpoint::WorkspaceParentSync, directory)?;
     if let Some(parent) = directory.parent() {
-        sync_directory(parent)?;
+        sync_transaction_directory(parent)?;
     }
     Ok(())
 }
@@ -895,9 +1038,11 @@ fn remove_workspace(directory: &Path) -> Result<(), BatchMutationError> {
 pub(crate) enum TestFailpoint {
     ManifestFlush,
     Publication(usize),
+    PhasePublication(TransactionPhase),
     PhaseFlush(TransactionPhase),
     RollbackPublication(usize),
     WorkspaceRemoval,
+    WorkspaceParentSync,
 }
 
 #[cfg(not(test))]
@@ -907,6 +1052,8 @@ enum TestFailpoint {
     Publication(usize),
     PhaseFlush(TransactionPhase),
     RollbackPublication(usize),
+    WorkspaceParentSync,
+    PhasePublication(TransactionPhase),
     WorkspaceRemoval,
 }
 
@@ -914,6 +1061,29 @@ enum TestFailpoint {
 thread_local! {
     static TEST_FAILPOINT: std::cell::RefCell<Option<TestFailpoint>> =
         const { std::cell::RefCell::new(None) };
+    static WORKSPACE_PARENT_SYNC_PENDING: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn mark_workspace_parent_sync_pending() {
+    WORKSPACE_PARENT_SYNC_PENDING.set(true);
+}
+
+#[cfg(not(test))]
+fn mark_workspace_parent_sync_pending() {}
+
+#[cfg(test)]
+fn clear_workspace_parent_sync_pending() {
+    WORKSPACE_PARENT_SYNC_PENDING.set(false);
+}
+
+#[cfg(not(test))]
+fn clear_workspace_parent_sync_pending() {}
+
+#[cfg(test)]
+fn workspace_parent_sync_pending() -> bool {
+    WORKSPACE_PARENT_SYNC_PENDING.get()
 }
 
 #[cfg(test)]
@@ -1285,6 +1455,7 @@ mod tests {
             fail_once_at(TestFailpoint::PhaseFlush(TransactionPhase::Committing));
 
         assert!(prepared.publish().is_err());
+        assert!(prepared.publish().is_err());
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
         drop(prepared);
         recover_pending(fixture.root()).unwrap();
@@ -1353,6 +1524,134 @@ mod tests {
         assert!(directory.is_dir());
         recover_pending(fixture.root()).unwrap();
         assert!(!directory.exists());
+    }
+
+    #[test]
+    fn recovery_removes_valid_prepared_debris_without_a_manifest() {
+        let fixture = fixture_with_file("a.md", b"before");
+        let directory = fixture
+            .root()
+            .join(".clepsydra/transactions")
+            .join(Uuid::now_v7().to_string());
+        fs::create_dir_all(directory.join("staged")).unwrap();
+        fs::create_dir(directory.join("rollback")).unwrap();
+        fs::write(directory.join("staged/0"), b"after").unwrap();
+        fs::write(directory.join("rollback/0"), b"before").unwrap();
+
+        assert!(recover_pending(fixture.root()).unwrap().is_empty());
+        assert!(!directory.exists());
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
+        assert!(recover_pending(fixture.root()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn failed_phase_publication_retry_remains_recoverable() {
+        let fixture =
+            fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
+        let mut prepared = prepare(fixture.root(), &replace_two_files()).unwrap();
+        let _phase_failure =
+            fail_once_at(TestFailpoint::PhasePublication(TransactionPhase::Committing));
+
+        assert!(prepared.publish().is_err());
+        let _publication_failure = fail_once_at(TestFailpoint::Publication(1));
+        assert!(prepared.publish().is_err());
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"after-a");
+        drop(prepared);
+
+        recover_pending(fixture.root()).unwrap();
+        assert_eq!(
+            fs::read(fixture.root().join("a.md")).unwrap(),
+            b"before-a"
+        );
+        assert_eq!(
+            fs::read(fixture.root().join("b.md")).unwrap(),
+            b"before-b"
+        );
+    }
+
+    #[test]
+    fn recovery_rejects_out_of_vault_manifest_paths_before_mutation() {
+        let container = tempfile::tempdir().unwrap();
+        let root = container.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let outside = container.path().join("outside.md");
+        fs::write(&outside, b"outside").unwrap();
+        let directory = root
+            .join(".clepsydra/transactions")
+            .join(Uuid::now_v7().to_string());
+        fs::create_dir_all(directory.join("rollback")).unwrap();
+        fs::create_dir(directory.join("staged")).unwrap();
+        fs::write(directory.join("rollback/0"), b"outside").unwrap();
+        fs::write(directory.join("staged/0"), b"outside").unwrap();
+        let manifest = TransactionManifest {
+            phase: TransactionPhase::Committing,
+            intents: vec![ManifestIntent::Move {
+                source: "source.md".to_owned(),
+                destination: "../outside.md".to_owned(),
+                source_hash: content_hash(b"outside"),
+                destination_was_missing: true,
+            }],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        fs::write(
+            directory.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            recover_pending(&root),
+            Err(BatchMutationError::InvalidManifest { .. })
+        ));
+        assert_eq!(fs::read(&outside).unwrap(), b"outside");
+        assert!(!root.join("source.md").exists());
+    }
+
+    #[test]
+    fn corrupt_move_rollback_keeps_the_published_destination() {
+        let fixture = fixture_with_file("source.md", b"source");
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::Move {
+                source: VaultPath::new("source.md").unwrap(),
+                destination: VaultPath::new("destination.md").unwrap(),
+                expected_source: b"source".to_vec(),
+            }],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        prepared.publish().unwrap();
+        let directory = prepared.directory().to_path_buf();
+        drop(prepared);
+        fs::write(directory.join("rollback/0"), b"corrupt").unwrap();
+
+        assert!(matches!(
+            recover_pending(fixture.root()),
+            Err(BatchMutationError::CorruptWorkspace { .. })
+        ));
+        assert_eq!(
+            fs::read(fixture.root().join("destination.md")).unwrap(),
+            b"source"
+        );
+        assert!(!fixture.root().join("source.md").exists());
+    }
+
+    #[test]
+    fn workspace_parent_sync_failure_is_retryable_after_unlink() {
+        let fixture = fixture_with_file("a.md", b"before");
+        let prepared =
+            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let directory = prepared.directory().to_path_buf();
+        drop(prepared);
+        let _failure = fail_once_at(TestFailpoint::WorkspaceParentSync);
+
+        assert!(recover_pending(fixture.root()).is_err());
+        assert!(workspace_parent_sync_pending());
+        assert!(!directory.exists());
+        assert!(recover_pending(fixture.root()).unwrap().is_empty());
+        assert!(!workspace_parent_sync_pending());
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
     }
 
 }
