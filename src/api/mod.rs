@@ -145,7 +145,11 @@ pub(crate) fn mutation_error(
         | MutationError::IndexRollback { .. }
         | MutationError::IndexCompensation { .. }
         | MutationError::Reconcile { .. }
-        | MutationError::Hook { .. } => error::ApiError::internal(error.to_string()),
+        | MutationError::Hook { .. }
+        | MutationError::BatchPrepare { .. }
+        | MutationError::BatchPublish { .. }
+        | MutationError::BatchRollback { .. }
+        | MutationError::BatchRecovery { .. } => error::ApiError::internal(error.to_string()),
     }
 }
 

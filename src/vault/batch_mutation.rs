@@ -223,6 +223,13 @@ impl BatchMutationError {
             source,
         }
     }
+
+    pub(crate) fn stale_vault_path(&self) -> Option<VaultPath> {
+        match self {
+            Self::Stale(path) => VaultPath::new(path).ok(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]

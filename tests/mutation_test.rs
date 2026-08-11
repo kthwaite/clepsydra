@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::Arc;
 
 use clepsydra::vault::Vault;
+use clepsydra::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent};
 use clepsydra::vault::atomic_file::{
     AtomicPublicationError, atomic_create, atomic_create_owner_only, atomic_replace,
     atomic_replace_with,
@@ -10,9 +11,12 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
-use clepsydra::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator};
+use clepsydra::vault::mutation_coordinator::{
+    CreatePageCommand, MutationCoordinator, MutationError,
+};
 use clepsydra::vault::page::{PageMeta, parse_or_repair_frontmatter};
 use clepsydra::vault::path::VaultPath;
+use clepsydra::vault::sync::ChangeEvent;
 
 use tempfile::TempDir;
 
@@ -29,6 +33,51 @@ fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
     }
     let vault = Vault::open(&root).unwrap();
     (tmp, vault)
+}
+
+#[tokio::test]
+async fn batch_publication_failure_rolls_back_without_notification() {
+    let source_content = "+++\nid = \"019fd000-0000-7000-8000-000000000041\"\ntitle = \"Source\"\n+++\nbody\n";
+    let (_tmp, vault) = setup_vault(&[("source.md", source_content)]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let source_content = fs::read_to_string(vault.root().join("source.md")).unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&notifications);
+    let source = VaultPath::new("source.md").unwrap();
+    let destination = VaultPath::new("missing/destination.md").unwrap();
+
+    let error = coordinator
+        .execute_batch(
+            &vault,
+            &index,
+            Arc::new(Vec::new()),
+            BatchMutationCommand {
+                intents: vec![BatchPathIntent::Move {
+                    source: source.clone(),
+                    destination: destination.clone(),
+                    expected_source: source_content.as_bytes().to_vec(),
+                }],
+                index_events: vec![
+                    ChangeEvent::Remove(source.clone()),
+                    ChangeEvent::Upsert(destination.clone()),
+                ],
+                moved_pages: vec![(source.clone(), destination.clone())],
+            },
+            Arc::new(move |notification| observed.lock().push(notification)),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, MutationError::BatchPublish { .. }));
+    assert_eq!(
+        fs::read_to_string(vault.resolve(&source)).unwrap(),
+        source_content
+    );
+    assert!(!vault.resolve(&destination).exists());
+    assert!(notifications.lock().is_empty());
 }
 
 fn encrypted_referrer(id: &str, title: &str, link: &str) -> String {
