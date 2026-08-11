@@ -20,6 +20,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -263,6 +264,12 @@ describe("TaskEditPanel — immediate patches", () => {
   it("disposition radio change fires immediate PATCH {status}", async () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
+    const disposition = screen.getByRole("radiogroup", {
+      name: "Disposition",
+    });
+    expect(
+      within(disposition).getByTestId("edit-panel-status-REVIEW"),
+    ).toHaveRole("radio");
 
     await userEvent.click(screen.getByTestId("edit-panel-status-REVIEW"));
 
@@ -282,6 +289,10 @@ describe("TaskEditPanel — immediate patches", () => {
   it("priority radio change fires immediate PATCH {priority}", async () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
+    const priority = screen.getByRole("radiogroup", { name: "Priority" });
+    expect(
+      within(priority).getByTestId("edit-panel-priority-P0"),
+    ).toHaveRole("radio");
 
     await userEvent.click(screen.getByTestId("edit-panel-priority-P0"));
 

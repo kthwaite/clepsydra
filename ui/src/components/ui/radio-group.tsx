@@ -10,6 +10,7 @@ import { cn } from "#/lib/cn";
 
 export interface RadioGroupProps extends RACRadioGroupProps {
   label?: string;
+  optionsClassName?: string;
   description?: string;
   children?: ReactNode;
 }
@@ -18,6 +19,7 @@ export function RadioGroup({
   label,
   description,
   className,
+  optionsClassName,
   children,
   ...props
 }: RadioGroupProps) {
@@ -31,7 +33,7 @@ export function RadioGroup({
           {label}
         </span>
       )}
-      <div className="flex gap-0">{children}</div>
+      <div className={cn("flex gap-0", optionsClassName)}>{children}</div>
       {description && (
         <span className="text-xs text-muted-foreground">{description}</span>
       )}

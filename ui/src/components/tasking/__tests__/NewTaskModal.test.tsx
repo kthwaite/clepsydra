@@ -9,7 +9,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
@@ -124,16 +124,25 @@ describe("NewTaskModal — render", () => {
 
   it("presets the DISPOSITION radio to the given status", () => {
     wrap(undefined, { status: "FIELD" });
-    // The IN-FIELD button should be visually active (has the on-class bg)
-    const fieldBtn = screen.getByTestId("new-task-status-FIELD");
+    const disposition = screen.getByRole("radiogroup", {
+      name: "Disposition",
+    });
+    const fieldRadio = within(disposition).getByRole("radio", {
+      name: /in-field/i,
+    });
+    expect(fieldRadio).toBeChecked();
     // Active state: has bg-[var(--ink)] class from RADIO_CLS_ON
-    expect(fieldBtn.className).toContain("bg-[var(--ink)]");
+    expect(fieldRadio.closest("label")?.className).toContain(
+      "bg-[var(--ink)]",
+    );
   });
 
   it("defaults DISPOSITION to INTAKE when no status preset", () => {
     wrap();
-    const intakeBtn = screen.getByTestId("new-task-status-INTAKE");
-    expect(intakeBtn.className).toContain("bg-[var(--ink)]");
+    const intakeRadio = screen.getByTestId("new-task-status-INTAKE");
+    expect(intakeRadio.closest("label")?.className).toContain(
+      "bg-[var(--ink)]",
+    );
   });
 
   it("presets CYCLE select to preset cycle code", () => {
@@ -148,11 +157,18 @@ describe("NewTaskModal — render", () => {
     expect(cycleSelect.value).toBe("BACKLOG");
   });
 
-  it("defaults PRIORITY to P2", () => {
+  it("defaults PRIORITY to P2 and supports arrow-key selection", async () => {
     wrap();
-    const p2Btn = screen.getByTestId("new-task-priority-P2");
+    const priority = screen.getByRole("radiogroup", { name: "Priority" });
+    const p2 = within(priority).getByRole("radio", { name: "P2" });
+    expect(p2).toBeChecked();
     // Active state: has cool background
-    expect(p2Btn).toHaveStyle({ background: "var(--cool)" });
+    expect(p2.closest("label")).toHaveStyle({ background: "var(--cool)" });
+
+    const user = userEvent.setup();
+    p2.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(within(priority).getByRole("radio", { name: "P1" })).toBeChecked();
   });
 
   it("lists all operations in the OPERATION select", () => {
