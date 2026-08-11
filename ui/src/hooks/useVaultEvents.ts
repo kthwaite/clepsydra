@@ -39,6 +39,7 @@ export function useVaultEvents(): ConnectionStatus {
             invalidateByPath(queryClient, queryKeys.folders.pathPrefix);
             invalidateByPath(queryClient, queryKeys.index.pathPrefix);
             invalidateByPath(queryClient, queryKeys.academic.pathPrefix);
+            queryClient.invalidateQueries({ queryKey: queryKeys.blocks.all });
             queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
             queryClient.invalidateQueries({ queryKey: queryKeys.agenda.all });
             // Page edits move rows in and out of base views (the Neovim case).

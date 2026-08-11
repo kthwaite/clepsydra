@@ -55,4 +55,31 @@ describe("useVaultEvents", () => {
     expect(client.getQueryState(burndownKey)?.isInvalidated).toBe(true);
     unmount();
   });
+
+  it("invalidates block details after an index change", () => {
+    const client = new QueryClient();
+    const invalidateQueries = vi.spyOn(client, "invalidateQueries");
+
+    const { unmount } = renderHook(() => useVaultEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source?.onmessage?.({
+        data: JSON.stringify({
+          type: "index_changed",
+          upserted: ["source.md"],
+          removed: [],
+        }),
+      } as MessageEvent<string>);
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.blocks.all,
+    });
+    unmount();
+  });
 });
