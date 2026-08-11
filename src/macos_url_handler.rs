@@ -122,8 +122,11 @@ fn install_with(
         if had_previous
             && let Err(restore) = std::fs::rename(&backup, &app_path)
         {
+            let preserved = workspace.keep();
             return Err(format!(
-                "publish URL handler failed: {error}; restoring previous bundle failed: {restore}"
+                "publish URL handler failed: {error}; restoring previous bundle failed: \
+                 {restore}; rollback workspace preserved at {}",
+                preserved.display()
             )
             .into());
         }
@@ -150,9 +153,11 @@ fn install_with(
         if compensation_failures.is_empty() {
             return Err(primary);
         }
+        let preserved = workspace.keep();
         return Err(format!(
-            "{primary}; URL handler compensation failed: {}",
-            compensation_failures.join("; ")
+            "{primary}; URL handler compensation failed: {}; rollback workspace preserved at {}",
+            compensation_failures.join("; "),
+            preserved.display()
         )
         .into());
     }
@@ -205,6 +210,62 @@ mod tests {
             registration_attempts.get(),
             2,
             "the restored previous bundle must be re-registered"
+        );
+    }
+
+    #[test]
+    fn restore_failure_preserves_previous_bundle_in_rollback_workspace() {
+        let home = tempfile::tempdir().unwrap();
+        let applications = home.path().join("Applications");
+        let app = applications.join(APP_NAME);
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("identity"), b"previous").unwrap();
+
+        let error = install_with(
+            home.path(),
+            Path::new("/usr/local/bin/clepsydra"),
+            false,
+            |_, staging| {
+                std::fs::create_dir_all(staging.join("Contents"))?;
+                std::fs::write(staging.join("identity"), b"replacement")?;
+                std::fs::write(staging.join("Contents/Info.plist"), b"plist")?;
+                Ok(())
+            },
+            |_, _| Ok(()),
+            |candidate| {
+                std::fs::remove_dir_all(candidate)?;
+                std::fs::write(candidate, b"blocks restoration")?;
+                Err("injected Launch Services registration failure".into())
+            },
+        )
+        .unwrap_err();
+
+        let message = error.to_string();
+        assert!(message.contains("injected Launch Services registration failure"));
+        assert!(message.contains("remove replacement"));
+        assert!(message.contains("restore previous bundle"));
+        let rollback_workspaces: Vec<_> = std::fs::read_dir(&applications)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(".clepsydra-url-handler-"))
+            })
+            .collect();
+        assert_eq!(
+            rollback_workspaces.len(),
+            1,
+            "the rollback workspace must survive compensation failure"
+        );
+        assert!(
+            message.contains(&rollback_workspaces[0].display().to_string()),
+            "the error must report the preserved rollback path: {message}"
+        );
+        assert_eq!(
+            std::fs::read(rollback_workspaces[0].join("previous.app/identity")).unwrap(),
+            b"previous"
         );
     }
 }
