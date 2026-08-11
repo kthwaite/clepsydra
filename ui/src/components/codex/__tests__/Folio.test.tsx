@@ -1,7 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useMemo } from "react";
+import { createEditor, type Descendant, type Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TagCount } from "#/api/types";
+import type { CustomEditor } from "#/editor/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
 // opts out of throwOnError, so a 404 surfaces as editor.error and Folio's
@@ -9,7 +12,9 @@ import type { TagCount } from "#/api/types";
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
 const {
   mobileLayoutState,
+  mountedSlateEditors,
   navigateMock,
+  restorationFrames,
   routerHistory,
   useCollapsibleRailMock,
   usePageEditorMock,
@@ -17,7 +22,9 @@ const {
   useScrollSpyMock,
 } = vi.hoisted(() => ({
   mobileLayoutState: { matches: false },
+  mountedSlateEditors: [] as Editor[],
   navigateMock: vi.fn(),
+  restorationFrames: [] as FrameRequestCallback[],
   routerHistory: {
     back: vi.fn(),
     canGoBack: vi.fn(() => false),
@@ -86,24 +93,42 @@ vi.mock("#/editor/SlateEditor", () => ({
   SlateEditor: ({
     initialValue,
     onChange,
+    editorRef,
   }: {
-    initialValue: Array<{ children?: Array<{ text?: string }> }>;
-    onChange: (value: Array<{ type: string; children: Array<{ text: string }> }>) => void;
-  }) => (
-    <textarea
-      aria-label="Page body"
-      data-testid="slate-editor"
-      defaultValue={initialValue[0]?.children?.[0]?.text ?? ""}
-      onChange={(event) =>
-        onChange([
-          {
-            type: "paragraph",
-            children: [{ text: event.currentTarget.value }],
-          },
-        ])
-      }
-    />
-  ),
+    initialValue: Descendant[];
+    onChange: (value: Descendant[]) => void;
+    editorRef?: { current: CustomEditor | null };
+  }) => {
+    const editor = useMemo(() => {
+      const instance = createEditor() as CustomEditor;
+      instance.children = initialValue;
+      mountedSlateEditors.push(instance);
+      return instance;
+    }, [initialValue]);
+
+    useEffect(() => {
+      if (editorRef) editorRef.current = editor;
+      return () => {
+        if (editorRef?.current === editor) editorRef.current = null;
+      };
+    }, [editor, editorRef]);
+
+    return (
+      <textarea
+        aria-label="Page body"
+        data-testid="slate-editor"
+        defaultValue={initialValue[0]?.children?.[0]?.text ?? ""}
+        onChange={(event) =>
+          onChange([
+            {
+              type: "paragraph",
+              children: [{ text: event.currentTarget.value }],
+            },
+          ])
+        }
+      />
+    );
+  },
 }));
 vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, isLoading: false }),
@@ -115,9 +140,13 @@ vi.mock("#/lib/useProjects", () => ({
 }));
 
 import { useWorkspaceStore } from "#/store/workspace";
+import { clearFolioRestoration } from "#/store/folioRestoration";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
+  clearFolioRestoration("t1");
+  mountedSlateEditors.length = 0;
+  restorationFrames.length = 0;
   useTagsMock.mockReturnValue({
     data: [
       { tag: "research", count: 4 },
@@ -182,6 +211,35 @@ function editableEditor() {
     getPlaintext: vi.fn(),
     getRevision: vi.fn(),
   };
+}
+
+function activeSlateEditor(): Editor {
+  const editor = mountedSlateEditors[mountedSlateEditors.length - 1];
+  if (!editor) throw new Error("Expected SlateEditor to mount an editor");
+  return editor;
+}
+
+function folioScrollContainer(): HTMLDivElement {
+  let element = screen.getByTestId("slate-editor").parentElement;
+  while (element) {
+    if (
+      element.classList.contains("cl-noscroll") &&
+      (element.classList.contains("overflow-auto") ||
+        element.classList.contains("overflow-y-auto"))
+    ) {
+      return element as HTMLDivElement;
+    }
+    element = element.parentElement;
+  }
+  throw new Error("Expected a Folio scroll container");
+}
+
+function flushRestorationFrame() {
+  const callbacks = restorationFrames.splice(0);
+  expect(callbacks).not.toHaveLength(0);
+  act(() => {
+    for (const callback of callbacks) callback(performance.now());
+  });
 }
 
 describe("Folio invalid-tab recovery", () => {
@@ -365,5 +423,77 @@ describe("Folio mobile presentation", () => {
       1,
       true,
     );
+  });
+});
+
+describe("Folio in-session restoration", () => {
+  beforeEach(() => {
+    mobileLayoutState.matches = false;
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      restorationFrames.push(callback);
+      return restorationFrames.length;
+    });
+  });
+
+  it("restores scroll and selection only after the remounted editor is available", () => {
+    const departing = editableEditor();
+    departing.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(departing);
+    const firstMount = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const savedSelection = {
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    };
+    activeSlateEditor().selection = savedSelection;
+    folioScrollContainer().scrollTop = 96;
+    screen.getByRole("textbox", { name: "Page body" }).focus();
+
+    firstMount.unmount();
+
+    const returning = editableEditor();
+    returning.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(returning);
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredEditor = activeSlateEditor();
+    const restoredScroller = folioScrollContainer();
+    expect(restoredEditor.selection).toBeNull();
+    expect(restoredScroller.scrollTop).toBe(0);
+
+    flushRestorationFrame();
+
+    expect(restoredScroller.scrollTop).toBe(96);
+    expect(restoredEditor.selection).toEqual(savedSelection);
+  });
+
+  it("keeps a changed-revision selection unset when its saved leaf text is stale", () => {
+    const departing = editableEditor();
+    departing.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(departing);
+    const firstMount = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    activeSlateEditor().selection = {
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    };
+    folioScrollContainer().scrollTop = 64;
+    firstMount.unmount();
+
+    const returning = editableEditor();
+    returning.initialValue[0].children[0].text = "Different leaf text";
+    returning.getRevision.mockReturnValue("revision-2");
+    usePageEditorMock.mockReturnValue(returning);
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredEditor = activeSlateEditor();
+    const restoredScroller = folioScrollContainer();
+
+    flushRestorationFrame();
+
+    expect(restoredScroller.scrollTop).toBe(64);
+    expect(restoredEditor.selection).toBeNull();
   });
 });

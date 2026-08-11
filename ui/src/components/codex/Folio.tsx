@@ -5,9 +5,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
+import { Transforms } from "slate";
 import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
@@ -43,6 +45,13 @@ import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
+import {
+  clearFolioRestoration,
+  readFolioRestoration,
+  saveFolioRestoration,
+  snapshotTextPoint,
+  validateTextPointSnapshot,
+} from "#/store/folioRestoration";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type FolioProps = {
@@ -137,7 +146,14 @@ export function Folio({ tabId, path }: FolioProps) {
   const [conversationMode, setConversationMode] = useState<"read" | "edit">(
     "read",
   );
-  const conversationEditorRef = useRef<CustomEditor | null>(null);
+  const folioEditorRef = useRef<CustomEditor | null>(null);
+  const lastMountedFolioEditorRef = useRef<CustomEditor | null>(null);
+  const restorationStateRef = useRef<{
+    tabId: string;
+    path: string;
+    available: boolean;
+    getRevision: () => string;
+  } | null>(null);
   useEffect(() => {
     setConversationMode("read");
   }, [path]);
@@ -241,6 +257,88 @@ export function Folio({ tabId, path }: FolioProps) {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
+  const restorationAvailable =
+    !editor.isLoading &&
+    !(editor.error && !editor.isDraft) &&
+    (!encrypted || encryptionState.status === "plain");
+  restorationStateRef.current = {
+    tabId,
+    path,
+    available: restorationAvailable,
+    getRevision: editor.getRevision,
+  };
+
+  useEffect(() => {
+    if (folioEditorRef.current) {
+      lastMountedFolioEditorRef.current = folioEditorRef.current;
+    }
+  }, [editor.editorRevision, path]);
+
+  useEffect(() => {
+    if (!editor.isLoading && !restorationAvailable) {
+      clearFolioRestoration(tabId);
+    }
+  }, [editor.isLoading, restorationAvailable, tabId]);
+
+  useLayoutEffect(
+    () => () => {
+      const state = restorationStateRef.current;
+      if (
+        !state ||
+        state.tabId !== tabId ||
+        state.path !== path ||
+        !state.available
+      ) {
+        clearFolioRestoration(tabId);
+        return;
+      }
+
+      const slateEditor =
+        folioEditorRef.current ?? lastMountedFolioEditorRef.current;
+      if (!slateEditor) {
+        clearFolioRestoration(tabId);
+        return;
+      }
+      const selection = slateEditor.selection;
+      saveFolioRestoration({
+        tabId,
+        path,
+        revision: state.getRevision(),
+        scrollTop: bodyRef.current?.scrollTop ?? 0,
+        anchor: selection
+          ? snapshotTextPoint(slateEditor, selection.anchor)
+          : null,
+        focus: selection
+          ? snapshotTextPoint(slateEditor, selection.focus)
+          : null,
+      });
+    },
+    [path, tabId],
+  );
+
+  useLayoutEffect(() => {
+    if (!restorationAvailable) return;
+    const restoration = readFolioRestoration(tabId, path);
+    if (!restoration) return;
+
+    const frame = requestAnimationFrame(() => {
+      const slateEditor = folioEditorRef.current;
+      const scrollContainer = bodyRef.current;
+      if (!slateEditor || !scrollContainer) return;
+
+      scrollContainer.scrollTop = restoration.scrollTop;
+      if (!restoration.anchor || !restoration.focus) return;
+      const anchor = validateTextPointSnapshot(
+        slateEditor,
+        restoration.anchor,
+      );
+      const focus = validateTextPointSnapshot(slateEditor, restoration.focus);
+      if (!anchor || !focus) return;
+      Transforms.select(slateEditor, { anchor, focus });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [editor.editorRevision, path, restorationAvailable, tabId]);
   const editableTags = useMemo(
     () =>
       isJournal
@@ -287,8 +385,8 @@ export function Folio({ tabId, path }: FolioProps) {
     [editor.bodyMarkdown, isAiConversation],
   );
   const addConversationTurn = useCallback(() => {
-    if (!conversationEditorRef.current) return;
-    insertConversationTurn(conversationEditorRef.current);
+    if (!folioEditorRef.current) return;
+    insertConversationTurn(folioEditorRef.current);
   }, []);
   const { activeIndex, scrollTo } = useScrollSpy(
     bodyRef,
@@ -438,9 +536,7 @@ export function Folio({ tabId, path }: FolioProps) {
               insertionRequest={attachmentInsertion}
               onInsertionHandled={finishAttachmentInsertion}
               readOnly={conversationReadOnly}
-              editorRef={
-                isAiConversation ? conversationEditorRef : undefined
-              }
+              editorRef={folioEditorRef}
             />
           </ConversationPresentationProvider>
         </WikilinkResolutionProvider>
