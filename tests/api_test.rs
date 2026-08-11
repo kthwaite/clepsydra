@@ -2206,6 +2206,254 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         .into_server_and_temp()
 }
 
+fn seeded_reference_issue_server() -> (TestServer, TempDir) {
+    setup_server_with_files(&[
+        (
+            "notes/source-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000601\ntitle: Source A\ntype: NOTE\nproject: alpha\n---\nBroken ((abc123DEF0)); missing [[Missing Page]].\n",
+        ),
+        (
+            "notes/source-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000602\ntitle: Source B\ntype: NOTE\nproject: alpha\n---\nBroken ((fed987CBA0)).\n",
+        ),
+        (
+            "notes/ambiguous-source.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000603\ntitle: Ambiguous Source\ntype: NOTE\nproject: beta\n---\nSee [[Twin]].\n",
+        ),
+        (
+            "notes/twin-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000604\ntitle: Twin\ntype: NOTE\nproject: beta\n---\nFirst.\n",
+        ),
+        (
+            "notes/twin-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000605\ntitle: Twin\ntype: NOTE\nproject: beta\n---\nSecond.\n",
+        ),
+    ])
+}
+
+#[tokio::test]
+async fn reference_issues_filter_before_paginating() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get(
+            "/api/vault/index/issues?kind=broken_block_ref&project=alpha&page_kind=NOTE&actionable=false&limit=1&offset=0",
+        )
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 2);
+    assert_eq!(response["limit"], 1);
+    assert_eq!(response["offset"], 0);
+    assert_eq!(response["items"].as_array().unwrap().len(), 1);
+    assert_eq!(response["items"][0]["kind"], "broken_block_ref");
+    assert_eq!(response["items"][0]["actions"], serde_json::json!(["open_source"]));
+}
+
+#[tokio::test]
+async fn reference_issues_normalize_repeated_and_comma_separated_kinds() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get(
+            "/api/vault/index/issues?kind=broken_block_ref,unresolved_page_link&kind=ambiguous_page_link&limit=200",
+        )
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 4);
+    let kinds = response["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|issue| issue["kind"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        kinds,
+        BTreeSet::from([
+            "ambiguous_page_link",
+            "broken_block_ref",
+            "unresolved_page_link",
+        ])
+    );
+}
+
+#[tokio::test]
+async fn reference_issues_expose_ranked_candidate_evidence() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link")
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 1);
+    let candidates = response["items"][0]["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["path"], "notes/twin-a.md");
+    assert_eq!(candidates[0]["title"], "Twin");
+    assert!(candidates[0]["page_id"].as_str().is_some());
+    assert!(candidates[0]["rationale"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn reference_issues_reject_invalid_filters_and_limits() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let misspelled_kind = server
+        .get("/api/vault/index/issues?kind=broken_block_reff")
+        .await;
+    misspelled_kind.assert_status_bad_request();
+    assert!(
+        !misspelled_kind
+            .json::<serde_json::Value>()
+            .to_string()
+            .contains("broken_block_reff")
+    );
+
+    for query in [
+        "project=",
+        "page_kind=NOT_A_KIND",
+        "actionable=sometimes",
+        "limit=0",
+        "limit=201",
+        "limit=lots",
+        "offset=-1",
+    ] {
+        let response = server
+            .get(&format!("/api/vault/index/issues?{query}"))
+            .await;
+        response.assert_status_bad_request();
+    }
+}
+
+#[tokio::test]
+async fn reference_issues_hide_encrypted_reference_evidence() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/private.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000606\ntitle: Private\ntype: NOTE\n---\nDo not expose ((sec123RET0)).\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pages SET encrypted = 1 WHERE id = ?1",
+                    ["019fd000-0000-7000-8000-000000000606"],
+                )
+                .unwrap();
+        })
+        .build();
+    let response = fixture
+        .server
+        .get("/api/vault/index/issues?kind=broken_block_ref")
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    let issue = &response["items"][0];
+    assert_eq!(response["total"], 1);
+    assert!(issue["snippet"].is_null());
+    assert!(issue["target_raw"].is_null());
+    assert!(issue["source_field"].is_null());
+    assert!(issue["span_start"].is_null());
+    assert!(issue["span_end"].is_null());
+    assert_eq!(issue["candidates"], serde_json::json!([]));
+    assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
+}
+
+#[tokio::test]
+async fn reference_issues_return_stable_ordering_and_fingerprints() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let path = "/api/vault/index/issues?limit=200";
+    let first: serde_json::Value = server.get(path).await.json();
+    let second: serde_json::Value = server.get(path).await.json();
+
+    assert_eq!(first, second);
+    assert!(
+        first["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|issue| issue["fingerprint"].as_str().is_some_and(|value| value.len() == 64))
+    );
+}
+
+#[tokio::test]
+async fn reference_issues_do_not_expose_projection_failures() {
+    let fixture = ApiFixture::builder()
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection.execute_batch("DROP TABLE links").unwrap();
+        })
+        .build();
+    let response = fixture.server.get("/api/vault/index/issues").await;
+    response.assert_status_internal_server_error();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["error"], "reference issue inventory unavailable");
+    assert!(!body.to_string().contains("links"));
+    assert!(!body.to_string().contains("sqlite"));
+}
+
+#[test]
+fn reference_issues_openapi_registers_route_parameters_and_schemas() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let operation = &openapi["paths"]["/api/vault/index/issues"]["get"];
+    let parameters = operation["parameters"].as_array().unwrap();
+    let names = parameters
+        .iter()
+        .map(|parameter| parameter["name"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        names,
+        BTreeSet::from(["actionable", "kind", "limit", "offset", "page_kind", "project"])
+    );
+    let limit = parameters
+        .iter()
+        .find(|parameter| parameter["name"] == "limit")
+        .unwrap();
+    assert_eq!(limit["schema"]["minimum"], 1);
+    assert_eq!(limit["schema"]["maximum"], 200);
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ReferenceIssuesResponse"
+    );
+    for schema in [
+        "ReferenceCandidateDto",
+        "ReferenceIssueActionDto",
+        "ReferenceIssueDto",
+        "ReferenceIssueKindDto",
+        "ReferenceIssuesResponse",
+    ] {
+        assert!(
+            openapi["components"]["schemas"].get(schema).is_some(),
+            "missing OpenAPI schema {schema}"
+        );
+    }
+    assert_eq!(
+        openapi["components"]["schemas"]["ReferenceIssueKindDto"]["enum"],
+        serde_json::json!([
+            "unresolved_page_link",
+            "ambiguous_page_link",
+            "broken_block_ref",
+            "invalid_relation_target",
+            "orphan_page",
+            "isolated_page"
+        ])
+    );
+    assert_eq!(
+        openapi["components"]["schemas"]["ReferenceIssueActionDto"]["enum"],
+        serde_json::json!(["create", "replace", "open_source", "none"])
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Preview mutation (dry-run)
 // ---------------------------------------------------------------------------

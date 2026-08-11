@@ -920,6 +920,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/index/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["reference_issues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/index/outlinks/{path}": {
         parameters: {
             query?: never;
@@ -2416,6 +2432,42 @@ export interface components {
             pages_removed: number;
             pages_skipped: number;
             warnings: string[];
+        };
+        ReferenceCandidateDto: {
+            page_id: string;
+            path: string;
+            rationale: string;
+            title?: string | null;
+        };
+        /** @enum {string} */
+        ReferenceIssueActionDto: "create" | "replace" | "open_source" | "none";
+        ReferenceIssueDto: {
+            actions: components["schemas"]["ReferenceIssueActionDto"][];
+            candidates: components["schemas"]["ReferenceCandidateDto"][];
+            fingerprint: string;
+            kind: components["schemas"]["ReferenceIssueKindDto"];
+            snippet?: string | null;
+            source_field?: string | null;
+            source_id: string;
+            source_path: string;
+            source_revision: string;
+            source_title?: string | null;
+            /** Format: int64 */
+            span_end?: number | null;
+            /** Format: int64 */
+            span_start?: number | null;
+            target_raw?: string | null;
+        };
+        /** @enum {string} */
+        ReferenceIssueKindDto: "unresolved_page_link" | "ambiguous_page_link" | "broken_block_ref" | "invalid_relation_target" | "orphan_page" | "isolated_page";
+        ReferenceIssuesResponse: {
+            items: components["schemas"]["ReferenceIssueDto"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
         };
         RefreshFeedsResponse: {
             scheduled: number;
@@ -5634,6 +5686,54 @@ export interface operations {
                 };
             };
             /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reference_issues: {
+        parameters: {
+            query?: {
+                /** @description Issue kinds. The parameter may be repeated and each value may be comma-separated. */
+                kind?: components["schemas"]["ReferenceIssueKindDto"][];
+                project?: string;
+                page_kind?: components["schemas"]["Kind"];
+                actionable?: boolean;
+                /** @description Page size. Defaults to 50. */
+                limit?: number;
+                /** @description Zero-based result offset. Defaults to 0. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated reference issue inventory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceIssuesResponse"];
+                };
+            };
+            /** @description Invalid filter or pagination value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Reference issue inventory unavailable */
             500: {
                 headers: {
                     [name: string]: unknown;
