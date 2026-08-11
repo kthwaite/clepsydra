@@ -783,7 +783,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_assign",
-        description = "File pages by declaring kind and/or project in frontmatter — the vault then relocates each file to its canonical folder automatically. THE preferred way to organise pages (use vault_move_page only for destinations assignment can't express). Accepts one path or many; bulk runs report per-path failures without aborting.",
+        description = "File pages by declaring kind and/or project in frontmatter — the vault then relocates each file to its canonical folder automatically. THE preferred way to organise pages (use vault_move_page only for destinations assignment can't express). Accepts one path or many; bulk assignment commits every path together and returns one error without changing any page if any path cannot be assigned.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1869,7 +1869,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn assign_bulk_reports_moves_per_path() {
+    async fn assign_bulk_returns_one_atomic_success() {
         let (server, _tmp) = serve_seeded_vault().await;
         let value = parse(
             server
@@ -1882,7 +1882,11 @@ mod tests {
                 .await,
         );
         assert_eq!(value["moved"].as_array().unwrap().len(), 2);
-        assert_eq!(value["failed"].as_array().unwrap().len(), 0);
+        assert_eq!(value["unchanged"], serde_json::json!([]));
+        assert!(
+            value.get("failed").is_none(),
+            "atomic bulk success must not expose per-path failures"
+        );
     }
 
     #[tokio::test]

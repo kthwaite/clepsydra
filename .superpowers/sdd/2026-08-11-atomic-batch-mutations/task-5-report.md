@@ -29,6 +29,7 @@ The focused integration suites reported six existing library dead-code warnings 
 - `src/api/board/cycles.rs`
 - `src/api/pages.rs`
 - `src/api/openapi.rs`
+- `src/mcp/server.rs`
 - `src/vault/batch_mutation.rs`
 - `src/vault/mutation_coordinator.rs`
 - `tests/api_board_test.rs`
@@ -76,3 +77,20 @@ No known functional concerns. The deterministic publication setter is intentiona
 - `cargo test --test api_test bulk_assign_reports_canonical_paths_for_normalizing_aliases -- --exact --nocapture`: 1 passed, 120 filtered out.
 - `cargo test --lib api::pages::tests::bulk_assign -- --nocapture`: 3 passed, 859 filtered out.
 - `cargo test --test api_test -- --nocapture`: 121 passed.
+
+## Full-gate fix: MCP bulk-assignment result
+
+### RED evidence
+
+- `cargo test --lib mcp::server::tests::assign_bulk_reports_moves_per_path -- --nocapture` reproduced the full-gate failure: the MCP behavioral test unwrapped the removed per-path `failed` field and panicked at `src/mcp/server.rs:1885`.
+
+### Fix
+
+- The `vault_assign` tool description now states that multi-page assignment commits every path together and returns one error without changing any page.
+- The MCP behavioral contract consumes the atomic success shape directly: `moved` plus `unchanged`, with no `failed` field or compatibility shim.
+
+### GREEN evidence
+
+- `cargo test --lib mcp::server::tests::assign_bulk_returns_one_atomic_success -- --exact --nocapture`: 1 passed, 870 filtered out.
+- `cargo test --lib mcp::server::tests::assign_ -- --nocapture`: 4 passed, 867 filtered out.
+- `cargo test --test api_test bulk_assign -- --nocapture`: 2 passed, 123 filtered out.
