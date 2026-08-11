@@ -500,6 +500,39 @@ describe("mobile Folio Back", () => {
     ).toBeUndefined();
   });
 
+  it("focuses a fenced code block loaded from real Markdown", async () => {
+    pageEditorState.body =
+      "```typescript\nconst answer = 42;\n^abc123DEF0\n```\n";
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    await screen.findByText("const answer = 42;");
+
+    act(() => {
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
+    });
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(
+      document.querySelector('[data-block-id="abc123DEF0"]'),
+    ).not.toBeNull();
+    expect(editorCapture.current?.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    });
+  });
+
   it("claims a StrictMode focus request once and accepts a later request for the same block", async () => {
     useWorkspaceStore
       .getState()

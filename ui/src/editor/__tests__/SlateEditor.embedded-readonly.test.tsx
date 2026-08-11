@@ -5,6 +5,7 @@ import type { Descendant } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as BlocksApi from "#/api/blocks";
 import type { BlockResponse } from "#/api/blocks";
+import { markdownToSlate } from "#/editor/convert";
 import type { CustomEditor } from "#/editor/types";
 
 const {
@@ -176,5 +177,32 @@ describe("SlateEditor embedded read-only contract", () => {
     expect(editor.children).toEqual(before);
     expect(onChange).not.toHaveBeenCalled();
     expect(onSaveNow).not.toHaveBeenCalled();
+  });
+
+  it("renders linked block-reference text as one ordinary link without a nested transclusion", () => {
+    const initialValue = markdownToSlate(
+      "[**See ((abc123DEF0))**](https://example.com)",
+    );
+
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <SlateEditor
+          initialValue={initialValue}
+          onChange={vi.fn()}
+          onSaveNow={vi.fn()}
+          readOnly
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "See ((abc123DEF0))" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open referenced block in Source",
+      }),
+    ).toBeNull();
+    expect(useBlockMock).not.toHaveBeenCalled();
   });
 });

@@ -50,6 +50,21 @@ describe("remarkBlockReferences", () => {
     });
   });
 
+  it("transforms adjacent references without dropping either match", () => {
+    const tree = parseAndTransform("((abc123DEF0))((abc123DEF045))");
+
+    expect(findPrivateBlockLinks(tree)).toMatchObject([
+      {
+        type: "link",
+        url: "clepsydra-block:abc123DEF0",
+      },
+      {
+        type: "link",
+        url: "clepsydra-block:abc123DEF045",
+      },
+    ]);
+  });
+
   it("transforms every valid reference inside nested phrasing content", () => {
     const tree = parseAndTransform(
       "**First ((abc123DEF0)), second ((abc123DEF045)).**",

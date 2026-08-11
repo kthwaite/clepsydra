@@ -115,12 +115,13 @@ fn parses_headings() {
 }
 
 #[test]
-fn parses_code_block() {
-    let md = "```rust\nfn main() {}\n```\n";
+fn parses_code_block_with_terminal_block_id() {
+    let md = "```rust\nfn main() {}\n^abc123DEF0\n```\n";
     let blocks = parse_blocks(md);
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].block_type, BlockType::Code);
-    assert!(blocks[0].content.contains("fn main() {}"));
+    assert_eq!(blocks[0].content, "fn main() {}");
+    assert_eq!(blocks[0].block_id.as_deref(), Some("abc123DEF0"));
 }
 
 #[test]

@@ -1,7 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BlockApiError } from "#/api/blocks";
 import { queryKeys } from "#/api/keys";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 
@@ -55,10 +60,44 @@ describe("useVaultEvents", () => {
     expect(client.getQueryState(burndownKey)?.isInvalidated).toBe(true);
     unmount();
   });
+  it("fails closed for changed block details without letting an old response repopulate them", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const changedKey = queryKeys.blocks.detail("abc123DEF0");
+    const unchangedKey = queryKeys.blocks.detail("unchanged01");
+    const searchKey = queryKeys.blocks.search("source", 8);
+    const changedBlock = {
+      block_id: "abc123DEF0",
+      block_type: "paragraph",
+      content: "protected plaintext",
+      page_path: "source.md",
+    };
+    const unchangedBlock = {
+      ...changedBlock,
+      block_id: "unchanged01",
+      page_path: "other.md",
+    };
+    client.setQueryData(changedKey, changedBlock);
+    client.setQueryData(unchangedKey, unchangedBlock);
+    client.setQueryData(searchKey, [changedBlock]);
 
-  it("invalidates block details after an index change", () => {
-    const client = new QueryClient();
-    const invalidateQueries = vi.spyOn(client, "invalidateQueries");
+    let resolveOldLookup!: (value: typeof changedBlock) => void;
+    let rejectNotFound!: (error: BlockApiError) => void;
+    const oldResponse = new Promise<typeof changedBlock>((resolve) => {
+      resolveOldLookup = resolve;
+    });
+    const eventualNotFound = new Promise<never>((_resolve, reject) => {
+      rejectNotFound = reject;
+    });
+    let lookupCount = 0;
+    const observer = new QueryObserver(client, {
+      queryKey: changedKey,
+      queryFn: () => (lookupCount++ === 0 ? oldResponse : eventualNotFound),
+      retry: false,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
 
     const { unmount } = renderHook(() => useVaultEvents(), {
       wrapper: ({ children }: { children: ReactNode }) => (
@@ -77,9 +116,76 @@ describe("useVaultEvents", () => {
       } as MessageEvent<string>);
     });
 
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: queryKeys.blocks.all,
+    expect(client.getQueryData(changedKey)).toBeUndefined();
+    expect(client.getQueryData(unchangedKey)).toEqual(unchangedBlock);
+    expect(client.getQueryState(searchKey)?.isInvalidated).toBe(true);
+
+    resolveOldLookup(changedBlock);
+    await Promise.resolve();
+    expect(client.getQueryData(changedKey)).toBeUndefined();
+
+    rejectNotFound(new BlockApiError("Block not found", 404));
+    await waitFor(() => expect(observer.getCurrentResult().isError).toBe(true));
+    unsubscribe();
+    unmount();
+  });
+
+  it("cancels an unseeded lookup when an external index event makes its path unknowable", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
     });
+    const detailKey = queryKeys.blocks.detail("abc123DEF0");
+    const block = {
+      block_id: "abc123DEF0",
+      block_type: "paragraph",
+      content: "protected plaintext",
+      page_path: "source.md",
+    };
+    let resolveOldLookup!: (value: typeof block) => void;
+    let rejectNotFound!: (error: BlockApiError) => void;
+    const oldResponse = new Promise<typeof block>((resolve) => {
+      resolveOldLookup = resolve;
+    });
+    const eventualNotFound = new Promise<never>((_resolve, reject) => {
+      rejectNotFound = reject;
+    });
+    let lookupCount = 0;
+    const observer = new QueryObserver(client, {
+      queryKey: detailKey,
+      queryFn: () => (lookupCount++ === 0 ? oldResponse : eventualNotFound),
+      retry: false,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    expect(observer.getCurrentResult().data).toBeUndefined();
+    expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
+
+    const { unmount } = renderHook(() => useVaultEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source?.onmessage?.({
+        data: JSON.stringify({
+          type: "index_changed",
+          upserted: ["source.md"],
+          removed: [],
+        }),
+      } as MessageEvent<string>);
+    });
+
+    expect(lookupCount).toBeGreaterThan(1);
+    expect(client.getQueryData(detailKey)).toBeUndefined();
+
+    resolveOldLookup(block);
+    await Promise.resolve();
+    expect(client.getQueryData(detailKey)).toBeUndefined();
+
+    rejectNotFound(new BlockApiError("Block not found", 404));
+    await waitFor(() => expect(observer.getCurrentResult().isError).toBe(true));
+    unsubscribe();
     unmount();
   });
 });

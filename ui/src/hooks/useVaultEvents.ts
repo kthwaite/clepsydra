@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { clearBlockDetailsForPagePaths } from "#/api/blocks";
 import { invalidateByPath, queryKeys } from "#/api/keys";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -35,6 +36,10 @@ export function useVaultEvents(): ConnectionStatus {
         try {
           const data: SyncNotification = JSON.parse(event.data);
           if (data.type === "index_changed") {
+            void clearBlockDetailsForPagePaths(queryClient, [
+              ...data.upserted,
+              ...data.removed,
+            ]);
             invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
             invalidateByPath(queryClient, queryKeys.folders.pathPrefix);
             invalidateByPath(queryClient, queryKeys.index.pathPrefix);

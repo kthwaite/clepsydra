@@ -74,7 +74,10 @@ export const codeBlockDescriptor: ElementDescriptor<CodeBlockElementType> = {
   ),
   normalize: normalizeCodeBlock,
   toMdast: (node) => {
-    const value = node.children.map((c) => (c as CustomText).text).join("");
+    const text = node.children.map((c) => (c as CustomText).text).join("");
+    const value = node.blockId
+      ? `${text}${text.endsWith("\n") ? "" : "\n"}^${node.blockId}`
+      : text;
     const code: Code = {
       type: "code",
       lang: node.language ?? null,

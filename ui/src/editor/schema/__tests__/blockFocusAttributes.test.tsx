@@ -2,6 +2,7 @@ import { render } from "@testing-library/react";
 import { createEditor, type Descendant } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { describe, expect, it } from "vitest";
+import { markdownToSlate } from "#/editor/convert";
 import { renderElement } from "#/editor/elements/renderElement";
 import { withSchema } from "../withSchema";
 
@@ -59,5 +60,22 @@ describe("block focus attributes", () => {
       "quote12345",
       "listitem01",
     ]);
+  });
+
+  it("marks a fenced code block parsed from Markdown with its terminal block ID", () => {
+    const editor = withReact(withSchema(createEditor()));
+    const value = markdownToSlate(
+      "```typescript\nconst answer = 42;\n^abc123DEF0\n```",
+    );
+
+    const { container } = render(
+      <Slate editor={editor} initialValue={value}>
+        <Editable renderElement={renderElement} />
+      </Slate>,
+    );
+
+    expect(
+      container.querySelector('[data-block-id="abc123DEF0"]'),
+    ).toHaveTextContent("const answer = 42;");
   });
 });

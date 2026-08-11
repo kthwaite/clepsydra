@@ -97,6 +97,23 @@ describe("slateToMarkdown", () => {
     );
   });
 
+  it("serializes a code block ID as a canonical terminal marker", () => {
+    const slate: Descendant[] = [
+      {
+        type: "code-block",
+        language: "typescript",
+        blockId: "abc123DEF0",
+        children: [{ text: "const answer = 42;" }],
+      },
+    ];
+
+    const markdown = slateToMarkdown(slate);
+    expect(markdown.trim()).toBe(
+      "```typescript\nconst answer = 42;\n^abc123DEF0\n```",
+    );
+    expect(markdownToSlate(markdown)).toEqual(slate);
+  });
+
   it("converts code blocks without language", () => {
     const slate: Descendant[] = [
       {

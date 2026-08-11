@@ -174,6 +174,29 @@ w = z^2
     );
   });
 
+  it("keeps block references inside link labels literal and non-interactive", () => {
+    render(
+      <MarkdownRenderer
+        content={
+          "[**See ((abc123DEF0))**](target.md) [Reference ((abc123DEF0))][source]\n\n[source]: source.md"
+        }
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "See ((abc123DEF0))" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Reference ((abc123DEF0))" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", {
+        name: "Open referenced block in Source",
+      }),
+    ).toBeNull();
+    expect(useBlockMock).not.toHaveBeenCalled();
+  });
+
   it("renders block content for a block reference", async () => {
     mockBlock("abc123DEF0", "Rendered from source");
 
