@@ -104,7 +104,7 @@ pub struct ListPagesParams {
     /// Offset into the path-ordered page list, for pagination.
     pub offset: Option<u32>,
     /// Only pages of this resolved kind (NOTE, PROJECT, JOURNAL, TODO, QUOTE,
-    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE).
+    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION).
     pub kind: Option<String>,
     /// Only pages carrying this exact tag.
     pub tag: Option<String>,
@@ -149,8 +149,7 @@ pub struct LinksParams {
 }
 
 /// The kind vocabulary, spelled out for tool schemas and error messages.
-const KIND_TOKENS: &str =
-    "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE";
+const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION";
 
 const MCP_INSTRUCTIONS: &str = "Work with a clepsydra vault (a markdown personal knowledge base) \
 through its running server. Orient with vault_tree and vault_tags, locate pages with vault_search \
@@ -171,8 +170,8 @@ pub struct CreatePageParams {
     /// Page title. Required; also drives the generated filename slug.
     pub title: String,
     /// Kind token (NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE,
-    /// PERSON, TASK, CYCLE). Defaults to NOTE. Declared in frontmatter and
-    /// used to pick the canonical folder.
+    /// PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION). Defaults to NOTE.
+    /// Declared in frontmatter and used to pick the canonical folder.
     pub kind: Option<String>,
     /// Folder override, vault-relative. With a declared kind it must be the
     /// kind's canonical folder or a subfolder beneath it (e.g. `notes/drafts`
@@ -241,7 +240,8 @@ pub struct AssignParams {
     /// use the bulk endpoint and report per-path successes and failures.
     pub paths: Vec<String>,
     /// Kind token to declare in frontmatter (NOTE, PROJECT, JOURNAL, TODO,
-    /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE).
+    /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE,
+    /// AI_CONVERSATION).
     pub kind: Option<String>,
     /// Project to declare in frontmatter.
     pub project: Option<String>,
@@ -1629,6 +1629,14 @@ mod tests {
             .unwrap();
         server
             .vault_create_page(Parameters(CreatePageParams {
+                kind: Some("recipe".to_string()),
+                body: Some("INGREDIENTS\n\nSTEPS\n\nNOTES\n".to_string()),
+                ..create_params("Recipe Filter Target")
+            }))
+            .await
+            .unwrap();
+        server
+            .vault_create_page(Parameters(CreatePageParams {
                 project: Some("skunkworks".to_string()),
                 ..create_params("Project Page")
             }))
@@ -1662,6 +1670,20 @@ mod tests {
         assert_eq!(by_kind["total"], 1);
         assert_eq!(by_kind["items"][0]["title"], "Filter Target");
 
+        let by_recipe = parse(
+            server
+                .vault_list_pages(Parameters(ListPagesParams {
+                    limit: None,
+                    offset: None,
+                    kind: Some("recipe".to_string()),
+                    tag: None,
+                    project: None,
+                }))
+                .await,
+        );
+        assert_eq!(by_recipe["total"], 1);
+        assert_eq!(by_recipe["items"][0]["title"], "Recipe Filter Target");
+
         let by_project = parse(
             server
                 .vault_list_pages(Parameters(ListPagesParams {
@@ -1680,13 +1702,13 @@ mod tests {
             .vault_list_pages(Parameters(ListPagesParams {
                 limit: None,
                 offset: None,
-                kind: Some("recipe".to_string()),
+                kind: Some("banana".to_string()),
                 tag: None,
                 project: None,
             }))
             .await
             .expect_err("unknown kind filter should be rejected");
-        assert!(err.contains("QUOTE"), "{err}");
+        assert!(err.contains("RECIPE"), "should list valid kinds: {err}");
     }
 
     #[test]
@@ -1724,17 +1746,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_page_accepts_recipe_and_uses_canonical_folder() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_create_page(Parameters(CreatePageParams {
+                    kind: Some("recipe".to_string()),
+                    body: Some("INGREDIENTS\n\nSTEPS\n\nNOTES\n".to_string()),
+                    ..create_params("Soup")
+                }))
+                .await,
+        );
+        assert_eq!(value["kind"], "RECIPE");
+        assert!(
+            value["path"].as_str().unwrap().starts_with("recipes/"),
+            "unexpected path: {}",
+            value["path"]
+        );
+    }
+
+    #[tokio::test]
     async fn create_page_rejects_unknown_kind_and_lists_the_vocabulary() {
         let (server, _tmp) = serve_seeded_vault().await;
         let err = server
             .vault_create_page(Parameters(CreatePageParams {
-                kind: Some("recipe".to_string()),
+                kind: Some("banana".to_string()),
                 ..create_params("X")
             }))
             .await
             .expect_err("unknown kind should be rejected");
-        assert!(err.contains("recipe"), "{err}");
-        assert!(err.contains("QUOTE"), "should list valid kinds: {err}");
+        assert!(err.contains("banana"), "{err}");
+        assert!(err.contains("RECIPE"), "should list valid kinds: {err}");
     }
 
     #[tokio::test]
@@ -1969,18 +2011,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn assign_rejects_unknown_kind() {
+    async fn assign_accepts_recipe() {
         let (server, _tmp) = serve_seeded_vault().await;
-        let err = server
-            .vault_assign(Parameters(AssignParams {
-                paths: vec!["notes/alpha.md".to_string()],
-                kind: Some("recipe".to_string()),
-                project: None,
-                clear_project: None,
-            }))
-            .await
-            .expect_err("unknown kind should be rejected");
-        assert!(err.contains("QUOTE"), "should list valid kinds: {err}");
+        let value = parse(
+            server
+                .vault_assign(Parameters(AssignParams {
+                    paths: vec!["notes/alpha.md".to_string()],
+                    kind: Some("recipe".to_string()),
+                    project: None,
+                    clear_project: None,
+                }))
+                .await,
+        );
+        assert_eq!(value["kind"], "RECIPE");
+        assert!(
+            value["path"].as_str().unwrap().starts_with("recipes/"),
+            "assign should relocate to the canonical folder: {}",
+            value["path"]
+        );
     }
 
     #[tokio::test]

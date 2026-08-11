@@ -74,6 +74,10 @@ describe("intakePath", () => {
     ).toBe("notes/20260531.x.aaaa0000.md");
   });
 
+  it("projects recipes into the canonical recipes folder", () => {
+    expect(KIND_FOLDER.RECIPE).toBe("recipes");
+  });
+
   it("has a folder for every kind", () => {
     for (const k of KINDS) {
       expect(KIND_FOLDER[k]).toMatch(/^[a-z]+$/);

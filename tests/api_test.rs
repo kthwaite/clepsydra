@@ -824,6 +824,53 @@ async fn create_default_page_uses_server_path_trimmed_title_and_one_clock_read()
 }
 
 #[tokio::test]
+async fn recipe_kind_create_filter_and_assign() {
+    let (server, _tmp) = setup_server();
+
+    let created_response = server
+        .post("/api/vault/pages/recipes/soup.md")
+        .json(&serde_json::json!({
+            "title": "Soup",
+            "kind": "RECIPE",
+            "body": "INGREDIENTS\n\nSTEPS\n\nNOTES\n"
+        }))
+        .await;
+    created_response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = created_response.json();
+    assert_eq!(created["kind"], "RECIPE");
+    let recipe_path = created["path"].as_str().unwrap().to_string();
+    assert!(recipe_path.starts_with("recipes/"));
+
+    let filtered_response = server.get("/api/vault/pages?kind=recipe").await;
+    filtered_response.assert_status_ok();
+    let filtered: serde_json::Value = filtered_response.json();
+    assert!(
+        filtered["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|page| page["path"] == recipe_path),
+        "created recipe missing from filtered listing: {filtered}"
+    );
+
+    let note_response = server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({ "title": "Ordinary Note" }))
+        .await;
+    note_response.assert_status(StatusCode::CREATED);
+    let note: serde_json::Value = note_response.json();
+    let note_path = note["path"].as_str().unwrap();
+
+    let assigned_response = server
+        .post(&format!("/api/vault/pages-assign/{note_path}"))
+        .json(&serde_json::json!({ "kind": "RECIPE" }))
+        .await;
+    assigned_response.assert_status_ok();
+    let assigned: serde_json::Value = assigned_response.json();
+    assert!(assigned["path"].as_str().unwrap().starts_with("recipes/"));
+}
+
+#[tokio::test]
 async fn create_default_page_rejects_blank_titles_without_creating_markdown() {
     let fixture = ApiFixture::builder().build();
     let root = fixture.temp_dir.path().join("vault");

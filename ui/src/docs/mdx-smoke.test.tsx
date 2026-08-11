@@ -10,6 +10,7 @@ import BrowserExtension, {
 import Configuration from "#/docs/content/configuration.mdx";
 import Guide, { meta } from "#/docs/content/getting-started.mdx";
 import source from "#/docs/content/getting-started.mdx?raw";
+import Recipes, { meta as recipesMeta } from "#/docs/content/recipes.mdx";
 import Troubleshooting, {
   meta as troubleshootingMeta,
 } from "#/docs/content/troubleshooting.mdx";
@@ -100,6 +101,22 @@ it("renders the Books and Reading workflow", () => {
   );
   expect(
     screen.getByText("academic.books_folder", { exact: true }),
+  ).toBeInTheDocument();
+});
+
+it("renders the Recipes workflow", () => {
+  render(<Recipes />);
+  expect(recipesMeta.slug).toBe("recipes");
+  expect(
+    screen.getByRole("heading", { name: "Recipe format" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "Structured editing" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", {
+      name: "When Clepsydra falls back to Markdown",
+    }),
   ).toBeInTheDocument();
 });
 

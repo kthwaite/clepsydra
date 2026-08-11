@@ -1,0 +1,94 @@
+export const meta = {
+  slug: "recipes",
+  title: "Recipes",
+  description: "Create, file, and edit structured recipe Folios without giving up portable Markdown."
+}
+
+Recipe Folios keep ingredients, steps, and notes structured in Clepsydra while
+remaining ordinary, portable Markdown files.
+
+## Create and file a recipe
+
+Create a page with kind `RECIPE`, or assign `RECIPE` to an existing page. A
+recipe without a project is filed canonically under `recipes/`. Assigning the
+kind can move the page to that folder, but it does not rewrite the page body.
+
+The recipe title belongs to normal Clepsydra page metadata. Do not repeat it as
+a heading or title line in the body. Clepsydra may remove an initial body line
+only when it exactly matches the metadata title after trimming; arbitrary first
+lines remain description text and never replace the metadata title.
+
+## Recipe format
+
+The canonical recipe body uses plain section markers, Unicode ingredient
+bullets, numbered steps, and Markdown notes:
+
+```markdown
+Clean, clear chicken broth with charred aromatics. Makes four bowls.
+
+INGREDIENTS
+• 1.5 kilograms whole chicken
+• 2 large brown onions, halved
+
+STEPS
+1. Char the aromatics until blackened in patches.
+2. Poach the chicken at a bare simmer.
+
+NOTES
+**Batch-friendly**: The broth freezes well.
+```
+
+Everything before `INGREDIENTS` is the description. Every ingredient and step
+is an opaque string: Clepsydra preserves quantities, punctuation, temperatures,
+units, emphasis, and wording. It does not parse measurements or perform unit
+conversion. Content after `NOTES` remains Markdown.
+
+Clepsydra also reads an equivalent standard-Markdown form:
+
+```markdown
+Clean, clear chicken broth with charred aromatics. Makes four bowls.
+
+## Ingredients
+- 1.5 kilograms whole chicken
+- 2 large brown onions, halved
+
+## Steps
+1. Char the aromatics until blackened in patches.
+2. Poach the chicken at a bare simmer.
+
+## Notes
+**Batch-friendly**: The broth freezes well.
+```
+
+The three heading names are matched case-insensitively and must use a consistent
+heading level. Ingredients may use `-`, `*`, or `+` unordered-list markers;
+steps use an ordered list. The sections must appear once each in the order
+Ingredients, Steps, Notes. Empty sections are accepted when their markers are
+present.
+
+## Structured editing
+
+A supported recipe opens with dedicated read and edit views for its description,
+ingredients, steps, and notes. Add, remove, or reorder ingredient and step rows;
+step numbers follow the current row order. Edit description and notes as
+Markdown.
+
+Saving from the structured editor always writes one deterministic canonical
+body: uppercase `INGREDIENTS`, `STEPS`, and `NOTES` markers, `•` ingredient
+bullets, sequential step numbers, normalized spacing and line endings, all
+three markers, and one final newline. A standard-Markdown recipe is normalized
+to this format only after an explicit structured edit and save. Opening it, or
+merely assigning `RECIPE`, does not rewrite its source.
+
+## When Clepsydra falls back to Markdown
+
+If Clepsydra cannot account for the complete body without losing content, it
+shows a preservation notice and uses the generic Markdown editor instead of the
+structured recipe editor. Examples include missing, duplicated, or out-of-order
+sections; mixed section formats; unsupported nested list shapes; or other
+Markdown between recognized list items and boundaries.
+
+The original Markdown remains authoritative in fallback mode. Editing and
+saving through the generic editor preserves unsupported Markdown rather than
+silently dropping or canonicalizing it. To enable structured editing, reshape
+the body into one of the complete accepted formats above.
