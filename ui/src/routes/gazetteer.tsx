@@ -6,7 +6,7 @@ import { KINDS, type Kind } from "#/lib/kind";
 export type GazetteerSearch = Record<string, unknown> & {
   q?: string;
   tags?: string[];
-  kind?: Kind;
+  kind?: string;
   project?: string;
   sort: GazetteerSort;
   page: number;
@@ -37,9 +37,7 @@ export const Route = createFileRoute("/gazetteer")({
     ];
     const rawKind =
       typeof search.kind === "string" ? search.kind.toUpperCase() : undefined;
-    const kind = KINDS.includes(rawKind as Kind)
-      ? (rawKind as Kind)
-      : undefined;
+    const kind = rawKind;
     const project =
       typeof search.project === "string" && search.project.trim()
         ? search.project.trim()
@@ -90,10 +88,15 @@ function GazetteerPage() {
       }),
     });
 
+  const kind = KINDS.includes(search.kind as Kind)
+    ? (search.kind as Kind)
+    : undefined;
+
   const filters: GazetteerFilters = {
     query: search.q ?? "",
     selectedTags: search.tags ?? [],
-    kind: search.kind,
+    kind,
+    queryKind: search.kind,
     project: search.project,
     sort: search.sort,
     page: search.page,

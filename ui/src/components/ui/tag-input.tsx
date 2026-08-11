@@ -34,6 +34,9 @@ export interface TagInputProps {
   onBlur?: () => void;
 }
 
+const tagsEqual = (left: string, right: string) =>
+  left.trim().toLowerCase() === right.trim().toLowerCase();
+
 export function TagInput({
   label,
   values,
@@ -75,8 +78,8 @@ export function TagInput({
           .filter(
             (suggestion) =>
               suggestion.toLowerCase().includes(queryLower) &&
-              !values.includes(suggestion) &&
-              !readOnlyValues.includes(suggestion),
+              !values.some((value) => tagsEqual(suggestion, value)) &&
+              !readOnlyValues.some((value) => tagsEqual(suggestion, value)),
           )
           .slice(0, maxSuggestions)
       : [];
@@ -89,8 +92,8 @@ export function TagInput({
       const trimmed = val.trim();
       if (
         trimmed &&
-        !values.includes(trimmed) &&
-        !readOnlyValues.includes(trimmed)
+        !values.some((value) => tagsEqual(trimmed, value)) &&
+        !readOnlyValues.some((value) => tagsEqual(trimmed, value))
       ) {
         onChange([...values, trimmed]);
       }

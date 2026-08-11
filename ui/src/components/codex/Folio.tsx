@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Transforms } from "slate";
+import { type Range, Transforms } from "slate";
 import {
   useBacklinks,
   useOutlinks,
@@ -349,21 +349,25 @@ export function Folio({ tabId, path }: FolioProps) {
       const scrollContainer = bodyRef.current;
       if (!slateEditor || !scrollContainer) return;
 
-      scrollContainer.scrollTop = restoration.scrollTop;
-      if (!restoration.anchor || !restoration.focus) return;
       const requireTextMatch = restoration.revision !== editor.getRevision();
-      const anchor = validateTextPointSnapshot(
-        slateEditor,
-        restoration.anchor,
-        requireTextMatch,
-      );
-      const focus = validateTextPointSnapshot(
-        slateEditor,
-        restoration.focus,
-        requireTextMatch,
-      );
-      if (!anchor || !focus) return;
-      Transforms.select(slateEditor, { anchor, focus });
+      let selection: Range | null = null;
+      if (restoration.anchor && restoration.focus) {
+        const anchor = validateTextPointSnapshot(
+          slateEditor,
+          restoration.anchor,
+          requireTextMatch,
+        );
+        const focus = validateTextPointSnapshot(
+          slateEditor,
+          restoration.focus,
+          requireTextMatch,
+        );
+        if (anchor && focus) selection = { anchor, focus };
+      }
+      if (requireTextMatch && !selection) return;
+
+      scrollContainer.scrollTop = restoration.scrollTop;
+      if (selection) Transforms.select(slateEditor, selection);
     });
 
     return () => cancelAnimationFrame(frame);

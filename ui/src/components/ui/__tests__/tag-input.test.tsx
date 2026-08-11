@@ -119,6 +119,25 @@ describe("TagInput", () => {
 
     expect(onChange).not.toHaveBeenCalled();
   });
+  it.each(["JOURNAL", " journal "])(
+    "does not add the read-only value variant %j",
+    async (candidate) => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <TagInput
+          label="Tags"
+          values={["pkm"]}
+          readOnlyValues={["journal"]}
+          onChange={onChange}
+        />,
+      );
+
+      await user.type(screen.getByRole("textbox"), `${candidate}{Enter}`);
+
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
 
   it("emits only editable values when adding a tag", async () => {
     const user = userEvent.setup();
@@ -148,6 +167,15 @@ describe("TagInput", () => {
     await user.type(screen.getByRole("textbox"), "daily{Enter}");
 
     expect(onChange).toHaveBeenCalledWith(["journal", "daily"]);
+  });
+  it("allows an ordinary tag when no matching read-only value exists", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<TagInput label="Tags" values={[]} onChange={onChange} />);
+
+    await user.type(screen.getByRole("textbox"), "journal{Enter}");
+
+    expect(onChange).toHaveBeenCalledWith(["journal"]);
   });
 
   it("does not add empty tags", async () => {
@@ -268,6 +296,28 @@ describe("TagInput", () => {
     expect(
       screen.queryByRole("listbox", { name: "Tag suggestions" }),
     ).toBeNull();
+  });
+  it("excludes read-only variants before selecting a suggestion", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        readOnlyValues={["journal"]}
+        suggestions={["JOURNAL", " journal ", "journal-entry"]}
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(input, "jour");
+
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.mouseDown(screen.getByRole("option", { name: "journal-entry" }));
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["journal-entry"]);
   });
 
   it("does not show suggestions when suggestions are omitted", async () => {

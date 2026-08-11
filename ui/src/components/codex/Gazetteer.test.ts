@@ -7,26 +7,35 @@ import { useGazetteerStore } from "#/store/gazetteer";
 import { Gazetteer, toggleInSet } from "./Gazetteer";
 
 const {
+  contentQueryState,
   contentState,
   layoutState,
   openTabMock,
   routeBridge,
   useContentIndexMock,
-} = vi.hoisted(() => ({
-  contentState: {
+} = vi.hoisted(() => {
+  const contentState = {
     items: [] as Array<Record<string, unknown>>,
     total: 0,
-  },
-  layoutState: { mobile: true },
-  openTabMock: vi.fn(),
-  routeBridge: { openWorkspace: undefined as (() => void) | undefined },
-  useContentIndexMock: vi.fn(),
-}));
+  };
+  return {
+    contentQueryState: {
+      data: contentState as typeof contentState | undefined,
+      error: null as Error | null,
+      isSuccess: true,
+    },
+    contentState,
+    layoutState: { mobile: true },
+    openTabMock: vi.fn(),
+    routeBridge: { openWorkspace: undefined as (() => void) | undefined },
+    useContentIndexMock: vi.fn(),
+  };
+});
 
 vi.mock("#/api/index", () => ({
   useContentIndex: (...args: unknown[]) => {
     useContentIndexMock(...args);
-    return { data: contentState };
+    return contentQueryState;
   },
   useTags: () => ({ data: [{ tag: "research", count: 1 }] }),
 }));
@@ -87,6 +96,9 @@ beforeEach(() => {
   contentState.items = Array.from({ length: 25 }, (_, index) =>
     makeContentEntry(index),
   );
+  contentQueryState.data = contentState;
+  contentQueryState.error = null;
+  contentQueryState.isSuccess = true;
   useGazetteerStore.setState({
     query: "",
     selectedTags: [],
@@ -219,6 +231,45 @@ describe("Gazetteer controller", () => {
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Open Alpha" })).toBeVisible();
+  });
+
+  it("retains a requested page until the authoritative query resolves", () => {
+    const onPageChange = vi.fn();
+    const filters = {
+      query: "",
+      selectedTags: [],
+      sort: "ts" as const,
+      page: 2,
+      onQueryChange: vi.fn(),
+      onSelectedTagsChange: vi.fn(),
+      onKindChange: vi.fn(),
+      onProjectChange: vi.fn(),
+      onSortChange: vi.fn(),
+      onPageChange,
+    };
+    contentQueryState.data = undefined;
+    contentQueryState.isSuccess = false;
+
+    const view = render(createElement(Gazetteer, { filters }));
+
+    expect(useContentIndexMock).toHaveBeenLastCalledWith({
+      q: undefined,
+      tags: undefined,
+      kind: undefined,
+      project: undefined,
+      limit: 20,
+      offset: 20,
+    });
+    expect(onPageChange).not.toHaveBeenCalled();
+
+    contentState.items = [];
+    contentState.total = 0;
+    contentQueryState.data = contentState;
+    contentQueryState.isSuccess = true;
+    view.rerender(createElement(Gazetteer, { filters }));
+
+    expect(onPageChange).toHaveBeenCalledOnce();
+    expect(onPageChange).toHaveBeenCalledWith(1);
   });
   it("offers the shared Kind and Project vocabularies through accessible desktop filters", async () => {
     const user = userEvent.setup();

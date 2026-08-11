@@ -533,7 +533,7 @@ describe("Folio in-session restoration", () => {
     expect(restoredEditor.selection).toEqual(savedSelection);
   });
 
-  it("keeps a changed-revision selection unset when its saved leaf text is stale", () => {
+  it("leaves scroll and selection untouched when changed-revision text is stale", () => {
     const departing = editableEditor();
     departing.getRevision.mockReturnValue("revision-1");
     usePageEditorMock.mockReturnValue(departing);
@@ -555,8 +555,26 @@ describe("Folio in-session restoration", () => {
 
     flushRestorationFrame();
 
-    expect(restoredScroller.scrollTop).toBe(64);
+    expect(restoredScroller.scrollTop).toBe(0);
     expect(restoredEditor.selection).toBeNull();
+  });
+
+  it("restores scroll and selection when changed-revision text remains compatible", () => {
+    saveFolioRestoration(restorationRecord({ scrollTop: 80 }));
+    const returning = editableEditor();
+    returning.getRevision.mockReturnValue("revision-2");
+    usePageEditorMock.mockReturnValue(returning);
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredEditor = activeSlateEditor();
+    const restoredScroller = folioScrollContainer();
+
+    flushRestorationFrame();
+
+    expect(restoredScroller.scrollTop).toBe(80);
+    expect(restoredEditor.selection).toEqual({
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    });
   });
 
   it("clears restoration when the same tab is repointed to another path", () => {

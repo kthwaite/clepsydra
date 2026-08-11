@@ -13,9 +13,19 @@ const routeMocks = vi.hoisted(() => ({
     page: 2,
   },
   navigate: vi.fn(),
-  useContentIndex: vi.fn((..._args: unknown[]) => ({
-    data: { items: [], total: 0 },
-  })),
+  useContentIndex: vi.fn(
+    (
+      ..._args: unknown[]
+    ): {
+      data?: { items: never[]; total: number };
+      error?: Error;
+      isError?: boolean;
+      isSuccess?: boolean;
+    } => ({
+      data: { items: [], total: 0 },
+      isSuccess: true,
+    }),
+  ),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -73,6 +83,35 @@ describe("Gazetteer route filters", () => {
       throw new Error("Expected a callable search validator");
     }
     expect(validateSearch(completeSearch)).toEqual(completeSearch);
+  });
+
+  it("preserves an explicit unknown Kind and surfaces the rejected query", () => {
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    expect(validateSearch({ ...completeSearch, kind: "RECIPE" })).toEqual({
+      ...completeSearch,
+      kind: "RECIPE",
+    });
+
+    routeMocks.search.kind = "RECIPE";
+    routeMocks.useContentIndex.mockReturnValueOnce({
+      error: new Error("Unknown Kind: RECIPE"),
+      isError: true,
+      isSuccess: false,
+    });
+    render(<GazetteerPage />);
+
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
+      q: "atlas",
+      tags: ["research"],
+      kind: "RECIPE",
+      project: "clepsydra",
+      limit: 20,
+      offset: 20,
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Unknown Kind: RECIPE");
   });
 
   it("combines route filters in the authoritative paged query and follows history changes", () => {

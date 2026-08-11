@@ -7,6 +7,7 @@ import {
   Button as SelectButton,
 } from "react-aria-components";
 import { useContentIndex, useTags } from "#/api/index";
+import { formatApiError } from "#/api/error";
 import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";
@@ -41,6 +42,7 @@ export interface GazetteerFilters {
   query: string;
   selectedTags: string[];
   kind?: Kind;
+  queryKind?: string;
   project?: string;
   sort: GazetteerSort;
   page: number;
@@ -87,18 +89,19 @@ export function Gazetteer({ initialTag, filters }: Props) {
     );
   const { data: tagsData } = useTags();
   const requestedPage = Math.max(1, Math.floor(page));
-  const { data: content } = useContentIndex(
+  const contentQuery = useContentIndex(
     filters
       ? {
           q: query || undefined,
           tags: selectedTags.length > 0 ? selectedTags : undefined,
-          kind,
+          kind: filters.queryKind ?? kind,
           project,
           limit: MOBILE_GAZETTEER_PAGE_SIZE,
           offset: (requestedPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE,
         }
       : { kind, project, limit: 500 },
   );
+  const { data: content } = contentQuery;
   const isMobile = useMobileLayout();
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
@@ -123,7 +126,9 @@ export function Gazetteer({ initialTag, filters }: Props) {
     1,
     Math.ceil(filteredCount / MOBILE_GAZETTEER_PAGE_SIZE),
   );
-  const currentPage = Math.min(requestedPage, pageCount);
+  const currentPage = contentQuery.isSuccess
+    ? Math.min(requestedPage, pageCount)
+    : requestedPage;
   const rows = useMemo(() => {
     if (filters) return rowsForPage;
     const start = (currentPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE;
@@ -131,8 +136,8 @@ export function Gazetteer({ initialTag, filters }: Props) {
   }, [currentPage, filters, rowsForPage]);
 
   useLayoutEffect(() => {
-    if (currentPage !== page) setPage(currentPage);
-  }, [currentPage, page, setPage]);
+    if (contentQuery.isSuccess && currentPage !== page) setPage(currentPage);
+  }, [contentQuery.isSuccess, currentPage, page, setPage]);
   const selected = [...selectedPaths];
 
   const toggleRow = (path: string) => {
@@ -184,6 +189,14 @@ export function Gazetteer({ initialTag, filters }: Props) {
       { onSuccess: onBulkDone },
     );
   };
+
+  if (contentQuery.error) {
+    return (
+      <p role="alert" className="p-4 text-sm text-destructive">
+        {formatApiError(contentQuery.error, "Gazetteer could not be loaded.")}
+      </p>
+    );
+  }
 
   const tagSummary =
     selectedTags.length > 0
