@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Pin, X } from "lucide-react";
+import { Pin, Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useStats } from "#/api/index";
@@ -17,6 +17,7 @@ import {
   quireColorVar,
   sheafSegments,
 } from "#/store/quires";
+import { useUiStore } from "#/store/ui";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type SheafProps = {
@@ -29,6 +30,7 @@ const HOVER_DELAY = 220;
 
 export function Sheaf({ activeTabId, className }: SheafProps) {
   const navigate = useNavigate();
+  const openInscribe = useUiStore((state) => state.openInscribe);
   const tabs = useWorkspaceStore((s) => s.tabs);
   const quires = useWorkspaceStore((s) => s.quires);
   const activateTab = useWorkspaceStore((s) => s.activateTab);
@@ -172,6 +174,17 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
           </Fragment>
         ),
       )}
+
+      <button
+        type="button"
+        aria-label="New page"
+        title="New page"
+        onClick={openInscribe}
+        className="flex flex-shrink-0 cursor-pointer items-center gap-1 border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+      >
+        <Plus aria-hidden="true" size={11} />
+        New
+      </button>
 
       {hoveredPath && hovered && (
         <TabPreviewCard path={hoveredPath} rect={hovered.rect} />

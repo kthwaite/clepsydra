@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Sheaf } from "../Sheaf";
 
@@ -26,6 +27,10 @@ function seed(collapsed: boolean) {
     openHistory: [],
   });
 }
+
+beforeEach(() => {
+  useUiStore.setState({ isInscribeOpen: false });
+});
 
 describe("Sheaf quire rendering", () => {
   it("renders the quire label cell before its member tabs", () => {
@@ -66,5 +71,40 @@ describe("Sheaf quire rendering", () => {
     render(<Sheaf activeTabId="t3" />);
     await user.click(screen.getByRole("button", { name: /quire thesis/i }));
     expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
+  });
+});
+
+describe("Sheaf creation action", () => {
+  it("opens the existing Intake page-creation dialog state", async () => {
+    const user = userEvent.setup();
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+
+    await user.click(screen.getByRole("button", { name: "New page" }));
+
+    expect(useUiStore.getState().isInscribeOpen).toBe(true);
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(3);
+  });
+
+  it("does not represent the creation action as a sheaf tab", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "New page" }),
+    ).not.toHaveAttribute("aria-selected");
+  });
+
+  it("keeps duplicate activation idempotent", async () => {
+    const user = userEvent.setup();
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+
+    await user.dblClick(screen.getByRole("button", { name: "New page" }));
+
+    expect(useUiStore.getState().isInscribeOpen).toBe(true);
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "New page" })).toHaveLength(1);
   });
 });
