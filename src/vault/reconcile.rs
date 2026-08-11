@@ -6,6 +6,7 @@ use super::Vault;
 use super::hooks::PostMoveHook;
 use super::index::{IndexError, VaultIndex};
 use super::mutation::{MutationOp, MutationPlanner};
+use super::mutation_coordinator::MutationCoordinator;
 use super::page::Page;
 use super::path::VaultPath;
 use super::projection::project_path;
@@ -54,16 +55,14 @@ pub fn move_page_to(
     {
         return Ok(None);
     }
-    // Plan the move; the planner's immutable borrow of `index` ends when `plan`
-    // is returned, freeing `index` for the mutable `execute` call.
-    let plan = {
-        let planner = MutationPlanner::new(vault, index);
-        planner.plan(&MutationOp::MovePage {
+    let command = MutationPlanner::new(vault, index)
+        .plan(&MutationOp::MovePage {
             source: source.to_string(),
             destination: dest.to_string(),
         })?
-    };
-    plan.execute(vault, index, hooks)?;
+        .into_batch_command(vault)?;
+    MutationCoordinator::execute_batch_direct(vault, index, hooks, command)
+        .map_err(|error| IndexError::Other(error.to_string()))?;
     Ok(Some(dest.to_string()))
 }
 

@@ -5,6 +5,9 @@ use rusqlite::params;
 use serde::Serialize;
 
 use super::Vault;
+use super::batch_mutation::{
+    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
+};
 use super::canonical::CanonicalName;
 use super::index::{IndexError, VaultIndex};
 use super::page::{Page, parse_or_repair_frontmatter};
@@ -21,6 +24,28 @@ fn vp_err(e: impl std::fmt::Display) -> IndexError {
         std::io::ErrorKind::InvalidInput,
         e.to_string(),
     ))
+}
+
+fn collect_missing_parent_directories(
+    vault: &Vault,
+    path: &VaultPath,
+    directories: &mut Vec<VaultPath>,
+) -> Result<(), IndexError> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    let mut current = String::new();
+    for component in parent.split('/') {
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(component);
+        let directory = VaultPath::new(&current).map_err(vp_err)?;
+        if !vault.resolve(&directory).exists() && !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    Ok(())
 }
 
 fn is_protected_content(content: &str) -> bool {
@@ -157,85 +182,135 @@ impl MutationPlan {
         }
     }
 
-    /// Execute the mutation plan: perform file operations, apply staged writes,
-    /// and incrementally update the index.
+    /// Convert this preview into a durable atomic batch command.
     ///
-    /// File operations run first so that if they fail, backlink pages remain
-    /// untouched. If staged writes fail after file ops, a full rebuild recovers
-    /// correct state.
-    ///
-    /// Consumes `self` since each plan should be executed exactly once.
-    pub fn execute(
-        self,
-        vault: &Vault,
-        index: &mut VaultIndex,
-        hooks: &[Box<dyn crate::vault::hooks::PostMoveHook>],
-    ) -> Result<(), IndexError> {
-        // 1. Perform file operations FIRST (primary mutation)
-        for op in &self.file_ops {
+    /// Every expected state is captured from the filesystem at conversion
+    /// time, so publication fails stale rather than overwriting a concurrent
+    /// change.
+    pub fn into_batch_command(self, vault: &Vault) -> Result<BatchMutationCommand, IndexError> {
+        let mut intents = Vec::with_capacity(self.staged_writes.len() + self.file_ops.len());
+        let mut create_directories = Vec::new();
+        let mut remove_directories = Vec::new();
+
+        for (absolute, content) in self.staged_writes {
+            let relative = absolute.strip_prefix(vault.root()).map_err(vp_err)?;
+            let relative = relative.to_str().ok_or_else(|| {
+                IndexError::Other(format!(
+                    "staged write path is not valid UTF-8: {}",
+                    absolute.display()
+                ))
+            })?;
+            let path = VaultPath::new(relative).map_err(vp_err)?;
+            intents.push(BatchPathIntent::Write {
+                expected: ExpectedPathState::Bytes(fs::read(&absolute)?),
+                path,
+                content: content.into_bytes(),
+            });
+        }
+
+        for op in self.file_ops {
             match op.kind {
                 FileOpKind::Rename => {
-                    if let Some(ref dest) = op.destination {
-                        let source_vp = VaultPath::new(&op.path).map_err(vp_err)?;
-                        let dest_vp = VaultPath::new(dest).map_err(vp_err)?;
-                        let source_abs = vault.resolve(&source_vp);
-                        let dest_abs = vault.resolve(&dest_vp);
-                        if let Some(parent) = dest_abs.parent() {
-                            fs::create_dir_all(parent)?;
+                    let destination = op.destination.ok_or_else(|| {
+                        IndexError::Other(format!("rename has no destination: {}", op.path))
+                    })?;
+                    let source = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let destination = VaultPath::new(&destination).map_err(vp_err)?;
+                    let source_absolute = vault.resolve(&source);
+                    if source_absolute.is_dir() {
+                        for entry in walkdir::WalkDir::new(&source_absolute)
+                            .into_iter()
+                            .filter_map(Result::ok)
+                            .filter(|entry| entry.file_type().is_dir())
+                        {
+                            let suffix = entry
+                                .path()
+                                .strip_prefix(&source_absolute)
+                                .map_err(vp_err)?;
+                            let source_directory =
+                                entry.path().strip_prefix(vault.root()).map_err(vp_err)?;
+                            let destination_directory = vault.resolve(&destination).join(suffix);
+                            let destination_directory = destination_directory
+                                .strip_prefix(vault.root())
+                                .map_err(vp_err)?;
+                            let source_directory =
+                                VaultPath::new(&source_directory.to_string_lossy())
+                                    .map_err(vp_err)?;
+                            let destination_directory =
+                                VaultPath::new(&destination_directory.to_string_lossy())
+                                    .map_err(vp_err)?;
+                            collect_missing_parent_directories(
+                                vault,
+                                &destination_directory,
+                                &mut create_directories,
+                            )?;
+                            if !vault.resolve(&destination_directory).exists()
+                                && !create_directories.contains(&destination_directory)
+                            {
+                                create_directories.push(destination_directory);
+                            }
+                            remove_directories.push(source_directory);
                         }
-                        fs::rename(&source_abs, &dest_abs)?;
+                        for entry in walkdir::WalkDir::new(&source_absolute)
+                            .into_iter()
+                            .filter_map(Result::ok)
+                            .filter(|entry| entry.file_type().is_file())
+                        {
+                            let absolute = entry.path();
+                            let suffix = absolute.strip_prefix(&source_absolute).map_err(vp_err)?;
+                            let source_file = absolute.strip_prefix(vault.root()).map_err(vp_err)?;
+                            let destination_file = vault.resolve(&destination).join(suffix);
+                            let destination_file =
+                                destination_file.strip_prefix(vault.root()).map_err(vp_err)?;
+                            let source_file = VaultPath::new(&source_file.to_string_lossy())
+                                .map_err(vp_err)?;
+                            let destination_file =
+                                VaultPath::new(&destination_file.to_string_lossy())
+                                    .map_err(vp_err)?;
+                            collect_missing_parent_directories(
+                                vault,
+                                &destination_file,
+                                &mut create_directories,
+                            )?;
+                            intents.push(BatchPathIntent::Move {
+                                expected_source: fs::read(absolute)?,
+                                source: source_file,
+                                destination: destination_file,
+                            });
+                        }
+                    } else {
+                        collect_missing_parent_directories(
+                            vault,
+                            &destination,
+                            &mut create_directories,
+                        )?;
+                        intents.push(BatchPathIntent::Move {
+                            expected_source: fs::read(&source_absolute)?,
+                            source,
+                            destination,
+                        });
                     }
                 }
                 FileOpKind::Delete => {
-                    let vp = VaultPath::new(&op.path).map_err(vp_err)?;
-                    let abs = vault.resolve(&vp);
-                    if abs.exists() {
-                        fs::remove_file(&abs)?;
-                    }
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    intents.push(BatchPathIntent::Delete {
+                        expected: fs::read(vault.resolve(&path))?,
+                        path,
+                    });
                 }
-                FileOpKind::CreateDir => {
-                    let vp = VaultPath::new(&op.path).map_err(vp_err)?;
-                    let abs = vault.resolve(&vp);
-                    fs::create_dir_all(&abs)?;
-                }
+                FileOpKind::CreateDir => {}
             }
         }
 
-        // Call post-move hooks for each moved markdown page.
-        for (old_vp, new_vp) in &self.moved_pages {
-            // Page paths still use old path in DB at this point.
-            if let Ok(page_id_str) = index.connection().query_row(
-                "SELECT id FROM pages WHERE path = ?1",
-                rusqlite::params![old_vp.as_str()],
-                |row| row.get::<_, String>(0),
-            ) && let Ok(page_id) = page_id_str.parse::<uuid::Uuid>()
-            {
-                for hook in hooks {
-                    hook.on_page_moved(old_vp, new_vp, &page_id, vault, index)
-                        .map_err(|e| IndexError::Other(e.to_string()))?;
-                }
-            }
-        }
-
-        // 2. Apply staged writes and sync index.
-        // On failure, attempt a full rebuild to restore consistency.
-        let post_result = (|| -> Result<(), IndexError> {
-            if !self.staged_writes.is_empty() {
-                rewriter::apply_staged_writes(&self.staged_writes)?;
-            }
-            use super::sync::SyncEngine;
-            SyncEngine::process_events(&self.index_events, vault, index)?;
-            Ok(())
-        })();
-
-        if post_result.is_err() {
-            // Best-effort recovery: rebuild index from filesystem truth
-            let _ = index.build(vault);
-            let _ = index.resolve_links();
-        }
-
-        post_result
+        Ok(BatchMutationCommand {
+            create_directories,
+            remove_directories,
+            intents,
+            index_events: self.index_events,
+            moved_pages: self.moved_pages,
+        })
     }
+
 }
 
 // ---------------------------------------------------------------------------

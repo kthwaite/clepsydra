@@ -1,8 +1,4 @@
-use std::path::PathBuf;
-
-use clepsydra::vault::rewriter::{
-    DELETE_PLAIN, DELETE_UNLINK, apply_staged_writes, rewrite_links_in_content,
-};
+use clepsydra::vault::rewriter::{DELETE_PLAIN, DELETE_UNLINK, rewrite_links_in_content};
 
 // ---------------------------------------------------------------------------
 // rewrite_links_in_content tests
@@ -73,37 +69,4 @@ fn delete_rewrite_unlink() {
     let new_target = format!("{DELETE_UNLINK}Doomed Page");
     let result = rewrite_links_in_content(content, &[("Doomed Page", &new_target)]);
     assert_eq!(result, "See ~~Doomed Page~~ for info.");
-}
-
-// ---------------------------------------------------------------------------
-// apply_staged_writes test
-// ---------------------------------------------------------------------------
-
-#[test]
-fn staged_writes_atomic_success() {
-    let dir = tempfile::tempdir().unwrap();
-
-    let file_a = dir.path().join("a.md");
-    let file_b = dir.path().join("b.md");
-
-    // Create initial content
-    std::fs::write(&file_a, "original A").unwrap();
-    std::fs::write(&file_b, "original B").unwrap();
-
-    let writes: Vec<(PathBuf, String)> = vec![
-        (file_a.clone(), "updated A".to_string()),
-        (file_b.clone(), "updated B".to_string()),
-    ];
-
-    apply_staged_writes(&writes).unwrap();
-
-    // Verify both updated
-    assert_eq!(std::fs::read_to_string(&file_a).unwrap(), "updated A");
-    assert_eq!(std::fs::read_to_string(&file_b).unwrap(), "updated B");
-
-    // Verify no tmp files remain
-    let tmp_a = PathBuf::from(format!("{}.clepsydra-tmp", file_a.display()));
-    let tmp_b = PathBuf::from(format!("{}.clepsydra-tmp", file_b.display()));
-    assert!(!tmp_a.exists(), "tmp file for a.md should not remain");
-    assert!(!tmp_b.exists(), "tmp file for b.md should not remain");
 }

@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::sync::Arc;
 
 use clepsydra::vault::Vault;
-use clepsydra::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent};
+use clepsydra::vault::batch_mutation::{
+    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
+};
 use clepsydra::vault::atomic_file::{
     AtomicPublicationError, atomic_create, atomic_create_owner_only, atomic_replace,
     atomic_replace_with,
@@ -60,6 +63,8 @@ async fn batch_publication_failure_rolls_back_without_notification() {
                     destination: destination.clone(),
                     expected_source: source_content.as_bytes().to_vec(),
                 }],
+                create_directories: Vec::new(),
+                remove_directories: Vec::new(),
                 index_events: vec![
                     ChangeEvent::Remove(source.clone()),
                     ChangeEvent::Upsert(destination.clone()),
@@ -190,6 +195,80 @@ Content.
 
     // Should have index events
     assert!(!plan.index_events.is_empty());
+}
+
+#[test]
+fn move_plan_batch_intents_cover_every_previewed_path_with_exact_expected_bytes() {
+    let alpha = "\
+---
+id: 00000000-0000-0000-0000-000000000110
+title: Alpha
+---
+Link to [[Beta]].
+";
+    let beta = "\
+---
+id: 00000000-0000-0000-0000-000000000111
+title: Beta
+---
+Content.
+";
+    let gamma = "\
+---
+id: 00000000-0000-0000-0000-000000000112
+title: Gamma
+---
+Another link to [Beta](beta.md).
+";
+    let (_tmp, vault) =
+        setup_vault(&[("alpha.md", alpha), ("beta.md", beta), ("gamma.md", gamma)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MovePage {
+            source: "beta.md".to_string(),
+            destination: "archive/renamed.md".to_string(),
+        })
+        .unwrap();
+    assert_eq!(plan.staged_writes.len(), 2);
+    let preview_paths = plan
+        .text_edits
+        .iter()
+        .map(|edit| edit.path.clone())
+        .chain(plan.file_ops.iter().map(|op| op.path.clone()))
+        .collect::<BTreeSet<_>>();
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    let command_paths = command
+        .affected_paths()
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    assert!(preview_paths.is_subset(&command_paths));
+
+    for intent in command.intents {
+        match intent {
+            BatchPathIntent::Write { path, expected, .. } => {
+                assert_eq!(
+                    expected,
+                    ExpectedPathState::Bytes(fs::read(vault.resolve(&path)).unwrap())
+                );
+            }
+            BatchPathIntent::Move {
+                source,
+                expected_source,
+                ..
+            } => {
+                assert_eq!(expected_source, fs::read(vault.resolve(&source)).unwrap());
+            }
+            BatchPathIntent::Delete { path, expected } => {
+                assert_eq!(expected, fs::read(vault.resolve(&path)).unwrap());
+            }
+        }
+    }
 }
 
 #[test]
@@ -526,7 +605,7 @@ fn encrypted_page_delete_skips_protected_referrers_but_rewrites_plain_referrers(
 }
 
 // ---------------------------------------------------------------------------
-// Task 5: MutationPlan::execute() tests
+// Batch command execution tests
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -549,7 +628,8 @@ fn execute_plan_moves_file_and_rewrites() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     // Verify file moved
     use clepsydra::vault::path::VaultPath;
@@ -592,7 +672,8 @@ fn execute_plan_deletes_file_and_rewrites() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     // Verify file deleted
     use clepsydra::vault::path::VaultPath;
@@ -716,7 +797,8 @@ fn delete_page_with_self_link_does_not_recreate_file() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     let abs_path = vault.resolve(&VaultPath::new("selfie.md").unwrap());
     assert!(
@@ -744,7 +826,8 @@ fn move_page_with_self_link_no_orphan_at_old_path() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     let old_path = vault.resolve(&VaultPath::new("original.md").unwrap());
     let new_path = vault.resolve(&VaultPath::new("moved.md").unwrap());
@@ -777,7 +860,8 @@ fn folder_move_internal_refs_no_orphan_outside() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     // Old paths should not exist
     let old_b = vault.resolve(&VaultPath::new("notes/b.md").unwrap());

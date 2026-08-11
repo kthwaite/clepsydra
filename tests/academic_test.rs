@@ -168,6 +168,7 @@ A highlight.
     use clepsydra::vault::academic_hook::AcademicMoveHook;
     use clepsydra::vault::hooks::PostMoveHook;
     use clepsydra::vault::mutation::{MutationOp, MutationPlanner};
+    use clepsydra::vault::mutation_coordinator::MutationCoordinator;
 
     let hooks: Vec<Box<dyn PostMoveHook>> = vec![Box::new(AcademicMoveHook)];
     let planner = MutationPlanner::new(&vault, &index);
@@ -177,7 +178,8 @@ A highlight.
             destination: "archive/my-paper.md".to_string(),
         })
         .unwrap();
-    plan.execute(&vault, &mut index, &hooks).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &hooks, command).unwrap();
 
     // Verify annotation's work_path was updated
     let ann_content = fs::read_to_string(root.join("library/annotations/highlight-1.md")).unwrap();

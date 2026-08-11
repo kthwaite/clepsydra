@@ -325,6 +325,58 @@ fn batch_notification(events: &[ChangeEvent]) -> MutationNotification {
     notification
 }
 
+fn publish_batch(
+    root: &Path,
+    command: &BatchMutationCommand,
+) -> Result<batch_mutation::PreparedBatch, MutationError> {
+    let mut prepared = batch_mutation::prepare(root, command).map_err(batch_prepare_error)?;
+    let directory = prepared.directory().to_path_buf();
+    if let Err(publish) = prepared
+        .publish()
+        .and_then(|()| prepared.mark_filesystem_committed())
+    {
+        return match prepared.rollback() {
+            Ok(()) => Err(MutationError::BatchPublish { source: publish }),
+            Err(rollback) => Err(MutationError::BatchRollback {
+                directory,
+                publish,
+                rollback,
+            }),
+        };
+    }
+    Ok(prepared)
+}
+
+fn reconcile_batch_index(
+    vault: &Vault,
+    index: &mut super::index::VaultIndex,
+    hooks: &[Box<dyn PostMoveHook>],
+    index_events: &[ChangeEvent],
+    moved_pages: &[(VaultPath, VaultPath)],
+) -> Result<(), IndexError> {
+    for (old_path, new_path) in moved_pages {
+        let page_id = match index.connection().query_row(
+            "SELECT id FROM pages WHERE path = ?1",
+            rusqlite::params![old_path.as_str()],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(value) => value.parse::<uuid::Uuid>().map_err(|source| {
+                IndexError::Other(format!(
+                    "invalid indexed page UUID for {}: {source}",
+                    old_path.as_str()
+                ))
+            })?,
+            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+            Err(source) => return Err(IndexError::Sqlite(source)),
+        };
+        for hook in hooks {
+            hook.on_page_moved(old_path, new_path, &page_id, vault, index)
+                .map_err(|error| IndexError::Other(error.to_string()))?;
+        }
+    }
+    SyncEngine::process_events(index_events, vault, index).map(|_| ())
+}
+
 fn rollback_created_publication(
     path: &Path,
     sync_hook: Option<&CreateRollbackSyncHook>,
@@ -496,6 +548,39 @@ impl MutationCoordinator {
         self.lock_paths(std::slice::from_ref(folder)).await
     }
 
+    /// Execute a durable batch against an already-open offline index.
+    ///
+    /// This uses the same publication, hook, index-reconciliation, retained
+    /// workspace, and cleanup path as [`Self::execute_batch`] without creating
+    /// a second coordinator or Tokio index worker.
+    pub fn execute_batch_direct(
+        vault: &Vault,
+        index: &mut super::index::VaultIndex,
+        hooks: &[Box<dyn PostMoveHook>],
+        command: BatchMutationCommand,
+    ) -> Result<MutationNotification, MutationError> {
+        let notification = batch_notification(&command.index_events);
+        let prepared = publish_batch(vault.root(), &command)?;
+        let directory = prepared.directory().to_path_buf();
+        if let Err(source) = reconcile_batch_index(
+            vault,
+            index,
+            hooks,
+            &command.index_events,
+            &command.moved_pages,
+        ) {
+            return Err(MutationError::BatchRecovery {
+                directory,
+                source: BatchRecoveryError::Index(source),
+            });
+        }
+        prepared.finish().map_err(|source| MutationError::BatchRecovery {
+            directory,
+            source: BatchRecoveryError::Workspace(source),
+        })?;
+        Ok(notification)
+    }
+
     pub async fn execute_batch(
         &self,
         vault: &Vault,
@@ -522,24 +607,9 @@ impl MutationCoordinator {
             let blocking_error_path = root.clone();
             let blocking_applied = Arc::clone(&filesystem_applied);
             let prepared = tokio::task::spawn_blocking(move || {
-                let mut prepared =
-                    batch_mutation::prepare(&blocking_root, &command).map_err(batch_prepare_error)?;
-                let directory = prepared.directory().to_path_buf();
-                if let Err(publish) = prepared
-                    .publish()
-                    .and_then(|()| prepared.mark_filesystem_committed())
-                {
-                    return match prepared.rollback() {
-                        Ok(()) => Err(MutationError::BatchPublish { source: publish }),
-                        Err(rollback) => Err(MutationError::BatchRollback {
-                            directory,
-                            publish,
-                            rollback,
-                        }),
-                    };
-                }
+                let prepared = publish_batch(&blocking_root, &command)?;
                 blocking_applied.store(true, Ordering::Release);
-                Ok((guard, prepared))
+                Ok::<_, MutationError>((guard, prepared))
             })
             .await
             .map_err(|source| MutationError::Filesystem {
@@ -553,36 +623,14 @@ impl MutationCoordinator {
             let (guard, prepared) = prepared;
             let directory = prepared.directory().to_path_buf();
             let reconciliation = index
-                .with_index(move |vault_index, index_vault| -> Result<(), IndexError> {
-                    for (old_path, new_path) in &moved_pages {
-                        let page_id = match vault_index.connection().query_row(
-                            "SELECT id FROM pages WHERE path = ?1",
-                            rusqlite::params![old_path.as_str()],
-                            |row| row.get::<_, String>(0),
-                        ) {
-                            Ok(value) => value.parse::<uuid::Uuid>().map_err(|source| {
-                                IndexError::Other(format!(
-                                    "invalid indexed page UUID for {}: {source}",
-                                    old_path.as_str()
-                                ))
-                            })?,
-                            // A page absent from the index has no stable hook target.
-                            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
-                            Err(source) => return Err(IndexError::Sqlite(source)),
-                        };
-                        for hook in hooks.iter() {
-                            hook.on_page_moved(
-                                old_path,
-                                new_path,
-                                &page_id,
-                                index_vault,
-                                vault_index,
-                            )
-                            .map_err(|error| IndexError::Other(error.to_string()))?;
-                        }
-                    }
-                    SyncEngine::process_events(&index_events, index_vault, vault_index)?;
-                    Ok(())
+                .with_index(move |vault_index, index_vault| {
+                    reconcile_batch_index(
+                        index_vault,
+                        vault_index,
+                        hooks.as_ref(),
+                        &index_events,
+                        &moved_pages,
+                    )
                 })
                 .await
                 .and_then(|result| result);
@@ -1335,6 +1383,8 @@ mod tests {
                     content: content.as_bytes().to_vec(),
                 })
                 .collect(),
+            create_directories: Vec::new(),
+            remove_directories: Vec::new(),
             index_events: replacements
                 .iter()
                 .map(|(path, _, _)| ChangeEvent::Upsert(VaultPath::new(path).unwrap()))
@@ -1611,6 +1661,8 @@ mod tests {
                         destination: destination.clone(),
                         expected_source: source_content.as_bytes().to_vec(),
                     }],
+                    create_directories: Vec::new(),
+                    remove_directories: Vec::new(),
                     index_events: vec![
                         ChangeEvent::Remove(source.clone()),
                         ChangeEvent::Upsert(destination.clone()),

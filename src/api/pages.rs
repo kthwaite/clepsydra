@@ -1212,24 +1212,31 @@ pub async fn delete_page(
         _ => RewriteMode::PlainText,
     };
 
-    {
-        let op = MutationOp::DeletePage {
-            path: path.clone(),
-            rewrite: rewrite_mode,
-        };
-        let hooks = Arc::clone(&state.hooks);
-        state
-            .index
-            .with_index(move |index, vault| {
-                let planner = MutationPlanner::new(vault, index);
-                let plan = planner.plan(&op)?;
-                plan.execute(vault, index, &hooks)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?
-            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?;
-    }
+    let op = MutationOp::DeletePage {
+        path: path.clone(),
+        rewrite: rewrite_mode,
+    };
+    let command = state
+        .index
+        .with_index(move |index, vault| {
+            MutationPlanner::new(vault, index)
+                .plan(&op)?
+                .into_batch_command(vault)
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?
+        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?;
+    state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            command,
+            super::mutation_notifier(&state),
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     // Run post-delete hooks (e.g. CAS ref_count cleanup for archive pages)
     if let Some(ref meta) = page_meta {
@@ -1239,11 +1246,6 @@ pub async fn delete_page(
             }
         }
     }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![],
-        removed: vec![path.clone()],
-    });
 
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -1274,7 +1276,7 @@ pub async fn move_page(
 ) -> Result<Json<PageDetail>, ApiError> {
     let source_vp = crate::api::error::parse_request_path(&path, "invalid path")?;
     let dest_vp = crate::api::error::parse_request_path(&body.destination, "invalid destination")?;
-    let _guard = state
+    let planning_guard = state
         .mutation_coordinator
         .lock_paths(&[source_vp.clone(), dest_vp.clone()])
         .await;
@@ -1296,23 +1298,28 @@ pub async fn move_page(
         source: path.clone(),
         destination: body.destination.clone(),
     };
-    let hooks = Arc::clone(&state.hooks);
-    state
+    let command = state
         .index
         .with_index(move |index, vault| {
-            let planner = MutationPlanner::new(vault, index);
-            let plan = planner.plan(&op)?;
-            plan.execute(vault, index, &hooks)?;
-            Ok::<_, crate::vault::index::IndexError>(())
+            MutationPlanner::new(vault, index)
+                .plan(&op)?
+                .into_batch_command(vault)
         })
         .await
         .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?
         .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?;
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![body.destination],
-        removed: vec![path],
-    });
+    drop(planning_guard);
+    state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            command,
+            super::mutation_notifier(&state),
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     let page = Page::from_file(&dest_abs, dest_vp)
         .map_err(|error| ApiError::internal(format!("failed to read moved page: {error}")))?;

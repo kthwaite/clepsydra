@@ -1,4 +1,5 @@
 mod support;
+use std::collections::BTreeSet;
 
 use std::fs;
 use std::future::{Future, poll_fn};
@@ -14,6 +15,7 @@ use axum_test::TestServer;
 use tokio::sync::{Barrier, mpsc};
 
 use clepsydra::api::error::{parse_internal_path, parse_request_path};
+use clepsydra::api::events::SyncNotification;
 use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
@@ -739,8 +741,9 @@ async fn page_move_waits_for_uuid_update_publish_and_preserves_single_identity()
     assert_eq!(updated["body"], "published before move");
     assert_ne!(updated["revision"], original_revision);
 
-    assert_eq!(move_response.status(), StatusCode::OK);
+    let move_status = move_response.status();
     let moved = response_json(move_response).await;
+    assert_eq!(move_status, StatusCode::OK, "move failed: {moved}");
     assert_eq!(moved["meta"]["id"], id);
     assert_eq!(moved["path"], "moved/publish-race.md");
     assert_eq!(moved["body"], "published before move");
@@ -1483,6 +1486,103 @@ async fn move_page_rewrites_backlinks() {
     assert!(
         content.contains("[[renamed]]"),
         "expected [[renamed]] in rewritten content, but found: {content}"
+    );
+}
+
+#[tokio::test]
+async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification() {
+    let fixture = ApiFixture::builder().build();
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fixture
+        .server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({"title": "Source", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .post("/api/vault/pages-move/target.md")
+        .json(&serde_json::json!({"destination": "renamed.md"}))
+        .await
+        .assert_status(StatusCode::OK);
+
+    assert!(!vault_root.join("target.md").exists());
+    assert!(vault_root.join("renamed.md").exists());
+    let backlink = fs::read_to_string(vault_root.join("source.md")).unwrap();
+    assert!(!backlink.contains("[[Target]]"));
+    assert!(backlink.contains("[[renamed]]"));
+    match notifications.try_recv().expect("move notification") {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(
+                upserted.into_iter().collect::<BTreeSet<_>>(),
+                BTreeSet::from(["renamed.md".to_string(), "source.md".to_string()])
+            );
+            assert_eq!(removed, vec!["target.md"]);
+        }
+        notification => panic!("unexpected move notification: {notification:?}"),
+    }
+    assert!(
+        notifications.try_recv().is_err(),
+        "page move must publish exactly one notification"
+    );
+}
+
+#[tokio::test]
+async fn page_delete_commits_primary_and_backlink_rewrite_before_one_notification() {
+    let fixture = ApiFixture::builder().build();
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fixture
+        .server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
+
+    assert!(!vault_root.join("target.md").exists());
+    let backlink = fs::read_to_string(vault_root.join("linker.md")).unwrap();
+    assert!(!backlink.contains("[[Target]]"));
+    assert!(backlink.contains("See Target here."));
+    match notifications.try_recv().expect("delete notification") {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(upserted, vec!["linker.md"]);
+            assert_eq!(removed, vec!["target.md"]);
+        }
+        notification => panic!("unexpected delete notification: {notification:?}"),
+    }
+    assert!(
+        notifications.try_recv().is_err(),
+        "page delete must publish exactly one notification"
     );
 }
 

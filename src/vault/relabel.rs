@@ -8,6 +8,7 @@ use super::Vault;
 use super::block_id::generate_short_id;
 use super::index::{IndexError, VaultIndex};
 use super::mutation::{MutationOp, MutationPlanner};
+use super::mutation_coordinator::MutationCoordinator;
 use super::page::Page;
 use super::page_filename::page_filename;
 use super::path::{VaultPath, is_canonical_page_filename};
@@ -86,16 +87,14 @@ pub fn relabel(
 
         let dest = target_path(vp.parent(), created, &title, &generate_short_id());
 
-        // Plan the move; the planner's immutable borrow of `index` ends when
-        // `plan` is returned, freeing `index` for the mutable `execute` call.
-        let plan = {
-            let planner = MutationPlanner::new(vault, index);
-            planner.plan(&MutationOp::MovePage {
+        let command = MutationPlanner::new(vault, index)
+            .plan(&MutationOp::MovePage {
                 source: path.clone(),
                 destination: dest.clone(),
             })?
-        };
-        plan.execute(vault, index, &[])?;
+            .into_batch_command(vault)?;
+        MutationCoordinator::execute_batch_direct(vault, index, &[], command)
+            .map_err(|error| IndexError::Other(error.to_string()))?;
         report.renamed += 1;
     }
     Ok(report)

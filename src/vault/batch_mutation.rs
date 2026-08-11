@@ -38,6 +38,11 @@ pub enum BatchPathIntent {
 #[derive(Debug, Clone)]
 pub struct BatchMutationCommand {
     pub intents: Vec<BatchPathIntent>,
+    /// Missing destination directories created as transaction preparation,
+    /// not as logical mutation intents.
+    pub create_directories: Vec<VaultPath>,
+    /// Existing source directories removed after their contents publish.
+    pub remove_directories: Vec<VaultPath>,
     pub index_events: Vec<ChangeEvent>,
     pub moved_pages: Vec<(VaultPath, VaultPath)>,
 }
@@ -46,6 +51,12 @@ impl BatchMutationCommand {
     pub fn affected_paths(&self) -> Vec<VaultPath> {
         let mut paths = BTreeSet::new();
 
+        for path in &self.create_directories {
+            paths.insert(SortedVaultPath(path));
+        }
+        for path in &self.remove_directories {
+            paths.insert(SortedVaultPath(path));
+        }
         for intent in &self.intents {
             match intent {
                 BatchPathIntent::Write { path, .. } | BatchPathIntent::Delete { path, .. } => {
@@ -83,7 +94,11 @@ impl PartialOrd for SortedVaultPath<'_> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct TransactionManifest {
+    #[serde(default)]
+    remove_directories: Vec<String>,
     phase: TransactionPhase,
+    #[serde(default)]
+    create_directories: Vec<String>,
     intents: Vec<ManifestIntent>,
     index_events: Vec<ManifestChangeEvent>,
     moved_pages: Vec<(String, String)>,
@@ -278,7 +293,9 @@ impl PreparedBatch {
                 });
             }
         }
-
+        for path in &self.manifest.create_directories {
+            create_synced_directory(&self.root.join(path))?;
+        }
         for index in 0..self.manifest.intents.len() {
             hit_test_failpoint(TestFailpoint::Publication(index), &self.directory)?;
             publish_intent(
@@ -287,6 +304,9 @@ impl PreparedBatch {
                 index,
                 &self.manifest.intents[index],
             )?;
+        }
+        for path in self.manifest.remove_directories.iter().rev() {
+            remove_empty_synced_directory(&self.root.join(path))?;
         }
         Ok(())
     }
@@ -401,8 +421,12 @@ pub(crate) fn prepare(
 ) -> Result<PreparedBatch, BatchMutationError> {
     validate_intents(&command.intents)
         .map_err(|error| BatchMutationError::Validation(error.to_string()))?;
-    validate_observed_state(root, &command.intents)?;
-
+    validate_observed_state(
+        root,
+        &command.intents,
+        &command.create_directories,
+        &command.remove_directories,
+    )?;
     let transactions = root.join(".clepsydra").join("transactions");
     create_synced_directory_tree(root, &transactions)?;
     let directory = transactions.join(Uuid::now_v7().to_string());
@@ -470,6 +494,16 @@ pub(crate) fn prepare(
 
         let manifest = TransactionManifest {
             phase: TransactionPhase::Prepared,
+            create_directories: command
+                .create_directories
+                .iter()
+                .map(|path| path.as_str().to_owned())
+                .collect(),
+            remove_directories: command
+                .remove_directories
+                .iter()
+                .map(|path| path.as_str().to_owned())
+                .collect(),
             intents: manifest_intents,
             index_events: command
                 .index_events
@@ -629,7 +663,24 @@ fn manifest_path_value(manifest: &Path, path: &str) -> Result<VaultPath, BatchMu
 fn validate_observed_state(
     root: &Path,
     intents: &[BatchPathIntent],
+    create_directories: &[VaultPath],
+    remove_directories: &[VaultPath],
 ) -> Result<(), BatchMutationError> {
+    for path in create_directories {
+        let absolute = root.join(path.as_str());
+        if absolute
+            .try_exists()
+            .map_err(|source| BatchMutationError::filesystem("inspect path", &absolute, source))?
+        {
+            return Err(BatchMutationError::Stale(path.as_str().to_owned()));
+        }
+    }
+    for path in remove_directories {
+        let absolute = root.join(path.as_str());
+        if !absolute.is_dir() {
+            return Err(BatchMutationError::Stale(path.as_str().to_owned()));
+        }
+    }
     for intent in intents {
         match intent {
             BatchPathIntent::Write { path, expected, .. } => {
@@ -714,6 +765,14 @@ fn rollback_manifest(
     directory: &Path,
     manifest: &TransactionManifest,
 ) -> Result<(), BatchMutationError> {
+    for path in &manifest.remove_directories {
+        let absolute = root.join(path);
+        if !absolute.exists() {
+            create_synced_directory(&absolute)?;
+        } else if !absolute.is_dir() {
+            return Err(BatchMutationError::Stale(path.clone()));
+        }
+    }
     for index in (0..manifest.intents.len()).rev() {
         hit_test_failpoint(TestFailpoint::RollbackPublication(index), directory)?;
         let rollback_path = directory.join("rollback").join(index.to_string());
@@ -751,6 +810,20 @@ fn rollback_manifest(
             ManifestIntent::Delete { path, before_hash } => {
                 let content = read_verified(&rollback_path, before_hash)?;
                 restore_missing_file(&root.join(path), before_hash, &content)?;
+            }
+        }
+    }
+    for path in manifest.create_directories.iter().rev() {
+        let absolute = root.join(path);
+        match fs::remove_dir(&absolute) {
+            Ok(()) => sync_directory_parent(&absolute)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(BatchMutationError::filesystem(
+                    "remove prepared directory",
+                    &absolute,
+                    source,
+                ));
             }
         }
     }
@@ -956,6 +1029,12 @@ fn validate_manifest_paths(
     manifest: &TransactionManifest,
 ) -> Result<(), BatchMutationError> {
     let path = directory.join("manifest.json");
+    for directory_path in &manifest.remove_directories {
+        manifest_path_value(&path, directory_path)?;
+    }
+    for directory_path in &manifest.create_directories {
+        manifest_path_value(&path, directory_path)?;
+    }
     for intent in &manifest.intents {
         match intent {
             ManifestIntent::Write {
@@ -1019,6 +1098,18 @@ fn create_synced_directory_tree(root: &Path, transactions: &Path) -> Result<(), 
         sync_directory(&metadata)?;
     }
     Ok(())
+}
+
+fn remove_empty_synced_directory(path: &Path) -> Result<(), BatchMutationError> {
+    match fs::remove_dir(path) {
+        Ok(()) => sync_directory_parent(path),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(BatchMutationError::filesystem(
+            "remove empty directory",
+            path,
+            source,
+        )),
+    }
 }
 
 fn create_synced_directory(path: &Path) -> Result<(), BatchMutationError> {
@@ -1233,6 +1324,8 @@ mod tests {
                 expected: ExpectedPathState::Bytes(before.to_vec()),
                 content: after.to_vec(),
             }],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![ChangeEvent::Upsert(VaultPath::new(path).unwrap())],
             moved_pages: vec![],
         }
@@ -1252,6 +1345,8 @@ mod tests {
                     content: b"after-b".to_vec(),
                 },
             ],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![
                 ChangeEvent::Upsert(VaultPath::new("a.md").unwrap()),
                 ChangeEvent::Upsert(VaultPath::new("b.md").unwrap()),
@@ -1283,6 +1378,8 @@ mod tests {
                     content: b"new".to_vec(),
                 },
             ],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![],
             moved_pages: vec![],
         };
@@ -1427,6 +1524,8 @@ mod tests {
                 destination: VaultPath::new("destination.md").unwrap(),
                 expected_source: b"source".to_vec(),
             }],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![],
             moved_pages: vec![(
                 VaultPath::new("source.md").unwrap(),
@@ -1596,6 +1695,8 @@ mod tests {
                     expected: b"before".to_vec(),
                 },
             ],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![],
             moved_pages: vec![],
         };
@@ -1704,6 +1805,8 @@ mod tests {
                 source_hash: content_hash(b"outside"),
                 destination_was_missing: true,
             }],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![],
             moved_pages: vec![],
         };
@@ -1730,6 +1833,8 @@ mod tests {
                 destination: VaultPath::new("destination.md").unwrap(),
                 expected_source: b"source".to_vec(),
             }],
+            create_directories: vec![],
+            remove_directories: vec![],
             index_events: vec![],
             moved_pages: vec![],
         };
