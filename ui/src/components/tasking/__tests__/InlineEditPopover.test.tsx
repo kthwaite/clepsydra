@@ -8,10 +8,13 @@
  *   - priority field: click chip opens the popover, clicking a PriorityRow
  *     entry fires PATCH {priority}
  *   - Escape closes the popover without firing a PATCH
+ *   - regression: a keydown the chip doesn't itself handle (e.g. a global
+ *     shortcut key) must still reach the window-level shortcut dispatcher —
+ *     a blanket stopPropagation guard on the chip previously swallowed it
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
@@ -174,5 +177,34 @@ describe("InlineEditPopover — priority", () => {
     );
 
     expect(onCardClick).not.toHaveBeenCalled();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// global shortcut passthrough (regression)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("InlineEditPopover — global shortcut passthrough", () => {
+  it("does not swallow a keydown RAC's press handling doesn't itself act on", () => {
+    wrap(
+      <InlineEditPopover task={TASK} field="status" testIdPrefix="kb">
+        <span>pip</span>
+      </InlineEditPopover>,
+    );
+
+    const trigger = screen.getByTestId(`kb-inline-status-${TASK.id}`);
+    trigger.focus();
+    expect(trigger).toHaveFocus();
+
+    // "k" is not Enter/Space, so RAC's usePress never calls stopPropagation
+    // on it — the only thing that could swallow it is a guard we wrote.
+    const onWindowKeyDown = vi.fn();
+    window.addEventListener("keydown", onWindowKeyDown);
+    try {
+      fireEvent.keyDown(trigger, { key: "k", code: "KeyK" });
+      expect(onWindowKeyDown).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", onWindowKeyDown);
+    }
   });
 });

@@ -30,40 +30,42 @@ export function InlineEditPopover({
   };
 
   return (
-    // span guard: chip interaction must never bubble into the card's onClick
-    <span
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
-    >
-      <DialogTrigger isOpen={open} onOpenChange={setOpen}>
-        <Button
-          className="cursor-pointer outline-none focus-visible:outline-[1px] focus-visible:outline-[var(--hot)]"
-          data-testid={`${testIdPrefix}-inline-${field}-${task.id}`}
-          aria-label={`Change ${field}`}
+    // No manual stopPropagation guard here: RAC's Button (via usePress)
+    // already stops propagation of the pointer/keyboard events it handles
+    // (click, Enter/Space) by default, which is sufficient to keep chip
+    // interaction from opening the card underneath. A blanket
+    // onKeyDown={stopPropagation} wrapper would additionally swallow every
+    // OTHER keydown while focus rests on the chip — including global
+    // shortcut chords the RAC press handling never touches — before they
+    // reach the window-level useGlobalShortcuts dispatcher.
+    <DialogTrigger isOpen={open} onOpenChange={setOpen}>
+      <Button
+        className="cursor-pointer outline-none focus-visible:outline-[1px] focus-visible:outline-[var(--hot)]"
+        data-testid={`${testIdPrefix}-inline-${field}-${task.id}`}
+        aria-label={`Change ${field}`}
+      >
+        {children}
+      </Button>
+      <Popover hideArrow placement="bottom start">
+        <Dialog
+          aria-label={`Set ${field}`}
+          className="w-[320px] border border-[var(--ink-3)] bg-[var(--bg)] p-[8px] outline-none"
         >
-          {children}
-        </Button>
-        <Popover hideArrow placement="bottom start">
-          <Dialog
-            aria-label={`Set ${field}`}
-            className="w-[320px] border border-[var(--ink-3)] bg-[var(--bg)] p-[8px] outline-none"
-          >
-            {field === "status" ? (
-              <DispositionRow
-                value={task.status}
-                onChange={commit}
-                testIdPrefix="inline"
-              />
-            ) : (
-              <PriorityRow
-                value={task.priority}
-                onChange={commit}
-                testIdPrefix="inline"
-              />
-            )}
-          </Dialog>
-        </Popover>
-      </DialogTrigger>
-    </span>
+          {field === "status" ? (
+            <DispositionRow
+              value={task.status}
+              onChange={commit}
+              testIdPrefix="inline"
+            />
+          ) : (
+            <PriorityRow
+              value={task.priority}
+              onChange={commit}
+              testIdPrefix="inline"
+            />
+          )}
+        </Dialog>
+      </Popover>
+    </DialogTrigger>
   );
 }
