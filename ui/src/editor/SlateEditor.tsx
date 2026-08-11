@@ -485,6 +485,7 @@ export function SlateEditor({
   }, [slashTrigger, editor]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (wikilinkTrigger || blockRefTrigger || slashTrigger) {
       if (
         ["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)

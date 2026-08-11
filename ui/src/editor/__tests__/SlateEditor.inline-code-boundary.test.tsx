@@ -1,8 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
-import { type Descendant, type Editor, Transforms } from "slate";
+import { type Descendant, Editor, Transforms } from "slate";
 import type { HistoryEditor } from "slate-history";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
@@ -52,20 +58,27 @@ beforeEach(() => {
   editorRef.current = null;
 });
 
-async function renderTerminalInlineCode() {
+async function renderTerminalInlineCode(withFollowingBlock = false) {
   const user = userEvent.setup();
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, enabled: false } },
   });
+  const initialValue: Descendant[] = [
+    {
+      type: "paragraph",
+      children: [{ text: "code", code: true }],
+    } as Descendant,
+  ];
+  if (withFollowingBlock) {
+    initialValue.push({
+      type: "paragraph",
+      children: [{ text: "after" }],
+    } as Descendant);
+  }
   render(
     <QueryClientProvider client={client}>
       <SlateEditor
-        initialValue={[
-          {
-            type: "paragraph",
-            children: [{ text: "code", code: true }],
-          } as Descendant,
-        ]}
+        initialValue={initialValue}
         onChange={vi.fn()}
         onSaveNow={vi.fn()}
       />
@@ -89,7 +102,7 @@ describe("SlateEditor terminal inline-code boundary", () => {
     const { editable, editor, user } = await renderTerminalInlineCode();
 
     await user.keyboard("{ArrowRight}");
-    act(() => editor.insertText(" next"));
+    await user.keyboard(" next");
 
     expect(slateToMarkdown(editor.children).trim()).toBe("`code` next");
 
@@ -110,5 +123,29 @@ describe("SlateEditor terminal inline-code boundary", () => {
     await waitFor(() =>
       expect(slateToMarkdown(editor.children).trim()).toBe("`code`"),
     );
+  });
+
+  it("leaves a second ArrowRight available to navigate to a following block", async () => {
+    const { editable, editor } = await renderTerminalInlineCode(true);
+
+    expect(fireEvent.keyDown(editable, { key: "ArrowRight" })).toBe(false);
+    expect(Editor.marks(editor)?.code).not.toBe(true);
+
+    // jsdom does not synthesize native contenteditable caret movement. A true
+    // return proves the second event remains available to the browser default.
+    expect(fireEvent.keyDown(editable, { key: "ArrowRight" })).toBe(true);
+  });
+
+  it.each([
+    ["native composition", { isComposing: true }],
+    ["legacy IME composition", { keyCode: 229 }],
+  ] as const)("does not exit inline code during %s", async (_name, eventInit) => {
+    const { editable, editor } = await renderTerminalInlineCode();
+
+    expect(
+      fireEvent.keyDown(editable, { key: "ArrowRight", ...eventInit }),
+    ).toBe(true);
+    expect(Editor.marks(editor)?.code).toBe(true);
+    expect(slateToMarkdown(editor.children).trim()).toBe("`code`");
   });
 });

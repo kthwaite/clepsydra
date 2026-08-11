@@ -189,6 +189,7 @@ describe("exitTerminalInlineCode", () => {
     Transforms.select(editor, { path: [0, 0], offset: 4 });
 
     expect(exitTerminalInlineCode(editor)).toBe(true);
+    expect(exitTerminalInlineCode(editor)).toBe(false);
     editor.insertText(" next");
 
     expect(slateToMarkdown(editor.children).trim()).toBe("`code` next");
@@ -267,7 +268,7 @@ describe("exitTerminalInlineCode", () => {
       {
         type: "code-block",
         language: "typescript",
-        children: [{ text: "code" }],
+        children: [{ text: "code", code: true }],
       },
     ]);
     Transforms.select(editor, { path: [0, 0], offset: 4 });
