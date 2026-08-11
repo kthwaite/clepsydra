@@ -31,6 +31,7 @@ function UnavailableBlock({
       {onRetry ? (
         <button
           type="button"
+          contentEditable={false}
           className="underline decoration-1 underline-offset-2 hover:decoration-2"
           onClick={onRetry}
         >
@@ -90,6 +91,7 @@ export function BlockTransclusion({
       <span className="max-w-full">{content}</span>
       <button
         type="button"
+        contentEditable={false}
         aria-label={`Open referenced block in ${sourceName}`}
         className="shrink-0 cursor-pointer text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground hover:decoration-solid"
         onClick={() => onOpenSource(data)}
