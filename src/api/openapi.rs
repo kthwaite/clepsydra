@@ -446,6 +446,7 @@ mod tests {
                 "PERSON",
                 "TASK",
                 "CYCLE",
+                "RECIPE",
                 "AI_CONVERSATION",
             ]
         );
