@@ -406,8 +406,9 @@ pub(crate) fn prepare(
     let transactions = root.join(".clepsydra").join("transactions");
     create_synced_directory_tree(root, &transactions)?;
     let directory = transactions.join(Uuid::now_v7().to_string());
-    create_synced_directory(&directory)?;
+    create_directory(&directory)?;
     let result = (|| {
+        sync_directory_parent(&directory)?;
         let staged = directory.join("staged");
         let rollback = directory.join("rollback");
         create_synced_directory(&staged)?;
@@ -1021,8 +1022,17 @@ fn create_synced_directory_tree(root: &Path, transactions: &Path) -> Result<(), 
 }
 
 fn create_synced_directory(path: &Path) -> Result<(), BatchMutationError> {
+    create_directory(path)?;
+    sync_directory_parent(path)
+}
+
+fn create_directory(path: &Path) -> Result<(), BatchMutationError> {
     fs::create_dir(path)
-        .map_err(|source| BatchMutationError::filesystem("create directory", path, source))?;
+        .map_err(|source| BatchMutationError::filesystem("create directory", path, source))
+}
+
+fn sync_directory_parent(path: &Path) -> Result<(), BatchMutationError> {
+    hit_test_failpoint(TestFailpoint::DirectoryParentSync, path)?;
     if let Some(parent) = path.parent() {
         sync_directory(parent)?;
     }
@@ -1080,6 +1090,7 @@ pub(crate) enum TestFailpoint {
     RollbackPublication(usize),
     WorkspaceRemoval,
     WorkspaceParentSync,
+    DirectoryParentSync,
 }
 
 #[cfg(not(test))]
@@ -1092,6 +1103,7 @@ enum TestFailpoint {
     WorkspaceParentSync,
     PhasePublication(TransactionPhase),
     WorkspaceRemoval,
+    DirectoryParentSync,
 }
 
 #[cfg(test)]
@@ -1542,6 +1554,33 @@ mod tests {
         assert!(directory.is_dir());
         assert!(retained);
         assert!(source.to_string().contains("ManifestFlush"));
+        assert!(cleanup.to_string().contains("WorkspaceRemoval"));
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
+    }
+
+    #[test]
+    fn transaction_directory_parent_sync_failure_reports_retained_workspace() {
+        let fixture = fixture_with_file("a.md", b"before");
+        let _failure = fail_at(&[
+            TestFailpoint::DirectoryParentSync,
+            TestFailpoint::WorkspaceRemoval,
+        ]);
+
+        let error =
+            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap_err();
+
+        let (directory, retained, source, cleanup) = match error {
+            BatchMutationError::PreparationCleanup {
+                directory,
+                retained,
+                source,
+                cleanup,
+            } => (directory, retained, source, cleanup),
+            error => panic!("expected preparation cleanup error, got {error:?}"),
+        };
+        assert!(retained);
+        assert!(directory.is_dir());
+        assert!(source.to_string().contains("DirectoryParentSync"));
         assert!(cleanup.to_string().contains("WorkspaceRemoval"));
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
     }
