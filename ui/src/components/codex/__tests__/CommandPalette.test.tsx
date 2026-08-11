@@ -1,17 +1,31 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler } from "react";
 import { flushSync } from "react-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { navigateMock, openTabMock, useSearchMock, useTagsMock } = vi.hoisted(
-  () => ({
+const {
+  navigateMock,
+  openTabMock,
+  searchRefetchMock,
+  useSearchMock,
+  useTagsMock,
+} = vi.hoisted(() => {
+  const searchRefetchMock = vi.fn();
+  return {
     navigateMock: vi.fn(),
     openTabMock: vi.fn(),
-    useSearchMock: vi.fn(() => ({ data: [] })),
+    searchRefetchMock,
+    useSearchMock: vi.fn((_query: string, _limit?: number) => ({
+      data: [] as unknown[] | undefined,
+      isFetching: false,
+      isError: false,
+      error: null as Error | null,
+      refetch: searchRefetchMock,
+    })),
     useTagsMock: vi.fn(() => ({ data: [] })),
-  }),
-);
+  };
+});
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
@@ -46,6 +60,13 @@ describe("CommandPalette keyboard navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useUiStore.setState({ isSearchOpen: true });
+    useSearchMock.mockReturnValue({
+      data: [],
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: searchRefetchMock,
+    });
   });
 
   it("moves down and dispatches the selected command with Enter", async () => {
@@ -179,5 +200,77 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
     expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("announces while vault search results are loading", async () => {
+    useSearchMock.mockImplementation((query: string) => ({
+      data: undefined,
+      isFetching: query === "clep",
+      isError: false,
+      error: null,
+      refetch: searchRefetchMock,
+    }));
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Command query" }),
+      "clep",
+    );
+    await waitFor(() =>
+      expect(useSearchMock).toHaveBeenLastCalledWith("clep", 12),
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/searching/i);
+  });
+
+  it("announces the backend search error", async () => {
+    useSearchMock.mockImplementation((query: string) => ({
+      data: undefined,
+      isFetching: false,
+      isError: query === "clep",
+      error:
+        query === "clep" ? new Error("Search service unavailable") : null,
+      refetch: searchRefetchMock,
+    }));
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Command query" }),
+      "clep",
+    );
+    await waitFor(() =>
+      expect(useSearchMock).toHaveBeenLastCalledWith("clep", 12),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Search service unavailable",
+    );
+  });
+
+  it("offers an accessible retry for a failed vault search", async () => {
+    useSearchMock.mockImplementation((query: string) => ({
+      data: undefined,
+      isFetching: false,
+      isError: query === "clep",
+      error: query === "clep" ? new Error("Search failed") : null,
+      refetch: searchRefetchMock,
+    }));
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Command query" }),
+      "clep",
+    );
+    await waitFor(() =>
+      expect(useSearchMock).toHaveBeenLastCalledWith("clep", 12),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /retry (vault )?search/i }),
+    );
+
+    expect(searchRefetchMock).toHaveBeenCalledOnce();
   });
 });

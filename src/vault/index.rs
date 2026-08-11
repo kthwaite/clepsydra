@@ -37,6 +37,22 @@ pub enum IndexError {
     Other(String),
 }
 
+fn fts_prefix_query(input: &str) -> Option<String> {
+    let mut query = String::new();
+    for term in input
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|term| !term.is_empty())
+    {
+        if !query.is_empty() {
+            query.push_str(" AND ");
+        }
+        query.push('"');
+        query.push_str(term);
+        query.push_str("\"*");
+    }
+    (!query.is_empty()).then_some(query)
+}
+
 // ---------------------------------------------------------------------------
 // UnresolvedReason / LinkCandidate / UnresolvedLinkDetail
 // ---------------------------------------------------------------------------
@@ -1198,6 +1214,9 @@ impl VaultIndex {
 
     /// Full-text search across page titles and bodies.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, IndexError> {
+        let Some(query) = fts_prefix_query(query) else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare(
             "SELECT f.page_id, f.path, p.title,
                     snippet(pages_fts, 3, '<mark>', '</mark>', '\u{2026}', 32),
@@ -2391,6 +2410,94 @@ mod kind_index_tests {
             })
             .unwrap();
         assert_eq!(page_path, "Note.md");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn search_index() -> VaultIndex {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        fs::create_dir_all(root.join("notes")).unwrap();
+        fs::write(
+            root.join("notes/stray.md"),
+            "# Clepsydra: Stray Thoughts\n\nIdeas gathered between sessions.\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("notes/clepsydra.md"),
+            "# Clepsydra Handbook\n\nReference notes for the project.\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("notes/unicode.md"),
+            "# Élan vital\n\nA Unicode search fixture.\n",
+        )
+        .unwrap();
+
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open_in_memory().unwrap();
+        index.build(&vault).unwrap();
+        index
+    }
+
+    fn assert_paths(results: Vec<SearchResult>, expected: &[&str]) {
+        let mut paths = results
+            .into_iter()
+            .map(|result| result.path)
+            .collect::<Vec<_>>();
+        let mut expected = expected
+            .iter()
+            .map(|path| (*path).to_owned())
+            .collect::<Vec<_>>();
+        paths.sort();
+        expected.sort();
+        assert_eq!(paths, expected);
+    }
+
+    #[test]
+    fn search_prefixes_human_tokens() {
+        let index = search_index();
+
+        assert_paths(
+            index.search("clep", 20).unwrap(),
+            &["notes/stray.md", "notes/clepsydra.md"],
+        );
+        assert_paths(
+            index.search("clepsydra", 20).unwrap(),
+            &["notes/stray.md", "notes/clepsydra.md"],
+        );
+        assert_paths(
+            index.search("Clepsydra: Stray", 20).unwrap(),
+            &["notes/stray.md"],
+        );
+    }
+
+    #[test]
+    fn search_treats_fts_punctuation_as_inert_separators() {
+        let index = search_index();
+
+        assert!(index.search(": OR *", 20).is_ok());
+        assert!(index.search("", 20).unwrap().is_empty());
+        assert!(index.search("---", 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_preserves_multi_token_and_unicode_prefixes() {
+        let index = search_index();
+
+        assert_paths(
+            index.search("clep stray", 20).unwrap(),
+            &["notes/stray.md"],
+        );
+        assert_paths(
+            index.search("Éla", 20).unwrap(),
+            &["notes/unicode.md"],
+        );
     }
 }
 

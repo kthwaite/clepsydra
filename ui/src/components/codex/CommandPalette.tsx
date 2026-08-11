@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { formatApiError } from "#/api/error";
 import { useSearch, useTags } from "#/api/index";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { shortFolio } from "#/components/codex/folio-utils";
@@ -62,10 +63,13 @@ function CommandPaletteContent() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const debouncedQ = useDebounce(open ? q : "", 200);
-  const { data: searchResults } = useSearch(
-    open && debouncedQ.length > 0 ? debouncedQ : "",
-    12,
-  );
+  const {
+    data: searchResults,
+    error: searchError,
+    isError: searchIsError,
+    isFetching: searchIsFetching,
+    refetch: retrySearch,
+  } = useSearch(open && debouncedQ.length > 0 ? debouncedQ : "", 12);
   const { data: tags } = useTags(open);
 
   useEffect(() => {
@@ -310,7 +314,32 @@ function CommandPaletteContent() {
       </div>
       {/* results */}
       <div className="cl-noscroll max-h-[340px] overflow-auto py-[4px]">
-        {filtered.length === 0 && (
+        {searchIsFetching && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint"
+          >
+            — SEARCHING —
+          </div>
+        )}
+        {searchIsError && (
+          <div
+            role="alert"
+            className="cl-mono flex items-center justify-between gap-3 px-3 py-[16px] text-[11px] tracking-[0.08em] text-warn"
+          >
+            <span>{formatApiError(searchError, "Search failed.")}</span>
+            <button
+              type="button"
+              aria-label="Retry search"
+              onClick={() => void retrySearch()}
+              className="border border-current px-2 py-1 tracking-[0.12em]"
+            >
+              RETRY
+            </button>
+          </div>
+        )}
+        {!searchIsFetching && !searchIsError && filtered.length === 0 && (
           <div className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint">
             — NO RESULTS —
           </div>
