@@ -388,7 +388,7 @@ describe("Gazetteer controller", () => {
       createElement(Gazetteer, {
         filters: {
           query: "",
-          selectedTags: ["legacy-url-tag"],
+          selectedTags: ["research", "legacy-url-tag"],
           sort: "ts",
           page: 1,
           onQueryChange: vi.fn(),
@@ -405,12 +405,17 @@ describe("Gazetteer controller", () => {
       screen.getByRole("combobox", { name: "Filter by tags" }),
       "res",
     );
-    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+    const selectedTagGrid = screen.getByRole("grid", {
+      name: "Filter by tags",
+    });
+    expect(within(selectedTagGrid).getByText("#legacy-url-tag")).toBeVisible();
+    expect(within(selectedTagGrid).getByText("#research")).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: "Retry tag suggestions" }),
     );
     expect(tagQueryState.refetch).toHaveBeenCalledOnce();
-    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+    expect(within(selectedTagGrid).getByText("#legacy-url-tag")).toBeVisible();
+    expect(within(selectedTagGrid).getByText("#research")).toBeVisible();
   });
 
   it("announces loading tag suggestions without clearing selected route tags", async () => {
