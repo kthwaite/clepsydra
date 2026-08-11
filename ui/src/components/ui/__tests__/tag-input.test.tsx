@@ -343,6 +343,21 @@ describe("TagInput", () => {
     expect(screen.queryByRole("option", { name: "eta" })).toBeNull();
   });
 
+  it("honors a caller-provided suggestion limit", async () => {
+    const user = userEvent.setup();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9"]}
+        maxSuggestions={8}
+        onChange={() => {}}
+      />,
+    );
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "a");
+    expect(screen.getAllByRole("option")).toHaveLength(8);
+  });
+
   it("links the combobox to its listbox and active option across navigation", async () => {
     const user = userEvent.setup();
     render(
@@ -479,16 +494,44 @@ describe("TagInput", () => {
     );
   });
 
-  it("dismisses suggestions with Escape without committing the draft", async () => {
+  it("renders a display prefix without storing it", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
       <TagInput
         label="Tags"
-        values={[]}
-        suggestions={["rust"]}
+        values={["rust"]}
+        suggestions={["react"]}
+        valuePrefix="#"
         onChange={onChange}
       />,
+    );
+
+    expect(screen.getByText("#rust")).toBeInTheDocument();
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "#re");
+    expect(screen.getByRole("option", { name: "#react" })).toBeInTheDocument();
+    await user.keyboard("{Tab}");
+    expect(onChange).toHaveBeenCalledWith(["rust", "react"]);
+  });
+
+  it("swallows Escape while suggestions are open, then bubbles it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const containerKey = vi.fn();
+    render(
+      <div
+        onKeyDown={(event) => {
+          if (event.key === "Escape") containerKey();
+        }}
+      >
+        <TagInput
+          label="Tags"
+          values={[]}
+          suggestions={["rust"]}
+          valuePrefix="#"
+          onChange={onChange}
+        />
+      </div>,
     );
 
     await user.type(screen.getByRole("combobox", { name: "Add tags" }), "ru");
@@ -498,5 +541,9 @@ describe("TagInput", () => {
       screen.queryByRole("listbox", { name: "Tag suggestions" }),
     ).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
+    expect(containerKey).not.toHaveBeenCalled();
+
+    await user.keyboard("{Escape}");
+    expect(containerKey).toHaveBeenCalledTimes(1);
   });
 });

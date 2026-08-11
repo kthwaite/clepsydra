@@ -10,7 +10,7 @@ import {
 import { Button, Tag, TagGroup, TagList } from "react-aria-components";
 import { cn } from "#/lib/cn";
 
-const MAX_SUGGESTIONS = 5;
+export type TagInputVariant = "default" | "codex";
 
 export interface TagInputProps {
   label: string;
@@ -22,6 +22,9 @@ export interface TagInputProps {
   onChange: (values: string[]) => void;
   placeholder?: string;
   className?: string;
+  variant?: TagInputVariant;
+  valuePrefix?: string;
+  maxSuggestions?: number;
   /** Called after the input loses focus (and any draft is committed). */
   onBlur?: () => void;
 }
@@ -35,6 +38,9 @@ export function TagInput({
   ariaDescribedBy,
   onChange,
   placeholder,
+  variant = "default",
+  valuePrefix = "",
+  maxSuggestions = 5,
   className,
   onBlur,
 }: TagInputProps) {
@@ -44,7 +50,14 @@ export function TagInput({
   const [dismissed, setDismissed] = useState(false);
   const hasSuggestions = suggestions !== undefined;
   const listId = useId();
-  const query = inputValue.trim();
+  const stripValuePrefix = useCallback(
+    (value: string) =>
+      valuePrefix && value.startsWith(valuePrefix)
+        ? value.slice(valuePrefix.length)
+        : value,
+    [valuePrefix],
+  );
+  const query = stripValuePrefix(inputValue.trim());
   const queryLower = query.toLowerCase();
   const matches = query
     ? (suggestions ?? [])
@@ -54,7 +67,7 @@ export function TagInput({
             !values.includes(suggestion) &&
             !readOnlyValues.includes(suggestion),
         )
-        .slice(0, MAX_SUGGESTIONS)
+        .slice(0, maxSuggestions)
     : [];
   const open = !dismissed && matches.length > 0;
   const selected = Math.min(highlight, Math.max(matches.length - 1, 0));
@@ -62,7 +75,7 @@ export function TagInput({
 
   const addValue = useCallback(
     (val: string) => {
-      const trimmed = val.trim();
+      const trimmed = stripValuePrefix(val.trim());
       if (
         trimmed &&
         !values.includes(trimmed) &&
@@ -75,7 +88,7 @@ export function TagInput({
       setNavigated(false);
       setDismissed(false);
     },
-    [values, readOnlyValues, onChange],
+    [values, readOnlyValues, onChange, stripValuePrefix],
   );
 
   const handleRemove = useCallback(
@@ -138,7 +151,12 @@ export function TagInput({
 
   return (
     <div
-      className={cn("relative flex flex-wrap items-center gap-1", className)}
+      className={cn(
+        "relative flex flex-wrap items-center gap-1",
+        variant === "codex" &&
+          "mt-1 border border-rule p-1 focus-within:border-accent",
+        className,
+      )}
       onClick={() => inputRef.current?.focus()}
     >
       <span className="text-xs text-muted-foreground">{label}:</span>
@@ -152,9 +170,13 @@ export function TagInput({
               <Tag
                 id={item.id}
                 textValue={item.name}
-                className="flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs"
+                className={cn(
+                  "flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs",
+                  variant === "codex" &&
+                    "cl-mono inline-flex border-rule bg-paper-2 px-1.5 py-[1px] text-[11px] tracking-[0.04em] text-ink-2",
+                )}
               >
-                {item.name}
+                {`${valuePrefix}${item.name}`}
               </Tag>
             )}
           </TagList>
@@ -175,11 +197,15 @@ export function TagInput({
               <Tag
                 id={item.id}
                 textValue={item.name}
-                className="flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs"
+                className={cn(
+                  "flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-xs",
+                  variant === "codex" &&
+                    "cl-mono inline-flex border-rule bg-paper-2 px-1.5 py-[1px] text-[11px] tracking-[0.04em] text-ink-2",
+                )}
               >
                 {({ allowsRemoving }) => (
                   <>
-                    {item.name}
+                    {`${valuePrefix}${item.name}`}
                     {allowsRemoving && (
                       <Button
                         slot="remove"
@@ -224,14 +250,21 @@ export function TagInput({
             ? placeholder
             : undefined
         }
-        className="min-w-[80px] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+        className={cn(
+          "min-w-[80px] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground",
+          variant === "codex" &&
+            "cl-mono min-w-[8ch] border-none p-[2px] text-[12px] text-ink placeholder:text-ink-mute",
+        )}
       />
       {open && (
         <ul
           id={listId}
           role="listbox"
           aria-label="Tag suggestions"
-          className="absolute left-0 right-0 top-full z-10 m-0 max-h-[200px] list-none overflow-auto border border-border bg-background p-0.5"
+          className={cn(
+            "absolute left-0 right-0 top-full z-10 m-0 max-h-[200px] list-none overflow-auto border border-border bg-background p-0.5",
+            variant === "codex" && "cl-mono border-rule bg-paper",
+          )}
         >
           {matches.map((suggestion, index) => (
             <li
@@ -245,10 +278,15 @@ export function TagInput({
               }}
               className={cn(
                 "cursor-pointer px-2 py-1 text-xs",
-                index === selected && "bg-muted font-bold",
+                variant === "codex" &&
+                  "text-[11px] tracking-[0.04em] text-ink-2",
+                index === selected &&
+                  (variant === "codex"
+                    ? "bg-highlight font-bold text-ink"
+                    : "bg-muted font-bold"),
               )}
             >
-              {suggestion}
+              {`${valuePrefix}${suggestion}`}
             </li>
           ))}
         </ul>
