@@ -216,6 +216,7 @@ pub struct CreateTaskRequest {
     pub assignee: Option<String>,
     pub estimate: Option<String>,
     pub due: Option<String>,
+    pub start: Option<String>,
     pub tags: Option<Vec<String>>,
     pub link: Option<String>,
     /// Checklist items. Each becomes a `- [ ] item` line in the page body.
@@ -224,8 +225,8 @@ pub struct CreateTaskRequest {
 
 /// PATCH request for updating a task. All fields are optional.
 ///
-/// For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `hold`,
-/// `link`): absent = leave unchanged; `null` = clear the field; string value =
+/// For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
+/// `hold`, `link`): absent = leave unchanged; `null` = clear the field; string value =
 /// set to that value. Implemented via `#[serde(default, deserialize_with)]`
 /// which maps the outer `Option` to "present or absent" and the inner `Option`
 /// to "null or value".
@@ -251,6 +252,9 @@ pub struct PatchTaskRequest {
     /// Tri-state: absent = keep, null = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub due: Option<Option<String>>,
+    /// Tri-state: absent = keep, null = clear, value = set.
+    #[serde(default, deserialize_with = "deserialize_tri_state")]
+    pub start: Option<Option<String>>,
     /// Tri-state: absent = keep, null = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub hold: Option<Option<String>>,

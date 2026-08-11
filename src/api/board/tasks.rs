@@ -114,6 +114,10 @@ pub(crate) async fn create_task(
         meta.extra
             .insert("due".to_string(), toml::Value::String(d.clone()));
     }
+    if let Some(ref s) = body.start {
+        meta.extra
+            .insert("start".to_string(), toml::Value::String(s.clone()));
+    }
     if let Some(ref l) = body.link {
         meta.extra
             .insert("link".to_string(), toml::Value::String(l.clone()));
@@ -256,6 +260,7 @@ pub(crate) async fn patch_task(
     apply_tri_state(&mut meta, "assignee", &body.assignee);
     apply_tri_state(&mut meta, "estimate", &body.estimate);
     apply_tri_state(&mut meta, "due", &body.due);
+    apply_tri_state(&mut meta, "start", &body.start);
     apply_tri_state(&mut meta, "hold", &body.hold);
     apply_tri_state(&mut meta, "link", &body.link);
 
