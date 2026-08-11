@@ -51,6 +51,9 @@ function renderGazetteer(
     projects: ["atlas", "clepsydra"],
     rows,
     tags,
+    tagsLoading: false,
+    tagsError: null,
+    onRetryTags: vi.fn(),
     totalCount: 2,
     filteredCount: 2,
     page: 1,
@@ -113,8 +116,12 @@ describe("MobileGazetteer", () => {
     );
     expect(onQueryChange).toHaveBeenCalledWith("a");
 
+    const tagPicker = within(dialog).getByRole("combobox", {
+      name: "Filter by tags",
+    });
+    await user.type(tagPicker, "res");
     await user.click(
-      within(dialog).getByRole("button", { name: "Filter by research" }),
+      within(dialog).getByRole("option", { name: "#research" }),
     );
     expect(onSelectedTagsChange).toHaveBeenCalledWith(["research"]);
 
@@ -128,6 +135,31 @@ describe("MobileGazetteer", () => {
       screen.queryByRole("dialog", { name: "Gazetteer filters" }),
     ).not.toBeInTheDocument();
   });
+  it("clears selected tags without rendering the complete vocabulary as buttons", async () => {
+    const user = userEvent.setup();
+    const onSelectedTagsChange = vi.fn();
+    renderGazetteer({
+      selectedTags: ["legacy-url-tag"],
+      onSelectedTagsChange,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Filters · 1" }));
+    const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
+    expect(
+      within(dialog).getByRole("combobox", { name: "Filter by tags" }),
+    ).toBeVisible();
+    expect(within(dialog).getByText("#legacy-url-tag")).toBeVisible();
+    expect(
+      within(dialog).queryByRole("button", { name: "Filter by research" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("button", { name: "Filter by active" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Clear tags" }));
+    expect(onSelectedTagsChange).toHaveBeenCalledWith([]);
+  });
+
   it("emits controlled Kind and Project changes from the shared vocabularies", async () => {
     const user = userEvent.setup();
     const onKindChange = vi.fn();

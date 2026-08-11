@@ -12,6 +12,7 @@ const {
   layoutState,
   openTabMock,
   routeBridge,
+  tagQueryState,
   useContentIndexMock,
 } = vi.hoisted(() => {
   const contentState = {
@@ -28,6 +29,15 @@ const {
     layoutState: { mobile: true },
     openTabMock: vi.fn(),
     routeBridge: { openWorkspace: undefined as (() => void) | undefined },
+    tagQueryState: {
+      data: [
+        { tag: "research", count: 4, computed_count: 0 },
+        { tag: "rust", count: 2, computed_count: 0 },
+      ],
+      isFetching: false,
+      error: null as Error | null,
+      refetch: vi.fn(),
+    },
     useContentIndexMock: vi.fn(),
   };
 });
@@ -37,7 +47,7 @@ vi.mock("#/api/index", () => ({
     useContentIndexMock(...args);
     return contentQueryState;
   },
-  useTags: () => ({ data: [{ tag: "research", count: 1 }] }),
+  useTags: () => tagQueryState,
 }));
 vi.mock("#/api/pages", () => ({
   useAssignBulk: () => ({ isPending: false, mutate: vi.fn() }),
@@ -93,6 +103,13 @@ beforeEach(() => {
   layoutState.mobile = true;
   useContentIndexMock.mockClear();
   routeBridge.openWorkspace = undefined;
+  tagQueryState.data = [
+    { tag: "research", count: 4, computed_count: 0 },
+    { tag: "rust", count: 2, computed_count: 0 },
+  ];
+  tagQueryState.isFetching = false;
+  tagQueryState.error = null;
+  tagQueryState.refetch.mockReset();
   contentState.items = Array.from({ length: 25 }, (_, index) =>
     makeContentEntry(index),
   );
@@ -138,8 +155,12 @@ describe("Gazetteer controller", () => {
       within(filters).getByRole("searchbox", { name: "Search pages" }),
       "Al",
     );
+    const tagPicker = within(filters).getByRole("combobox", {
+      name: "Filter by tags",
+    });
+    await user.type(tagPicker, "res");
     await user.click(
-      within(filters).getByRole("button", { name: "Filter by research" }),
+      within(filters).getByRole("option", { name: "#research" }),
     );
     await user.click(within(filters).getByRole("radio", { name: "Title" }));
     await user.click(
@@ -160,9 +181,7 @@ describe("Gazetteer controller", () => {
     expect(
       within(restored).getByRole("searchbox", { name: "Search pages" }),
     ).toHaveValue("Al");
-    expect(
-      within(restored).getByRole("button", { name: "Filter by research" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    expect(within(restored).getByText("#research")).toBeVisible();
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
@@ -290,5 +309,139 @@ describe("Gazetteer controller", () => {
     await user.click(project);
     expect(screen.getByRole("option", { name: "atlas" })).toBeVisible();
     expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
+  });
+
+  it("renders one controlled desktop tag picker instead of the complete tag rail", async () => {
+    const user = userEvent.setup();
+    const onSelectedTagsChange = vi.fn();
+    layoutState.mobile = false;
+    render(
+      createElement(Gazetteer, {
+        filters: {
+          query: "",
+          selectedTags: [],
+          sort: "ts",
+          page: 1,
+          onQueryChange: vi.fn(),
+          onSelectedTagsChange,
+          onKindChange: vi.fn(),
+          onProjectChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onPageChange: vi.fn(),
+        },
+      }),
+    );
+
+    const picker = screen.getByRole("combobox", { name: "Filter by tags" });
+    expect(
+      screen.getAllByRole("combobox", { name: "Filter by tags" }),
+    ).toHaveLength(1);
+    expect(
+      screen.queryByRole("button", { name: "Filter by research" }),
+    ).not.toBeInTheDocument();
+
+    await user.type(picker, "res");
+    await user.click(screen.getByRole("option", { name: "#research" }));
+    expect(onSelectedTagsChange).toHaveBeenCalledWith(["research"]);
+  });
+
+  it("keeps unknown URL tags removable while rejecting unknown drafts", async () => {
+    const user = userEvent.setup();
+    const onSelectedTagsChange = vi.fn();
+    layoutState.mobile = false;
+    render(
+      createElement(Gazetteer, {
+        filters: {
+          query: "",
+          selectedTags: ["legacy-url-tag"],
+          sort: "ts",
+          page: 1,
+          onQueryChange: vi.fn(),
+          onSelectedTagsChange,
+          onKindChange: vi.fn(),
+          onProjectChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onPageChange: vi.fn(),
+        },
+      }),
+    );
+
+    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+    await user.type(
+      screen.getByRole("combobox", { name: "Filter by tags" }),
+      "unknown{Enter}",
+    );
+    expect(onSelectedTagsChange).not.toHaveBeenCalled();
+
+    const selectedTags = screen.getByRole("grid", {
+      name: "Filter by tags",
+    });
+    await user.click(within(selectedTags).getByRole("button"));
+    expect(onSelectedTagsChange).toHaveBeenCalledWith([]);
+  });
+
+  it("retries failed tag suggestions without clearing selected route tags", async () => {
+    const user = userEvent.setup();
+    layoutState.mobile = false;
+    tagQueryState.error = new Error("offline");
+    render(
+      createElement(Gazetteer, {
+        filters: {
+          query: "",
+          selectedTags: ["legacy-url-tag"],
+          sort: "ts",
+          page: 1,
+          onQueryChange: vi.fn(),
+          onSelectedTagsChange: vi.fn(),
+          onKindChange: vi.fn(),
+          onProjectChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onPageChange: vi.fn(),
+        },
+      }),
+    );
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Filter by tags" }),
+      "res",
+    );
+    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Retry tag suggestions" }),
+    );
+    expect(tagQueryState.refetch).toHaveBeenCalledOnce();
+    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+  });
+
+  it("announces loading tag suggestions without clearing selected route tags", async () => {
+    const user = userEvent.setup();
+    layoutState.mobile = false;
+    tagQueryState.isFetching = true;
+    render(
+      createElement(Gazetteer, {
+        filters: {
+          query: "",
+          selectedTags: ["legacy-url-tag"],
+          sort: "ts",
+          page: 1,
+          onQueryChange: vi.fn(),
+          onSelectedTagsChange: vi.fn(),
+          onKindChange: vi.fn(),
+          onProjectChange: vi.fn(),
+          onSortChange: vi.fn(),
+          onPageChange: vi.fn(),
+        },
+      }),
+    );
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Filter by tags" }),
+      "res",
+    );
+    expect(screen.getByText("Loading tag suggestions…")).toHaveAttribute(
+      "role",
+      "status",
+    );
+    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
   });
 });

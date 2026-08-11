@@ -13,6 +13,7 @@ import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { TagInput } from "#/components/ui/tag-input";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
@@ -81,13 +82,9 @@ export function Gazetteer({ initialTag, filters }: Props) {
     if (!filters) store.enter(initialTag);
   }, [filters, initialTag, store.enter]);
 
-  const toggleTag = (tag: string) =>
-    setSelectedTags(
-      selectedTags.includes(tag)
-        ? selectedTags.filter((selected) => selected !== tag)
-        : [...selectedTags, tag],
-    );
-  const { data: tagsData } = useTags();
+  const tagsQuery = useTags();
+  const tags = tagsQuery.data ?? [];
+  const tagSuggestions = tags.map((tag) => tag.tag);
   const requestedPage = Math.max(1, Math.floor(page));
   const contentQuery = useContentIndex(
     filters
@@ -107,7 +104,6 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const bulk = useAssignBulk();
   const projects = useProjects();
 
-  const tags = tagsData ?? [];
   const items = content?.items ?? [];
   const rowsForPage = useMemo(
     () =>
@@ -214,6 +210,9 @@ export function Gazetteer({ initialTag, filters }: Props) {
         sort={sort}
         rows={rows}
         tags={tags}
+        tagsLoading={tagsQuery.isFetching}
+        tagsError={tagsQuery.error}
+        onRetryTags={() => void tagsQuery.refetch()}
         totalCount={totalCount}
         filteredCount={filteredCount}
         page={currentPage}
@@ -310,24 +309,35 @@ export function Gazetteer({ initialTag, filters }: Props) {
         </div>
       </div>
 
-      {/* tag rail — multi-select, AND semantics */}
-      <div className="cl-noscroll flex flex-shrink-0 flex-wrap gap-x-2 gap-y-1.5 border-b border-rule-soft px-5 py-2">
-        <Chip
-          active={selectedTags.length === 0}
-          onClick={() => setSelectedTags([])}
-        >
-          all · {totalCount}
-        </Chip>
-        {tags.map((t) => (
-          <Chip
-            key={t.tag}
-            active={selectedTags.includes(t.tag)}
-            onClick={() => toggleTag(t.tag)}
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-rule-soft px-5 py-2">
+        <TagInput
+          label="Tags"
+          ariaLabel="Filter by tags"
+          values={selectedTags}
+          suggestions={tagSuggestions}
+          suggestionsLoading={tagsQuery.isFetching}
+          suggestionsError={tagsQuery.error}
+          onRetrySuggestions={() => void tagsQuery.refetch()}
+          allowCreate={false}
+          onChange={setSelectedTags}
+          placeholder="filter tags…"
+          variant="codex"
+          valuePrefix="#"
+          maxSuggestions={8}
+          className="min-w-0 flex-1"
+        />
+        {selectedTags.length > 0 ? (
+          <button
+            type="button"
+            className="cl-btn"
+            onClick={() => setSelectedTags([])}
           >
-            #{t.tag}
-            <sup className="ml-[2px] text-ink-mute">{t.count}</sup>
-          </Chip>
-        ))}
+            clear
+          </button>
+        ) : null}
+        <span className="cl-mono text-[9px] text-ink-mute">
+          all must match · {totalCount}
+        </span>
       </div>
 
       {/* bulk action bar — only when rows are selected */}
@@ -548,30 +558,5 @@ function Th({
     >
       {children}
     </th>
-  );
-}
-
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "cl-mono cursor-pointer border px-[6px] py-[1px] text-[10px]",
-        active
-          ? "border-accent text-accent"
-          : "border-rule-soft text-ink-mute hover:text-ink",
-      )}
-    >
-      {children}
-    </button>
   );
 }
