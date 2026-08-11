@@ -24,6 +24,7 @@ import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
+import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
 import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
@@ -42,6 +43,11 @@ import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
+import {
+  parseRecipeMarkdown,
+  type RecipeDocument,
+  serializeRecipeMarkdown,
+} from "#/recipe/recipeCodec";
 import { useProjects } from "#/lib/useProjects";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
@@ -137,9 +143,17 @@ export function Folio({ tabId, path }: FolioProps) {
   const [conversationMode, setConversationMode] = useState<"read" | "edit">(
     "read",
   );
+  const [recipeMode, setRecipeMode] = useState<"read" | "edit">("read");
+  const [recipeDraft, setRecipeDraft] = useState<{
+    path: string;
+    editorRevision: number;
+    document: RecipeDocument;
+  } | null>(null);
   const conversationEditorRef = useRef<CustomEditor | null>(null);
   useEffect(() => {
     setConversationMode("read");
+    setRecipeMode("read");
+    setRecipeDraft(null);
   }, [path]);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
@@ -207,6 +221,24 @@ export function Folio({ tabId, path }: FolioProps) {
     presentation.bodyPresentation === "ai-conversation";
   const conversationReadOnly =
     isAiConversation && conversationMode === "read";
+  const isRecipe = presentation.bodyPresentation === "recipe";
+  const recipeParse = useMemo(
+    () =>
+      isRecipe
+        ? parseRecipeMarkdown(editor.bodyMarkdown, editor.title)
+        : null,
+    [editor.bodyMarkdown, editor.title, isRecipe],
+  );
+  const recipeDocument =
+    recipeParse?.ok === true
+      ? recipeDraft?.path === path &&
+        recipeDraft.editorRevision === editor.editorRevision
+        ? recipeDraft.document
+        : recipeParse.value
+      : null;
+  const recipeStructured = recipeParse?.ok === true;
+  const recipeReadOnly = recipeStructured && recipeMode === "read";
+  const folioReadOnly = conversationReadOnly || recipeReadOnly;
   const isJournal = kind === "JOURNAL";
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
@@ -217,12 +249,12 @@ export function Folio({ tabId, path }: FolioProps) {
       if (e.defaultPrevented) return;
       if (!matchesChord(e, SHORTCUTS["folio.save"].chord)) return;
       e.preventDefault();
-      if (conversationReadOnly) return;
+      if (folioReadOnly) return;
       void saveNow().catch(() => undefined);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [conversationReadOnly, saveNow]);
+  }, [folioReadOnly, saveNow]);
 
   const onScroll = () => {
     const el = bodyRef.current;
@@ -328,7 +360,7 @@ export function Folio({ tabId, path }: FolioProps) {
             <Pip kind={kind} />
             {kindLabel(kind)}
           </span>
-          {conversationReadOnly && editor.revisionConflict ? (
+          {folioReadOnly && editor.revisionConflict ? (
             <span className="text-xs text-destructive">
               Page changed on disk
             </span>
@@ -348,7 +380,7 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const document = (
     <>
-      {conversationReadOnly ? (
+      {folioReadOnly ? (
         <ReadOnlyPageHeader
           path={path}
           title={editor.title}
@@ -412,37 +444,59 @@ export function Folio({ tabId, path }: FolioProps) {
         </>
       ) : null}
 
+      {isRecipe && !recipeStructured ? (
+        <div className="ai-conversation-warning" role="alert">
+          The recipe structure could not be read. The original Markdown is
+          preserved in the editor below.
+        </div>
+      ) : null}
+
       <hr className="cl-rule-dash mt-3" />
 
       <article
         className={cn(
           "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
-          isAiConversation &&
-            `ai-conversation--${conversationMode}`,
+          isAiConversation && `ai-conversation--${conversationMode}`,
         )}
       >
         <WikilinkResolutionProvider path={path}>
-          <ConversationPresentationProvider
-            value={{
-              mode: isAiConversation ? conversationMode : "generic",
-              provider: isAiConversation
-                ? editor.conversationProvider
-                : null,
-            }}
-          >
-            <SlateEditor
-              key={`${path}:${editor.editorRevision}`}
-              initialValue={currentEditorValue}
-              onChange={editor.onSlateChange}
-              onSaveNow={editor.saveNow}
-              insertionRequest={attachmentInsertion}
-              onInsertionHandled={finishAttachmentInsertion}
-              readOnly={conversationReadOnly}
-              editorRef={
-                isAiConversation ? conversationEditorRef : undefined
-              }
+          {recipeStructured && recipeDocument ? (
+            <RecipeFolioBody
+              document={recipeDocument}
+              mode={recipeMode}
+              onModeChange={setRecipeMode}
+              onDocumentChange={(nextDocument) => {
+                setRecipeDraft({
+                  path,
+                  editorRevision: editor.editorRevision,
+                  document: nextDocument,
+                });
+                editor.setBodyMarkdown(serializeRecipeMarkdown(nextDocument));
+              }}
             />
-          </ConversationPresentationProvider>
+          ) : (
+            <ConversationPresentationProvider
+              value={{
+                mode: isAiConversation ? conversationMode : "generic",
+                provider: isAiConversation
+                  ? editor.conversationProvider
+                  : null,
+              }}
+            >
+              <SlateEditor
+                key={`${path}:${editor.editorRevision}`}
+                initialValue={currentEditorValue}
+                onChange={editor.onSlateChange}
+                onSaveNow={editor.saveNow}
+                insertionRequest={attachmentInsertion}
+                onInsertionHandled={finishAttachmentInsertion}
+                readOnly={conversationReadOnly}
+                editorRef={
+                  isAiConversation ? conversationEditorRef : undefined
+                }
+              />
+            </ConversationPresentationProvider>
+          )}
         </WikilinkResolutionProvider>
       </article>
 
@@ -462,7 +516,7 @@ export function Folio({ tabId, path }: FolioProps) {
       <KV
         k="Kind"
         v={
-          conversationReadOnly ? (
+          folioReadOnly ? (
             <span>{kindLabel(kind)}</span>
           ) : (
             <KindSelect
@@ -481,7 +535,7 @@ export function Folio({ tabId, path }: FolioProps) {
       <KV
         k="Project"
         v={
-          conversationReadOnly ? (
+          folioReadOnly ? (
             <span>{project ?? "—"}</span>
           ) : (
             <ProjectCombo
@@ -514,7 +568,7 @@ export function Folio({ tabId, path }: FolioProps) {
       <KV
         k="Protection"
         v={
-          conversationReadOnly ? (
+          folioReadOnly ? (
             <span>{encrypted ? "encrypted" : "plaintext"}</span>
           ) : (
             <button
@@ -556,7 +610,7 @@ export function Folio({ tabId, path }: FolioProps) {
       })()}
 
       <Block label="Attachments">
-        {conversationReadOnly ? (
+        {folioReadOnly ? (
           <p className="cl-marg m-0">Switch to Edit to manage attachments.</p>
         ) : (
           <>
@@ -590,7 +644,7 @@ export function Folio({ tabId, path }: FolioProps) {
       </Block>
 
       <Block label="Organization">
-        {conversationReadOnly ? (
+        {folioReadOnly ? (
           <p className="cl-marg m-0">Switch to Edit to manage paths.</p>
         ) : (
           <>
@@ -769,7 +823,7 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   const protection =
-    !conversationReadOnly && protectionDialog && editor.pageId ? (
+    !folioReadOnly && protectionDialog && editor.pageId ? (
       <Suspense fallback={null}>
         <NoteProtectionDialog
           mode={protectionDialog}
