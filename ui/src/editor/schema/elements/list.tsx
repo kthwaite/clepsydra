@@ -2,7 +2,7 @@ import type { List } from "mdast";
 import {
   type Editor,
   type Element,
-  type NodeEntry,
+  Node,
   Element as SlateElement,
   Transforms,
 } from "slate";
@@ -43,6 +43,7 @@ function ListItem({
   if (!isTask) {
     return <li {...attributes}>{children}</li>;
   }
+  const label = Node.string(element);
 
   return (
     <li
@@ -58,6 +59,7 @@ function ListItem({
       >
         <input
           type="checkbox"
+          aria-label={label}
           checked={checked}
           disabled={readOnly}
           onChange={() => {

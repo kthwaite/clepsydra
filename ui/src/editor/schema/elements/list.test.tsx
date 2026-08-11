@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createEditor, type Descendant } from "slate";
 import { HistoryEditor, withHistory } from "slate-history";
@@ -46,7 +46,7 @@ function renderedTask() {
   if (!listItem) throw new Error("Rendered task is not inside a list item");
   return {
     listItem,
-    checkbox: within(listItem).getByRole("checkbox"),
+    checkbox: screen.getByRole("checkbox", { name: /buy milk/i }),
   };
 }
 
