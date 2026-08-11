@@ -1,6 +1,8 @@
+import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
 import { type KeyboardEvent, useState } from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
 import type { DraftProperty } from "./definition-model";
 import { moveItem } from "./definition-model";
 
@@ -294,35 +296,39 @@ export function PropertyDefinitionEditor({
           className="flex flex-wrap gap-2"
           aria-label={`Order controls for ${property.key}`}
         >
-          <Button
-            size="sm"
+          <IconButton
+            aria-label={`Move ${property.key} up`}
             variant="ghost"
             isDisabled={index === 0}
             onPress={() => onMove(index, index - 1)}
           >
-            Move {property.key} up
-          </Button>
-          <Button
-            size="sm"
+            <ArrowUp />
+          </IconButton>
+          <IconButton
+            aria-label={`Move ${property.key} down`}
             variant="ghost"
             isDisabled={index === count - 1}
             onPress={() => onMove(index, index + 1)}
           >
-            Move {property.key} down
-          </Button>
-          <Button
-            size="sm"
+            <ArrowDown />
+          </IconButton>
+          <IconButton
+            aria-label={`Rename ${property.key}`}
             variant="ghost"
             onPress={() => {
               setRenameKey("");
               onStartRename(property);
             }}
           >
-            Rename {property.key}
-          </Button>
-          <Button size="sm" variant="ghost" onPress={() => onRemove(property)}>
-            Remove {property.key}
-          </Button>
+            <Pencil />
+          </IconButton>
+          <IconButton
+            aria-label={`Remove ${property.key}`}
+            variant="ghost"
+            onPress={() => onRemove(property)}
+          >
+            <Trash2 />
+          </IconButton>
         </div>
       </div>
 

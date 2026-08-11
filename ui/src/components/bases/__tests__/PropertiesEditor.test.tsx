@@ -145,7 +145,10 @@ describe("PropertiesEditor", () => {
       definition: { type: "relation", many: true },
     });
     rerender(<PropertiesEditor {...props} properties={typed} />);
-    await user.click(screen.getByRole("button", { name: "Move beta up" }));
+    const moveBetaUp = screen.getByRole("button", { name: "Move beta up" });
+    expect(moveBetaUp).not.toHaveTextContent("Move beta up");
+    expect(moveBetaUp.querySelector("svg")).not.toBeNull();
+    await user.click(moveBetaUp);
     expect(latest(onChange).map(({ id }) => id)).toEqual([
       "id-beta",
       "id-alpha",

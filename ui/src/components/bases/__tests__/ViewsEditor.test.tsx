@@ -209,9 +209,12 @@ describe("ViewsEditor", () => {
       "status",
       "title",
     ]);
-    await user.click(
-      screen.getByRole("button", { name: "Remove title column" }),
-    );
+    const removeTitle = screen.getByRole("button", {
+      name: "Remove title column",
+    });
+    expect(removeTitle).not.toHaveTextContent("Remove title column");
+    expect(removeTitle.querySelector("svg")).not.toBeNull();
+    await user.click(removeTitle);
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["status"]);
   });
 
