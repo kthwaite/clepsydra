@@ -6,6 +6,7 @@ import {
   Element as SlateElement,
   Transforms,
 } from "slate";
+import { HistoryEditor } from "slate-history";
 import {
   ReactEditor,
   type RenderElementProps,
@@ -59,15 +60,16 @@ function ListItem({
           type="checkbox"
           checked={checked}
           disabled={readOnly}
-          onChange={(e) => {
+          onChange={() => {
             if (readOnly) return;
-            e.preventDefault();
-            const path = ReactEditor.findPath(editor, element);
-            Transforms.setNodes(
-              editor,
-              { checked: !checked } as Partial<Element>,
-              { at: path },
-            );
+            HistoryEditor.withNewBatch(editor, () => {
+              const path = ReactEditor.findPath(editor, element);
+              Transforms.setNodes(
+                editor,
+                { checked: !checked } as Partial<Element>,
+                { at: path },
+              );
+            });
           }}
           className="accent-foreground"
         />
