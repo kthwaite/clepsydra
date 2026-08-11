@@ -160,7 +160,6 @@ export function TaskEditPanel({
   // to truthy on the next render, the useEffect below fires focus + select.
   const holdReasonRef = useRef<HTMLInputElement>(null);
   const focusReasonOnHold = useRef(false);
-  const prevHoldRef = useRef<string | null>(task.hold ?? null);
   const [needsFocus, setNeedsFocus] = useState(false);
 
   const disarmDestroy = useCallback(() => {
@@ -210,11 +209,7 @@ export function TaskEditPanel({
   // When hold toggle is activated (task.hold becomes truthy from an optimistic
   // patch), sync the reason input's state with the hold value.
   useEffect(() => {
-    const wasNotHeld = !prevHoldRef.current;
-    const isNowHeld = !!task.hold;
-    prevHoldRef.current = task.hold ?? null;
-
-    if (wasNotHeld && isNowHeld && focusReasonOnHold.current) {
+    if (task.hold && focusReasonOnHold.current) {
       focusReasonOnHold.current = false;
       // Sync the state with the new hold value so the input is populated
       setHoldReason(task.hold ?? "");

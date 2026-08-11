@@ -527,6 +527,13 @@ describe("TaskEditPanel — hold toggle", () => {
     expect(reason.selectionStart).toBe(0);
     expect(reason.selectionEnd).toBe("BLOCKED".length);
   });
+
+  it("does NOT focus the reason input when opening panel on an already-held task", () => {
+    wrap({ task: HELD_TASK });
+    const reason = screen.getByTestId("edit-panel-hold-reason") as HTMLInputElement;
+    // Focus should be on the panel itself (tabIndex=-1), not on the reason input
+    expect(document.activeElement).not.toBe(reason);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
