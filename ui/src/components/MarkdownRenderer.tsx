@@ -1,5 +1,8 @@
 import { type ReactNode, useRef } from "react";
-import Markdown, { defaultUrlTransform } from "react-markdown";
+import Markdown, {
+  defaultUrlTransform,
+  type UrlTransform,
+} from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
@@ -61,12 +64,18 @@ const remarkPlugins: PluggableList = [
   ],
 ];
 
-function transformMarkdownUrl(url: string): string {
-  if (url.startsWith(BLOCK_REFERENCE_SCHEME)) return url;
+const transformMarkdownUrl: UrlTransform = (url, key, node) => {
+  if (
+    key === "href" &&
+    node.tagName === "a" &&
+    url.startsWith(BLOCK_REFERENCE_SCHEME)
+  ) {
+    return url;
+  }
   return isCasResource(url)
     ? resolveResourceUrl(url)
     : defaultUrlTransform(url);
-}
+};
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const openTab = useOpenTab();

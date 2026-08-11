@@ -215,4 +215,15 @@ w = z^2
     expect(screen.getByText("Malformed").closest("a")).toBeNull();
     expect(screen.getByText("Unknown").closest("a")).toHaveAttribute("href", "");
   });
+
+  it("does not preserve private block schemes in image destinations", () => {
+    render(
+      <MarkdownRenderer content="![Private](clepsydra-block:abc123DEF0)" />,
+    );
+
+    expect(screen.getByRole("img", { name: "Private" })).not.toHaveAttribute(
+      "src",
+    );
+    expect(useBlockMock).not.toHaveBeenCalled();
+  });
 });
