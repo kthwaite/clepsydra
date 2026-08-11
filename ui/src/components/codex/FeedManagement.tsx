@@ -44,6 +44,7 @@ export function FeedManagement() {
   const [activeDisclosure, setActiveDisclosure] = useState<{
     namespace: string;
     preferences: FeedDisclosurePreferences;
+    shouldPersist: boolean;
   } | null>(null);
   const surfaceError = refreshFeeds.error ?? importOpml.error;
   const successfulManifest =
@@ -62,62 +63,90 @@ export function FeedManagement() {
   );
 
   useEffect(() => {
-    if (!successfulManifest) return;
+    const manifest = feedsQuery.data;
+    if (!manifest) return;
 
-    const namespace = successfulManifest.preference_namespace;
-    const storage = getFeedDisclosureStorage();
+    const namespace = manifest.preference_namespace;
+    const loaded = readFeedDisclosurePreferences(
+      getFeedDisclosureStorage(),
+      namespace,
+    );
     setActiveDisclosure((current) => {
-      const preferences =
-        current?.namespace === namespace
-          ? current.preferences
-          : readFeedDisclosurePreferences(storage, namespace);
-      const reconciled = reconcileFeedDisclosurePreferences(
-        storage,
-        namespace,
-        preferences,
-        successfulManifest,
-      );
+      const isCurrentNamespace = current?.namespace === namespace;
+      const preferences = isCurrentNamespace
+        ? current.preferences
+        : loaded;
+      const reconciled = successfulManifest
+        ? reconcileFeedDisclosurePreferences(
+            preferences,
+            successfulManifest,
+          )
+        : preferences;
+      const shouldPersist =
+        (isCurrentNamespace && current.shouldPersist) ||
+        reconciled !== preferences;
       if (
-        current?.namespace === namespace &&
-        current.preferences === reconciled
+        isCurrentNamespace &&
+        current.preferences === reconciled &&
+        current.shouldPersist === shouldPersist
       ) {
         return current;
       }
-      return { namespace, preferences: reconciled };
+      return { namespace, preferences: reconciled, shouldPersist };
     });
-  }, [successfulManifest]);
+  }, [feedsQuery.data, successfulManifest]);
+
+  useEffect(() => {
+    if (!activeDisclosure?.shouldPersist) return;
+
+    writeFeedDisclosurePreferences(
+      getFeedDisclosureStorage(),
+      activeDisclosure.namespace,
+      activeDisclosure.preferences,
+    );
+    setActiveDisclosure((current) => {
+      if (
+        current?.namespace !== activeDisclosure.namespace ||
+        current.preferences !== activeDisclosure.preferences ||
+        !current.shouldPersist
+      ) {
+        return current;
+      }
+      return { ...current, shouldPersist: false };
+    });
+  }, [activeDisclosure]);
 
   const setDisclosureExpanded = (
     kind: "groups" | "feeds",
     identity: string | number,
     isExpanded: boolean,
   ) => {
-    if (!successfulManifest) return;
+    const manifest = feedsQuery.data;
+    if (!manifest) return;
 
-    const namespace = successfulManifest.preference_namespace;
-    const storage = getFeedDisclosureStorage();
+    const namespace = manifest.preference_namespace;
+    const loaded = readFeedDisclosurePreferences(
+      getFeedDisclosureStorage(),
+      namespace,
+    );
     setActiveDisclosure((current) => {
-      const stored =
-        current?.namespace === namespace
-          ? current.preferences
-          : reconcileFeedDisclosurePreferences(
-              storage,
-              namespace,
-              readFeedDisclosurePreferences(storage, namespace),
-              successfulManifest,
-            );
+      const isCurrentNamespace = current?.namespace === namespace;
+      const stored = isCurrentNamespace ? current.preferences : loaded;
       const preferences = {
         groups: new Set(stored.groups),
         feeds: new Set(stored.feeds),
       };
       const collapsed = preferences[kind] as Set<string | number>;
-      if (isExpanded) {
-        collapsed.delete(identity);
-      } else {
-        collapsed.add(identity);
-      }
-      writeFeedDisclosurePreferences(storage, namespace, preferences);
-      return { namespace, preferences };
+      const changed = isExpanded
+        ? collapsed.delete(identity)
+        : !collapsed.has(identity);
+      if (!isExpanded && changed) collapsed.add(identity);
+      if (!changed && isCurrentNamespace) return current;
+      return {
+        namespace,
+        preferences,
+        shouldPersist: changed,
+      };
     });
   };
 

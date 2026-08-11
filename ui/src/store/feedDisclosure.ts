@@ -105,10 +105,10 @@ export function writeFeedDisclosurePreferences(
   preferences: FeedDisclosurePreferences,
 ): void {
   try {
-    storage?.setItem(
-      feedDisclosureStorageKey(preferenceNamespace),
-      JSON.stringify(serializePreferences(preferences)),
-    );
+    const key = feedDisclosureStorageKey(preferenceNamespace);
+    const serialized = JSON.stringify(serializePreferences(preferences));
+    if (storage?.getItem(key) === serialized) return;
+    storage?.setItem(key, serialized);
   } catch {
     // Persistence is a preference only; unavailable storage must not break feeds.
   }
@@ -119,8 +119,6 @@ function setsEqual<T>(left: Set<T>, right: Set<T>): boolean {
 }
 
 export function reconcileFeedDisclosurePreferences(
-  storage: FeedDisclosureStorage | null | undefined,
-  preferenceNamespace: string,
   preferences: FeedDisclosurePreferences,
   manifest: FeedDisclosureManifest | undefined,
 ): FeedDisclosurePreferences {
@@ -148,13 +146,7 @@ export function reconcileFeedDisclosurePreferences(
     return preferences;
   }
 
-  const reconciled = { groups, feeds };
-  writeFeedDisclosurePreferences(
-    storage,
-    preferenceNamespace,
-    reconciled,
-  );
-  return reconciled;
+  return { groups, feeds };
 }
 
 export function getFeedDisclosureStorage(): FeedDisclosureStorage | undefined {

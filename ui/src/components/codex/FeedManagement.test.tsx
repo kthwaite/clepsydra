@@ -1,6 +1,7 @@
+import { StrictMode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
 import { feedDisclosureStorageKey } from "#/store/feedDisclosure";
 
@@ -195,6 +196,10 @@ beforeEach(() => {
   managementMocks.exportOpml.mockResolvedValue(
     '<?xml version="1.0"?><opml version="2.0"><body /></opml>',
   );
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("FeedManagement", () => {
@@ -1012,5 +1017,161 @@ describe("FeedManagement", () => {
       collapsed.getByRole("button", { name: /unsubscribe one example/i }),
     ).toBeVisible();
     expect(collapsed.getByText("Timeout contacting origin")).toBeVisible();
+  });
+
+  it("persists one committed transition once under StrictMode", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <FeedManagement />
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(feedDisclosure("One Example")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+    expect(setItem).not.toHaveBeenCalled();
+
+    await user.click(feedDisclosure("One Example"));
+
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await waitFor(() => expect(setItem).toHaveBeenCalledTimes(1));
+    expect(setItem).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["loading", "error"] as const)(
+    "keeps retained-data disclosures interactive during background %s without pruning",
+    async (queryState) => {
+      const key = feedDisclosureStorageKey(
+        disclosureFeedList.preference_namespace,
+      );
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 1,
+          groups: ["research", "obsolete"],
+          feeds: [8, 99],
+        }),
+      );
+      managementMocks.feedsQuery.data = disclosureFeedList;
+      if (queryState === "loading") {
+        managementMocks.feedsQuery.isPending = true;
+        managementMocks.feedsQuery.isLoading = true;
+      } else {
+        managementMocks.feedsQuery.isError = true;
+        managementMocks.feedsQuery.error = new Error("background refresh failed");
+      }
+      const user = userEvent.setup();
+      renderManagement();
+
+      await waitFor(() => {
+        expect(groupDisclosure("Research")).toHaveAttribute(
+          "aria-expanded",
+          "false",
+        );
+      });
+      const engineering = groupDisclosure("Engineering");
+      await user.click(engineering);
+      expect(engineering).toHaveAttribute("aria-expanded", "false");
+      await user.click(engineering);
+      expect(engineering).toHaveAttribute("aria-expanded", "true");
+
+      const feed = feedDisclosure("One Example");
+      feed.focus();
+      await user.keyboard(" ");
+      expect(feed).toHaveAttribute("aria-expanded", "false");
+      expect(JSON.parse(window.localStorage.getItem(key) ?? "{}")).toEqual({
+        version: 1,
+        groups: ["obsolete", "research"],
+        feeds: [7, 8, 99],
+      });
+    },
+  );
+
+  it("restores distinct preferences across a same-mounted A to B to A namespace switch", async () => {
+    const namespaceA = disclosureFeedList.preference_namespace;
+    const namespaceB = "another-vault";
+    window.localStorage.setItem(
+      feedDisclosureStorageKey(namespaceA),
+      JSON.stringify({
+        version: 1,
+        groups: ["engineering"],
+        feeds: [8],
+      }),
+    );
+    window.localStorage.setItem(
+      feedDisclosureStorageKey(namespaceB),
+      JSON.stringify({
+        version: 1,
+        groups: ["research"],
+        feeds: [7],
+      }),
+    );
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const view = renderManagement();
+
+    await waitFor(() => {
+      expect(groupDisclosure("Engineering")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(groupDisclosure("Research")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("Two Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    managementMocks.feedsQuery.data = {
+      ...disclosureFeedList,
+      preference_namespace: namespaceB,
+    };
+    view.rerender(<FeedManagement />);
+
+    await waitFor(() => {
+      expect(groupDisclosure("Research")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(groupDisclosure("Engineering")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    view.rerender(<FeedManagement />);
+
+    await waitFor(() => {
+      expect(groupDisclosure("Engineering")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(groupDisclosure("Research")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("Two Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(setItem).not.toHaveBeenCalled();
   });
 });

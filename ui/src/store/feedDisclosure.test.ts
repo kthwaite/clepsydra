@@ -93,6 +93,28 @@ describe("feed disclosure preferences", () => {
     ).toEqual(["version", "groups", "feeds"]);
   });
 
+  it("does not set storage when the committed serialization is unchanged", () => {
+    const namespace = "vault-alpha";
+    const serialized = JSON.stringify({
+      version: 1,
+      groups: ["engineering"],
+      feeds: [7],
+    });
+    const storage = memoryStorage({
+      [feedDisclosureStorageKey(namespace)]: serialized,
+    });
+
+    writeFeedDisclosurePreferences(storage, namespace, {
+      groups: new Set(["Engineering"]),
+      feeds: new Set([7]),
+    });
+
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.values.get(feedDisclosureStorageKey(namespace))).toBe(
+      serialized,
+    );
+  });
+
   it("contains storage getter and setter exceptions", () => {
     const throwingGetter: FeedDisclosureStorage = {
       getItem: () => {
@@ -135,65 +157,43 @@ describe("feed disclosure preferences", () => {
     expect([...preferences.groups]).toEqual(["engineering", "research"]);
   });
 
-  it("prunes obsolete identities while retaining live groups and feeds", () => {
-    const storage = memoryStorage();
+  it("purely prunes obsolete identities while retaining live groups and feeds", () => {
     const preferences: FeedDisclosurePreferences = {
       groups: new Set(["engineering", "obsolete", "research"]),
       feeds: new Set([2, 7, 99]),
     };
 
-    const reconciled = reconcileFeedDisclosurePreferences(
-      storage,
-      "vault-alpha",
-      preferences,
-      {
-        groups: [
-          { name: " Engineering ", feeds: [{ id: 7 }] },
-          { name: "Research", feeds: [{ id: 2 }] },
-        ],
-      },
-    );
+    const reconciled = reconcileFeedDisclosurePreferences(preferences, {
+      groups: [
+        { name: " Engineering ", feeds: [{ id: 7 }] },
+        { name: "Research", feeds: [{ id: 2 }] },
+      ],
+    });
 
     expect([...reconciled.groups]).toEqual(["engineering", "research"]);
     expect([...reconciled.feeds]).toEqual([2, 7]);
-    expect(storage.setItem).toHaveBeenCalledTimes(1);
-    expect(storage.values.get(feedDisclosureStorageKey("vault-alpha"))).toBe(
-      JSON.stringify({
-        version: 1,
-        groups: ["engineering", "research"],
-        feeds: [2, 7],
-      }),
-    );
   });
 
-  it("keeps the same preferences and avoids writes when reconciliation is unchanged", () => {
-    const storage = memoryStorage();
+  it("keeps the same preferences when reconciliation is unchanged", () => {
     const preferences: FeedDisclosurePreferences = {
       groups: new Set(["engineering"]),
       feeds: new Set([7]),
     };
 
-    const reconciled = reconcileFeedDisclosurePreferences(
-      storage,
-      "vault-alpha",
-      preferences,
-      { groups: [{ name: "Engineering", feeds: [{ id: 7 }] }] },
-    );
+    const reconciled = reconcileFeedDisclosurePreferences(preferences, {
+      groups: [{ name: "Engineering", feeds: [{ id: 7 }] }],
+    });
 
     expect(reconciled).toBe(preferences);
-    expect(storage.setItem).not.toHaveBeenCalled();
   });
 
-  it("does not reconcile or write without a successful live manifest", () => {
-    const storage = memoryStorage();
+  it("does not reconcile without a successful live manifest", () => {
     const preferences: FeedDisclosurePreferences = {
       groups: new Set(["possibly-live"]),
       feeds: new Set([44]),
     };
 
     const reconciled = reconcileFeedDisclosurePreferences(
-      storage,
-      "vault-alpha",
       preferences,
       undefined,
     );
@@ -201,7 +201,6 @@ describe("feed disclosure preferences", () => {
     expect(reconciled).toBe(preferences);
     expect([...reconciled.groups]).toEqual(["possibly-live"]);
     expect([...reconciled.feeds]).toEqual([44]);
-    expect(storage.setItem).not.toHaveBeenCalled();
   });
 
   it("creates independent empty set instances", () => {
