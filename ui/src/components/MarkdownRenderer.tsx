@@ -4,11 +4,13 @@ import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { MathExpression } from "#/components/MathExpression";
+import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import {
+  BLOCK_REFERENCE_SCHEME,
   blockIdFromHref,
   remarkBlockReferences,
 } from "#/lib/markdown/blockReferences";
@@ -60,7 +62,7 @@ const remarkPlugins: PluggableList = [
 ];
 
 function transformMarkdownUrl(url: string): string {
-  if (blockIdFromHref(url)) return url;
+  if (url.startsWith(BLOCK_REFERENCE_SCHEME)) return url;
   return isCasResource(url)
     ? resolveResourceUrl(url)
     : defaultUrlTransform(url);
@@ -101,6 +103,23 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           return <div {...props}>{children}</div>;
         },
         a: ({ href, children, ...props }) => {
+          const blockId = href ? blockIdFromHref(href) : null;
+          if (blockId) {
+            return (
+              <BlockTransclusion
+                blockId={blockId}
+                onOpenSource={(block) => {
+                  openTab(
+                    "page",
+                    block.page_path,
+                    block.page_title || block.page_path,
+                  );
+                }}
+              />
+            );
+          }
+          if (href?.startsWith(BLOCK_REFERENCE_SCHEME)) return children;
+
           const resource = href ? classifyLinkResource(href) : null;
           if (href?.startsWith("/pages/")) {
             const pagePath = decodeURIComponent(href.replace(/^\/pages\//, ""));
