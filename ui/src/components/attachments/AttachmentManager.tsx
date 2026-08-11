@@ -10,6 +10,10 @@ import {
 } from "#/api/attachments";
 import { formatApiError } from "#/api/error";
 import { CopyButton } from "#/components/ui/CopyButton";
+import {
+  type PendingAttachmentAction,
+  PlaintextAttachmentDialog,
+} from "./PlaintextAttachmentDialog";
 
 interface AttachmentManagerProps {
   onInsertMarkdown?: (markdown: string) => void;
@@ -35,19 +39,51 @@ export function AttachmentManager({
   const remove = useDeleteAttachment();
   const [deletePath, setDeletePath] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingAttachmentAction | null>(null);
 
-  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const uploadFile = async (file: File): Promise<AttachmentInfo | null> => {
     setActionError(null);
     try {
-      await upload.mutateAsync({ file });
+      return await upload.mutateAsync({ file });
     } catch (uploadError) {
       setActionError(
         formatApiError(uploadError, `Could not upload ${file.name}.`),
       );
+      return null;
+    }
+  };
+
+  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+    setActionError(null);
+    if (protectedPage) {
+      setPendingAction({ kind: "upload", file });
+      return;
+    }
+
+    const attachment = await uploadFile(file);
+    if (attachment && onInsertMarkdown) {
+      onInsertMarkdown(attachmentMarkdown(attachment));
+    }
+  };
+
+  const acknowledgePendingAction = async (
+    action: PendingAttachmentAction,
+  ) => {
+    try {
+      if (action.kind === "upload") {
+        const attachment = await uploadFile(action.file);
+        if (attachment && onInsertMarkdown) {
+          onInsertMarkdown(attachmentMarkdown(attachment));
+        }
+      } else {
+        onInsertMarkdown?.(action.markdown);
+      }
     } finally {
-      event.target.value = "";
+      setPendingAction((current) => (current === action ? null : current));
     }
   };
 
@@ -73,17 +109,24 @@ export function AttachmentManager({
         </p>
       ) : null}
 
-      <label className="mb-2 inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">
-        <Upload aria-hidden size={12} />
-        {upload.isPending ? "Uploading…" : "Upload"}
-        <input
-          type="file"
-          aria-label="Upload attachment"
-          className="sr-only"
-          disabled={upload.isPending}
-          onChange={(event) => void onUpload(event)}
-        />
-      </label>
+      <div className="mb-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">
+          <Upload aria-hidden size={12} />
+          {upload.isPending ? "Uploading…" : "Upload"}
+          <input
+            type="file"
+            aria-label="Upload attachment"
+            className="sr-only"
+            disabled={upload.isPending}
+            onChange={(event) => void onUpload(event)}
+          />
+        </label>
+        {!protectedPage ? (
+          <p className="mt-1 text-ink-mute">
+            Uploads are stored as plaintext, including filenames and metadata.
+          </p>
+        ) : null}
+      </div>
 
       {actionError ? (
         <p role="alert" className="mb-2 text-danger">
@@ -138,7 +181,17 @@ export function AttachmentManager({
                     <button
                       type="button"
                       className="cursor-pointer uppercase tracking-[0.08em] text-accent hover:underline"
-                      onClick={() => onInsertMarkdown(markdown)}
+                      onClick={() => {
+                        if (protectedPage) {
+                          setPendingAction({
+                            kind: "insert",
+                            attachment,
+                            markdown,
+                          });
+                        } else {
+                          onInsertMarkdown(markdown);
+                        }
+                      }}
                     >
                       <Paperclip
                         aria-hidden
@@ -183,6 +236,11 @@ export function AttachmentManager({
           })}
         </ul>
       )}
+      <PlaintextAttachmentDialog
+        action={pendingAction}
+        onCancel={() => setPendingAction(null)}
+        onAcknowledge={(action) => void acknowledgePendingAction(action)}
+      />
     </section>
   );
 }
