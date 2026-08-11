@@ -875,8 +875,12 @@ fn rollback_manifest(
                     });
                 }
                 let content = read_verified(&rollback_path, source_hash)?;
-                remove_after_state(&root.join(destination), source_hash)?;
-                restore_missing_file(&root.join(source), source_hash, &content)?;
+                let source = root.join(source);
+                let destination = root.join(destination);
+                preflight_restore_missing_file(&source, source_hash)?;
+                preflight_remove_after_state(&destination, source_hash)?;
+                restore_missing_file(&source, source_hash, &content)?;
+                remove_after_state(&destination, source_hash)?;
             }
             ManifestIntent::Delete { path, before_hash } => {
                 let content = read_verified(&rollback_path, before_hash)?;
@@ -955,6 +959,19 @@ fn restore_file_state(
     }
 }
 
+fn preflight_restore_missing_file(
+    path: &Path,
+    before_hash: &str,
+) -> Result<(), BatchMutationError> {
+    match observed_hash(path)?.as_deref() {
+        Some(observed) if observed == before_hash => Ok(()),
+        None => Ok(()),
+        _ => Err(BatchMutationError::RecoveryConflict(
+            path.display().to_string(),
+        )),
+    }
+}
+
 fn restore_missing_file(
     path: &Path,
     before_hash: &str,
@@ -968,6 +985,19 @@ fn restore_missing_file(
                 source,
             }
         }),
+        _ => Err(BatchMutationError::RecoveryConflict(
+            path.display().to_string(),
+        )),
+    }
+}
+
+fn preflight_remove_after_state(
+    path: &Path,
+    after_hash: &str,
+) -> Result<(), BatchMutationError> {
+    match observed_hash(path)?.as_deref() {
+        None => Ok(()),
+        Some(observed) if observed == after_hash => Ok(()),
         _ => Err(BatchMutationError::RecoveryConflict(
             path.display().to_string(),
         )),
@@ -1616,7 +1646,28 @@ mod tests {
             write_missing("same.md", b"two"),
         ])
         .unwrap_err();
-        assert!(error.to_string().contains("same.md"));
+        assert_eq!(
+            error,
+            IntentValidationError::DuplicateFinalDestination("same.md".to_owned())
+        );
+    }
+
+    #[test]
+    fn move_and_write_final_destination_collision_is_rejected() {
+        let error = validate_intents(&[
+            BatchPathIntent::Move {
+                source: VaultPath::new("source.md").unwrap(),
+                destination: VaultPath::new("same.md").unwrap(),
+                expected_source: b"source".to_vec(),
+            },
+            write_missing("same.md", b"replacement"),
+        ])
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            IntentValidationError::DuplicateFinalDestination("same.md".to_owned())
+        );
     }
 
     #[test]
@@ -2118,6 +2169,39 @@ mod tests {
             b"source"
         );
         assert!(!fixture.root().join("source.md").exists());
+    }
+
+    #[test]
+    fn move_rollback_preserves_published_destination_when_recreated_source_conflicts() {
+        let fixture = fixture_with_file("source.md", b"source");
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::Move {
+                source: VaultPath::new("source.md").unwrap(),
+                destination: VaultPath::new("destination.md").unwrap(),
+                expected_source: b"source".to_vec(),
+            }],
+            create_directories: vec![],
+            remove_directories: vec![],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        prepared.publish().unwrap();
+        drop(prepared);
+        fs::write(fixture.root().join("source.md"), b"external").unwrap();
+
+        assert!(matches!(
+            recover_pending(fixture.root()),
+            Err(BatchMutationError::RecoveryConflict(path)) if path.ends_with("source.md")
+        ));
+        assert_eq!(
+            fs::read(fixture.root().join("source.md")).unwrap(),
+            b"external"
+        );
+        assert_eq!(
+            fs::read(fixture.root().join("destination.md")).unwrap(),
+            b"source"
+        );
     }
 
     #[test]

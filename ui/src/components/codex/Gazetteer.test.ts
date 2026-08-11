@@ -5,10 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { Gazetteer, toggleInSet } from "./Gazetteer";
 
-const { contentState, openTabMock, routeBridge } = vi.hoisted(() => ({
+const {
+  contentState,
+  openTabMock,
+  routeBridge,
+  bulkMutateMock,
+  mobileLayoutState,
+} = vi.hoisted(() => ({
   contentState: { items: [] as Array<Record<string, unknown>> },
   openTabMock: vi.fn(),
   routeBridge: { openWorkspace: undefined as (() => void) | undefined },
+  bulkMutateMock: vi.fn(),
+  mobileLayoutState: { enabled: true },
 }));
 
 vi.mock("#/api/index", () => ({
@@ -18,9 +26,11 @@ vi.mock("#/api/index", () => ({
   useTags: () => ({ data: [{ tag: "research", count: 1 }] }),
 }));
 vi.mock("#/api/pages", () => ({
-  useAssignBulk: () => ({ isPending: false, mutate: vi.fn() }),
+  useAssignBulk: () => ({ isPending: false, mutate: bulkMutateMock }),
 }));
-vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => true }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => mobileLayoutState.enabled,
+}));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => (...args: unknown[]) => {
     openTabMock(...args);
@@ -63,6 +73,8 @@ function makeContentEntry(index: number) {
 beforeEach(() => {
   openTabMock.mockClear();
   routeBridge.openWorkspace = undefined;
+  bulkMutateMock.mockReset();
+  mobileLayoutState.enabled = true;
   contentState.items = Array.from({ length: 25 }, (_, index) =>
     makeContentEntry(index),
   );
@@ -199,5 +211,50 @@ describe("Gazetteer controller", () => {
     expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Open Alpha" })).toBeVisible();
+  });
+
+  it("accepts an atomic moved-and-unchanged bulk response and clears the selection", async () => {
+    mobileLayoutState.enabled = false;
+    bulkMutateMock.mockImplementation(
+      (
+        _request: unknown,
+        options: {
+          onSuccess: (response: {
+            moved: [string, string][];
+            unchanged: string[];
+          }) => void;
+        },
+      ) => {
+        options.onSuccess({
+          moved: [["notes/alpha.md", "quotes/alpha.md"]],
+          unchanged: [],
+        });
+      },
+    );
+    const user = userEvent.setup();
+    render(createElement(Gazetteer));
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    expect(
+      screen.getByRole("button", { name: "✕ 1 selected" }),
+    ).toBeVisible();
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Project" }),
+      "Atlas{Enter}",
+    );
+
+    expect(bulkMutateMock).toHaveBeenCalledWith(
+      {
+        body: {
+          paths: ["notes/alpha.md"],
+          project: "Atlas",
+        },
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "✕ 1 selected" }),
+    ).not.toBeInTheDocument();
   });
 });

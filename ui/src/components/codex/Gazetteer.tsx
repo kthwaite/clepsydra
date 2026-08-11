@@ -54,7 +54,6 @@ export function Gazetteer({ initialTag }: Props) {
     setPage,
   } = useGazetteerStore();
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
-  const [failures, setFailures] = useState<[string, string][]>([]);
 
   useLayoutEffect(() => enter(initialTag), [enter, initialTag]);
 
@@ -96,13 +95,11 @@ export function Gazetteer({ initialTag }: Props) {
   const selected = [...selectedPaths];
 
   const toggleRow = (path: string) => {
-    setFailures([]);
     setSelectedPaths((cur) => toggleInSet(cur, path));
   };
 
   const clearSelection = () => {
     setSelectedPaths(new Set());
-    setFailures([]);
   };
 
   const allVisibleSelected =
@@ -110,27 +107,26 @@ export function Gazetteer({ initialTag }: Props) {
 
   const toggleAllVisible = () => {
     if (rows.length === 0) return;
-    setFailures([]);
     setSelectedPaths(
       allVisibleSelected ? new Set() : new Set(rows.map((n) => n.path)),
     );
   };
 
   const onBulkDone = (data: BulkAssignResponse) => {
-    setSelectedPaths(new Set());
-    setFailures(data.failed.length > 0 ? data.failed : []);
+    setSelectedPaths((current) => {
+      const remaining = new Set(current);
+      for (const [source] of data.moved) remaining.delete(source);
+      for (const path of data.unchanged) remaining.delete(path);
+      return remaining;
+    });
   };
-
-  const startBulk = () => setFailures([]);
 
   const applyKind = (kind: Kind) => {
     if (bulk.isPending) return;
-    startBulk();
     bulk.mutate({ body: { paths: selected, kind } }, { onSuccess: onBulkDone });
   };
   const applyProject = (project: string) => {
     if (bulk.isPending) return;
-    startBulk();
     bulk.mutate(
       { body: { paths: selected, project } },
       { onSuccess: onBulkDone },
@@ -138,7 +134,6 @@ export function Gazetteer({ initialTag }: Props) {
   };
   const applyClearProject = () => {
     if (bulk.isPending) return;
-    startBulk();
     bulk.mutate(
       { body: { paths: selected, clear_project: true } },
       { onSuccess: onBulkDone },
@@ -284,12 +279,6 @@ export function Gazetteer({ initialTag }: Props) {
               onClear={applyClearProject}
             />
           </div>
-          {failures.length > 0 && (
-            <span className="cl-mono text-[10px] text-hot">
-              ⚠ {failures.length} failed: {shortFolio(failures[0][0])} —{" "}
-              {failures[0][1]}
-            </span>
-          )}
         </div>
       )}
 

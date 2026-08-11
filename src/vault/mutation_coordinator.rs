@@ -350,34 +350,67 @@ fn publish_batch(
     Ok(prepared)
 }
 
+#[derive(Clone, Copy)]
+enum MovedPageIdentity {
+    Source,
+    Destination,
+}
+
 fn reconcile_batch_index(
     vault: &Vault,
     index: &mut super::index::VaultIndex,
     hooks: &[Box<dyn PostMoveHook>],
     index_events: &[ChangeEvent],
     moved_pages: &[(VaultPath, VaultPath)],
+    identity: MovedPageIdentity,
 ) -> Result<(), IndexError> {
+    let mut hook_events = Vec::new();
     for (old_path, new_path) in moved_pages {
+        let identity_path = match identity {
+            MovedPageIdentity::Source => old_path,
+            MovedPageIdentity::Destination => new_path,
+        };
         let page_id = match index.connection().query_row(
             "SELECT id FROM pages WHERE path = ?1",
-            rusqlite::params![old_path.as_str()],
+            rusqlite::params![identity_path.as_str()],
             |row| row.get::<_, String>(0),
         ) {
             Ok(value) => value.parse::<uuid::Uuid>().map_err(|source| {
                 IndexError::Other(format!(
                     "invalid indexed page UUID for {}: {source}",
-                    old_path.as_str()
+                    identity_path.as_str()
                 ))
             })?,
             Err(rusqlite::Error::QueryReturnedNoRows) => continue,
             Err(source) => return Err(IndexError::Sqlite(source)),
         };
         for hook in hooks {
-            hook.on_page_moved(old_path, new_path, &page_id, vault, index)
-                .map_err(|error| IndexError::Other(error.to_string()))?;
+            hook_events.extend(
+                hook.on_page_moved(old_path, new_path, &page_id, vault, index)
+                    .map_err(|error| IndexError::Other(error.to_string()))?
+                    .into_iter()
+                    .map(ChangeEvent::Upsert),
+            );
         }
     }
-    SyncEngine::process_events(index_events, vault, index).map(|_| ())
+    SyncEngine::process_events(index_events, vault, index)?;
+    SyncEngine::process_events(&hook_events, vault, index).map(|_| ())
+}
+
+pub(crate) fn reconcile_recovered_batch_index(
+    vault: &Vault,
+    index: &mut super::index::VaultIndex,
+    hooks: &[Box<dyn PostMoveHook>],
+    recovered: &batch_mutation::RecoveredBatch,
+) -> Result<(), IndexError> {
+    reconcile_batch_index(
+        vault,
+        index,
+        hooks,
+        &recovered.index_events,
+        &recovered.moved_pages,
+        MovedPageIdentity::Destination,
+    )
 }
 
 fn rollback_created_publication(
@@ -586,6 +619,7 @@ impl MutationCoordinator {
             hooks,
             &command.index_events,
             &command.moved_pages,
+            MovedPageIdentity::Source,
         ) {
             return Err(MutationError::BatchRecovery {
                 directory,
@@ -653,6 +687,7 @@ impl MutationCoordinator {
                         hooks.as_ref(),
                         &index_events,
                         &moved_pages,
+                        MovedPageIdentity::Source,
                     )
                 })
                 .await

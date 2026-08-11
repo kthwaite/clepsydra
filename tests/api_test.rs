@@ -3155,9 +3155,9 @@ async fn page_mutation_projected_move_invokes_hook_before_notification() {
             _page_id: &uuid::Uuid,
             _vault: &Vault,
             _index: &VaultIndex,
-        ) -> Result<(), Box<dyn std::error::Error>> {
+        ) -> Result<Vec<VaultPath>, Box<dyn std::error::Error>> {
             self.events.lock().push("hook");
-            Ok(())
+            Ok(Vec::new())
         }
     }
 

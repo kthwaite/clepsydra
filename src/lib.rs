@@ -579,6 +579,23 @@ pub async fn build_app_state_with_feeds(
         warnings = stats.warnings.len(),
         "index built"
     );
+    let hooks: Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>> =
+        Arc::new(vec![Box::new(vault::academic_hook::AcademicMoveHook)]);
+    for recovered in &recovered_batches {
+        vault::mutation_coordinator::reconcile_recovered_batch_index(
+            &vault,
+            &mut index,
+            hooks.as_ref(),
+            recovered,
+        )
+        .map_err(|source| {
+            startup_index_error(
+                "recovered transaction reconciliation",
+                source,
+                &recovered_batches,
+            )
+        })?;
+    }
     index
         .resolve_links()
         .map_err(|source| startup_index_error("link resolution", source, &recovered_batches))?;
@@ -599,9 +616,6 @@ pub async fn build_app_state_with_feeds(
     let index_handle = IndexHandle::spawn(index, vault.clone());
     let (change_broadcast_tx, _) =
         tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
-
-    let hooks: Arc<Vec<Box<dyn vault::hooks::PostMoveHook>>> =
-        Arc::new(vec![Box::new(vault::academic_hook::AcademicMoveHook)]);
 
     let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
 
@@ -1136,6 +1150,101 @@ mod state_tests {
         crate::vault::init::init_vault(&root).unwrap();
         let state = build_app_state(&root).await.unwrap();
         assert!(state.vault.root().exists());
+    }
+
+    #[tokio::test]
+    async fn build_app_state_replays_committed_academic_move_hooks_before_finalization() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::write(
+            root.join(".clepsydra/config.toml"),
+            "[vault]\nlinkable_properties = [\"work_path\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("library/papers")).unwrap();
+        std::fs::create_dir_all(root.join("library/annotations")).unwrap();
+        std::fs::create_dir_all(root.join("archive")).unwrap();
+
+        let work_id = "00000000-0000-0000-0000-000000000300";
+        let annotation_id = "00000000-0000-0000-0000-000000000301";
+        let work_content = format!(
+            "---\nid: {work_id}\nkind: work\nwork_type: paper\ntitle: My Paper\ncite_key: \
+             mypaper2024\ntags: []\n---\nPaper content.\n"
+        );
+        let annotation_content = format!(
+            "---\nid: {annotation_id}\nkind: annotation\nwork_id: {work_id}\nwork_path: \
+             library/papers/my-paper.md\nannotation_type: highlight\ntags: []\n---\nA highlight.\n"
+        );
+        std::fs::write(
+            root.join("library/papers/my-paper.md"),
+            work_content.as_bytes(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("library/annotations/highlight-1.md"),
+            annotation_content,
+        )
+        .unwrap();
+
+        let source =
+            vault::path::VaultPath::new("library/papers/my-paper.md").unwrap();
+        let destination = vault::path::VaultPath::new("archive/my-paper.md").unwrap();
+        let command = vault::batch_mutation::BatchMutationCommand {
+            intents: vec![vault::batch_mutation::BatchPathIntent::Move {
+                source: source.clone(),
+                destination: destination.clone(),
+                expected_source: work_content.into_bytes(),
+            }],
+            create_directories: Vec::new(),
+            remove_directories: Vec::new(),
+            index_events: vec![
+                ChangeEvent::Remove(source.clone()),
+                ChangeEvent::Upsert(destination.clone()),
+            ],
+            moved_pages: vec![(source, destination)],
+        };
+        let mut pending = vault::batch_mutation::prepare(&root, &command).unwrap();
+        pending.publish().unwrap();
+        pending.mark_filesystem_committed().unwrap();
+        let transaction_directory = pending.directory().to_path_buf();
+        drop(pending);
+
+        let state = build_app_state(&root).await.unwrap();
+
+        let annotation =
+            std::fs::read_to_string(root.join("library/annotations/highlight-1.md")).unwrap();
+        assert!(
+            annotation.contains("work_path = \"archive/my-paper.md\""),
+            "persisted move hook did not update annotation: {annotation}"
+        );
+        let (indexed_work_path, resolved_work_id) = state
+            .index
+            .with_index(move |index, _vault| {
+                let indexed_work_path = index
+                    .connection()
+                    .query_row(
+                        "SELECT json_extract(meta_json, '$.work_path') FROM pages WHERE id = ?1",
+                        rusqlite::params![annotation_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap();
+                let resolved_work_id = index
+                    .connection()
+                    .query_row(
+                        "SELECT target_id FROM links \
+                         WHERE source_id = ?1 AND source_field = 'work_path'",
+                        rusqlite::params![annotation_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .unwrap();
+                (indexed_work_path, resolved_work_id)
+            })
+            .await
+            .unwrap();
+        assert_eq!(indexed_work_path, "archive/my-paper.md");
+        assert_eq!(resolved_work_id.as_deref(), Some(work_id));
+        assert!(!transaction_directory.exists());
     }
 }
 

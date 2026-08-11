@@ -6,7 +6,8 @@ use uuid::Uuid;
 /// Hook invoked after a page has been moved to a new path.
 ///
 /// Domain modules (e.g. academic-library) implement this trait to react to
-/// page moves — updating their own indexes, caches, or external state.
+/// page moves. Returned paths identify pages whose bytes the hook modified and
+/// therefore must be reindexed before the transaction can be finalized.
 pub trait PostMoveHook: Send + Sync {
     fn on_page_moved(
         &self,
@@ -15,7 +16,7 @@ pub trait PostMoveHook: Send + Sync {
         page_id: &Uuid,
         vault: &Vault,
         index: &VaultIndex,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<Vec<VaultPath>, Box<dyn std::error::Error>>;
 }
 
 /// Hook invoked after a page has been deleted.

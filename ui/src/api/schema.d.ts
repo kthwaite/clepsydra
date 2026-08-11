@@ -1749,23 +1749,18 @@ export interface components {
             clear_project?: boolean;
             /** @description Declared kind token applied to every path (see `AssignRequest::kind`). */
             kind?: string | null;
-            /** @description Page paths to assign. Each is processed independently. */
+            /** @description Page paths assigned as one atomic mutation. */
             paths: string[];
             /** @description Declared project applied to every path (see `AssignRequest::project`). */
             project?: string | null;
         };
         BulkAssignResponse: {
-            /** @description `path -> error` for failures (best-effort: one bad page doesn't abort). */
-            failed: [
-                string,
-                string
-            ][];
-            /** @description `original -> final` for each page that actually relocated. */
+            /** @description `original -> final` for every page relocated by the atomic assignment. */
             moved: [
                 string,
                 string
             ][];
-            /** @description Paths that were assigned successfully but did NOT relocate. */
+            /** @description Paths assigned successfully without relocation. */
             unchanged: string[];
         };
         CandidateEntry: {
@@ -2115,6 +2110,7 @@ export interface components {
             manifest_revision: string;
         };
         ImportResponse: {
+            checkpoint_error?: string | null;
             results: components["schemas"]["ImportResult"][];
         };
         ImportResult: {
@@ -6367,13 +6363,40 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Per-path assign results */
+            /** @description All pages assigned atomically */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["BulkAssignResponse"];
+                };
+            };
+            /** @description Invalid path, kind, project, or duplicate */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Destination or stale mutation conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal server error */
