@@ -56,3 +56,32 @@ This report is part of commit `refactor(vault): execute planned moves as atomic 
 ## Concerns
 
 No known functional concerns. Folder batches deliberately reject non-empty source-directory cleanup during publication and retain/roll back through the durable batch path rather than deleting unexpected files.
+
+## Review round 0 fixes
+
+### RED evidence
+
+- `cargo test --test mutation_test move_plan_batch -- --nocapture` failed because conversion resampled the concurrent replacement as the backlink's expected bytes instead of retaining the planner snapshot.
+- `cargo test --test mutation_test folder_plan_batch_uses_the_planner_inventory_without_rewalking -- --nocapture` failed because a post-plan `notes/late.md` appeared in the converted command.
+- `cargo test --test mutation_test explicit_create_dir_plan_becomes_preparation_metadata -- --nocapture` failed with no preparation directories instead of `archive` and `archive/nested`.
+- `cargo test --lib preserves_directory_created_after_preparation -- --nocapture` failed both rollback and recovery cases because an externally created destination directory was removed.
+- `cargo test --lib directory_only_command_publishes_preparation_metadata -- --nocapture` failed with `Validation(\"batch mutation command is empty\")`.
+
+### Fixes
+
+- `StagedWrite` now owns the exact bytes read to compute each rewrite. `into_batch_command` never rereads content; stale concurrent primary or backlink updates are rejected.
+- Folder planning performs one inventory walk. Exact file bytes, per-file move intents, directory preparation metadata, markdown index events, and move-hook metadata all derive from that inventory.
+- Explicit `FileOpKind::CreateDir` entries add their missing path and ancestors to preparation metadata, and directory-only batches publish successfully.
+- The manifest durably records `created_directories` after each successful directory creation. Rollback and crash recovery remove only transaction-owned directories; a path created externally after preparation remains untouched.
+- Added exact semantic affected-path equality tests for move, delete, and nested folder plans.
+- Added coordinator failure injection proving a plan-derived backlink write is rolled back when the following primary move fails, with unchanged index and no notification.
+- Added nested folder cleanup/recovery coverage for unexpected source content and interrupted publication.
+
+### Final GREEN evidence
+
+- `cargo test --test mutation_test -- --nocapture`: 45 passed.
+- `cargo test --test api_test -- --nocapture`: 119 passed.
+- `cargo test --test academic_test -- --nocapture`: 5 passed.
+- `cargo test --lib vault::batch_mutation::tests -- --nocapture`: 28 passed, 832 filtered out.
+- `cargo test --lib rolls_back_ -- --nocapture`: 2 passed, 858 filtered out.
+- Legacy executor search remains empty.

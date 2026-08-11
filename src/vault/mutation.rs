@@ -10,7 +10,7 @@ use super::batch_mutation::{
 };
 use super::canonical::CanonicalName;
 use super::index::{IndexError, VaultIndex};
-use super::page::{Page, parse_or_repair_frontmatter};
+use super::page::parse_or_repair_frontmatter;
 use super::path::VaultPath;
 use super::rewriter;
 use super::sync::ChangeEvent;
@@ -159,6 +159,13 @@ pub struct PlannedTextEdit {
     pub new_text: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct StagedWrite {
+    pub path: PathBuf,
+    pub expected_bytes: Vec<u8>,
+    pub content: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MutationPlan {
     pub file_ops: Vec<PlannedFileOp>,
@@ -166,9 +173,15 @@ pub struct MutationPlan {
     #[serde(skip)]
     pub index_events: Vec<ChangeEvent>,
     #[serde(skip)]
-    pub staged_writes: Vec<(PathBuf, String)>,
+    pub staged_writes: Vec<StagedWrite>,
     #[serde(skip)]
     pub moved_pages: Vec<(VaultPath, VaultPath)>,
+    #[serde(skip)]
+    primary_intents: Vec<BatchPathIntent>,
+    #[serde(skip)]
+    create_directories: Vec<VaultPath>,
+    #[serde(skip)]
+    remove_directories: Vec<VaultPath>,
 }
 
 impl MutationPlan {
@@ -179,126 +192,54 @@ impl MutationPlan {
             index_events: Vec::new(),
             staged_writes: Vec::new(),
             moved_pages: Vec::new(),
+            primary_intents: Vec::new(),
+            create_directories: Vec::new(),
+            remove_directories: Vec::new(),
         }
     }
 
-    /// Convert this preview into a durable atomic batch command.
+    /// Convert this coherent planner snapshot into a durable atomic batch command.
     ///
-    /// Every expected state is captured from the filesystem at conversion
-    /// time, so publication fails stale rather than overwriting a concurrent
-    /// change.
+    /// Expected bytes are captured by the planner in the same reads used to
+    /// compute rewrites. Conversion never resamples file contents.
     pub fn into_batch_command(self, vault: &Vault) -> Result<BatchMutationCommand, IndexError> {
-        let mut intents = Vec::with_capacity(self.staged_writes.len() + self.file_ops.len());
-        let mut create_directories = Vec::new();
-        let mut remove_directories = Vec::new();
+        let MutationPlan {
+            file_ops,
+            index_events,
+            staged_writes,
+            moved_pages,
+            primary_intents,
+            mut create_directories,
+            remove_directories,
+            ..
+        } = self;
+        let mut intents = Vec::with_capacity(staged_writes.len() + primary_intents.len());
 
-        for (absolute, content) in self.staged_writes {
-            let relative = absolute.strip_prefix(vault.root()).map_err(vp_err)?;
+        for write in staged_writes {
+            let relative = write.path.strip_prefix(vault.root()).map_err(vp_err)?;
             let relative = relative.to_str().ok_or_else(|| {
                 IndexError::Other(format!(
                     "staged write path is not valid UTF-8: {}",
-                    absolute.display()
+                    write.path.display()
                 ))
             })?;
-            let path = VaultPath::new(relative).map_err(vp_err)?;
             intents.push(BatchPathIntent::Write {
-                expected: ExpectedPathState::Bytes(fs::read(&absolute)?),
-                path,
-                content: content.into_bytes(),
+                path: VaultPath::new(relative).map_err(vp_err)?,
+                expected: ExpectedPathState::Bytes(write.expected_bytes),
+                content: write.content.into_bytes(),
             });
         }
+        intents.extend(primary_intents);
 
-        for op in self.file_ops {
-            match op.kind {
-                FileOpKind::Rename => {
-                    let destination = op.destination.ok_or_else(|| {
-                        IndexError::Other(format!("rename has no destination: {}", op.path))
-                    })?;
-                    let source = VaultPath::new(&op.path).map_err(vp_err)?;
-                    let destination = VaultPath::new(&destination).map_err(vp_err)?;
-                    let source_absolute = vault.resolve(&source);
-                    if source_absolute.is_dir() {
-                        for entry in walkdir::WalkDir::new(&source_absolute)
-                            .into_iter()
-                            .filter_map(Result::ok)
-                            .filter(|entry| entry.file_type().is_dir())
-                        {
-                            let suffix = entry
-                                .path()
-                                .strip_prefix(&source_absolute)
-                                .map_err(vp_err)?;
-                            let source_directory =
-                                entry.path().strip_prefix(vault.root()).map_err(vp_err)?;
-                            let destination_directory = vault.resolve(&destination).join(suffix);
-                            let destination_directory = destination_directory
-                                .strip_prefix(vault.root())
-                                .map_err(vp_err)?;
-                            let source_directory =
-                                VaultPath::new(&source_directory.to_string_lossy())
-                                    .map_err(vp_err)?;
-                            let destination_directory =
-                                VaultPath::new(&destination_directory.to_string_lossy())
-                                    .map_err(vp_err)?;
-                            collect_missing_parent_directories(
-                                vault,
-                                &destination_directory,
-                                &mut create_directories,
-                            )?;
-                            if !vault.resolve(&destination_directory).exists()
-                                && !create_directories.contains(&destination_directory)
-                            {
-                                create_directories.push(destination_directory);
-                            }
-                            remove_directories.push(source_directory);
-                        }
-                        for entry in walkdir::WalkDir::new(&source_absolute)
-                            .into_iter()
-                            .filter_map(Result::ok)
-                            .filter(|entry| entry.file_type().is_file())
-                        {
-                            let absolute = entry.path();
-                            let suffix = absolute.strip_prefix(&source_absolute).map_err(vp_err)?;
-                            let source_file = absolute.strip_prefix(vault.root()).map_err(vp_err)?;
-                            let destination_file = vault.resolve(&destination).join(suffix);
-                            let destination_file =
-                                destination_file.strip_prefix(vault.root()).map_err(vp_err)?;
-                            let source_file = VaultPath::new(&source_file.to_string_lossy())
-                                .map_err(vp_err)?;
-                            let destination_file =
-                                VaultPath::new(&destination_file.to_string_lossy())
-                                    .map_err(vp_err)?;
-                            collect_missing_parent_directories(
-                                vault,
-                                &destination_file,
-                                &mut create_directories,
-                            )?;
-                            intents.push(BatchPathIntent::Move {
-                                expected_source: fs::read(absolute)?,
-                                source: source_file,
-                                destination: destination_file,
-                            });
-                        }
-                    } else {
-                        collect_missing_parent_directories(
-                            vault,
-                            &destination,
-                            &mut create_directories,
-                        )?;
-                        intents.push(BatchPathIntent::Move {
-                            expected_source: fs::read(&source_absolute)?,
-                            source,
-                            destination,
-                        });
-                    }
+        for op in file_ops {
+            if matches!(op.kind, FileOpKind::CreateDir) {
+                let directory = VaultPath::new(&op.path).map_err(vp_err)?;
+                collect_missing_parent_directories(vault, &directory, &mut create_directories)?;
+                if !vault.resolve(&directory).exists()
+                    && !create_directories.contains(&directory)
+                {
+                    create_directories.push(directory);
                 }
-                FileOpKind::Delete => {
-                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
-                    intents.push(BatchPathIntent::Delete {
-                        expected: fs::read(vault.resolve(&path))?,
-                        path,
-                    });
-                }
-                FileOpKind::CreateDir => {}
             }
         }
 
@@ -306,8 +247,8 @@ impl MutationPlan {
             create_directories,
             remove_directories,
             intents,
-            index_events: self.index_events,
-            moved_pages: self.moved_pages,
+            index_events,
+            moved_pages,
         })
     }
 
@@ -346,6 +287,11 @@ impl<'a> MutationPlanner<'a> {
         let dest_vp = VaultPath::new(destination).map_err(vp_err)?;
 
         let source_abs = self.vault.resolve(&source_vp);
+        let source_bytes = fs::read(&source_abs)?;
+        let source_title = std::str::from_utf8(&source_bytes).ok().and_then(|content| {
+            let (meta, _, _, _) = parse_or_repair_frontmatter(content);
+            meta.title
+        });
 
         let old_stem = source_vp.stem().to_string();
         let new_stem = dest_vp.stem().to_string();
@@ -359,6 +305,16 @@ impl<'a> MutationPlanner<'a> {
             destination: Some(destination.to_string()),
         });
         plan.moved_pages.push((source_vp.clone(), dest_vp.clone()));
+        collect_missing_parent_directories(
+            self.vault,
+            &dest_vp,
+            &mut plan.create_directories,
+        )?;
+        plan.primary_intents.push(BatchPathIntent::Move {
+            source: source_vp.clone(),
+            destination: dest_vp.clone(),
+            expected_source: source_bytes,
+        });
 
         // 2. Find backlink pages
         let backlink_pages = self.find_backlink_pages(&source_vp, &old_stem)?;
@@ -387,8 +343,7 @@ impl<'a> MutationPlanner<'a> {
             }
 
             // Title-based wikilink rewrite
-            if let Ok(page) = Page::from_file(&source_abs, source_vp.clone())
-                && let Some(ref title) = page.meta.title
+            if let Some(title) = &source_title
                 && title != &old_stem
                 && title != &new_stem
             {
@@ -423,7 +378,11 @@ impl<'a> MutationPlanner<'a> {
                 }
 
                 // Stage the write (for execution)
-                plan.staged_writes.push((ref_abs, new_content));
+                plan.staged_writes.push(StagedWrite {
+                    path: ref_abs,
+                    expected_bytes: content.as_bytes().to_vec(),
+                    content: new_content,
+                });
 
                 // Index event for the modified page
                 plan.index_events.push(ChangeEvent::Upsert(ref_vp));
@@ -446,6 +405,7 @@ impl<'a> MutationPlanner<'a> {
         let target_vp = VaultPath::new(path).map_err(vp_err)?;
         let target_abs = self.vault.resolve(&target_vp);
         let old_stem = target_vp.stem().to_string();
+        let target_bytes = fs::read(&target_abs)?;
 
         let mut plan = MutationPlan::empty();
 
@@ -454,6 +414,10 @@ impl<'a> MutationPlanner<'a> {
             kind: FileOpKind::Delete,
             path: path.to_string(),
             destination: None,
+        });
+        plan.primary_intents.push(BatchPathIntent::Delete {
+            path: target_vp.clone(),
+            expected: target_bytes.clone(),
         });
 
         // 2. Index event: remove the deleted page
@@ -465,12 +429,14 @@ impl<'a> MutationPlanner<'a> {
             return Ok(plan);
         }
 
-        // 4. Read the target page to get its title for display text
-        let display_text = if let Ok(page) = Page::from_file(&target_abs, target_vp.clone()) {
-            page.meta.title.clone().unwrap_or_else(|| old_stem.clone())
-        } else {
-            old_stem.clone()
-        };
+        // 4. Read the target snapshot to get its title for display text.
+        let display_text = std::str::from_utf8(&target_bytes)
+            .ok()
+            .and_then(|content| {
+                let (meta, _, _, _) = parse_or_repair_frontmatter(content);
+                meta.title
+            })
+            .unwrap_or_else(|| old_stem.clone());
 
         // 5. Choose sentinel prefix based on rewrite mode
         let sentinel_prefix = match rewrite {
@@ -531,7 +497,11 @@ impl<'a> MutationPlanner<'a> {
                 }
 
                 // Stage the write (for execution)
-                plan.staged_writes.push((ref_abs, new_content));
+                plan.staged_writes.push(StagedWrite {
+                    path: ref_abs,
+                    expected_bytes: content.as_bytes().to_vec(),
+                    content: new_content,
+                });
 
                 // Index event for the modified page
                 plan.index_events.push(ChangeEvent::Upsert(ref_vp));
@@ -549,143 +519,151 @@ impl<'a> MutationPlanner<'a> {
         let source_vp = VaultPath::new(source).map_err(vp_err)?;
         let dest_vp = VaultPath::new(destination).map_err(vp_err)?;
         let source_abs = self.vault.resolve(&source_vp);
-
         let mut plan = MutationPlan::empty();
 
-        // 1. File operation: rename the folder
         plan.file_ops.push(PlannedFileOp {
             kind: FileOpKind::Rename,
             path: source.to_string(),
             destination: Some(destination.to_string()),
         });
 
-        // 2. Walk the source directory to find all .md files
-        let mut md_files: Vec<(VaultPath, VaultPath)> = Vec::new();
+        // Snapshot the folder exactly once. File intents, directory metadata,
+        // index events, and move-hook metadata all derive from this inventory.
+        let mut md_files = Vec::<(VaultPath, VaultPath, Vec<u8>)>::new();
         for entry in walkdir::WalkDir::new(&source_abs)
             .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .filter_map(Result::ok)
         {
-            let abs = entry.path();
-            let rel = abs.strip_prefix(self.vault.root()).map_err(vp_err)?;
-            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            let absolute = entry.path();
+            let suffix = absolute.strip_prefix(&source_abs).map_err(vp_err)?;
+            let source_relative = absolute.strip_prefix(self.vault.root()).map_err(vp_err)?;
+            let destination_absolute = self.vault.resolve(&dest_vp).join(suffix);
+            let destination_relative = destination_absolute
+                .strip_prefix(self.vault.root())
+                .map_err(vp_err)?;
+            let source_path =
+                VaultPath::new(&source_relative.to_string_lossy()).map_err(vp_err)?;
+            let destination_path =
+                VaultPath::new(&destination_relative.to_string_lossy()).map_err(vp_err)?;
 
-            // Compute new path: replace source prefix with destination prefix
-            let suffix = rel_str.strip_prefix(source_vp.as_str()).unwrap_or(&rel_str);
-            let new_rel = format!("{}{suffix}", dest_vp.as_str());
-
-            let old_vp = VaultPath::new(&rel_str).map_err(vp_err)?;
-            let new_vp = VaultPath::new(&new_rel).map_err(vp_err)?;
-
-            md_files.push((old_vp, new_vp));
-        }
-
-        // 3. For each file, compute backlinks and build rewrites
-        let mut upserted_refs: Vec<String> = Vec::new();
-
-        for (old_vp, new_vp) in &md_files {
-            let old_stem = old_vp.stem().to_string();
-            let new_stem = new_vp.stem().to_string();
-            let old_abs = self.vault.resolve(old_vp);
-            plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
-
-            // Index events for the moved file
-            plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
-            plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
-
-            // Find backlink pages
-            let backlink_pages = self.find_backlink_pages(old_vp, &old_stem)?;
-
-            // Filter: skip pages inside the moved folder — their internal
-            // cross-references don't need rewriting since the whole folder moves.
-            let source_prefix = format!("{}/", source_vp.as_str());
-            let backlink_pages: Vec<_> = backlink_pages
-                .into_iter()
-                .filter(|(_, p)| !p.starts_with(&source_prefix))
-                .collect();
-
-            if backlink_pages.is_empty() {
+            if entry.file_type().is_dir() {
+                collect_missing_parent_directories(
+                    self.vault,
+                    &destination_path,
+                    &mut plan.create_directories,
+                )?;
+                if !self.vault.resolve(&destination_path).exists()
+                    && !plan.create_directories.contains(&destination_path)
+                {
+                    plan.create_directories.push(destination_path);
+                }
+                plan.remove_directories.push(source_path);
+                continue;
+            }
+            if !entry.file_type().is_file() {
                 continue;
             }
 
-            for (_, ref_path_str) in &backlink_pages {
-                let ref_vp = VaultPath::new(ref_path_str).map_err(vp_err)?;
+            let expected_source = fs::read(absolute)?;
+            collect_missing_parent_directories(
+                self.vault,
+                &destination_path,
+                &mut plan.create_directories,
+            )?;
+            plan.primary_intents.push(BatchPathIntent::Move {
+                source: source_path.clone(),
+                destination: destination_path.clone(),
+                expected_source: expected_source.clone(),
+            });
+            if absolute.extension().is_some_and(|extension| extension == "md") {
+                md_files.push((source_path, destination_path, expected_source));
+            }
+        }
+
+        let mut upserted_refs = Vec::<String>::new();
+        let source_prefix = format!("{}/", source_vp.as_str());
+        for (old_vp, new_vp, expected_source) in &md_files {
+            let old_stem = old_vp.stem().to_string();
+            let new_stem = new_vp.stem().to_string();
+            let source_title = std::str::from_utf8(expected_source).ok().and_then(|content| {
+                let (meta, _, _, _) = parse_or_repair_frontmatter(content);
+                meta.title
+            });
+            plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
+            plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
+            plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
+
+            let backlink_pages = self
+                .find_backlink_pages(old_vp, &old_stem)?
+                .into_iter()
+                .filter(|(_, path)| !path.starts_with(&source_prefix))
+                .collect::<Vec<_>>();
+
+            for (_, ref_path_str) in backlink_pages {
+                let ref_vp = VaultPath::new(&ref_path_str).map_err(vp_err)?;
                 let ref_abs = self.vault.resolve(&ref_vp);
-
-                let disk_content = fs::read_to_string(&ref_abs)?;
-                if is_protected_content(&disk_content) {
-                    continue;
-                }
-
-                // Read from staged write if we already have one, otherwise from disk
-                let content = if let Some(existing) =
-                    plan.staged_writes.iter().find(|(p, _)| *p == ref_abs)
-                {
-                    existing.1.clone()
+                let existing_index = plan
+                    .staged_writes
+                    .iter()
+                    .position(|write| write.path == ref_abs);
+                let (content, expected_bytes) = if let Some(index) = existing_index {
+                    (plan.staged_writes[index].content.clone(), None)
                 } else {
-                    disk_content
+                    let content = fs::read_to_string(&ref_abs)?;
+                    if is_protected_content(&content) {
+                        continue;
+                    }
+                    let expected = content.as_bytes().to_vec();
+                    (content, Some(expected))
                 };
 
-                let mut replacements: Vec<(String, String)> = Vec::new();
-
-                // Stem-based wikilink rewrite
+                let mut replacements = Vec::<(String, String)>::new();
                 if old_stem != new_stem {
                     replacements.push((old_stem.clone(), new_stem.clone()));
                 }
-
-                // Title-based wikilink rewrite
-                if let Ok(page) = Page::from_file(&old_abs, old_vp.clone())
-                    && let Some(ref title) = page.meta.title
+                if let Some(title) = &source_title
                     && title != &old_stem
                     && title != &new_stem
                 {
                     replacements.push((title.clone(), new_stem.clone()));
                 }
-
-                // Markdown link: old relative path -> new relative path
                 let old_rel = compute_relative_path(ref_vp.as_str(), old_vp.as_str());
                 let new_rel = compute_relative_path(ref_vp.as_str(), new_vp.as_str());
                 if old_rel != new_rel {
                     replacements.push((old_rel, new_rel));
                 }
-
                 if replacements.is_empty() {
                     continue;
                 }
 
-                let replacement_refs: Vec<(&str, &str)> = replacements
+                let replacement_refs = replacements
                     .iter()
                     .map(|(old, new)| (old.as_str(), new.as_str()))
-                    .collect();
-
-                let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
-                if new_content != content {
-                    // Record per-replacement text edits (for dry-run preview)
-                    for (old, new) in &replacements {
-                        plan.text_edits.push(PlannedTextEdit {
-                            path: ref_path_str.clone(),
-                            old_text: old.clone(),
-                            new_text: new.clone(),
-                        });
-                    }
-
-                    // Stage the write (dedup: update existing or push new)
-                    if let Some(existing) =
-                        plan.staged_writes.iter_mut().find(|(p, _)| *p == ref_abs)
-                    {
-                        let re_rewritten =
-                            rewriter::rewrite_links_in_content(&existing.1, &replacement_refs);
-                        existing.1 = re_rewritten;
-                    } else {
-                        plan.staged_writes.push((ref_abs, new_content));
-                    }
-
-                    // Dedup index events for modified referencing pages
-                    if !upserted_refs.contains(ref_path_str) {
-                        plan.index_events.push(ChangeEvent::Upsert(ref_vp));
-                        upserted_refs.push(ref_path_str.clone());
-                    }
+                    .collect::<Vec<_>>();
+                let new_content =
+                    rewriter::rewrite_links_in_content(&content, &replacement_refs);
+                if new_content == content {
+                    continue;
+                }
+                for (old, new) in &replacements {
+                    plan.text_edits.push(PlannedTextEdit {
+                        path: ref_path_str.clone(),
+                        old_text: old.clone(),
+                        new_text: new.clone(),
+                    });
+                }
+                if let Some(index) = existing_index {
+                    plan.staged_writes[index].content = new_content;
+                } else {
+                    plan.staged_writes.push(StagedWrite {
+                        path: ref_abs,
+                        expected_bytes: expected_bytes.expect("new staged write has snapshot"),
+                        content: new_content,
+                    });
+                }
+                if !upserted_refs.contains(&ref_path_str) {
+                    plan.index_events.push(ChangeEvent::Upsert(ref_vp));
+                    upserted_refs.push(ref_path_str);
                 }
             }
         }

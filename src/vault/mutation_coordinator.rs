@@ -45,6 +45,8 @@ pub struct MutationCoordinator {
     before_lock_acquire_hook: parking_lot::Mutex<Option<Arc<BeforeLockAcquireHook>>>,
     #[cfg(test)]
     before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
+    #[cfg(test)]
+    batch_publication_failure: parking_lot::Mutex<Option<usize>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -434,6 +436,8 @@ impl MutationCoordinator {
             before_lock_acquire_hook: parking_lot::Mutex::new(None),
             #[cfg(test)]
             before_batch_lock_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            batch_publication_failure: parking_lot::Mutex::new(None),
         }
     }
 
@@ -478,6 +482,11 @@ impl MutationCoordinator {
     #[cfg(test)]
     fn set_before_batch_lock_hook(&self, hook: Option<Arc<BeforeBatchLockHook>>) {
         *self.before_batch_lock_hook.lock() = hook;
+    }
+
+    #[cfg(test)]
+    fn fail_next_batch_publication_at(&self, intent_index: usize) {
+        *self.batch_publication_failure.lock() = Some(intent_index);
     }
 
     /// Lock the requested paths for mutation and every ancestor for subtree
@@ -601,12 +610,18 @@ impl MutationCoordinator {
         let notification = batch_notification(&command.index_events);
         let index_events = command.index_events.clone();
         let moved_pages = command.moved_pages.clone();
+        #[cfg(test)]
+        let batch_publication_failure = self.batch_publication_failure.lock().take();
 
         run_shielded_mutation(shield_path, move |filesystem_applied| async move {
             let blocking_root = root.clone();
             let blocking_error_path = root.clone();
             let blocking_applied = Arc::clone(&filesystem_applied);
             let prepared = tokio::task::spawn_blocking(move || {
+                #[cfg(test)]
+                let _failure = batch_publication_failure.map(|index| {
+                    batch_mutation::fail_once_at(batch_mutation::TestFailpoint::Publication(index))
+                });
                 let prepared = publish_batch(&blocking_root, &command)?;
                 blocking_applied.store(true, Ordering::Release);
                 Ok::<_, MutationError>((guard, prepared))
@@ -1349,7 +1364,11 @@ mod tests {
             let root = temp.path().join("vault");
             crate::vault::init::init_vault(&root).unwrap();
             for (path, content) in files {
-                fs::write(root.join(path), content).unwrap();
+                let path = root.join(path);
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(path, content).unwrap();
             }
             let vault = Vault::open(&root).unwrap();
             let mut raw_index =
@@ -1481,6 +1500,131 @@ mod tests {
             fs::read_to_string(fixture.root().join("b.md")).unwrap(),
             external_b
         );
+    }
+
+    #[tokio::test]
+    async fn plan_derived_move_rolls_back_backlink_before_primary_failure_without_notification() {
+        let target = batch_page(
+            "019fd000-0000-7000-8000-000000000009",
+            "Target",
+            "target body",
+        );
+        let backlink = batch_page(
+            "019fd000-0000-7000-8000-000000000010",
+            "Backlink",
+            "See [[Target]].",
+        );
+        let fixture = BatchFixture::new(&[("target.md", &target), ("backlink.md", &backlink)]);
+        let original_target = fs::read(fixture.root().join("target.md")).unwrap();
+        let original_backlink = fs::read(fixture.root().join("backlink.md")).unwrap();
+        let command = fixture
+            .index
+            .with_index(|index, vault| {
+                crate::vault::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::vault::mutation::MutationOp::MovePage {
+                        source: "target.md".to_string(),
+                        destination: "renamed.md".to_string(),
+                    })?
+                    .into_batch_command(vault)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(command.intents.len(), 2);
+        fixture.coordinator.fail_next_batch_publication_at(1);
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                command,
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::BatchPublish { .. }));
+        assert_eq!(
+            fs::read(fixture.root().join("target.md")).unwrap(),
+            original_target
+        );
+        assert_eq!(
+            fs::read(fixture.root().join("backlink.md")).unwrap(),
+            original_backlink
+        );
+        assert!(!fixture.root().join("renamed.md").exists());
+        assert!(notifications.lock().is_empty());
+        let indexed_paths = fixture
+            .index
+            .with_index(|index, _| {
+                let mut statement = index
+                    .connection()
+                    .prepare("SELECT path FROM pages ORDER BY path")
+                    .unwrap();
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+        assert_eq!(indexed_paths, vec!["backlink.md", "target.md"]);
+    }
+
+    #[tokio::test]
+    async fn folder_batch_rolls_back_when_unexpected_source_content_blocks_cleanup() {
+        let page = batch_page(
+            "019fd000-0000-7000-8000-000000000013",
+            "Nested",
+            "body",
+        );
+        let fixture = BatchFixture::new(&[("notes/nested/page.md", &page)]);
+        let original = fs::read(fixture.root().join("notes/nested/page.md")).unwrap();
+        let command = fixture
+            .index
+            .with_index(|index, vault| {
+                crate::vault::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::vault::mutation::MutationOp::MoveFolder {
+                        source: "notes".to_string(),
+                        destination: "archive/notes".to_string(),
+                    })?
+                    .into_batch_command(vault)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        fs::write(fixture.root().join("notes/late.txt"), "external").unwrap();
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                command,
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::BatchPublish { .. }));
+        assert_eq!(
+            fs::read(fixture.root().join("notes/nested/page.md")).unwrap(),
+            original
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("notes/late.txt")).unwrap(),
+            "external"
+        );
+        assert!(!fixture.root().join("archive").exists());
+        assert!(notifications.lock().is_empty());
     }
 
     #[tokio::test]

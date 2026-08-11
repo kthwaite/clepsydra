@@ -99,6 +99,8 @@ struct TransactionManifest {
     phase: TransactionPhase,
     #[serde(default)]
     create_directories: Vec<String>,
+    #[serde(default)]
+    created_directories: Vec<String>,
     intents: Vec<ManifestIntent>,
     index_events: Vec<ManifestChangeEvent>,
     moved_pages: Vec<(String, String)>,
@@ -293,8 +295,14 @@ impl PreparedBatch {
                 });
             }
         }
-        for path in &self.manifest.create_directories {
-            create_synced_directory(&self.root.join(path))?;
+        for path in self.manifest.create_directories.clone() {
+            if self.manifest.created_directories.contains(&path) {
+                continue;
+            }
+            create_synced_directory(&self.root.join(&path))?;
+            self.manifest.created_directories.push(path);
+            write_manifest(&self.directory, &self.manifest, false)?;
+            sync_manifest_and_directory(&self.directory)?;
         }
         for index in 0..self.manifest.intents.len() {
             hit_test_failpoint(TestFailpoint::Publication(index), &self.directory)?;
@@ -419,8 +427,12 @@ pub(crate) fn prepare(
     root: &Path,
     command: &BatchMutationCommand,
 ) -> Result<PreparedBatch, BatchMutationError> {
-    validate_intents(&command.intents)
-        .map_err(|error| BatchMutationError::Validation(error.to_string()))?;
+    if !command.intents.is_empty()
+        || (command.create_directories.is_empty() && command.remove_directories.is_empty())
+    {
+        validate_intents(&command.intents)
+            .map_err(|error| BatchMutationError::Validation(error.to_string()))?;
+    }
     validate_observed_state(
         root,
         &command.intents,
@@ -499,6 +511,7 @@ pub(crate) fn prepare(
                 .iter()
                 .map(|path| path.as_str().to_owned())
                 .collect(),
+            created_directories: Vec::new(),
             remove_directories: command
                 .remove_directories
                 .iter()
@@ -813,7 +826,7 @@ fn rollback_manifest(
             }
         }
     }
-    for path in manifest.create_directories.iter().rev() {
+    for path in manifest.created_directories.iter().rev() {
         let absolute = root.join(path);
         match fs::remove_dir(&absolute) {
             Ok(()) => sync_directory_parent(&absolute)?,
@@ -1034,6 +1047,17 @@ fn validate_manifest_paths(
     }
     for directory_path in &manifest.create_directories {
         manifest_path_value(&path, directory_path)?;
+    }
+    for directory_path in &manifest.created_directories {
+        manifest_path_value(&path, directory_path)?;
+        if !manifest.create_directories.contains(directory_path) {
+            return Err(BatchMutationError::InvalidManifest {
+                path: path.clone(),
+                message: format!(
+                    "created directory was not declared for preparation: {directory_path}"
+                ),
+            });
+        }
     }
     for intent in &manifest.intents {
         match intent {
@@ -1394,6 +1418,82 @@ mod tests {
     }
 
     #[test]
+    fn rollback_preserves_directory_created_after_preparation() {
+        let fixture = fixture_with_file("source.md", b"source");
+        let destination_directory = VaultPath::new("destination").unwrap();
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::Move {
+                source: VaultPath::new("source.md").unwrap(),
+                destination: VaultPath::new("destination/source.md").unwrap(),
+                expected_source: b"source".to_vec(),
+            }],
+            create_directories: vec![destination_directory.clone()],
+            remove_directories: vec![],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        fs::create_dir(fixture.root().join(destination_directory.as_str())).unwrap();
+
+        assert!(prepared.publish().is_err());
+        prepared.rollback().unwrap();
+
+        assert!(fixture
+            .root()
+            .join(destination_directory.as_str())
+            .is_dir());
+    }
+
+    #[test]
+    fn recovery_preserves_directory_created_after_preparation() {
+        let fixture = fixture_with_file("source.md", b"source");
+        let destination_directory = VaultPath::new("destination").unwrap();
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::Move {
+                source: VaultPath::new("source.md").unwrap(),
+                destination: VaultPath::new("destination/source.md").unwrap(),
+                expected_source: b"source".to_vec(),
+            }],
+            create_directories: vec![destination_directory.clone()],
+            remove_directories: vec![],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        fs::create_dir(fixture.root().join(destination_directory.as_str())).unwrap();
+        assert!(prepared.publish().is_err());
+        drop(prepared);
+
+        assert!(recover_pending(fixture.root()).unwrap().is_empty());
+        assert!(fixture
+            .root()
+            .join(destination_directory.as_str())
+            .is_dir());
+    }
+
+    #[test]
+    fn directory_only_command_publishes_preparation_metadata() {
+        let fixture = fixture_with_files(&[]);
+        let command = BatchMutationCommand {
+            intents: vec![],
+            create_directories: vec![
+                VaultPath::new("archive").unwrap(),
+                VaultPath::new("archive/nested").unwrap(),
+            ],
+            remove_directories: vec![],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        prepared.publish().unwrap();
+        prepared.mark_filesystem_committed().unwrap();
+        prepared.finish().unwrap();
+
+        assert!(fixture.root().join("archive/nested").is_dir());
+    }
+
+    #[test]
     fn duplicate_final_destinations_are_rejected() {
         let error = validate_intents(&[
             write_missing("same.md", b"one"),
@@ -1548,6 +1648,54 @@ mod tests {
             b"source"
         );
         assert!(!fixture.root().join("destination.md").exists());
+    }
+
+    #[test]
+    fn interrupted_folder_publication_recovers_nested_directories_and_files() {
+        let fixture = fixture_with_files(&[
+            ("notes/nested/a.md", b"a"),
+            ("notes/nested/b.md", b"b"),
+        ]);
+        let command = BatchMutationCommand {
+            intents: vec![
+                BatchPathIntent::Move {
+                    source: VaultPath::new("notes/nested/a.md").unwrap(),
+                    destination: VaultPath::new("archive/notes/nested/a.md").unwrap(),
+                    expected_source: b"a".to_vec(),
+                },
+                BatchPathIntent::Move {
+                    source: VaultPath::new("notes/nested/b.md").unwrap(),
+                    destination: VaultPath::new("archive/notes/nested/b.md").unwrap(),
+                    expected_source: b"b".to_vec(),
+                },
+            ],
+            create_directories: vec![
+                VaultPath::new("archive").unwrap(),
+                VaultPath::new("archive/notes").unwrap(),
+                VaultPath::new("archive/notes/nested").unwrap(),
+            ],
+            remove_directories: vec![
+                VaultPath::new("notes").unwrap(),
+                VaultPath::new("notes/nested").unwrap(),
+            ],
+            index_events: vec![],
+            moved_pages: vec![],
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        let _failure = fail_once_at(TestFailpoint::Publication(1));
+        assert!(prepared.publish().is_err());
+        drop(prepared);
+
+        assert!(recover_pending(fixture.root()).unwrap().is_empty());
+        assert_eq!(
+            fs::read(fixture.root().join("notes/nested/a.md")).unwrap(),
+            b"a"
+        );
+        assert_eq!(
+            fs::read(fixture.root().join("notes/nested/b.md")).unwrap(),
+            b"b"
+        );
+        assert!(!fixture.root().join("archive").exists());
     }
 
     #[test]
@@ -1806,6 +1954,7 @@ mod tests {
                 destination_was_missing: true,
             }],
             create_directories: vec![],
+            created_directories: vec![],
             remove_directories: vec![],
             index_events: vec![],
             moved_pages: vec![],
