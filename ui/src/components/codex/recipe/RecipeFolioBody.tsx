@@ -20,6 +20,12 @@ export type RecipeFolioBodyProps = {
 
 type RecipeCollectionKey = "ingredients" | "steps";
 type PendingFocus = { collection: RecipeCollectionKey; index: number } | null;
+const focusContainedAction = (
+  container: HTMLSpanElement | null | undefined,
+) => {
+  const action = container?.firstElementChild;
+  if (action instanceof HTMLElement) action.focus();
+};
 
 const recipeModeOptions = [
   { id: "read", label: "Read" },
@@ -38,6 +44,24 @@ export function RecipeFolioBody({
   const pendingFocus = useRef<PendingFocus>(null);
   const ingredientInputs = useRef<Array<HTMLInputElement | null>>([]);
   const stepInputs = useRef<Array<HTMLInputElement | null>>([]);
+  const nextRowId = useRef(0);
+  const ingredientRowIds = useRef<string[]>([]);
+  const stepRowIds = useRef<string[]>([]);
+
+  ingredientRowIds.current.length = Math.min(
+    ingredientRowIds.current.length,
+    document.ingredients.length,
+  );
+  while (ingredientRowIds.current.length < document.ingredients.length) {
+    ingredientRowIds.current.push(`ingredient-${nextRowId.current++}`);
+  }
+  stepRowIds.current.length = Math.min(
+    stepRowIds.current.length,
+    document.steps.length,
+  );
+  while (stepRowIds.current.length < document.steps.length) {
+    stepRowIds.current.push(`step-${nextRowId.current++}`);
+  }
 
   useEffect(() => {
     const target = pendingFocus.current;
@@ -59,6 +83,9 @@ export function RecipeFolioBody({
 
   const addRow = (collection: RecipeCollectionKey) => {
     const values = document[collection];
+    const rowIds =
+      collection === "ingredients" ? ingredientRowIds : stepRowIds;
+    rowIds.current.push(`${collection}-${nextRowId.current++}`);
     pendingFocus.current = { collection, index: values.length };
     updateCollection(collection, [...values, ""]);
   };
@@ -69,14 +96,32 @@ export function RecipeFolioBody({
     destination: number,
   ) => {
     const values = [...document[collection]];
-    [values[index], values[destination]] = [
-      values[destination] ?? "",
-      values[index] ?? "",
-    ];
+    const rowIds =
+      collection === "ingredients" ? ingredientRowIds.current : stepRowIds.current;
+    const movingValue = values[index];
+    const displacedValue = values[destination];
+    const movingRowId = rowIds[index];
+    const displacedRowId = rowIds[destination];
+    if (
+      movingValue === undefined ||
+      displacedValue === undefined ||
+      movingRowId === undefined ||
+      displacedRowId === undefined
+    ) {
+      return;
+    }
+
+    values[index] = displacedValue;
+    values[destination] = movingValue;
+    rowIds[index] = displacedRowId;
+    rowIds[destination] = movingRowId;
     updateCollection(collection, values);
   };
 
   const removeRow = (collection: RecipeCollectionKey, index: number) => {
+    const rowIds =
+      collection === "ingredients" ? ingredientRowIds : stepRowIds;
+    rowIds.current.splice(index, 1);
     updateCollection(
       collection,
       document[collection].filter((_, candidate) => candidate !== index),
@@ -119,6 +164,7 @@ export function RecipeFolioBody({
             headingId={ingredientsId}
             values={document.ingredients}
             inputRefs={ingredientInputs}
+            rowIds={ingredientRowIds.current}
             onValueChange={(index, value) => {
               const ingredients = [...document.ingredients];
               ingredients[index] = value;
@@ -137,6 +183,7 @@ export function RecipeFolioBody({
             headingId={stepsId}
             values={document.steps}
             inputRefs={stepInputs}
+            rowIds={stepRowIds.current}
             onValueChange={(index, value) => {
               const steps = [...document.steps];
               steps[index] = value;
@@ -247,6 +294,7 @@ function RecipeCollectionEditor({
   headingId,
   values,
   inputRefs,
+  rowIds,
   onValueChange,
   onAdd,
   onMove,
@@ -256,6 +304,7 @@ function RecipeCollectionEditor({
   heading: string;
   headingId: string;
   values: string[];
+  rowIds: string[];
   inputRefs: React.RefObject<Array<HTMLInputElement | null>>;
   onValueChange: (index: number, value: string) => void;
   onAdd: () => void;
@@ -264,6 +313,8 @@ function RecipeCollectionEditor({
 }) {
   const singular = collection === "ingredients" ? "ingredient" : "step";
   const label = collection === "ingredients" ? "Ingredient" : "Step";
+  const moveUpActions = useRef<Array<HTMLSpanElement | null>>([]);
+  const moveDownActions = useRef<Array<HTMLSpanElement | null>>([]);
 
   return (
     <section aria-labelledby={headingId} className="grid gap-3">
@@ -283,7 +334,7 @@ function RecipeCollectionEditor({
       <ol className="m-0 grid list-none gap-3 p-0">
         {values.map((value, index) => (
           <li
-            key={`${collection}-${index}`}
+            key={rowIds[index]}
             className="grid gap-2 border-l-2 border-rule-soft pl-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
           >
             <TextField
@@ -296,24 +347,48 @@ function RecipeCollectionEditor({
               className="min-w-0"
             />
             <div className="flex items-center gap-1 sm:pb-px">
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Move ${singular} ${index + 1} up`}
-                isDisabled={index === 0}
-                onPress={() => onMove(index, index - 1)}
+              <span
+                ref={(container) => {
+                  moveUpActions.current[index] = container;
+                }}
+                className="contents"
               >
-                <ArrowUp aria-hidden="true" className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Move ${singular} ${index + 1} down`}
-                isDisabled={index === values.length - 1}
-                onPress={() => onMove(index, index + 1)}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Move ${singular} ${index + 1} up`}
+                  isDisabled={index === 0}
+                  onPress={() => {
+                    if (index === 1) {
+                      focusContainedAction(moveDownActions.current[index]);
+                    }
+                    onMove(index, index - 1);
+                  }}
+                >
+                  <ArrowUp aria-hidden="true" className="h-3.5 w-3.5" />
+                </Button>
+              </span>
+              <span
+                ref={(container) => {
+                  moveDownActions.current[index] = container;
+                }}
+                className="contents"
               >
-                <ArrowDown aria-hidden="true" className="h-3.5 w-3.5" />
-              </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Move ${singular} ${index + 1} down`}
+                  isDisabled={index === values.length - 1}
+                  onPress={() => {
+                    if (index === values.length - 2) {
+                      focusContainedAction(moveUpActions.current[index]);
+                    }
+                    onMove(index, index + 1);
+                  }}
+                >
+                  <ArrowDown aria-hidden="true" className="h-3.5 w-3.5" />
+                </Button>
+              </span>
               <Button
                 variant="ghost"
                 size="icon"

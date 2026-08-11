@@ -136,9 +136,16 @@ export function parseRecipeMarkdown(
   if (lines[0]?.trim() === pageTitle.trim()) lines.shift();
 
   const markers: SectionMarker[] = [];
+  let foundIngredients = false;
+  let foundSteps = false;
   for (const [index, line] of lines.entries()) {
     const marker = parseSectionMarker(line, index);
-    if (marker) markers.push(marker);
+    if (!marker) continue;
+
+    markers.push(marker);
+    if (marker.name === "ingredients") foundIngredients = true;
+    if (marker.name === "steps") foundSteps = true;
+    if (marker.name === "notes" && foundIngredients && foundSteps) break;
   }
 
   const ingredientMarkers = markers.filter(
@@ -219,10 +226,10 @@ export function serializeRecipeMarkdown(document: RecipeDocument): string {
     normalizeLineEndings(document.description).split("\n"),
   );
   const ingredients = document.ingredients
-    .filter((ingredient) => ingredient.length > 0)
+    .filter((ingredient) => ingredient.trim().length > 0)
     .map((ingredient) => `• ${normalizeLineEndings(ingredient)}`);
   const steps = document.steps
-    .filter((step) => step.length > 0)
+    .filter((step) => step.trim().length > 0)
     .map((step, index) => `${index + 1}. ${normalizeLineEndings(step)}`);
   const notes = joinMarkdown(
     normalizeLineEndings(document.notesMarkdown).split("\n"),

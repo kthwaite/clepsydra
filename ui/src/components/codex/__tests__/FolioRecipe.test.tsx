@@ -251,9 +251,14 @@ describe("Folio recipe presentation", () => {
     });
     renderFolio(editor);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "original Markdown is preserved",
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("original Markdown is preserved");
+    expect(alert).toHaveTextContent(
+      "Ingredients, Steps, and Notes once and in that order",
     );
+    expect(alert).toHaveTextContent("bullet ingredients and numbered steps");
+    expect(alert).toHaveTextContent("uppercase markers");
+    expect(alert).toHaveTextContent("consistent Markdown headings and lists");
     const fallback = screen.getByRole("textbox", { name: "Page body" });
     expect(fallback).toHaveValue(malformed);
     expect(editor.setBodyMarkdown).not.toHaveBeenCalled();

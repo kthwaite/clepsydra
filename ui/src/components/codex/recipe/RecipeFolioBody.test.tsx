@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -181,6 +181,67 @@ describe("RecipeFolioBody", () => {
     add.focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("textbox", { name: "Step 2" })).toHaveFocus();
+  });
+
+  it("keeps the same ingredient move-up action focused across consecutive moves", async () => {
+    const user = userEvent.setup();
+    render(<ControlledRecipe />);
+
+    act(() => {
+      screen
+        .getByRole("button", { name: "Move ingredient 3 up" })
+        .focus();
+    });
+    await user.keyboard("{Enter}");
+
+    const movedAction = screen.getByRole("button", {
+      name: "Move ingredient 2 up",
+    });
+    expect(movedAction).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
+      "30 g parmesan",
+    );
+    expect(screen.getByRole("textbox", { name: "Ingredient 2" })).toHaveValue(
+      "200 g spaghetti",
+    );
+    expect(
+      screen.getByRole("button", { name: "Move ingredient 1 down" }),
+    ).toHaveFocus();
+  });
+
+  it("keeps the same step move-down action focused across consecutive moves", async () => {
+    const user = userEvent.setup();
+    render(
+      <ControlledRecipe
+        initial={{
+          ...recipe,
+          steps: ["Boil.", "Toss.", "Serve."],
+        }}
+      />,
+    );
+
+    act(() => {
+      screen.getByRole("button", { name: "Move step 1 down" }).focus();
+    });
+    await user.keyboard("{Enter}");
+
+    const movedAction = screen.getByRole("button", {
+      name: "Move step 2 down",
+    });
+    expect(movedAction).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("textbox", { name: "Step 3" })).toHaveValue(
+      "Boil.",
+    );
+    expect(screen.getByRole("textbox", { name: "Step 2" })).toHaveValue(
+      "Serve.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Move step 3 up" }),
+    ).toHaveFocus();
   });
 
   it("does not persist newly added empty rows in canonical Markdown", async () => {

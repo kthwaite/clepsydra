@@ -337,6 +337,29 @@ NOTES
     expect(source).toBe(originalSource);
   });
 
+  it("round-trips marker-shaped Markdown inside Notes as notes content", () => {
+    const document = {
+      description: "A marker-heavy recipe.",
+      ingredients: ["broth"],
+      steps: ["Simmer."],
+      notesMarkdown: `INGREDIENTS
+## Ingredients
+STEPS
+## Steps
+NOTES
+## Notes
+Keep every marker-shaped line.`,
+    };
+
+    expect(
+      parseRecipeMarkdown(serializeRecipeMarkdown(document), "Recipe"),
+    ).toEqual({
+      ok: true,
+      sourceFormat: "example",
+      value: document,
+    });
+  });
+
   it("round-trips standard Markdown through the canonical demonstrated format", () => {
     const parsed = parseRecipeMarkdown(markdown, "Recipe");
     expect(parsed.ok).toBe(true);
@@ -380,36 +403,46 @@ NOTES
     expect(serialized.endsWith("\n\n")).toBe(false);
   });
 
-  it("normalizes line endings, omits empty rows, and preserves opaque strings", () => {
-    expect(
-      serializeRecipeMarkdown({
-        description: "\r\n**Fast** broth.\r\n\r\nSecond paragraph.\r\n",
-        ingredients: ["", "  ", "**2** onions (sliced)"],
-        steps: ["", "Heat to 180°C — don't boil."],
-        notesMarkdown: "\r\nUse `fresh` herbs.\r\n",
-      }),
-    ).toBe(`**Fast** broth.
+  it("filters rows by trimmed emptiness without changing nonblank values", () => {
+    const serialized = serializeRecipeMarkdown({
+      description: "\r\n**Fast** broth.\r\n\r\nSecond paragraph.\r\n",
+      ingredients: ["", " \t ", "**2** onions (sliced)  "],
+      steps: ["\t", "Heat to 180°C — don't boil.  ", " ", "Serve."],
+      notesMarkdown: "\r\nUse `fresh` herbs.\r\n",
+    });
+
+    expect(serialized).toBe(`**Fast** broth.
 
 Second paragraph.
 
 INGREDIENTS
-•   
-• **2** onions (sliced)
+• **2** onions (sliced)  
 
 STEPS
-1. Heat to 180°C — don't boil.
+1. Heat to 180°C — don't boil.  
+2. Serve.
 
 NOTES
 Use \`fresh\` herbs.
 `);
+    expect(parseRecipeMarkdown(serialized, "Recipe")).toEqual({
+      ok: true,
+      sourceFormat: "example",
+      value: {
+        description: "**Fast** broth.\n\nSecond paragraph.",
+        ingredients: ["**2** onions (sliced)  "],
+        steps: ["Heat to 180°C — don't boil.  ", "Serve."],
+        notesMarkdown: "Use `fresh` herbs.",
+      },
+    });
   });
 
-  it("always emits all markers for an empty document", () => {
+  it("always emits all markers for sections containing only empty rows", () => {
     expect(
       serializeRecipeMarkdown({
         description: "",
-        ingredients: [],
-        steps: [],
+        ingredients: [" ", "\t"],
+        steps: ["\t "],
         notesMarkdown: "",
       }),
     ).toBe(`INGREDIENTS
