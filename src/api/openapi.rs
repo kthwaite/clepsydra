@@ -1,14 +1,14 @@
 use axum::Router;
-use utoipa::openapi::Ref;
+use utoipa::openapi::{Ref, RefOr};
 use utoipa::openapi::schema::{
     AdditionalProperties, Array, Object, ObjectBuilder, OneOfBuilder, Schema, SchemaType, Type,
 };
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
-struct FilterSchema;
+struct SchemaOverrides;
 
-impl Modify for FilterSchema {
+impl Modify for SchemaOverrides {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let Some(components) = openapi.components.as_mut() else {
             return;
@@ -46,12 +46,19 @@ impl Modify for FilterSchema {
         components
             .schemas
             .insert("Filter".to_owned(), Schema::OneOf(filter).into());
+
+        if let Some(RefOr::T(Schema::Object(upload_form))) =
+            components.schemas.get_mut("AttachmentUploadForm")
+        {
+            upload_form.additional_properties =
+                Some(Box::new(AdditionalProperties::FreeForm(false)));
+        }
     }
 }
 /// OpenAPI document for the clepsydra vault API used by the UI.
 #[derive(OpenApi)]
 #[openapi(
-    modifiers(&FilterSchema),
+    modifiers(&SchemaOverrides),
     info(
         title = "Clepsydra API",
         version = "0.0.0",

@@ -4582,6 +4582,7 @@ async fn attachment_upload_openapi_documents_named_multipart_fields() {
         form["required"],
         serde_json::json!(["file", "plaintext_acknowledged"])
     );
+    assert_eq!(form["additionalProperties"], false);
     assert_eq!(form["properties"]["file"]["type"], "string");
     assert_eq!(form["properties"]["file"]["format"], "binary");
     assert_eq!(
