@@ -485,6 +485,110 @@ describe("usePatchFeedEntry", () => {
     expect(client.getQueryState(unrelatedDetailKey)?.isInvalidated).toBe(false);
   });
 
+  it("reconciles detail loaded while a patch is in flight", async () => {
+    const entry = makeEntry({ read: false });
+    const client = freshClient();
+    const patchResponse = deferred<Response>();
+    const detailResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(detailResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const detail = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    detailResponse.resolve(jsonResponse(entry));
+    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
+    expect(detail.result.current.data?.read).toBe(false);
+
+    patchResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await mutation;
+
+    expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
+      true,
+    );
+    detail.unmount();
+  });
+
+  it("defers active list refetch until overlapping optimistic patches settle", async () => {
+    const entry = makeEntry({ read: false, bookmarked: true });
+    const baseline = makePages([entry], ["baseline"]);
+    const finalPages = makePages([
+      { ...entry, read: true, bookmarked: false },
+    ]);
+    const listKey = entriesKey({ view: "all" });
+    const detailKey = entryDetailKey(entry.id);
+    const client = freshClient();
+    client.setQueryData(listKey, baseline);
+    client.setQueryData(detailKey, entry);
+    let finalCommitted = false;
+    let listRefetches = 0;
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: async () => {
+        listRefetches += 1;
+        return finalCommitted ? finalPages : baseline;
+      },
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      bookmarked: false,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    olderResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await olderMutation;
+
+    expect(listRefetches).toBe(0);
+    expect(
+      client.getQueryData<EntryPages>(listKey)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, bookmarked: false });
+    expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+      read: true,
+      bookmarked: false,
+    });
+
+    finalCommitted = true;
+    newerResponse.resolve(
+      jsonResponse({ ...entry, read: true, bookmarked: false }),
+    );
+    await newerMutation;
+    await waitFor(() => expect(listRefetches).toBe(1));
+
+    expect(listObserver.getCurrentResult().data).toEqual(finalPages);
+    expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+      read: true,
+      bookmarked: false,
+    });
+    unsubscribeList();
+  });
+
   it("optimistically patches every cached filter key and restores each exact pair on failure", async () => {
     const entry = makeEntry({ read: false, bookmarked: true });
     const keys = {

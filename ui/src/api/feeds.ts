@@ -179,6 +179,7 @@ function invalidateFeedQueries(queryClient: QueryClient) {
 }
 
 function invalidateEntryMutationQueries(queryClient: QueryClient) {
+  if (optimisticEntryStates.has(queryClient)) return Promise.resolve();
   return Promise.all([
     queryClient.invalidateQueries({
       queryKey: FEEDS_QUERY_KEY,
@@ -396,6 +397,32 @@ function settleEntryDetailMutation(
   if (states.size === 0) optimisticEntryDetailStates.delete(queryClient);
 }
 
+function reconcileEntryDetailSuccess(
+  queryClient: QueryClient,
+  mutation: FeedEntryMutation,
+  result: FeedEntry,
+) {
+  const projected = projectedEntryResult(mutation, result);
+  const state = optimisticEntryDetailStates
+    .get(queryClient)
+    ?.get(mutation.id);
+  if (state !== undefined) {
+    state.baseline = patchedEntry(state.baseline, projected);
+    rebaseEntryDetail(queryClient, state);
+    return;
+  }
+
+  const queryKey = entryDetailQueryKey(mutation.id);
+  const query = queryClient
+    .getQueryCache()
+    .find({ queryKey, exact: true }) as EntryDetailQuery | undefined;
+  if (query === undefined) return;
+  const cached = query.state.data;
+  query.setState({
+    data: cached === undefined ? result : patchedEntry(cached, projected),
+  });
+}
+
 function remapMutateOptions<TData, TError, TRawVariables, TVariables, TContext>(
   options: MutateOptions<TData, TError, TVariables, TContext> | undefined,
   variables: TVariables,
@@ -563,7 +590,15 @@ export function usePatchFeedEntry() {
       if (states.size === 0) optimisticEntryStates.delete(queryClient);
       return { snapshots, layerId, queryHashes, entryId, detailCached };
     },
-    onSuccess: (data, _variables, context) => {
+    onSuccess: async (data, variables, context) => {
+      const mutationInput = {
+        id: variables.params.path.id,
+        ...variables.body,
+      };
+      await queryClient.cancelQueries({
+        queryKey: entryDetailQueryKey(mutationInput.id),
+        exact: true,
+      });
       if (context !== undefined) {
         settleEntryMutation(
           queryClient,
@@ -579,6 +614,8 @@ export function usePatchFeedEntry() {
           context.layerId,
           data,
         );
+      } else {
+        reconcileEntryDetailSuccess(queryClient, mutationInput, data);
       }
     },
     onError: (_error, _variables, context) => {
