@@ -9,7 +9,10 @@ import {
   useUploadAttachment,
 } from "#/api/attachments";
 import { formatApiError } from "#/api/error";
-import { attachmentReferences } from "#/lib/markdown/attachmentReferences";
+import {
+  attachmentReferences,
+  canonicalAttachmentPath,
+} from "#/lib/markdown/attachmentReferences";
 import { CopyButton } from "#/components/ui/CopyButton";
 import {
   type PendingAttachmentAction,
@@ -46,10 +49,17 @@ export function AttachmentManager({
     useState<PendingAttachmentAction | null>(null);
   const pendingActionInFlight = useRef<PendingAttachmentAction | null>(null);
   const [isPendingAction, setIsPendingAction] = useState(false);
-  const existingReferences = useMemo(
-    () => (protectedPage ? attachmentReferences(pageMarkdown ?? "") : []),
-    [pageMarkdown, protectedPage],
-  );
+  const missingReferences = useMemo(() => {
+    if (!protectedPage || isLoading || error || !attachments) return [];
+    const attachmentPaths = new Set(
+      attachments.map((attachment) =>
+        canonicalAttachmentPath(attachment.path),
+      ),
+    );
+    return attachmentReferences(pageMarkdown ?? "").filter(
+      (reference) => !attachmentPaths.has(reference.path),
+    );
+  }, [attachments, error, isLoading, pageMarkdown, protectedPage]);
 
   const uploadFile = async (file: File): Promise<AttachmentInfo | null> => {
     setActionError(null);
@@ -128,15 +138,15 @@ export function AttachmentManager({
           Attachments are not encrypted. Only the note body is protected.
         </p>
       ) : null}
-      {existingReferences.length ? (
+      {missingReferences.length ? (
         <section
           aria-label="Plaintext attachment references"
           className="mb-2 border-l-2 border-warning pl-2 text-warning"
         >
           <p className="font-semibold">Plaintext attachment references</p>
-          <p>These referenced attachment files are not encrypted:</p>
+          <p>These references do not match the current attachment inventory:</p>
           <ul className="m-0 list-disc pl-4">
-            {existingReferences.map((reference) => (
+            {missingReferences.map((reference) => (
               <li key={reference.path}>{reference.path}</li>
             ))}
           </ul>

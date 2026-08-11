@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
@@ -366,6 +366,27 @@ describe("Folio attachment protection plumbing", () => {
 
     await waitFor(() => expect(attachmentUploadMock).toHaveBeenCalledOnce());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("hands decrypted Markdown to the protected attachment audit without mutating", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      encrypted: true,
+      bodyMarkdown:
+        "[Missing paper](/api/vault/attachments/private/missing%20paper.pdf)",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    );
+
+    const audit = await screen.findByRole("region", {
+      name: "Plaintext attachment references",
+    });
+    expect(within(audit).getByText("private/missing paper.pdf")).toBeVisible();
+    expect(attachmentUploadMock).not.toHaveBeenCalled();
+    expect(attachmentRemoveMock).not.toHaveBeenCalled();
   });
 });
 

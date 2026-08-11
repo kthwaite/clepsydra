@@ -290,8 +290,97 @@ describe("AttachmentManager", () => {
     expect(audit).toBeVisible();
     expect(within(audit).getByText("research/diagram 1.png")).toBeVisible();
     expect(within(audit).getByText("paper.pdf")).toBeVisible();
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
 
     view.rerender(<AttachmentManager pageMarkdown={pageMarkdown} />);
+    expect(
+      screen.queryByRole("region", {
+        name: "Plaintext attachment references",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("suppresses the audit when every canonical reference is present", () => {
+    mocks.useAttachments.mockReturnValue({
+      data: [
+        { name: "paper.pdf", path: "paper.pdf", size: 1 },
+        { name: "paper.pdf", path: "folder/paper.pdf", size: 1 },
+        { name: "name?.pdf", path: "name?.pdf", size: 1 },
+        { name: "name#draft.pdf", path: "name#draft.pdf", size: 1 },
+        { name: "100%.pdf", path: "100%.pdf", size: 1 },
+        { name: "café.pdf", path: "cafe\u0301.pdf", size: 1 },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    const pageMarkdown = [
+      "[Paper](/api/vault/attachments/%70aper.pdf?download=1#p2)",
+      "[Nested](%2Fapi%2Fvault%2Fattachments%2Ffolder%2Fpaper.pdf)",
+      "[Question](/api/vault/attachments/name%3F.pdf?download=1)",
+      "[Hash](/api/vault/attachments/name%23draft.pdf#preview)",
+      "[Percent](/api/vault/attachments/100%25.pdf)",
+      "[Unicode](/api/vault/attachments/caf%C3%A9.pdf)",
+    ].join("\n");
+
+    render(<AttachmentManager protectedPage pageMarkdown={pageMarkdown} />);
+
+    expect(
+      screen.queryByRole("region", {
+        name: "Plaintext attachment references",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lists only missing references in their source order", () => {
+    mocks.useAttachments.mockReturnValue({
+      data: [{ name: "Present", path: "present.pdf", size: 1 }],
+      isLoading: false,
+      error: null,
+    });
+    const pageMarkdown = [
+      "[Missing B](/api/vault/attachments/missing-b.pdf)",
+      "[Present](/api/vault/attachments/present.pdf)",
+      "[Missing A](/api/vault/attachments/missing-a.pdf)",
+    ].join("\n");
+
+    render(<AttachmentManager protectedPage pageMarkdown={pageMarkdown} />);
+
+    const audit = screen.getByRole("region", {
+      name: "Plaintext attachment references",
+    });
+    expect(
+      within(audit)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["missing-b.pdf", "missing-a.pdf"]);
+  });
+
+  it("suppresses the audit while inventory is loading or failed", () => {
+    const pageMarkdown =
+      "[Missing](/api/vault/attachments/missing.pdf)";
+    mocks.useAttachments.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    });
+    const view = render(
+      <AttachmentManager protectedPage pageMarkdown={pageMarkdown} />,
+    );
+    expect(
+      screen.queryByRole("region", {
+        name: "Plaintext attachment references",
+      }),
+    ).not.toBeInTheDocument();
+
+    mocks.useAttachments.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("inventory unavailable"),
+    });
+    view.rerender(
+      <AttachmentManager protectedPage pageMarkdown={pageMarkdown} />,
+    );
     expect(
       screen.queryByRole("region", {
         name: "Plaintext attachment references",
