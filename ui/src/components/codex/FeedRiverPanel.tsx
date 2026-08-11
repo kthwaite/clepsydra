@@ -6,16 +6,10 @@ import { Card } from "#/components/codex/Card";
 import { FeedRiver } from "#/components/codex/FeedRiver";
 import { cn } from "#/lib/cn";
 
-const VIEWS: ReadonlyArray<readonly [EntryView, string]> = [
-  ["unread", "Unread"],
-  ["all", "All"],
-  ["saved", "Saved"],
-];
-
 export function FeedRiverPanel() {
   const navigate = useNavigate();
   const feedsQuery = useFeeds();
-  const [view, setView] = useState<EntryView>("unread");
+  const [view, setView] = useState<EntryView>("all");
   const queryErrorMessage =
     feedsQuery.error instanceof Error
       ? feedsQuery.error.message
@@ -138,21 +132,36 @@ export function FeedRiverPanel() {
               aria-label="Feed river view"
               className="mb-3 flex border border-rule"
             >
-              {VIEWS.map(([key, label]) => (
-                <Button
-                  key={key}
-                  aria-pressed={view === key}
-                  onPress={() => setView(key)}
-                  className={cn(
-                    "cl-mono flex-1 border-r border-rule px-3 py-2 text-[9px] uppercase tracking-[0.18em] outline-none last:border-r-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
-                    view === key
-                      ? "bg-ink text-paper"
-                      : "bg-paper text-ink-mute hover:text-ink",
-                  )}
-                >
-                  {label} ({feedsQuery.data.counts[key]})
-                </Button>
-              ))}
+              <Button
+                aria-pressed={view === "unread"}
+                onPress={() =>
+                  setView((current) =>
+                    current === "unread" ? "all" : "unread",
+                  )
+                }
+                className={cn(
+                  "cl-mono flex-1 border-r border-rule px-3 py-2 text-[9px] uppercase tracking-[0.18em] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
+                  view === "unread"
+                    ? "bg-ink text-paper"
+                    : "bg-paper text-ink-mute hover:text-ink",
+                )}
+              >
+                Hide read ({feedsQuery.data.counts.unread})
+              </Button>
+              <Button
+                aria-pressed={view === "saved"}
+                onPress={() =>
+                  setView((current) => (current === "saved" ? "all" : "saved"))
+                }
+                className={cn(
+                  "cl-mono flex-1 px-3 py-2 text-[9px] uppercase tracking-[0.18em] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
+                  view === "saved"
+                    ? "bg-ink text-paper"
+                    : "bg-paper text-ink-mute hover:text-ink",
+                )}
+              >
+                Saved ({feedsQuery.data.counts.saved})
+              </Button>
             </div>
             <FeedRiver compact filters={{ view }} />
           </>

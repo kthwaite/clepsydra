@@ -688,7 +688,7 @@ pub async fn list_entries(
     let page = state
         .feeds
         .list_entries(EntryFilters {
-            view: query.view.unwrap_or(EntryViewDto::Unread).into(),
+            view: query.view.unwrap_or(EntryViewDto::All).into(),
             feed_id: query.feed,
             group: query.group,
             tag: query.tag,
@@ -1316,6 +1316,63 @@ mod tests {
             .await
             .unwrap()
             .entries
+    }
+
+    fn entry_ids(response: &Value) -> Vec<i64> {
+        response["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["id"].as_i64().unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn list_entries_defaults_to_all() {
+        let fixture = feed_test_app("").await;
+        seed_unread_entries(
+            &fixture.state,
+            vec![
+                fetched_entry("read-entry", 11),
+                fetched_entry("unread-entry", 10),
+            ],
+        )
+        .await;
+        let seeded = unread_entries(&fixture.state).await;
+        let read_id = seeded
+            .iter()
+            .find(|entry| entry.guid == "read-entry")
+            .unwrap()
+            .id;
+        let unread_id = seeded
+            .iter()
+            .find(|entry| entry.guid == "unread-entry")
+            .unwrap()
+            .id;
+
+        let (status, _) = request_json(
+            &fixture.app,
+            Method::PATCH,
+            &format!("/api/vault/feeds/entries/{read_id}"),
+            Some(json!({ "read": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, all) =
+            request_json(&fixture.app, Method::GET, "/api/vault/feeds/entries", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(entry_ids(&all), [read_id, unread_id]);
+
+        let (status, hidden) = request_json(
+            &fixture.app,
+            Method::GET,
+            "/api/vault/feeds/entries?view=unread",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(entry_ids(&hidden), [unread_id]);
     }
 
     #[tokio::test]

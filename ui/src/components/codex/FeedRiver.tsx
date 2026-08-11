@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Disclosure, DisclosurePanel } from "react-aria-components";
 import {
   type EntryView,
@@ -30,8 +30,33 @@ export function FeedRiver({
   const patchEntry = usePatchFeedEntry();
   const markEntriesRead = useMarkFeedEntriesRead();
   const [expandedEntry, setExpandedEntry] = useState<FeedEntry | null>(null);
+  const [expandedEntryFilters, setExpandedEntryFilters] =
+    useState<FeedRiverFilters | null>(null);
   const [tagEditorId, setTagEditorId] = useState<number | null>(null);
   const expandedMutationVersion = useRef(0);
+  const activeExpandedEntry =
+    expandedEntryFilters &&
+    sameFeedRiverFilters(expandedEntryFilters, filters)
+      ? expandedEntry
+      : null;
+
+  useEffect(() => {
+    if (
+      expandedEntryFilters &&
+      !sameFeedRiverFilters(expandedEntryFilters, filters)
+    ) {
+      expandedMutationVersion.current += 1;
+      setExpandedEntry(null);
+      setExpandedEntryFilters(null);
+      setTagEditorId(null);
+    }
+  }, [
+    expandedEntryFilters,
+    filters.feed,
+    filters.group,
+    filters.tag,
+    filters.view,
+  ]);
 
   const reconcileExpandedMutation = async (
     entryId: number,
@@ -69,14 +94,14 @@ export function FeedRiver({
     [entriesQuery.data],
   );
   const visibleEntries = useMemo(() => {
-    if (!expandedEntry) return entries;
+    if (!activeExpandedEntry) return entries;
 
     const mergedEntries = entries.slice();
     const expandedIndex = mergedEntries.findIndex(
-      (entry) => entry.id === expandedEntry.id,
+      (entry) => entry.id === activeExpandedEntry.id,
     );
-    if (expandedIndex === -1) mergedEntries.push(expandedEntry);
-    else mergedEntries[expandedIndex] = expandedEntry;
+    if (expandedIndex === -1) mergedEntries.push(activeExpandedEntry);
+    else mergedEntries[expandedIndex] = activeExpandedEntry;
 
     return mergedEntries.sort((left, right) => {
       const timeDifference =
@@ -84,7 +109,7 @@ export function FeedRiver({
         Date.parse(left.published_at ?? left.fetched_at);
       return timeDifference || right.id - left.id;
     });
-  }, [entries, expandedEntry]);
+  }, [activeExpandedEntry, entries]);
   const feedNames = useMemo(() => {
     const names = new Map<number, string>();
     for (const group of feedsQuery.data?.groups ?? []) {
@@ -208,7 +233,7 @@ export function FeedRiver({
             </div>
             <div className="border-t border-rule">
               {dayEntries.map((entry) => {
-                const isExpanded = expandedEntry?.id === entry.id;
+                const isExpanded = activeExpandedEntry?.id === entry.id;
                 return (
                   <EntryDisclosure
                     key={entry.id}
@@ -220,6 +245,7 @@ export function FeedRiver({
                     onExpandedChange={(expanded) => {
                       expandedMutationVersion.current += 1;
                       setExpandedEntry(expanded ? entry : null);
+                      setExpandedEntryFilters(expanded ? { ...filters } : null);
                       setTagEditorId(null);
                       if (expanded && !entry.read) {
                         patchEntry.reset();
@@ -547,6 +573,18 @@ function fullReaderHref(filters: FeedRiverFilters) {
   if (filters.feed !== undefined) params.set("feed", String(filters.feed));
   if (filters.tag) params.set("tag", filters.tag);
   return `/feeds?${params.toString()}`;
+}
+
+function sameFeedRiverFilters(
+  left: FeedRiverFilters,
+  right: FeedRiverFilters,
+) {
+  return (
+    left.view === right.view &&
+    left.group === right.group &&
+    left.feed === right.feed &&
+    left.tag === right.tag
+  );
 }
 
 function emptyTitle(view: EntryView) {

@@ -144,7 +144,7 @@ describe("FeedRiverPanel", () => {
     );
   });
 
-  it("renders live global counts in the caption and accessible view labels", async () => {
+  it("defaults to all, toggles Hide read, and keeps Saved independent", async () => {
     const user = userEvent.setup();
     panelMocks.feedsQuery.data = activeFeedList;
 
@@ -152,20 +152,22 @@ describe("FeedRiverPanel", () => {
 
     const river = screen.getByTestId("feed-river");
     expect(river).toHaveAttribute("data-compact", "true");
-    expect(river).toHaveAttribute("data-view", "unread");
+    expect(river).toHaveAttribute("data-view", "all");
     expect(screen.getByText("12 UNREAD · 6 SAVED · 1 SOURCE")).toBeVisible();
 
-    expect(screen.getByRole("button", { name: "Unread (12)" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "All (45)" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Saved (6)" })).toBeVisible();
+    const hideRead = screen.getByRole("button", { name: /^hide read/i });
+    expect(hideRead).toHaveAttribute("aria-pressed", "false");
+    await user.click(hideRead);
+    expect(river).toHaveAttribute("data-view", "unread");
+    expect(hideRead).toHaveAttribute("aria-pressed", "true");
 
-    await user.click(screen.getByRole("button", { name: "Saved (6)" }));
+    await user.click(hideRead);
+    expect(river).toHaveAttribute("data-view", "all");
+    expect(hideRead).toHaveAttribute("aria-pressed", "false");
 
+    await user.click(screen.getByRole("button", { name: /^saved/i }));
     expect(river).toHaveAttribute("data-view", "saved");
-    expect(screen.getByRole("button", { name: "Saved (6)" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^saved/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -181,9 +183,8 @@ describe("FeedRiverPanel", () => {
     rerender(<FeedRiverPanel />);
 
     expect(screen.getByText("7 UNREAD · 8 SAVED · 1 SOURCE")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Unread (7)" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "All (46)" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Saved (8)" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: /^hide read/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^saved/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -220,9 +221,10 @@ describe("FeedRiverPanel", () => {
     expect(caption).toHaveClass("whitespace-normal");
     expect(action).toHaveClass("shrink-0");
 
-    expect(screen.getByRole("button", { name: "Unread (12)" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "All (45)" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Saved (6)" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /^hide read/i }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /^saved/i })).toBeVisible();
     expect(action).toBeVisible();
   });
 });

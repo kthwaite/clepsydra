@@ -121,6 +121,7 @@ vi.mock("#/api/feeds", async (importOriginal) => {
   };
 });
 
+import { updateCachedEntryPages } from "#/api/feeds";
 import { FeedRiver } from "#/components/codex/FeedRiver";
 
 const baseEntry: FeedEntry = {
@@ -399,6 +400,50 @@ describe("FeedRiver", () => {
     expect(riverMocks.patchEntry).toHaveBeenCalledWith(
       expect.objectContaining({ id: 101, read: false }),
     );
+  });
+
+  it("keeps read entries in all, hides them in unread, and restores them when toggled off", async () => {
+    const user = userEvent.setup();
+    const page = renderRiver({ view: "all" });
+    const before = riverMocks.entriesQuery.data;
+    if (!before) {
+      throw new Error("Expected seeded entry pages");
+    }
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    expect(riverMocks.patchEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 101, read: true }),
+    );
+
+    const all = updateCachedEntryPages(
+      before,
+      { id: 101, read: true },
+      { view: "all" },
+    );
+    riverMocks.entriesQuery.data = all;
+    page.rerender(<FeedRiver filters={{ view: "all" }} />);
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
+
+    const unread = updateCachedEntryPages(
+      before,
+      { id: 101, read: true },
+      { view: "unread" },
+    );
+    riverMocks.entriesQuery.data = unread;
+    page.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).not.toBeInTheDocument();
+
+    riverMocks.entriesQuery.data = all;
+    page.rerender(<FeedRiver filters={{ view: "all" }} />);
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
+    expect(all.pageParams).toEqual(before.pageParams);
+    expect(unread.pageParams).toEqual(before.pageParams);
   });
 
   it("bounds mark-all-read at the newest visible cursor and preserves active filters", async () => {

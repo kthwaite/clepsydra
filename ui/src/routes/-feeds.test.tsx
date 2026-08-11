@@ -54,31 +54,44 @@ beforeEach(() => {
 });
 
 describe("feeds route controls", () => {
-  it("exposes the active river view to assistive technology", () => {
-    render(<FeedsPage />);
+  it("defaults an omitted or unknown view to all", () => {
+    expect(Route.options.validateSearch?.({})).toMatchObject({ view: "all" });
+    expect(
+      Route.options.validateSearch?.({ view: "not-a-view" }),
+    ).toMatchObject({ view: "all" });
+  });
 
-    const savedRadio = screen.queryByRole("radio", { name: /^saved$/i });
-    if (savedRadio) {
-      expect(savedRadio).toBeChecked();
-      expect(
-        screen.getByRole("radio", { name: /^unread$/i }),
-      ).not.toBeChecked();
-      expect(screen.getByRole("radio", { name: /^all$/i })).not.toBeChecked();
-      return;
-    }
+  it("maps Hide read to unread and toggles it off without changing other search state", async () => {
+    const user = userEvent.setup();
+    routeMocks.search.view = "all";
+    const page = render(<FeedsPage />);
 
+    const hideRead = screen.getByRole("button", { name: /hide read/i });
+    expect(hideRead).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: /^saved$/i })).toHaveAttribute(
       "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: /^unread$/i })).toHaveAttribute(
-      "aria-pressed",
       "false",
     );
-    expect(screen.getByRole("button", { name: /^all$/i })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+
+    await user.click(hideRead);
+    const enabled = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(enabled.search(routeMocks.search)).toEqual({
+      ...routeMocks.search,
+      view: "unread",
+    });
+
+    routeMocks.search.view = "unread";
+    page.rerender(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /hide read/i }));
+    const disabled = routeMocks.navigate.mock.calls[1]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(disabled.search(routeMocks.search)).toEqual({
+      ...routeMocks.search,
+      view: "all",
+    });
   });
 
   it("keeps a local tag draft and navigates once only when Enter submits it", async () => {

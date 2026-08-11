@@ -20,9 +20,9 @@ export const Route = createFileRoute("/feeds")({
           : undefined;
     return {
       view:
-        search.view === "all" || search.view === "saved"
+        search.view === "unread" || search.view === "saved"
           ? search.view
-          : "unread",
+          : "all",
       group:
         typeof search.group === "string" && search.group
           ? search.group
@@ -88,23 +88,35 @@ function FeedsPage() {
         <FeedManagement />
       ) : (
         <>
-          <Card label="River controls" caption="UNREAD · ALL · SAVED" pip="dim">
+          <Card label="River controls" caption="HIDE READ · SAVED" pip="dim">
             <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:grid-cols-[auto_minmax(9rem,1fr)_minmax(11rem,1.5fr)_minmax(9rem,1fr)_auto] lg:items-end">
               <fieldset className="min-w-0 sm:col-span-3 lg:col-span-1">
                 <legend className="cl-mono mb-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
                   View
                 </legend>
-                <div className="grid grid-cols-3">
-                  {(["unread", "all", "saved"] as const).map((view) => (
-                    <Button
-                      key={view}
-                      aria-pressed={search.view === view}
-                      className={`cl-btn justify-center border-r-0 px-2 last:border-r outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === view ? "cl-btn-hot bg-highlight" : ""}`}
-                      onPress={() => updateSearch({ view })}
-                    >
-                      {view}
-                    </Button>
-                  ))}
+                <div className="grid grid-cols-2">
+                  <Button
+                    aria-pressed={search.view === "unread"}
+                    className={`cl-btn justify-center border-r-0 px-2 outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === "unread" ? "cl-btn-hot bg-highlight" : ""}`}
+                    onPress={() =>
+                      updateSearch({
+                        view: search.view === "unread" ? "all" : "unread",
+                      })
+                    }
+                  >
+                    Hide read
+                  </Button>
+                  <Button
+                    aria-pressed={search.view === "saved"}
+                    className={`cl-btn justify-center px-2 outline-none focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-accent ${search.view === "saved" ? "cl-btn-hot bg-highlight" : ""}`}
+                    onPress={() =>
+                      updateSearch({
+                        view: search.view === "saved" ? "all" : "saved",
+                      })
+                    }
+                  >
+                    Saved
+                  </Button>
                 </div>
               </fieldset>
 
