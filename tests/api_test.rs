@@ -4684,6 +4684,159 @@ async fn content_index_includes_word_count() {
 }
 
 // ---------------------------------------------------------------------------
+// Archive compensation audit tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn archive_post_cas_publication_failure_compensates_every_reference() {
+    let fixture = ApiFixture::builder().build();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new(|_, _| {
+            Err(
+                clepsydra::vault::atomic_file::AtomicPublicationError::NotPublished(
+                    std::io::Error::other("injected archive page publication failure"),
+                ),
+            )
+        })));
+
+    let first = b"archive post-CAS first";
+    let second = b"archive post-CAS second";
+    let first_hash = clepsydra::vault::cas::ContentStore::hash_bytes(first);
+    let second_hash = clepsydra::vault::cas::ContentStore::hash_bytes(second);
+    let markdown = "# Post-CAS failure";
+    let content_hash = clepsydra::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
+    let encode = |bytes: &[u8]| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    };
+
+    for _ in 0..2 {
+        let response = fixture
+            .server
+            .post("/api/vault/archive")
+            .json(&serde_json::json!({
+                "url": "https://example.com/post-cas",
+                "domain": "example.com",
+                "title": "Post-CAS failure",
+                "captured_at": "2026-08-11T00:00:00Z",
+                "content_hash": content_hash,
+                "snapshot_hash": second_hash,
+                "markdown_body": markdown,
+                "tags": ["archive"],
+                "blobs": [
+                    {
+                        "hash": first_hash,
+                        "content_type": "application/octet-stream",
+                        "data": encode(first),
+                    },
+                    {
+                        "hash": second_hash,
+                        "content_type": "application/octet-stream",
+                        "data": encode(second),
+                    }
+                ]
+            }))
+            .await;
+        response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let root = fixture.temp_dir.path().join("vault");
+    assert!(
+        !root
+            .join("archive/example.com/post-cas-failure.md")
+            .exists(),
+        "a failed page publication must not leave an archive page"
+    );
+    let pruned = fixture
+        .state
+        .cas
+        .lock()
+        .gc(std::time::Duration::ZERO)
+        .unwrap();
+    assert_eq!(
+        pruned, 2,
+        "repeated compensation must leave one zero-reference row per unique blob"
+    );
+}
+
+#[tokio::test]
+async fn archive_post_page_publication_failure_removes_page_and_cas_references() {
+    let fixture = ApiFixture::builder().build();
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute_batch(
+                "CREATE TRIGGER fail_archive_index_insert
+                 BEFORE INSERT ON pages
+                 BEGIN
+                   SELECT RAISE(FAIL, 'injected after archive page publication');
+                 END;",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let blob = b"archive post-page blob";
+    let blob_hash = clepsydra::vault::cas::ContentStore::hash_bytes(blob);
+    let markdown = "# Post-page failure";
+    let content_hash = clepsydra::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
+    let encoded = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(blob)
+    };
+    let response = fixture
+        .server
+        .post("/api/vault/archive")
+        .json(&serde_json::json!({
+            "url": "https://example.com/post-page",
+            "domain": "example.com",
+            "title": "Post-page failure",
+            "captured_at": "2026-08-11T00:00:00Z",
+            "content_hash": content_hash,
+            "snapshot_hash": blob_hash,
+            "markdown_body": markdown,
+            "tags": ["archive"],
+            "blobs": [{
+                "hash": blob_hash,
+                "content_type": "application/octet-stream",
+                "data": encoded,
+            }]
+        }))
+        .await;
+
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("injected after archive page publication"),
+        "the primary index failure must remain actionable: {error}"
+    );
+    let root = fixture.temp_dir.path().join("vault");
+    assert!(
+        !root
+            .join("archive/example.com/post-page-failure.md")
+            .exists(),
+        "page compensation must remove the published archive page"
+    );
+    assert_eq!(
+        fixture
+            .state
+            .cas
+            .lock()
+            .gc(std::time::Duration::ZERO)
+            .unwrap(),
+        1,
+        "page failure must compensate the CAS reference"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Zotero import tests
 // ---------------------------------------------------------------------------
 

@@ -1046,16 +1046,25 @@ pub async fn import_zotero_handler(
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if let Some(path) = existing_by_zk {
-            let result = handle_zk_existing(
+            match handle_zk_existing(
                 &state,
                 item,
-                path,
+                path.clone(),
                 req.conflict_policy,
                 req.dry_run,
                 &used_cite_keys,
             )
-            .await?;
-            results.push(result);
+            .await
+            {
+                Ok(result) => results.push(result),
+                Err(error) => results.push(ImportResult {
+                    cite_key: format!("zotero:{}", item.zotero_key),
+                    status: "error".to_string(),
+                    page_path: Some(path),
+                    error: Some(error.error),
+                    conflict_detail: None,
+                }),
+            }
             continue;
         }
 
@@ -1092,9 +1101,24 @@ pub async fn import_zotero_handler(
             .map_err(|e| ApiError::internal(e.to_string()))?;
 
         if let Some(path) = existing {
-            let result =
-                handle_doi_existing(&state, &entry, path, req.conflict_policy, req.dry_run).await?;
-            results.push(result);
+            match handle_doi_existing(
+                &state,
+                &entry,
+                path.clone(),
+                req.conflict_policy,
+                req.dry_run,
+            )
+            .await
+            {
+                Ok(result) => results.push(result),
+                Err(error) => results.push(ImportResult {
+                    cite_key: entry.cite_key.clone(),
+                    status: "error".to_string(),
+                    page_path: Some(path),
+                    error: Some(error.error),
+                    conflict_detail: None,
+                }),
+            }
             continue;
         }
 
@@ -1141,14 +1165,22 @@ pub async fn import_zotero_handler(
         .await
         {
             Ok(detail) => {
-                patch_zotero_provenance(&state, &detail.path, item, &zotero_data_dir).await?;
-                results.push(ImportResult {
-                    cite_key: entry.cite_key.clone(),
-                    status: "created".to_string(),
-                    page_path: Some(detail.path),
-                    error: None,
-                    conflict_detail: None,
-                });
+                match patch_zotero_provenance(&state, &detail.path, item, &zotero_data_dir).await {
+                    Ok(()) => results.push(ImportResult {
+                        cite_key: entry.cite_key.clone(),
+                        status: "created".to_string(),
+                        page_path: Some(detail.path),
+                        error: None,
+                        conflict_detail: None,
+                    }),
+                    Err(error) => results.push(ImportResult {
+                        cite_key: entry.cite_key.clone(),
+                        status: "error".to_string(),
+                        page_path: Some(detail.path),
+                        error: Some(error.error),
+                        conflict_detail: None,
+                    }),
+                }
             }
             Err(e) => {
                 results.push(ImportResult {
