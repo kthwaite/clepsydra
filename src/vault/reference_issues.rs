@@ -137,7 +137,7 @@ WITH unresolved_links AS (
             WHERE cn.canonical_name = l.target_canonical
         ) AS canonical_candidate_count,
         (
-            SELECT COUNT(DISTINCT b.page_id)
+            SELECT COUNT(*)
             FROM blocks b
             WHERE b.block_id = l.target_block_id
         ) AS block_candidate_count
@@ -175,7 +175,7 @@ link_issues AS (
         target_canonical,
         target_block_id,
         CASE
-            WHEN encrypted != 0 THEN 0
+            WHEN encrypted != 0 AND link_kind IN ('wiki', 'block_ref') THEN 0
             WHEN link_kind = 'wiki' THEN 1
             WHEN link_kind = 'property_ref' AND canonical_candidate_count > 0 THEN 1
             WHEN link_kind = 'block_ref' AND block_candidate_count = 1 THEN 1
@@ -186,7 +186,8 @@ link_issues AS (
 topology_issues AS (
     SELECT
         CASE
-            WHEN NOT EXISTS (
+            WHEN p.encrypted = 0
+             AND NOT EXISTS (
                 SELECT 1
                 FROM links outbound
                 WHERE outbound.source_id = p.id
@@ -195,7 +196,8 @@ topology_issues AS (
             ELSE 'orphan_page'
         END AS issue_kind,
         CASE
-            WHEN NOT EXISTS (
+            WHEN p.encrypted = 0
+             AND NOT EXISTS (
                 SELECT 1
                 FROM links outbound
                 WHERE outbound.source_id = p.id
@@ -273,6 +275,7 @@ candidate_base AS (
         'ambiguous_page_link',
         'invalid_relation_target'
     )
+      AND (pi.encrypted = 0 OR pi.issue_kind = 'invalid_relation_target')
 
     UNION
 
@@ -288,6 +291,7 @@ candidate_base AS (
     JOIN blocks b ON b.block_id = pi.target_block_id
     JOIN pages candidate ON candidate.id = b.page_id
     WHERE pi.issue_kind = 'broken_block_ref'
+      AND pi.encrypted = 0
 ),
 candidate_rows AS (
     SELECT
@@ -318,6 +322,7 @@ all_rows AS (
         pi.body,
         pi.target_raw,
         pi.encrypted,
+        pi.actionable,
         cr.page_id AS candidate_id,
         cr.path AS candidate_path,
         cr.title AS candidate_title,
@@ -337,8 +342,9 @@ all_rows AS (
 
     SELECT
         (SELECT COUNT(*) FROM filtered),
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-        NULL, NULL, NULL, NULL, 0, 0, 0, '', 1
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        0, 0, 0, '', 1
     WHERE NOT EXISTS (SELECT 1 FROM page_items)
 )
 SELECT
@@ -354,6 +360,7 @@ SELECT
     body,
     target_raw,
     encrypted,
+    actionable,
     candidate_id,
     candidate_path,
     candidate_title,
@@ -365,6 +372,7 @@ ORDER BY sentinel, severity, source_path, order_span, order_target, candidate_ra
 struct IssueDraft {
     issue: ReferenceIssue,
     encrypted: bool,
+    automatic_actionable: bool,
 }
 
 impl IssueDraft {
@@ -372,6 +380,7 @@ impl IssueDraft {
         self.issue.actions = actions_for(
             self.issue.kind,
             self.encrypted,
+            self.automatic_actionable,
             self.issue.candidates.len(),
         );
         self.issue
@@ -440,6 +449,7 @@ pub(crate) fn project(
                 items.push(draft.finish());
             }
             let encrypted = row.get::<_, i64>(11)? != 0;
+            let automatic_actionable = row.get::<_, i64>(12)? != 0;
             let span_end = row.get(7)?;
             let source_field: Option<String> = row.get(8)?;
             let body: Option<String> = row.get(9)?;
@@ -451,6 +461,13 @@ pub(crate) fn project(
                 span_start,
                 span_end,
             );
+            let redact_body = is_encrypted_body_issue(encrypted, kind);
+            let (public_span_start, public_span_end, public_source_field, public_target_raw) =
+                if redact_body {
+                    (None, None, None, None)
+                } else {
+                    (span_start, span_end, source_field, target_raw)
+                };
             current = Some(IssueDraft {
                 issue: ReferenceIssue {
                     fingerprint,
@@ -459,28 +476,31 @@ pub(crate) fn project(
                     source_path: row.get(3)?,
                     source_title: row.get(4)?,
                     source_revision,
-                    span_start,
-                    span_end,
-                    source_field,
+                    span_start: public_span_start,
+                    span_end: public_span_end,
+                    source_field: public_source_field,
                     snippet,
-                    target_raw,
+                    target_raw: public_target_raw,
                     candidates: Vec::new(),
                     actions: Vec::new(),
                 },
                 encrypted,
+                automatic_actionable,
             });
         }
 
-        if let Some(page_id) = row.get::<_, Option<String>>(12)? {
+        if let Some(page_id) = row.get::<_, Option<String>>(13)? {
             let draft = current.as_mut().ok_or_else(|| {
                 IndexError::Other("candidate row had no reference issue".to_string())
             })?;
-            draft.issue.candidates.push(ReferenceCandidate {
-                page_id,
-                path: row.get(13)?,
-                title: row.get(14)?,
-                rationale: row.get(15)?,
-            });
+            if !is_encrypted_body_issue(draft.encrypted, draft.issue.kind) {
+                draft.issue.candidates.push(ReferenceCandidate {
+                    page_id,
+                    path: row.get(14)?,
+                    title: row.get(15)?,
+                    rationale: row.get(16)?,
+                });
+            }
         }
     }
 
@@ -519,11 +539,11 @@ fn snippet(
     span_start: Option<i64>,
     span_end: Option<i64>,
 ) -> Option<String> {
-    if encrypted {
-        return None;
-    }
     if kind == ReferenceIssueKind::InvalidRelationTarget {
         return source_field.map(|field| format!("frontmatter field: {field}"));
+    }
+    if encrypted {
+        return None;
     }
     let start = usize::try_from(span_start?).ok()?;
     let end = usize::try_from(span_end?).ok()?;
@@ -532,13 +552,24 @@ fn snippet(
     }
     body?.get(start..end).map(ToOwned::to_owned)
 }
+fn is_encrypted_body_issue(encrypted: bool, kind: ReferenceIssueKind) -> bool {
+    encrypted
+        && matches!(
+            kind,
+            ReferenceIssueKind::UnresolvedPageLink
+                | ReferenceIssueKind::AmbiguousPageLink
+                | ReferenceIssueKind::BrokenBlockRef
+        )
+}
+
 
 fn actions_for(
     kind: ReferenceIssueKind,
     encrypted: bool,
+    automatic_actionable: bool,
     candidate_count: usize,
 ) -> Vec<ReferenceIssueAction> {
-    if encrypted {
+    if is_encrypted_body_issue(encrypted, kind) {
         return vec![ReferenceIssueAction::OpenSource];
     }
     match kind {
@@ -554,11 +585,11 @@ fn actions_for(
             ReferenceIssueAction::Replace,
             ReferenceIssueAction::OpenSource,
         ],
-        ReferenceIssueKind::BrokenBlockRef if candidate_count == 1 => vec![
+        ReferenceIssueKind::BrokenBlockRef if automatic_actionable => vec![
             ReferenceIssueAction::Replace,
             ReferenceIssueAction::OpenSource,
         ],
-        ReferenceIssueKind::InvalidRelationTarget if candidate_count > 0 => vec![
+        ReferenceIssueKind::InvalidRelationTarget if automatic_actionable => vec![
             ReferenceIssueAction::Replace,
             ReferenceIssueAction::OpenSource,
         ],
@@ -665,6 +696,19 @@ mod tests {
             )
             .unwrap();
     }
+    fn insert_block(index: &VaultIndex, page_id: &str, block_id: &str, span_start: i64) {
+        index
+            .connection()
+            .execute(
+                "INSERT INTO blocks (
+                    block_id, page_id, block_type, parent_id, order_index,
+                    content, depth, span_start, span_end
+                 ) VALUES (?1, ?2, 'paragraph', NULL, ?3, 'candidate', 0, ?3, ?4)",
+                params![block_id, page_id, span_start, span_start + 9],
+            )
+            .unwrap();
+    }
+
 
     fn connect_source_to_anchor(index: &VaultIndex, source_id: &str, source_span: i64) {
         insert_page(
@@ -1005,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_pages_never_expose_snippets_or_body_actions() {
+    fn encrypted_body_issues_redact_all_public_body_evidence() {
         let index = VaultIndex::open_in_memory().unwrap();
         insert_page(
             &index,
@@ -1016,8 +1060,21 @@ mod tests {
             Kind::Note,
             None,
             true,
-            "prefix [[secret]]",
+            "prefix [[secret]] ((dead-secret))",
         );
+        insert_page(
+            &index,
+            "candidate",
+            "notes/candidate.md",
+            "Candidate",
+            "candidate-rev",
+            Kind::Note,
+            None,
+            false,
+            "candidate",
+        );
+        insert_canonical_name(&index, "candidate", "secret");
+        insert_block(&index, "candidate", "dead-secret", 1);
         insert_link(
             &index,
             "encrypted",
@@ -1027,21 +1084,234 @@ mod tests {
             None,
             None,
             "wiki",
-            None,
+            Some("must-not-leak"),
             7,
             17,
+        );
+        insert_link(
+            &index,
+            "encrypted",
+            "((dead-secret))",
+            None,
+            None,
+            None,
+            Some("dead-secret"),
+            "block_ref",
+            Some("must-not-leak"),
+            18,
+            33,
         );
 
         let page = index
             .reference_issues(ReferenceIssueFilter {
-                kinds: vec![ReferenceIssueKind::UnresolvedPageLink],
+                kinds: vec![
+                    ReferenceIssueKind::UnresolvedPageLink,
+                    ReferenceIssueKind::BrokenBlockRef,
+                ],
+                ..ReferenceIssueFilter::default()
+            })
+            .unwrap();
+
+        assert_eq!(page.total, 2);
+        for issue in &page.items {
+            assert_eq!(issue.span_start, None);
+            assert_eq!(issue.span_end, None);
+            assert_eq!(issue.source_field, None);
+            assert_eq!(issue.snippet, None);
+            assert_eq!(issue.target_raw, None);
+            assert!(issue.candidates.is_empty());
+            assert_eq!(issue.actions, vec![ReferenceIssueAction::OpenSource]);
+        }
+        let wiki = page
+            .items
+            .iter()
+            .find(|issue| issue.kind == ReferenceIssueKind::UnresolvedPageLink)
+            .unwrap();
+        assert_eq!(
+            wiki.fingerprint,
+            blake3::hash(
+                b"v1\0unresolved_page_link\0encrypted\0secret-rev\07\017\0[[secret]]"
+            )
+            .to_hex()
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn encrypted_property_relations_remain_clear_metadata() {
+        let index = VaultIndex::open_in_memory().unwrap();
+        insert_page(
+            &index,
+            "encrypted",
+            "notes/encrypted.md",
+            "Encrypted",
+            "secret-rev",
+            Kind::Note,
+            None,
+            true,
+            "ciphertext",
+        );
+        insert_page(
+            &index,
+            "candidate",
+            "projects/known.md",
+            "Known",
+            "candidate-rev",
+            Kind::Project,
+            None,
+            false,
+            "known",
+        );
+        insert_canonical_name(&index, "candidate", "known");
+        insert_link(
+            &index,
+            "encrypted",
+            "known",
+            Some("known"),
+            None,
+            None,
+            None,
+            "property_ref",
+            Some("related"),
+            -1,
+            -1,
+        );
+
+        let page = index
+            .reference_issues(ReferenceIssueFilter {
+                kinds: vec![ReferenceIssueKind::InvalidRelationTarget],
                 ..ReferenceIssueFilter::default()
             })
             .unwrap();
         let issue = &page.items[0];
 
-        assert_eq!(issue.snippet, None);
-        assert_eq!(issue.actions, vec![ReferenceIssueAction::OpenSource]);
+        assert_eq!(issue.span_start, Some(-1));
+        assert_eq!(issue.span_end, Some(-1));
+        assert_eq!(issue.source_field.as_deref(), Some("related"));
+        assert_eq!(issue.snippet.as_deref(), Some("frontmatter field: related"));
+        assert_eq!(issue.target_raw.as_deref(), Some("known"));
+        assert_eq!(issue.candidates.len(), 1);
+        assert_eq!(
+            issue.actions,
+            vec![
+                ReferenceIssueAction::Replace,
+                ReferenceIssueAction::OpenSource,
+            ]
+        );
+    }
+
+    #[test]
+    fn encrypted_page_without_indexed_outlinks_is_orphan_not_isolated() {
+        let index = VaultIndex::open_in_memory().unwrap();
+        insert_page(
+            &index,
+            "encrypted",
+            "notes/encrypted.md",
+            "Encrypted",
+            "secret-rev",
+            Kind::Note,
+            None,
+            true,
+            "ciphertext",
+        );
+        insert_page(
+            &index,
+            "plaintext",
+            "notes/plaintext.md",
+            "Plaintext",
+            "plain-rev",
+            Kind::Note,
+            None,
+            false,
+            "plaintext",
+        );
+
+        let page = index
+            .reference_issues(ReferenceIssueFilter {
+                kinds: vec![
+                    ReferenceIssueKind::OrphanPage,
+                    ReferenceIssueKind::IsolatedPage,
+                ],
+                ..ReferenceIssueFilter::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|issue| (issue.source_id.as_str(), issue.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                ("encrypted", ReferenceIssueKind::OrphanPage),
+                ("plaintext", ReferenceIssueKind::IsolatedPage),
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_block_rows_on_one_page_are_not_actionable() {
+        let index = VaultIndex::open_in_memory().unwrap();
+        insert_page(
+            &index,
+            "source",
+            "notes/source.md",
+            "Source",
+            "source-rev",
+            Kind::Note,
+            None,
+            false,
+            "prefix ((duplicate))",
+        );
+        insert_page(
+            &index,
+            "candidate",
+            "notes/candidate.md",
+            "Candidate",
+            "candidate-rev",
+            Kind::Note,
+            None,
+            false,
+            "duplicate blocks",
+        );
+        insert_block(&index, "candidate", "duplicate", 1);
+        insert_block(&index, "candidate", "duplicate", 20);
+        insert_link(
+            &index,
+            "source",
+            "((duplicate))",
+            None,
+            None,
+            None,
+            Some("duplicate"),
+            "block_ref",
+            None,
+            7,
+            20,
+        );
+
+        let non_actionable = index
+            .reference_issues(ReferenceIssueFilter {
+                kinds: vec![ReferenceIssueKind::BrokenBlockRef],
+                actionable: Some(false),
+                ..ReferenceIssueFilter::default()
+            })
+            .unwrap();
+        let actionable = index
+            .reference_issues(ReferenceIssueFilter {
+                kinds: vec![ReferenceIssueKind::BrokenBlockRef],
+                actionable: Some(true),
+                ..ReferenceIssueFilter::default()
+            })
+            .unwrap();
+
+        assert_eq!(non_actionable.total, 1);
+        assert_eq!(non_actionable.items[0].candidates.len(), 1);
+        assert_eq!(
+            non_actionable.items[0].actions,
+            vec![ReferenceIssueAction::OpenSource]
+        );
+        assert_eq!(actionable.total, 0);
+        assert!(actionable.items.is_empty());
     }
 
     #[test]
