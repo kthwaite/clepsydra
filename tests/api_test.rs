@@ -16,6 +16,7 @@ use tokio::sync::{Barrier, mpsc};
 
 use clepsydra::api::error::{parse_internal_path, parse_request_path};
 use clepsydra::api::events::SyncNotification;
+use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
@@ -23,6 +24,7 @@ use support::ApiFixture;
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
+use utoipa::OpenApi;
 
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
@@ -113,7 +115,9 @@ fn delayed_multipart_request(
     let header = Bytes::from(format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"race.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
     ));
-    let trailer = Bytes::from(format!("\r\n--{boundary}--\r\n"));
+    let trailer = Bytes::from(format!(
+        "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
+    ));
     let (sender, receiver) = mpsc::channel(1);
 
     tokio::spawn(async move {
@@ -134,6 +138,50 @@ fn delayed_multipart_request(
         )
         .body(Body::from_stream(ReceiverStream::new(receiver)))
         .unwrap()
+}
+
+async fn multipart_upload(
+    server: &TestServer,
+    file_name: &str,
+    payload: &[u8],
+    plaintext_acknowledged: Option<bool>,
+) -> axum_test::TestResponse {
+    let boundary = "----attachmentacknowledgementboundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(payload);
+    if let Some(acknowledged) = plaintext_acknowledged {
+        body.extend_from_slice(
+            format!(
+                "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\n{acknowledged}"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    server
+        .post(&format!("/api/vault/attachments/{file_name}"))
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into())
+        .await
+}
+
+fn assert_no_attachment_temporaries(tmp: &TempDir) {
+    let attachment_dir = tmp.path().join("vault/_attachments");
+    let temporary_names = fs::read_dir(attachment_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .filter(|name| name.to_string_lossy().starts_with(".upload-"))
+        .collect::<Vec<_>>();
+    assert!(
+        temporary_names.is_empty(),
+        "temporary upload files remain: {temporary_names:?}"
+    );
 }
 
 #[tokio::test]
@@ -4403,12 +4451,128 @@ async fn import_lifecycle_bibtex_dedup_and_verify() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn attachment_upload_requires_plaintext_acknowledgement() {
+    let (server, _tmp) = setup_server();
+
+    let missing = multipart_upload(&server, "missing.txt", b"secret", None).await;
+    missing.assert_status_bad_request();
+    assert_eq!(
+        missing.json::<serde_json::Value>()["error"],
+        "attachment plaintext storage must be acknowledged"
+    );
+
+    let false_ack = multipart_upload(&server, "false.txt", b"secret", Some(false)).await;
+    false_ack.assert_status_bad_request();
+    assert_eq!(
+        false_ack.json::<serde_json::Value>()["error"],
+        "attachment plaintext storage must be acknowledged"
+    );
+
+    multipart_upload(&server, "accepted.txt", b"secret", Some(true))
+        .await
+        .assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn rejected_attachment_upload_leaves_no_destination_or_temporary_file() {
+    let (server, tmp) = setup_server();
+
+    multipart_upload(&server, "rejected.bin", b"bytes", None)
+        .await
+        .assert_status_bad_request();
+
+    assert!(!tmp.path().join("vault/_attachments/rejected.bin").exists());
+    assert_no_attachment_temporaries(&tmp);
+}
+
+#[tokio::test]
+async fn attachment_upload_accepts_fields_in_arbitrary_order() {
+    let (server, tmp) = setup_server();
+    let boundary = "----acknowledgementfirstboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"ordered.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nbytes\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post("/api/vault/attachments/ordered.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    assert_eq!(
+        fs::read(tmp.path().join("vault/_attachments/ordered.bin")).unwrap(),
+        b"bytes"
+    );
+}
+
+#[tokio::test]
+async fn attachment_upload_rejects_duplicate_named_fields_and_unknown_binary_fields() {
+    let cases = [
+        (
+            "duplicate-file.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"two.bin\"\r\nContent-Type: application/octet-stream\r\n\r\ntwo\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+        (
+            "duplicate-ack.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+        (
+            "unknown-binary.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"unexpected\"; filename=\"other.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nother\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+    ];
+
+    for (destination, parts) in cases {
+        let (server, tmp) = setup_server();
+        let boundary = "----invalidnamedfieldsboundary";
+        let body = format!(
+            "--{boundary}\r\n{}\r\n--{boundary}--\r\n",
+            parts.replace("{boundary}", boundary)
+        );
+
+        server
+            .post(&format!("/api/vault/attachments/{destination}"))
+            .content_type(&format!("multipart/form-data; boundary={boundary}"))
+            .bytes(body.into_bytes().into())
+            .await
+            .assert_status_bad_request();
+
+        assert!(!tmp.path().join("vault/_attachments").join(destination).exists());
+        assert_no_attachment_temporaries(&tmp);
+    }
+}
+
+#[tokio::test]
+async fn attachment_upload_openapi_documents_named_multipart_fields() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]
+        ["content"]["multipart/form-data"]["schema"];
+    assert_eq!(
+        schema["$ref"],
+        "#/components/schemas/AttachmentUploadForm"
+    );
+    let form = &openapi["components"]["schemas"]["AttachmentUploadForm"];
+    assert_eq!(form["type"], "object");
+    assert_eq!(
+        form["required"],
+        serde_json::json!(["file", "plaintext_acknowledged"])
+    );
+    assert_eq!(form["properties"]["file"]["type"], "string");
+    assert_eq!(form["properties"]["file"]["format"], "binary");
+    assert_eq!(
+        form["properties"]["plaintext_acknowledged"]["type"],
+        "boolean"
+    );
+}
+
+#[tokio::test]
 async fn upload_and_retrieve_attachment() {
     let (server, _tmp) = setup_server();
 
     let boundary = "----testboundary";
     let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
     );
 
     let res = server
@@ -4434,7 +4598,7 @@ async fn upload_attachment_conflict() {
 
     let boundary = "----testboundary";
     let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dup.txt\"\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dup.txt\"\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
     );
     let ct = format!("multipart/form-data; boundary={boundary}");
 
@@ -4503,7 +4667,7 @@ async fn interrupted_attachment_upload_leaves_no_partial_files() {
     let (server, tmp) = setup_server();
     let boundary = "----interruptedattachmentboundary";
     let incomplete_body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"partial.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nincomplete"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"partial.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nincomplete"
     );
 
     let response = server
@@ -4525,7 +4689,7 @@ async fn cancelled_attachment_upload_removes_temporary_file() {
     let (app, tmp) = setup_app();
     let boundary = "----cancelledattachmentboundary";
     let header = Bytes::from(format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cancel.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npartial"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cancel.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npartial"
     ));
     let (sender, receiver) = mpsc::channel(1);
     sender.send(Ok::<_, std::io::Error>(header)).await.unwrap();
@@ -4583,7 +4747,7 @@ async fn attachment_upload_with_long_valid_basename_uses_bounded_temporary_name(
     let boundary = "----longattachmentboundary";
     let file_name = format!("{}.bin", "a".repeat(240));
     let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
     );
 
     server

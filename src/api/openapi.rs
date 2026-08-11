@@ -268,6 +268,7 @@ impl Modify for FilterSchema {
             crate::api::folders::MoveFolderRequest,
             // Attachments
             crate::api::attachments::AttachmentInfo,
+            crate::api::attachments::AttachmentUploadForm,
             // Events
             crate::api::events::SyncNotification,
             // Index

@@ -32,6 +32,13 @@ pub struct AttachmentInfo {
     pub size: u64,
 }
 
+#[derive(ToSchema)]
+pub struct AttachmentUploadForm {
+    #[schema(value_type = String, format = Binary)]
+    pub file: String,
+    pub plaintext_acknowledged: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -224,7 +231,7 @@ pub async fn list_attachments(
     context_path = "/api/vault",
     tag = "Attachments",
     params(("path" = String, Path, description = "Attachment path relative to attachment folder")),
-    request_body(content = String, content_type = "multipart/form-data"),
+    request_body(content = AttachmentUploadForm, content_type = "multipart/form-data"),
     responses(
         (status = 201, description = "Attachment uploaded", body = AttachmentInfo),
         (status = 400, description = "Invalid request", body = ApiError),
@@ -255,25 +262,87 @@ pub async fn upload_attachment(
     let (temporary_file, temporary_path) = temporary.into_parts();
     let mut temporary_file = tokio::fs::File::from_std(temporary_file);
 
-    let mut field = multipart
+    let mut file_seen = false;
+    let mut acknowledgement_seen = false;
+    let mut plaintext_acknowledged = false;
+    let mut size = 0_u64;
+
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::bad_request(format!("invalid multipart: {e}")))?
-        .ok_or_else(|| ApiError::bad_request("no file field in multipart body".to_string()))?;
-    let mut size = 0_u64;
-
-    while let Some(chunk) = field
-        .chunk()
-        .await
-        .map_err(|e| ApiError::bad_request(format!("failed to read file: {e}")))?
     {
-        temporary_file
-            .write_all(&chunk)
-            .await
-            .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
-        size = size
-            .checked_add(chunk.len() as u64)
-            .ok_or_else(|| ApiError::internal("attachment size overflow".to_string()))?;
+        let field_name = field.name().map(str::to_owned);
+        let has_file_name = field.file_name().is_some();
+
+        match field_name.as_deref() {
+            Some("file") => {
+                if file_seen {
+                    return Err(ApiError::bad_request(
+                        "duplicate file field in multipart body".to_string(),
+                    ));
+                }
+                if !has_file_name {
+                    return Err(ApiError::bad_request(
+                        "file field must include a filename".to_string(),
+                    ));
+                }
+                file_seen = true;
+
+                while let Some(chunk) = field.chunk().await.map_err(|e| {
+                    ApiError::bad_request(format!("failed to read file: {e}"))
+                })? {
+                    temporary_file.write_all(&chunk).await.map_err(|e| {
+                        ApiError::internal(format!("failed to write file: {e}"))
+                    })?;
+                    size = size
+                        .checked_add(chunk.len() as u64)
+                        .ok_or_else(|| {
+                            ApiError::internal("attachment size overflow".to_string())
+                        })?;
+                }
+            }
+            Some("plaintext_acknowledged") => {
+                if acknowledgement_seen {
+                    return Err(ApiError::bad_request(
+                        "duplicate plaintext_acknowledged field in multipart body".to_string(),
+                    ));
+                }
+                acknowledgement_seen = true;
+                if has_file_name {
+                    return Err(ApiError::bad_request(
+                        "attachment plaintext storage must be acknowledged".to_string(),
+                    ));
+                }
+                plaintext_acknowledged = field.text().await.map_err(|_| {
+                    ApiError::bad_request(
+                        "attachment plaintext storage must be acknowledged".to_string(),
+                    )
+                })? == "true";
+            }
+            Some(name) if has_file_name => {
+                return Err(ApiError::bad_request(format!(
+                    "unknown binary multipart field: {name}"
+                )));
+            }
+            None if has_file_name => {
+                return Err(ApiError::bad_request(
+                    "unknown unnamed binary multipart field".to_string(),
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    if !file_seen {
+        return Err(ApiError::bad_request(
+            "no file field in multipart body".to_string(),
+        ));
+    }
+    if !plaintext_acknowledged {
+        return Err(ApiError::bad_request(
+            "attachment plaintext storage must be acknowledged".to_string(),
+        ));
     }
 
     temporary_file
