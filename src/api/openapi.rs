@@ -494,6 +494,28 @@ mod tests {
     }
 
     #[test]
+    fn bulk_assignment_documents_atomic_success_or_typed_error() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let response = &json["components"]["schemas"]["BulkAssignResponse"];
+        assert!(response["properties"].get("moved").is_some());
+        assert!(response["properties"].get("unchanged").is_some());
+        assert!(
+            response["properties"].get("failed").is_none(),
+            "atomic bulk assignment must not expose per-page failures"
+        );
+
+        let responses =
+            &json["paths"]["/api/vault/pages-assign-bulk"]["post"]["responses"];
+        for status in ["200", "400", "404", "409", "500"] {
+            assert!(
+                responses.get(status).is_some(),
+                "bulk assignment should document response {status}"
+            );
+        }
+    }
+
+    #[test]
     fn openapi_documents_mobile_page_operations() {
         let spec = ApiDoc::openapi();
         let json = serde_json::to_value(&spec).unwrap();

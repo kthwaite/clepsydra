@@ -45,7 +45,6 @@ pub struct MutationCoordinator {
     before_lock_acquire_hook: parking_lot::Mutex<Option<Arc<BeforeLockAcquireHook>>>,
     #[cfg(test)]
     before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
-    #[cfg(test)]
     batch_publication_failure: parking_lot::Mutex<Option<usize>>,
 }
 
@@ -330,13 +329,15 @@ fn batch_notification(events: &[ChangeEvent]) -> MutationNotification {
 fn publish_batch(
     root: &Path,
     command: &BatchMutationCommand,
+    publication_failure: Option<usize>,
 ) -> Result<batch_mutation::PreparedBatch, MutationError> {
     let mut prepared = batch_mutation::prepare(root, command).map_err(batch_prepare_error)?;
     let directory = prepared.directory().to_path_buf();
-    if let Err(publish) = prepared
-        .publish()
-        .and_then(|()| prepared.mark_filesystem_committed())
-    {
+    let publication = match publication_failure {
+        Some(intent_index) => prepared.publish_with_failure_at(intent_index),
+        None => prepared.publish(),
+    };
+    if let Err(publish) = publication.and_then(|()| prepared.mark_filesystem_committed()) {
         return match prepared.rollback() {
             Ok(()) => Err(MutationError::BatchPublish { source: publish }),
             Err(rollback) => Err(MutationError::BatchRollback {
@@ -436,7 +437,6 @@ impl MutationCoordinator {
             before_lock_acquire_hook: parking_lot::Mutex::new(None),
             #[cfg(test)]
             before_batch_lock_hook: parking_lot::Mutex::new(None),
-            #[cfg(test)]
             batch_publication_failure: parking_lot::Mutex::new(None),
         }
     }
@@ -467,6 +467,15 @@ impl MutationCoordinator {
         *self.create_rollback_sync_hook.lock() = hook;
     }
 
+    /// Inject one deterministic batch publication failure for integration tests.
+    ///
+    /// `Some(index)` fails immediately before publishing that zero-based intent;
+    /// `None` clears a pending failure.
+    #[doc(hidden)]
+    pub fn set_batch_publication_fail_after(&self, intent_index: Option<usize>) {
+        *self.batch_publication_failure.lock() = intent_index;
+    }
+
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
         let hook = self.after_page_id_lookup_hook.lock().clone();
         if let Some(hook) = hook {
@@ -486,7 +495,7 @@ impl MutationCoordinator {
 
     #[cfg(test)]
     fn fail_next_batch_publication_at(&self, intent_index: usize) {
-        *self.batch_publication_failure.lock() = Some(intent_index);
+        self.set_batch_publication_fail_after(Some(intent_index));
     }
 
     /// Lock the requested paths for mutation and every ancestor for subtree
@@ -569,7 +578,7 @@ impl MutationCoordinator {
         command: BatchMutationCommand,
     ) -> Result<MutationNotification, MutationError> {
         let notification = batch_notification(&command.index_events);
-        let prepared = publish_batch(vault.root(), &command)?;
+        let prepared = publish_batch(vault.root(), &command, None)?;
         let directory = prepared.directory().to_path_buf();
         if let Err(source) = reconcile_batch_index(
             vault,
@@ -610,7 +619,6 @@ impl MutationCoordinator {
         let notification = batch_notification(&command.index_events);
         let index_events = command.index_events.clone();
         let moved_pages = command.moved_pages.clone();
-        #[cfg(test)]
         let batch_publication_failure = self.batch_publication_failure.lock().take();
 
         run_shielded_mutation(shield_path, move |filesystem_applied| async move {
@@ -618,11 +626,11 @@ impl MutationCoordinator {
             let blocking_error_path = root.clone();
             let blocking_applied = Arc::clone(&filesystem_applied);
             let prepared = tokio::task::spawn_blocking(move || {
-                #[cfg(test)]
-                let _failure = batch_publication_failure.map(|index| {
-                    batch_mutation::fail_once_at(batch_mutation::TestFailpoint::Publication(index))
-                });
-                let prepared = publish_batch(&blocking_root, &command)?;
+                let prepared = publish_batch(
+                    &blocking_root,
+                    &command,
+                    batch_publication_failure,
+                )?;
                 blocking_applied.store(true, Ordering::Release);
                 Ok::<_, MutationError>((guard, prepared))
             })

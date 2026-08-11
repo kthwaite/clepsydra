@@ -2550,6 +2550,51 @@ Destination body.
 }
 
 #[tokio::test]
+async fn bulk_assign_rolls_back() {
+    let first = "\
+---
+id: 00000000-0000-0000-0000-000000000220
+title: First
+type: NOTE
+---
+First body.
+";
+    let second = "\
+---
+id: 00000000-0000-0000-0000-000000000221
+title: Second
+type: NOTE
+---
+Second body.
+";
+    let (server, tmp) =
+        setup_server_with_files(&[("notes/first.md", first), ("notes/second.md", second)]);
+    let vault_root = tmp.path().join("vault");
+    let first_path = vault_root.join("notes/first.md");
+    let original_first = fs::read(&first_path).unwrap();
+    fs::remove_file(vault_root.join("notes/second.md")).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes/first.md", "notes/second.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CONFLICT);
+    assert_eq!(
+        fs::read(first_path).unwrap(),
+        original_first,
+        "a stale second page must leave the first assignment unchanged"
+    );
+    assert!(
+        !vault_root.join("quotes/first.md").exists(),
+        "the first page must not be relocated"
+    );
+}
+
+#[tokio::test]
 async fn page_mutation_project_assignment_set_clear_and_unchanged_preserve_contracts() {
     let source = "\
 ---

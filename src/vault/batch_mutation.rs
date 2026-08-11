@@ -286,6 +286,20 @@ impl PreparedBatch {
     }
 
     pub(crate) fn publish(&mut self) -> Result<(), BatchMutationError> {
+        self.publish_inner::<false>(usize::MAX)
+    }
+
+    pub(crate) fn publish_with_failure_at(
+        &mut self,
+        intent_index: usize,
+    ) -> Result<(), BatchMutationError> {
+        self.publish_inner::<true>(intent_index)
+    }
+
+    fn publish_inner<const INJECT_FAILURE: bool>(
+        &mut self,
+        failure_index: usize,
+    ) -> Result<(), BatchMutationError> {
         self.ensure_phase_certain()?;
         match self.manifest.phase {
             TransactionPhase::Prepared => self.change_phase(TransactionPhase::Committing)?,
@@ -319,6 +333,13 @@ impl PreparedBatch {
             sync_directory_parent(&absolute)?;
         }
         for index in 0..self.manifest.intents.len() {
+            if INJECT_FAILURE && index == failure_index {
+                return Err(BatchMutationError::filesystem(
+                    "execute deterministic publication failpoint",
+                    &self.directory,
+                    io::Error::other(format!("Publication({index})")),
+                ));
+            }
             hit_test_failpoint(TestFailpoint::Publication(index), &self.directory)?;
             publish_intent(
                 &self.root,
