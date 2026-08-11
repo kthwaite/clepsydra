@@ -307,9 +307,15 @@ reference confirmation is enforced by the Clepsydra frontend, not the server.
 Only the Markdown reference is encrypted with a protected body; the attachment
 remains plaintext.
 
-When attachment management opens for an unlocked protected note, the browser
-compares references parsed from decrypted Markdown with the current attachment
-inventory and lists stale references that no longer match a stored file. The
+The stale-reference audit is a client-only, best-effort check. It recognizes
+only Markdown links and images that target Clepsydra attachment URLs. It
+ignores raw HTML, code, malformed or unresolved links, and non-attachment
+destinations.
+
+A stale-reference warning is shown only while attachment management is open
+for an unlocked protected note and the current attachment inventory has loaded
+successfully. If the inventory cannot load, no stale-reference warning is
+shown. Absence of a warning is not proof that no stale reference exists. The
 browser sends neither decrypted note content nor its extracted attachment
 reference inventory to the server.
 

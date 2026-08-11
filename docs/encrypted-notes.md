@@ -66,12 +66,16 @@ disclosure, even though it can send the field without user interaction and
 can insert a reference without frontend confirmation. Reference confirmation
 is a client-enforced safeguard, not a server security boundary.
 
-For an unlocked protected note, **Manage attachments** parses the decrypted
-Markdown in the browser and compares its attachment references with the
-current attachment inventory. References that no longer match stored
-attachments remain listed as plaintext-reference warnings after reload. This
-audit sends neither the decrypted note body nor its extracted attachment
-reference inventory to the server.
+The stale-reference audit in **Manage attachments** is a client-only,
+best-effort check. While attachment management is open for an unlocked
+protected note, and only after the current attachment inventory loads
+successfully, the browser parses decrypted Markdown and reports recognized
+Markdown links and images whose Clepsydra attachment URLs no longer match a
+stored file. It ignores raw HTML, code, malformed or unresolved links, and
+non-attachment destinations. If the inventory cannot load, no stale-reference
+warning is shown. Absence of a warning is not proof that no stale reference
+exists. The audit sends neither the decrypted note body nor its extracted
+attachment reference inventory to the server.
 
 ## First setup
 

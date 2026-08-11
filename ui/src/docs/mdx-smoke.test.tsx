@@ -137,6 +137,17 @@ it("renders the protected-note attachment security boundary", () => {
   expect(
     screen.getByRole("link", { name: "attachment management" }),
   ).toHaveAttribute("href", "#attachment-management");
+  expect(
+    screen.getByText(/client-only, best-effort check/i),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/ignores raw HTML, code, malformed or unresolved links/i),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      /absence of a warning is not proof that no stale reference exists/i,
+    ),
+  ).toBeInTheDocument();
 });
 
 it("renders repository-only guide references as non-clickable source paths", () => {
