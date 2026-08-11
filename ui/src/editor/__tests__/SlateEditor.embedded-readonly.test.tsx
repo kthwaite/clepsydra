@@ -163,6 +163,7 @@ describe("SlateEditor embedded read-only contract", () => {
       "page",
       "notes/source.md",
       "Source",
+      { blockId: "abc123DEF0" },
     );
 
     expect(screen.queryByRole("button", { name: "RUST" })).toBeNull();
