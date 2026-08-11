@@ -13,7 +13,7 @@ it("declares the approved hierarchy and unique slugs", () => {
   ).toEqual([
     ["Start Here", ["getting-started", "configuration", "troubleshooting"]],
     ["Reference", ["cli"]],
-    ["Features", ["bases", "books-and-reading"]],
+    ["Features", ["bases", "books-and-reading", "recipes"]],
     ["Integrations", ["lsp", "mcp", "browser-extension"]],
   ]);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
@@ -35,6 +35,10 @@ it("resolves the dedicated troubleshooting and browser extension guides", () => 
     slug: "books-and-reading",
     title: "Books and Reading",
   });
+  expect(getDocPage("recipes")).toMatchObject({
+    slug: "recipes",
+    title: "Recipes",
+  });
 });
 
 it("derives previous and next guides from registry order", () => {
@@ -48,12 +52,15 @@ it("derives previous and next guides from registry order", () => {
     previous: { slug: "configuration" },
     next: { slug: "cli" },
   });
-  expect(getDocNeighbors("bases").next?.slug).toBe("books-and-reading");
   expect(getDocNeighbors("books-and-reading")).toMatchObject({
     previous: { slug: "bases" },
+    next: { slug: "recipes" },
+  });
+  expect(getDocNeighbors("recipes")).toMatchObject({
+    previous: { slug: "books-and-reading" },
     next: { slug: "lsp" },
   });
-  expect(getDocNeighbors("lsp").previous?.slug).toBe("books-and-reading");
+  expect(getDocNeighbors("lsp").previous?.slug).toBe("recipes");
   expect(getDocNeighbors("mcp").previous?.slug).toBe("lsp");
   expect(getDocNeighbors("mcp").next?.slug).toBe("browser-extension");
   expect(getDocNeighbors("browser-extension").previous?.slug).toBe("mcp");

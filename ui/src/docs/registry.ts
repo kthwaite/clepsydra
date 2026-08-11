@@ -7,6 +7,7 @@ import configurationSource from "#/docs/content/configuration.mdx?raw";
 import gettingStartedSource from "#/docs/content/getting-started.mdx?raw";
 import lspSource from "#/docs/content/lsp.mdx?raw";
 import mcpSource from "#/docs/content/mcp.mdx?raw";
+import recipesSource from "#/docs/content/recipes.mdx?raw";
 import troubleshootingSource from "#/docs/content/troubleshooting.mdx?raw";
 
 export { DEFAULT_DOC_SLUG } from "#/docs/constants";
@@ -27,6 +28,7 @@ const BasesGuide = lazy(() => import("#/docs/content/bases.mdx"));
 const BooksAndReadingGuide = lazy(
   () => import("#/docs/content/books-and-reading.mdx"),
 );
+const RecipesGuide = lazy(() => import("#/docs/content/recipes.mdx"));
 const LspGuide = lazy(() => import("#/docs/content/lsp.mdx"));
 const McpGuide = lazy(() => import("#/docs/content/mcp.mdx"));
 const BrowserExtensionGuide = lazy(
@@ -64,6 +66,12 @@ const booksAndReadingMeta = {
   title: "Books and Reading",
   description:
     "Add books from an ISBN or camera barcode and understand imported metadata.",
+} satisfies DocMeta;
+const recipesMeta = {
+  slug: "recipes",
+  title: "Recipes",
+  description:
+    "Create, file, and edit structured recipe Folios without giving up portable Markdown.",
 } satisfies DocMeta;
 const lspMeta = {
   slug: "lsp",
@@ -118,6 +126,12 @@ const booksAndReading = page(
   BooksAndReadingGuide,
   booksAndReadingSource,
 );
+const recipes = page(
+  "features",
+  recipesMeta,
+  RecipesGuide,
+  recipesSource,
+);
 const lsp = page("integrations", lspMeta, LspGuide, lspSource);
 const mcp = page("integrations", mcpMeta, McpGuide, mcpSource);
 const browserExtension = page(
@@ -137,7 +151,7 @@ export const DOC_GROUPS = [
   {
     id: "features",
     label: "Features",
-    pages: [bases, booksAndReading],
+    pages: [bases, booksAndReading, recipes],
   },
   {
     id: "integrations",
