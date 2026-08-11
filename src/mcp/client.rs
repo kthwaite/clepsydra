@@ -156,6 +156,13 @@ impl ApiClient {
         self.send(url, request).await
     }
 
+    /// PATCH a JSON `body` to `path`, returning the parsed JSON response.
+    pub async fn patch_json(&self, path: &str, body: &Value) -> Result<Value, ApiCallError> {
+        let url = format!("{}{}", self.base, path);
+        let request = self.http.patch(&url).json(body);
+        self.send(url, request).await
+    }
+
     /// PUT a JSON `body` to `path`, returning the parsed JSON response.
     pub async fn put_json(&self, path: &str, body: &Value) -> Result<Value, ApiCallError> {
         let url = format!("{}{}", self.base, path);
@@ -234,6 +241,57 @@ mod tests {
             encode_vault_path("notes/50% done?.md"),
             "notes/50%25%20done%3F.md"
         );
+    }
+
+    #[tokio::test]
+    async fn patch_json_sends_patch_and_parses_response() {
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let body = serde_json::json!({"status": "TRIAGE"});
+        Mock::given(method("PATCH"))
+            .and(path("/api/vault/board/tasks/abc"))
+            .and(body_json(&body))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = ApiClient::new(server.uri(), None).unwrap();
+        let response = client
+            .patch_json("/api/vault/board/tasks/abc", &body)
+            .await
+            .unwrap();
+        assert_eq!(response, serde_json::json!({"ok": true}));
+    }
+
+    #[tokio::test]
+    async fn patch_json_maps_api_failures_like_post_json() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_json(serde_json::json!({"status": 400, "error": "unknown status"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = ApiClient::new(server.uri(), None).unwrap();
+        let err = client
+            .patch_json("/api/vault/board/tasks/abc", &serde_json::json!({}))
+            .await
+            .unwrap_err();
+        match err {
+            ApiCallError::Api { status, message } => {
+                assert_eq!(status, 400);
+                assert!(message.contains("unknown status"), "{message}");
+            }
+            other => panic!("expected Api error, got {other:?}"),
+        }
     }
 
     #[test]
