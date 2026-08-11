@@ -256,9 +256,8 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
           </EdField>
           <EdField label="DUE" hint="YYYY-MM-DD">
             <input
-              type="text"
+              type="date"
               className={INPUT_CLS}
-              placeholder="2026-12-31"
               value={due}
               onChange={(e) => setDue(e.target.value)}
               data-testid="new-task-due"

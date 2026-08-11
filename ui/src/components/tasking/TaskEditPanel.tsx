@@ -483,7 +483,7 @@ export function TaskEditPanel({
             </EdField>
             <EdField label="DUE" hint="YYYY-MM-DD">
               <input
-                type="text"
+                type="date"
                 className={INPUT_CLS}
                 value={dueVal}
                 onChange={(e) => setDueVal(e.target.value)}

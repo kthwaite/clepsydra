@@ -218,6 +218,12 @@ describe("TaskEditPanel — render", () => {
       screen.queryByTestId("edit-panel-hold-reason"),
     ).not.toBeInTheDocument();
   });
+
+  it("DUE input is a date field", () => {
+    wrap();
+    const dueInput = screen.getByTestId<HTMLInputElement>("edit-panel-due");
+    expect(dueInput).toHaveAttribute("type", "date");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

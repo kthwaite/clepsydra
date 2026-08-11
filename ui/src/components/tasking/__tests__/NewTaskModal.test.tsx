@@ -215,6 +215,12 @@ describe("NewTaskModal — render", () => {
     expect(cycleSelect).toHaveTextContent("C-01");
     expect(cycleSelect).toHaveTextContent("C-02");
   });
+
+  it("DUE input is a date field", () => {
+    wrap();
+    const dueInput = screen.getByTestId<HTMLInputElement>("new-task-due");
+    expect(dueInput).toHaveAttribute("type", "date");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
