@@ -14,7 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { NewTaskModal } from "../NewTaskModal";
-import { BOARD_FIXTURE } from "./fixtures";
+import { BOARD_FIXTURE, NO_SLUG_OP } from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -220,6 +220,24 @@ describe("NewTaskModal — render", () => {
     wrap();
     const dueInput = screen.getByTestId<HTMLInputElement>("new-task-due");
     expect(dueInput).toHaveAttribute("type", "date");
+  });
+
+  it("omits slug-less operations from the OPERATION dropdown", () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    useBoardStore.setState({ taskModal: {} });
+    render(
+      <QueryClientProvider client={qc}>
+        <NewTaskModal
+          operations={[...operations, NO_SLUG_OP]}
+          cycles={cycles}
+        />
+      </QueryClientProvider>,
+    );
+    const opSelect = screen.getByTestId("new-task-operation");
+    expect(opSelect).toHaveTextContent("OPS-1");
+    expect(opSelect).not.toHaveTextContent("OPS-3");
   });
 });
 

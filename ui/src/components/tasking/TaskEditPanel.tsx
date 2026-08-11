@@ -332,6 +332,12 @@ export function TaskEditPanel({
   const barColor = PRI_BAR_COLOR[task.priority] ?? "var(--ink-3)";
   const priTextColor = PRI_TEXT_COLOR[task.priority] ?? "var(--ink-mute)";
 
+  // A board:true PROJECT page with no project: frontmatter has no valid
+  // filter/assignment key (filterTasks compares t.project === opFilter, and
+  // a slug-less op's key can never match a task's project) — exclude it so
+  // a task can't be reassigned to it.
+  const assignableOps = operations.filter((op) => Boolean(op.project));
+
   // Active operation code for header display
   const opCode = task.project
     ? (operations.find((op) => op.project === task.project)?.code ??
@@ -461,7 +467,7 @@ export function TaskEditPanel({
                 data-testid="edit-panel-operation"
               >
                 <option value="">UNFILED</option>
-                {operations.map((op) => (
+                {assignableOps.map((op) => (
                   <option key={op.id} value={opKey(op)}>
                     {op.code}
                   </option>

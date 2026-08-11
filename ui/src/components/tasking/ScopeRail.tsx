@@ -217,8 +217,13 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
 
         {/* Per-operation rows */}
         {operations.map((op) => {
-          const count = tasks.filter((t) => t.project === op.project).length;
-          const active = opFilter === opKey(op);
+          // Count by opKey, not op.project — a slug-less op's own project
+          // is null, and null===null would otherwise match every unfiled
+          // task (the same key filterTasks/opFilter use, so the badge
+          // always matches what clicking the row reveals).
+          const key = opKey(op);
+          const count = tasks.filter((t) => t.project === key).length;
+          const active = opFilter === key;
           return (
             <button
               key={op.id}

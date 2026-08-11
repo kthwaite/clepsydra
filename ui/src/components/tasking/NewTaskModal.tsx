@@ -89,6 +89,12 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
 
   if (!isOpen) return null;
 
+  // A board:true PROJECT page with no project: frontmatter has no valid
+  // filter/assignment key (filterTasks compares t.project === opFilter, and
+  // a slug-less op's key can never match a task's project) — exclude it so
+  // a task can't be misfiled to it.
+  const assignableOps = operations.filter((op) => Boolean(op.project));
+
   // Derived display for the sub-header
   const opLabel = project
     ? (operations.find((op) => opKey(op) === project)?.code ?? project)
@@ -192,7 +198,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
               data-testid="new-task-operation"
             >
               <option value="">UNFILED / NONE</option>
-              {operations.map((op) => (
+              {assignableOps.map((op) => (
                 <option key={op.id} value={opKey(op)}>
                   {op.code} — {op.name}
                 </option>

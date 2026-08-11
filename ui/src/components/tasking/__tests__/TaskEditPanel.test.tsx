@@ -24,11 +24,11 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BoardTask } from "#/api/board";
+import type { BoardOperation, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
 import { TaskEditPanel } from "../TaskEditPanel";
-import { BOARD_FIXTURE } from "./fixtures";
+import { BOARD_FIXTURE, NO_SLUG_OP } from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -63,6 +63,7 @@ const HELD_TASK: BoardTask = {
 
 interface WrapOpts {
   task?: BoardTask;
+  operations?: BoardOperation[];
   onClose?: () => void;
   onOpenPage?: (path: string) => void;
   onOpenDossier?: (link: string) => void;
@@ -73,6 +74,7 @@ interface WrapOpts {
 
 function wrap({
   task = FULL_TASK,
+  operations: opsOverride = operations,
   onClose = vi.fn(),
   onOpenPage = vi.fn(),
   onOpenDossier = vi.fn(),
@@ -98,7 +100,7 @@ function wrap({
       <QueryClientProvider client={qc}>
         <TaskEditPanel
           task={task}
-          operations={operations}
+          operations={opsOverride}
           cycles={cycles}
           onClose={onClose}
           onOpenPage={onOpenPage}
@@ -223,6 +225,13 @@ describe("TaskEditPanel — render", () => {
     wrap();
     const dueInput = screen.getByTestId<HTMLInputElement>("edit-panel-due");
     expect(dueInput).toHaveAttribute("type", "date");
+  });
+
+  it("omits slug-less operations from the OPERATION dropdown", () => {
+    wrap({ operations: [...operations, NO_SLUG_OP] });
+    const opSelect = screen.getByTestId("edit-panel-operation");
+    expect(opSelect).toHaveTextContent("OPS-1");
+    expect(opSelect).not.toHaveTextContent("OPS-3");
   });
 });
 
