@@ -28,14 +28,50 @@ before protecting important material, and test recovery before relying on it.
 - The filename and vault-relative path.
 - TOML frontmatter and metadata, including the title, tags, aliases,
   properties, timestamps, project/kind information, and encryption marker.
-- Attachments and attachment filenames.
-- File size, filesystem timestamps, access patterns, and repository structure.
+- Attachment bytes, filenames, vault-relative attachment paths, reported MIME
+  types, and sizes. These can disclose an attachment's subject or content.
+- Filesystem timestamps, access patterns, and repository structure.
 - Existing Git commits, filesystem snapshots, backups, editor swap files, or
   other copies made while the note was plaintext.
 - The public age recipient, key ID, and keyring metadata.
 
 TLS is still required when Clepsydra is accessed over a network. Ciphertext
 does not conceal visible metadata or protect the rest of an HTTP session.
+
+## Protected notes and plaintext attachments
+
+Protecting a note does not protect its attachments. Attachment bytes remain
+plaintext files in the configured attachment folder. Their filenames, paths,
+reported MIME types, and sizes also remain plaintext and can disclose content
+even when the note's Markdown body is encrypted.
+
+Clepsydra treats upload and reference insertion as separate actions:
+
+- Every upload must include the multipart field
+  `plaintext_acknowledged=true`. The server rejects a missing or false field
+  and does not install the file. This is an acknowledgement of plaintext
+  storage, not encryption, authorization, or prevention.
+- In the protected-note UI, selecting a file opens a disclosure for that
+  upload. Cancelling it uploads nothing and inserts nothing. After an
+  acknowledged upload succeeds, its Markdown reference is inserted.
+- Inserting a reference to an attachment that is already stored opens a
+  separate disclosure. Each upload or insertion needs its own acknowledgement;
+  one action never grants acknowledgement to a later action.
+
+Only the Markdown reference becomes part of the protected note body and is
+encrypted when that body is saved. The referenced attachment remains plaintext
+at its vault path. A custom client must still send
+`plaintext_acknowledged=true` to upload and must present the same plaintext
+disclosure, even though it can send the field without user interaction and
+can insert a reference without frontend confirmation. Reference confirmation
+is a client-enforced safeguard, not a server security boundary.
+
+For an unlocked protected note, **Manage attachments** parses the decrypted
+Markdown in the browser and compares its attachment references with the
+current attachment inventory. References that no longer match stored
+attachments remain listed as plaintext-reference warnings after reload. This
+audit sends neither the decrypted note body nor its extracted attachment
+reference inventory to the server.
 
 ## First setup
 

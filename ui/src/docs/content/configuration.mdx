@@ -281,6 +281,38 @@ by default. The production frontend clears its in-memory identity on reload or
 close and provides coordinated manual locking. Custom frontend hosts can supply
 an in-memory idle timeout to `EncryptionProvider`; it is not a server setting.
 
+### Protected notes and plaintext attachments
+
+Protected-note encryption covers the Markdown body, including an attachment
+reference saved in that body. It does not cover attachment bytes, filenames,
+vault-relative paths, reported MIME types, or sizes. All remain plaintext and
+can disclose an attachment's subject or content. Open
+[attachment management](#attachment-management) from an editable note to work
+with these files and references.
+
+#### Attachment management
+
+For a protected note, Clepsydra discloses plaintext storage separately for each
+upload and each insertion of an already stored attachment reference. Cancelling
+an upload disclosure stores no attachment and inserts no reference. An
+acknowledged upload sends the file with
+`plaintext_acknowledged=true`; the server rejects an absent or false field and
+does not install the file. The field acknowledges plaintext storage—it does not
+encrypt, authorize, or prevent an upload.
+
+Custom clients must also send `plaintext_acknowledged=true` for every upload
+and must present equivalent plaintext disclosure. It can nevertheless send the
+field without user interaction or insert a reference without confirmation:
+reference confirmation is enforced by the Clepsydra frontend, not the server.
+Only the Markdown reference is encrypted with a protected body; the attachment
+remains plaintext.
+
+When attachment management opens for an unlocked protected note, the browser
+compares references parsed from decrypted Markdown with the current attachment
+inventory and lists stale references that no longer match a stored file. The
+browser sends neither decrypted note content nor its extracted attachment
+reference inventory to the server.
+
 See `docs/encrypted-notes.md` for setup, recovery, limitations, and the
 complete security boundary.
 

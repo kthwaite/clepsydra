@@ -126,6 +126,19 @@ it("renders GFM tables as semantic HTML", () => {
   ).toBeInTheDocument();
 });
 
+it("renders the protected-note attachment security boundary", () => {
+  render(<Configuration />);
+
+  expect(
+    screen.getByRole("heading", {
+      name: "Protected notes and plaintext attachments",
+    }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "attachment management" }),
+  ).toHaveAttribute("href", "#attachment-management");
+});
+
 it("renders repository-only guide references as non-clickable source paths", () => {
   render(<Configuration />);
 
