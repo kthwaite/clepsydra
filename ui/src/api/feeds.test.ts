@@ -23,6 +23,7 @@ import {
   updateCachedEntryPages,
   useDeleteFeed,
   useFeeds,
+  useFeedEntry,
   useImportOpml,
   usePatchFeedEntry,
   useSubscribeFeed,
@@ -53,11 +54,20 @@ type EntryPages = InfiniteData<FeedEntryPage, string | undefined>;
 
 const feedsPath = "/api/vault/feeds";
 const entriesPath = "/api/vault/feeds/entries";
+const entryDetailPath = "/api/vault/feeds/entries/{id}";
 const feedsKey = ["get", feedsPath] as const;
 const requestOrigin = "https://ui.test";
 
 function entriesKey(filters: EntryFilters) {
   return ["get", entriesPath, { params: { query: filters } }] as const;
+}
+
+function entryDetailKey(id: number) {
+  return [
+    "get",
+    entryDetailPath,
+    { params: { path: { id } } },
+  ] as const;
 }
 
 function wrapper(client: QueryClient) {
@@ -131,6 +141,7 @@ function makeFeedList(
       },
     ],
     manifest_revision: manifestRevision,
+    preference_namespace: "fixture-feed-preferences",
   };
 }
 
@@ -192,6 +203,38 @@ describe("useFeeds", () => {
       all: 45,
       saved: 6,
     });
+  });
+});
+
+describe("useFeedEntry", () => {
+  it.each([undefined, 0, -1])(
+    "does not request detail for non-positive id %s",
+    (id) => {
+      const { result } = renderHook(() => useFeedEntry(id), {
+        wrapper: wrapper(freshClient()),
+      });
+
+      expect(result.current.fetchStatus).toBe("idle");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("requests the generated detail operation with the selected path id", async () => {
+    const entry = makeEntry();
+    const client = freshClient();
+    fetchMock.mockResolvedValue(jsonResponse(entry));
+
+    const { result } = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(entry);
+    expect(client.getQueryData(entryDetailKey(entry.id))).toEqual(entry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestedUrl(fetchMock).pathname).toBe(
+      `/api/vault/feeds/entries/${entry.id}`,
+    );
   });
 });
 
@@ -392,6 +435,56 @@ describe("feedEntriesInfiniteOptions", () => {
 });
 
 describe("usePatchFeedEntry", () => {
+  it("keeps the cached detail and matching list projection coherent through success", async () => {
+    const entry = makeEntry({ read: false, tags: ["rust"] });
+    const unrelated = makeEntry({ id: 202, guid: "entry-202" });
+    const listKey = entriesKey({ view: "all" });
+    const detailKey = entryDetailKey(entry.id);
+    const unrelatedDetailKey = entryDetailKey(unrelated.id);
+    const client = freshClient();
+    client.setQueryData(listKey, makePages([entry]));
+    client.setQueryData(detailKey, entry);
+    client.setQueryData(unrelatedDetailKey, unrelated);
+    const response = deferred<Response>();
+    fetchMock.mockReturnValue(response.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+      tags: [" rust ", "rust", "ai"],
+    });
+
+    await waitFor(() =>
+      expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+        read: true,
+        tags: [" rust ", "rust", "ai"],
+      }),
+    );
+    expect(
+      client.getQueryData<EntryPages>(listKey)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, tags: [" rust ", "rust", "ai"] });
+    expect(client.getQueryData(unrelatedDetailKey)).toBe(unrelated);
+
+    response.resolve(
+      jsonResponse({ ...entry, read: true, tags: ["rust", "ai"] }),
+    );
+    await mutation;
+
+    expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+      read: true,
+      tags: ["rust", "ai"],
+    });
+    expect(
+      client.getQueryData<EntryPages>(listKey)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, tags: ["rust", "ai"] });
+    expect(client.getQueryData(unrelatedDetailKey)).toBe(unrelated);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(unrelatedDetailKey)?.isInvalidated).toBe(false);
+  });
+
   it("optimistically patches every cached filter key and restores each exact pair on failure", async () => {
     const entry = makeEntry({ read: false, bookmarked: true });
     const keys = {
@@ -412,6 +505,8 @@ describe("usePatchFeedEntry", () => {
     for (const name of Object.keys(keys) as Array<keyof typeof keys>) {
       client.setQueryData(keys[name], before[name]);
     }
+    const detailKey = entryDetailKey(entry.id);
+    client.setQueryData(detailKey, entry);
 
     const response = deferred<Response>();
     fetchMock.mockReturnValue(response.promise);
@@ -435,6 +530,7 @@ describe("usePatchFeedEntry", () => {
       client.getQueryData<EntryPages>(keys.tag)?.pages[0].entries[0].read,
     ).toBe(true);
     expect(client.getQueryData(keys.absent)).toBe(before.absent);
+    expect(client.getQueryData<FeedEntry>(detailKey)?.read).toBe(true);
 
     response.resolve(
       jsonResponse({ error: "offline", hint: "try again" }, 500),
@@ -447,6 +543,7 @@ describe("usePatchFeedEntry", () => {
     for (const name of Object.keys(keys) as Array<keyof typeof keys>) {
       expect(client.getQueryData(keys[name])).toBe(before[name]);
     }
+    expect(client.getQueryData(detailKey)).toBe(entry);
   });
 
   it("invalidates feed summaries and all entry filters so newly matching tag views refetch", async () => {

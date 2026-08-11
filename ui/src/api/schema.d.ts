@@ -667,7 +667,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["get_entry"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2020,6 +2020,7 @@ export interface components {
             diagnostics: components["schemas"]["FeedDiagnosticDto"][];
             groups: components["schemas"]["FeedGroupDto"][];
             manifest_revision: string;
+            preference_namespace: string;
         };
         FeedMutationResponse: {
             feed: components["schemas"]["FeedDto"];
@@ -4832,6 +4833,44 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_entry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Entry identifier */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedEntryDto"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

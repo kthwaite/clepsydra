@@ -36,6 +36,7 @@ const MAX_OPML_OUTLINES: usize = 10_000;
 const MAX_OPML_DEPTH: usize = 32;
 const MAX_OPML_ATTRIBUTES_PER_OUTLINE: usize = 32;
 const MIN_DISCOVERY_NETWORK_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
+const FEED_PREFERENCE_NAMESPACE_DOMAIN: &[u8] = b"clepsydra-feed-preferences-v1\0";
 
 fn deserialize_tri_state<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
@@ -114,6 +115,7 @@ pub struct FeedListResponse {
     pub diagnostics: Vec<FeedDiagnosticDto>,
     pub counts: FeedEntryCountsDto,
     pub manifest_revision: String,
+    pub preference_namespace: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -362,6 +364,22 @@ fn feed_store_error(error: FeedStoreError) -> ApiError {
     }
 }
 
+async fn feed_preference_namespace(state: &AppState) -> Result<String, ApiError> {
+    let configured_root = state.vault.root();
+    let canonical_root = tokio::fs::canonicalize(configured_root)
+        .await
+        .map_err(|error| {
+            ApiError::internal(format!(
+                "resolve vault root `{}`: {error}",
+                configured_root.display()
+            ))
+        })?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(FEED_PREFERENCE_NAMESPACE_DOMAIN);
+    hasher.update(canonical_root.as_os_str().as_encoded_bytes());
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 fn subscribed_feeds(feeds: Vec<FeedSummary>) -> Vec<FeedSummary> {
     feeds.into_iter().filter(|feed| feed.subscribed).collect()
 }
@@ -405,6 +423,7 @@ async fn feed_by_id(store: &FeedStoreHandle, id: i64) -> Result<FeedSummary, Api
 pub async fn list_feeds(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<FeedListResponse>, ApiError> {
+    let preference_namespace = feed_preference_namespace(&state).await?;
     let _manifest_guard = state.feed_manifest_lock.lock().await;
     let snapshot = read_manifest(&state).await?;
     reconcile_feed_manifest_bytes_locked(&state, &snapshot.bytes)
@@ -428,6 +447,7 @@ pub async fn list_feeds(
             saved: counts.saved,
         },
         manifest_revision: snapshot.revision,
+        preference_namespace,
     };
     #[cfg(test)]
     if let Some(hook) = state.feed_after_list_snapshot_hook.lock().clone() {
@@ -701,6 +721,30 @@ pub async fn list_entries(
         entries: page.entries.into_iter().map(Into::into).collect(),
         next_cursor: page.next_cursor.map(|cursor| cursor.encode()),
     }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/entries/{id}",
+    context_path = "/api/vault/feeds",
+    tag = "Feeds",
+    params(("id" = i64, Path, description = "Entry identifier")),
+    responses(
+        (status = 200, body = FeedEntryDto),
+        (status = 404, body = ApiError),
+        (status = 500, body = ApiError)
+    )
+)]
+pub async fn get_entry(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<FeedEntryDto>, ApiError> {
+    let entry = state
+        .feeds
+        .get_entry(id)
+        .await
+        .map_err(feed_store_error)?;
+    Ok(Json(entry.into()))
 }
 
 #[utoipa::path(
@@ -1043,7 +1087,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/refresh", post(refresh_feeds))
         .route("/refresh/{id}", post(refresh_feed))
         .route("/entries", get(list_entries))
-        .route("/entries/{id}", axum::routing::patch(patch_entry))
+        .route("/entries/{id}", get(get_entry).patch(patch_entry))
         .route("/entries/mark-read", post(mark_entries_read))
         .route("/import", post(import_opml))
         .route("/export", get(export_opml))
