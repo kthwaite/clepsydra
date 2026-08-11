@@ -49,15 +49,17 @@ files directly, which bypasses locking, link rewriting, and the index.
 ## Workflows
 
 **Capture.** Fleeting input goes to today's journal via
-`vault_journal_capture` (markdown bullet, e.g. `- idea: ...`). Substantial
-input becomes a page: `vault_create_page` with `kind: CAPTURE` if it still
-needs processing, or its real kind if it's already formed.
+`vault_journal_capture` (markdown bullet, e.g. `- idea: ...`). Do not add
+`ai-generated` merely because an LLM performed the journal capture.
+Substantial input becomes a page: `vault_create_page` with `kind: CAPTURE`
+if it still needs processing, or its real kind if it's already formed.
 
 **Conversation.** “Send this conversation to Clepsydra” means
 `vault_capture_conversation`, never `vault_create_page`: generic creation
-omits the identity and prefix ledger needed for safe append. Send every
-complete visible user/assistant turn in source order, verbatim. Do not
-summarize. Clepsydra cannot retrieve omitted or truncated turns, hidden
+omits the identity and prefix ledger needed for safe append. Do not add
+`ai-generated` merely because an LLM performed the conversation capture.
+Send every complete visible user/assistant turn in source order, verbatim.
+Do not summarize. Clepsydra cannot retrieve omitted or truncated turns, hidden
 system/developer prompts, tool calls or results, or attachment contents.
 When the host exposes both provider and conversation ID, pass both; the
 server keeps the normalized provider and a derived hash, not the raw host
@@ -70,15 +72,18 @@ from a host context containing the complete earlier prefix; never
 fuzzy-match or overwrite.
 
 **Create.** Always `vault_search` first — the note may exist; extend it
-instead of duplicating. Check `vault_tags` and reuse existing tag spellings.
-Wikilink related pages in the body (`[[Title]]`), including one link back to
-the relevant project or hub page when there is one. Let the tool derive the
-path; pass `folder` only when the user names a specific location.
+instead of duplicating. Every standalone page authored by an LLM must
+include the `ai-generated` tag. Check `vault_tags` and reuse existing tag
+spellings. Declare the page's real Kind and project, and let the tool derive
+the path. Substantial project documentation must wikilink its project or hub
+page; wikilink other related pages in the body (`[[Title]]`). Pass `folder`
+only when the user names a specific location.
 
 **Edit.** Read with `vault_get_page`, then `vault_edit_page` with an exact
 unique `old_string` (or `vault_append_page` to add). If the body came back
 `body_truncated: true`, don't edit blind — narrow the target first. On a
 conflict error, re-read and re-apply; never blindly retry the same payload.
+An edit does not add `ai-generated` merely because an LLM performed it.
 
 **Organise.** Filing means declaring metadata: `vault_assign` with `kind`
 and/or `project` (bulk-capable via `paths`) — the vault relocates files

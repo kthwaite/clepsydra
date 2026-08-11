@@ -63,6 +63,23 @@ it trusts the server's own mkcert certificate. It refuses a non-loopback
 | `vault_delete_page` | organise | Delete; refuses backlinked pages until `force: true` |
 | `vault_preview_mutation` | read | Dry-run a move/delete: the plan, including link rewrites |
 
+## LLM-authored pages
+
+Before creating a page, search with `vault_search` for an existing page and
+extend it instead of duplicating it.
+
+| Action | `ai-generated` | Tool |
+| --- | --- | --- |
+| Author standalone page | required | `vault_create_page` |
+| Edit/append existing page | unchanged | `vault_edit_page` / `vault_append_page` |
+| Journal capture | not added for authorship alone | `vault_journal_capture` |
+| Conversation capture | not added for authorship alone | `vault_capture_conversation` |
+
+Standalone pages must declare their real Kind and project in
+`vault_create_page`. Use `vault_assign` to refile existing pages by project
+rather than inventing folders. Substantial project documentation must
+wikilink its project or hub page.
+
 Errors are written for agents: 404s suggest `vault_search` (the page may
 have been refiled), stale-write 409s say re-read and retry, and the delete
 tool's backlink refusal includes the linking pages so the agent can review

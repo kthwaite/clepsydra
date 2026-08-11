@@ -152,6 +152,20 @@ pub struct LinksParams {
 const KIND_TOKENS: &str =
     "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE";
 
+const MCP_INSTRUCTIONS: &str = "Work with a clepsydra vault (a markdown personal knowledge base) \
+through its running server. Orient with vault_tree and vault_tags, locate pages with vault_search \
+or vault_list_pages, read them with vault_get_page, and explore relationships with vault_links. \
+Before creating a page, search for an existing page and extend it instead of duplicating it. \
+Every standalone page authored by an LLM must include the `ai-generated` tag. Do not add that tag \
+merely for an edit, a journal capture, or a conversation capture. Declare the page's real kind \
+and project; use vault_assign to refile existing pages rather than inventing folders. Substantial \
+project documentation must wikilink its project or hub page. Use vault_journal_capture and \
+vault_capture_conversation for those dedicated intents instead of vault_create_page. Make \
+targeted edits with vault_edit_page or vault_append_page. The vault relocates pages filed by \
+kind/project itself; vault_preview_mutation dry-runs moves and deletes before they touch linked \
+pages. Page paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical \
+top-level folders. On a conflict error, re-read the page and re-apply the change.";
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
     /// Page title. Required; also drives the generated filename slug.
@@ -168,7 +182,8 @@ pub struct CreatePageParams {
     pub folder: Option<String>,
     /// Initial markdown body.
     pub body: Option<String>,
-    /// Frontmatter tags. Check vault_tags first to reuse existing vocabulary.
+    /// Frontmatter tags. Every standalone page authored by an LLM must include
+    /// `ai-generated`; check vault_tags first to reuse existing vocabulary.
     pub tags: Option<Vec<String>>,
     /// Alternative names the page can be wikilinked by.
     pub aliases: Option<Vec<String>>,
@@ -553,7 +568,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_create_page",
-        description = "Create a new page in one atomic call; kind/project are declared as part of the create itself. The canonical filename (yyyymmdd.slug.shortid.md) is derived from the title — never construct paths by hand. A declared kind files under its canonical folder ('folder' may only choose a subfolder beneath it); a declared project files under <kind-folder>/<project> and takes no 'folder' override. Search first (vault_search) to avoid duplicates. Returns the created page, including the path for follow-up calls.",
+        description = "Create a new page in one atomic call; kind/project are declared as part of the create itself. Every standalone page authored by an LLM must include the `ai-generated` tag. The canonical filename (yyyymmdd.slug.shortid.md) is derived from the title — never construct paths by hand. A declared kind files under its canonical folder ('folder' may only choose a subfolder beneath it); a declared project files under <kind-folder>/<project> and takes no 'folder' override. Search first (vault_search) and extend an existing page instead of creating a duplicate. Returns the created page, including the path for follow-up calls.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -733,7 +748,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_journal_capture",
-        description = "Quick-capture markdown into today's journal page (journals/YYYY-MM-DD.md), creating it if needed. The inbox verb: use for fleeting notes and log entries; use vault_create_page for substantial standalone content.",
+        description = "Quick-capture markdown into today's journal page (journals/YYYY-MM-DD.md), creating it if needed. The inbox verb: use for fleeting notes and log entries; use vault_create_page for substantial standalone content. Do not add `ai-generated` merely because an LLM performed the journal capture.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -759,7 +774,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_capture_conversation",
-        description = "Capture the complete visible user/assistant conversation as an AI_CONVERSATION Folio. Send ordered turns verbatim, not a summary. Clepsydra creates once and appends only when provider + host_conversation_id identify an exact existing capture; truncated or divergent context conflicts rather than guessing. Hidden system/developer prompts and tool traces are not accepted.",
+        description = "Capture the complete visible user/assistant conversation as an AI_CONVERSATION Folio. Send ordered turns verbatim, not a summary. Do not add `ai-generated` merely because an LLM performed the conversation capture. Clepsydra creates once and appends only when provider + host_conversation_id identify an exact existing capture; truncated or divergent context conflicts rather than guessing. Hidden system/developer prompts and tool traces are not accepted.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -783,7 +798,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_assign",
-        description = "File pages by declaring kind and/or project in frontmatter — the vault then relocates each file to its canonical folder automatically. THE preferred way to organise pages (use vault_move_page only for destinations assignment can't express). Accepts one path or many; bulk runs report per-path failures without aborting.",
+        description = "File pages by declaring their real kind and/or project in frontmatter — the vault then relocates each file to its canonical folder automatically. Use vault_assign to refile existing pages into projects rather than inventing folders. THE preferred way to organise pages (use vault_move_page only for destinations assignment can't express). Accepts one path or many; bulk runs report per-path failures without aborting.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1022,23 +1037,7 @@ impl ServerHandler for VaultMcpServer {
         );
         info.server_info =
             rmcp::model::Implementation::new("clepsydra-vault", env!("CARGO_PKG_VERSION"));
-        info.instructions = Some(
-            "Work with a clepsydra vault (a markdown personal knowledge base) through its \
-             running server. Orient with vault_tree and vault_tags, locate pages with \
-             vault_search or vault_list_pages, read them with vault_get_page, and explore \
-             relationships with vault_links. Create pages with vault_create_page (search \
-             first to avoid duplicates), make targeted edits with vault_edit_page or \
-             vault_append_page, and quick-capture into today's journal with \
-             vault_journal_capture. When a user asks to send this conversation to Clepsydra, \
-             use vault_capture_conversation: supply every complete visible user/assistant turn \
-             in order, verbatim; generic vault_create_page is not the conversation-capture path. \
-             Organise by declaring kind/project with vault_assign (the vault relocates files \
-             itself); vault_preview_mutation dry-runs moves and deletes before they touch linked \
-             pages. Page paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map \
-             to canonical top-level folders. On a conflict error, re-read the page and re-apply \
-             the change."
-                .to_string(),
-        );
+        info.instructions = Some(MCP_INSTRUCTIONS.to_string());
         info
     }
 }
@@ -1050,6 +1049,52 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn server_instructions_define_llm_page_authoring_policy() {
+        let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
+        let instructions = VaultMcpServer::new(Arc::new(client))
+            .get_info()
+            .instructions
+            .expect("server instructions");
+        let normalized = instructions
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+
+        for (policy, required_clause) in [
+            (
+                "search before create",
+                "before creating a page, search for an existing page and extend it instead of duplicating it",
+            ),
+            (
+                "standalone LLM-authored page provenance",
+                "every standalone page authored by an llm must include the `ai-generated` tag",
+            ),
+            (
+                "provenance exclusions",
+                "do not add that tag merely for an edit, a journal capture, or a conversation capture",
+            ),
+            (
+                "real kind and project",
+                "declare the page's real kind and project",
+            ),
+            (
+                "project assignment",
+                "use vault_assign to refile existing pages rather than inventing folders",
+            ),
+            (
+                "project documentation wikilinking",
+                "substantial project documentation must wikilink its project or hub page",
+            ),
+        ] {
+            assert!(
+                normalized.contains(required_clause),
+                "server instructions are missing the {policy} policy: {required_clause:?}"
+            );
+        }
+    }
 
     #[test]
     fn truncate_body_leaves_small_bodies_alone() {
