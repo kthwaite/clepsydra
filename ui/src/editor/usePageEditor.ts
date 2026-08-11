@@ -81,6 +81,8 @@ interface PageEditorState {
   /** Latest live Slate AST, including edits that have not saved yet. */
   editorValue: Descendant[];
   editorRevision: number;
+  /** True once the Slate value for the current page revision is committed. */
+  isEditorSynchronized: boolean;
   title: string;
   setTitle: (t: string) => void;
   tags: string[];
@@ -659,6 +661,16 @@ export function usePageEditor(
 
   const getRevision = useCallback(() => revisionRef.current, []);
 
+  const isEditorSynchronized =
+    !isLoading &&
+    (isDraft ||
+      (!page && error != null) ||
+      (page !== undefined &&
+        plainBody !== null &&
+        previousPathRef.current === path &&
+        revisionRef.current === page.revision &&
+        editorValueRef.current.length > 0));
+
   return {
     isLoading,
     error: pageNotFound && canDraft ? null : error,
@@ -669,6 +681,7 @@ export function usePageEditor(
         ? editorValueRef.current
         : initialValue,
     editorRevision,
+    isEditorSynchronized,
     title,
     setTitle,
     tags,

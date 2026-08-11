@@ -10,6 +10,7 @@ import {
   StrictMode,
   useEffect,
   useMemo,
+  useSyncExternalStore,
   type MutableRefObject,
 } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
@@ -27,14 +28,31 @@ import { useConstellationStore } from "#/store/constellation";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { useWorkspaceStore } from "#/store/workspace";
 
-const { editorCapture, pageEditorState } = vi.hoisted(() => ({
+const {
+  editorCapture,
+  editorMountCount,
+  mutatePage,
+  pageEditorState,
+  refetchPage,
+} = vi.hoisted(() => ({
   editorCapture: { current: null as CustomEditor | null },
+  editorMountCount: { current: 0 },
+  mutatePage: vi.fn().mockResolvedValue(undefined),
   pageEditorState: {
+    body: "Focused source block ^abc123DEF0\n",
     isLoading: false,
     kind: "NOTE",
-    bodyMarkdown: "Editable body",
+    listeners: new Set<() => void>(),
+    version: 0,
   },
+  refetchPage: vi.fn(),
 }));
+
+function publishPageLoading(isLoading: boolean) {
+  pageEditorState.isLoading = isLoading;
+  pageEditorState.version += 1;
+  for (const listener of pageEditorState.listeners) listener();
+}
 
 vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => true }));
 vi.mock("#/api/index", () => ({
@@ -64,6 +82,51 @@ vi.mock("#/api/index", () => ({
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
+  usePage: (path: string) => {
+    const pageStateVersion = useSyncExternalStore(
+      (listener) => {
+        pageEditorState.listeners.add(listener);
+        return () => pageEditorState.listeners.delete(listener);
+      },
+      () => pageEditorState.version,
+      () => pageEditorState.version,
+    );
+    const data = useMemo(
+      () =>
+        pageEditorState.isLoading
+          ? undefined
+          : {
+              path,
+              canonical_name:
+                path.split("/").at(-1)?.replace(/\.md$/, "") ?? path,
+              body: pageEditorState.body,
+              revision: `revision:${path}`,
+              kind: pageEditorState.kind,
+              inferred: false,
+              project: null,
+              encrypted: false,
+              conversation: null,
+              meta: {
+                id: `page:${path}`,
+                title: "Alpha",
+                tags: ["mobile"],
+                aliases: [],
+                created_at: "2026-08-08T00:00:00Z",
+                updated_at: "2026-08-08T00:00:00Z",
+              },
+            },
+      [path, pageStateVersion],
+    );
+    return {
+      data,
+      isLoading: pageEditorState.isLoading,
+      error: null,
+      refetch: refetchPage,
+    };
+  },
+  useUpdatePage: () => ({
+    mutateAsync: mutatePage,
+  }),
 }));
 vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, isLoading: false }),
@@ -71,6 +134,7 @@ vi.mock("#/api/journal", () => ({
 }));
 vi.mock("#/crypto/EncryptionProvider", () => ({
   useOptionalEncryptionActions: () => ({ lock: vi.fn() }),
+  useOptionalEncryptionStatus: () => null,
 }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/ForceGraph", () => ({
@@ -89,7 +153,10 @@ vi.mock("#/editor/SlateEditor", () => ({
     readOnly?: boolean;
     editorRef?: MutableRefObject<CustomEditor | null>;
   }) => {
-    const editor = useMemo(() => withReact(withSchema(createEditor())), []);
+    const editor = useMemo(() => {
+      editorMountCount.current += 1;
+      return withReact(withSchema(createEditor()));
+    }, []);
     if (editorRef) editorRef.current = editor;
     editorCapture.current = editorRef ? editor : null;
     useEffect(
@@ -109,50 +176,6 @@ vi.mock("#/editor/SlateEditor", () => ({
       </Slate>
     );
   },
-}));
-vi.mock("#/editor/usePageEditor", () => ({
-  usePageEditor: () => ({
-    isLoading: pageEditorState.isLoading,
-    error: null,
-    isDraft: false,
-    title: "Alpha",
-    setTitle: vi.fn(),
-    tags: ["mobile"],
-    setTags: vi.fn(),
-    aliases: [],
-    setAliases: vi.fn(),
-    saveNow: vi.fn().mockResolvedValue(undefined),
-    saveStatus: "saved",
-    saveError: null,
-    revisionConflict: null,
-    reloadAfterConflict: vi.fn(),
-    kind: pageEditorState.kind,
-    bodyMarkdown: pageEditorState.bodyMarkdown,
-    inferred: false,
-    project: null,
-    initialValue: [
-      {
-        type: "paragraph",
-        blockId: "abc123DEF0",
-        children: [{ text: "Focused source block" }],
-      },
-    ],
-    editorValue: [
-      {
-        type: "paragraph",
-        blockId: "abc123DEF0",
-        children: [{ text: "Focused source block" }],
-      },
-    ],
-    onSlateChange: vi.fn(),
-    editorRevision: 1,
-    createdAt: "2026-08-08T00:00:00Z",
-    updatedAt: "2026-08-08T00:00:00Z",
-    encrypted: false,
-    pageId: "page-alpha",
-    getPlaintext: vi.fn(),
-    getRevision: vi.fn(),
-  }),
 }));
 
 function OpenAlpha({
@@ -265,9 +288,12 @@ describe("mobile Folio Back", () => {
     });
     scrollIntoView.mockReset();
     editorCapture.current = null;
+    editorMountCount.current = 0;
+    pageEditorState.body = "Focused source block ^abc123DEF0\n";
     pageEditorState.isLoading = false;
     pageEditorState.kind = "NOTE";
-    pageEditorState.bodyMarkdown = "Editable body";
+    pageEditorState.listeners.clear();
+    pageEditorState.version = 0;
     useWorkspaceStore.setState({
       tabs: [],
       activeTabId: null,
@@ -291,8 +317,9 @@ describe("mobile Folio Back", () => {
     });
   });
 
-  it("focuses a source block after its page opens in a new tab", async () => {
+  it("keeps Slate selection and focus after fetched content bumps the editor revision", async () => {
     const user = userEvent.setup();
+    pageEditorState.isLoading = true;
     const router = renderNavigation("/");
 
     await user.click(
@@ -300,6 +327,8 @@ describe("mobile Folio Back", () => {
         name: "Open Alpha from source reference",
       }),
     );
+    await screen.findByText(/fetching folio notes\/alpha\.md/);
+    act(() => publishPageLoading(false));
 
     await screen.findByText("Focused source block");
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
@@ -310,6 +339,7 @@ describe("mobile Folio Back", () => {
     });
     expect(screen.getByRole("textbox", { name: "Page body" })).toHaveFocus();
     expect(router.state.location.pathname).toBe("/workspace");
+    expect(editorMountCount.current).toBeGreaterThanOrEqual(2);
     const state = useWorkspaceStore.getState();
     expect(
       state.tabs.find((tab) => tab.id === state.activeTabId)?.focusBlockId,
@@ -415,7 +445,7 @@ describe("mobile Folio Back", () => {
 
   it("focuses the DOM block without changing Slate selection in read-only mode", async () => {
     pageEditorState.kind = "AI_CONVERSATION";
-    pageEditorState.bodyMarkdown = "Focused source block";
+    pageEditorState.body = "Focused source block ^abc123DEF0\n";
     useWorkspaceStore.setState({
       tabs: [
         {
@@ -428,9 +458,7 @@ describe("mobile Folio Back", () => {
       activeTabId: "alpha",
     });
     renderNavigation("/workspace");
-    const targetText = await screen.findByText("Focused source block");
-    const target = targetText.closest<HTMLElement>("[data-block-id]");
-    expect(target).not.toBeNull();
+    await screen.findByText("Focused source block");
 
     act(() => {
       useWorkspaceStore
@@ -441,7 +469,7 @@ describe("mobile Folio Back", () => {
     });
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
-    expect(target).toHaveFocus();
+    expect(document.querySelector('[data-block-id="abc123DEF0"]')).toHaveFocus();
     expect(editorCapture.current?.selection).toBeNull();
   });
 

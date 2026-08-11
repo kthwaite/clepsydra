@@ -216,7 +216,13 @@ export function Folio({ tabId, path }: FolioProps) {
     isAiConversation && conversationMode === "read";
   const isJournal = kind === "JOURNAL";
   useEffect(() => {
-    if (!focusRequestId || editor.isLoading) return;
+    if (
+      !focusRequestId ||
+      editor.isLoading ||
+      !editor.isEditorSynchronized
+    ) {
+      return;
+    }
     const focusBlockId = takeTabFocus(tabId, focusRequestId);
     if (!focusBlockId) return;
 
@@ -251,6 +257,7 @@ export function Folio({ tabId, path }: FolioProps) {
     conversationReadOnly,
     editor.editorRevision,
     editor.isLoading,
+    editor.isEditorSynchronized,
     focusRequestId,
     tabId,
     takeTabFocus,
