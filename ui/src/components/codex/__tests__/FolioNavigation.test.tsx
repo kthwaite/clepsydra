@@ -16,7 +16,7 @@ import {
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createEditor, type Descendant } from "slate";
+import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { Folio } from "#/components/codex/Folio";
 import { Constellation } from "#/components/codex/Constellation";
@@ -40,16 +40,25 @@ const {
   mutatePage: vi.fn().mockResolvedValue(undefined),
   pageEditorState: {
     body: "Focused source block ^abc123DEF0\n",
+    error: null as Error | null,
     isLoading: false,
     kind: "NOTE",
     listeners: new Set<() => void>(),
+    revision: "revision-a",
     version: 0,
   },
   refetchPage: vi.fn(),
 }));
 
-function publishPageLoading(isLoading: boolean) {
-  pageEditorState.isLoading = isLoading;
+function publishPageState(
+  next: Partial<
+    Pick<
+      typeof pageEditorState,
+      "body" | "error" | "isLoading" | "kind" | "revision"
+    >
+  >,
+) {
+  Object.assign(pageEditorState, next);
   pageEditorState.version += 1;
   for (const listener of pageEditorState.listeners) listener();
 }
@@ -100,7 +109,7 @@ vi.mock("#/api/pages", () => ({
               canonical_name:
                 path.split("/").at(-1)?.replace(/\.md$/, "") ?? path,
               body: pageEditorState.body,
-              revision: `revision:${path}`,
+              revision: pageEditorState.revision,
               kind: pageEditorState.kind,
               inferred: false,
               project: null,
@@ -120,7 +129,7 @@ vi.mock("#/api/pages", () => ({
     return {
       data,
       isLoading: pageEditorState.isLoading,
-      error: null,
+      error: pageEditorState.error,
       refetch: refetchPage,
     };
   },
@@ -146,10 +155,12 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
 vi.mock("#/editor/SlateEditor", () => ({
   SlateEditor: ({
     initialValue,
+    onChange,
     readOnly = false,
     editorRef,
   }: {
     initialValue: Descendant[];
+    onChange: (value: Descendant[], editor: Editor) => void;
     readOnly?: boolean;
     editorRef?: MutableRefObject<CustomEditor | null>;
   }) => {
@@ -167,7 +178,11 @@ vi.mock("#/editor/SlateEditor", () => ({
       [editor, editorRef],
     );
     return (
-      <Slate editor={editor} initialValue={initialValue}>
+      <Slate
+        editor={editor}
+        initialValue={initialValue}
+        onChange={(value) => onChange(value, editor)}
+      >
         <Editable
           aria-label="Page body"
           readOnly={readOnly}
@@ -293,6 +308,8 @@ describe("mobile Folio Back", () => {
     pageEditorState.isLoading = false;
     pageEditorState.kind = "NOTE";
     pageEditorState.listeners.clear();
+    pageEditorState.error = null;
+    pageEditorState.revision = "revision-a";
     pageEditorState.version = 0;
     useWorkspaceStore.setState({
       tabs: [],
@@ -328,7 +345,7 @@ describe("mobile Folio Back", () => {
       }),
     );
     await screen.findByText(/fetching folio notes\/alpha\.md/);
-    act(() => publishPageLoading(false));
+    act(() => publishPageState({ isLoading: false }));
 
     await screen.findByText("Focused source block");
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
@@ -337,13 +354,113 @@ describe("mobile Folio Back", () => {
       anchor: { path: [0, 0], offset: 0 },
       focus: { path: [0, 0], offset: 0 },
     });
-    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Page body" })).toHaveFocus(),
+    );
     expect(router.state.location.pathname).toBe("/workspace");
     expect(editorMountCount.current).toBeGreaterThanOrEqual(2);
     const state = useWorkspaceStore.getState();
     expect(
       state.tabs.find((tab) => tab.id === state.activeTabId)?.focusBlockId,
     ).toBeUndefined();
+  });
+
+  it("focuses the retained local tree when a dirty editor rejects a newer server revision", async () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    await screen.findByText("Focused source block");
+    await waitFor(() => expect(editorMountCount.current).toBeGreaterThanOrEqual(2));
+    const editor = editorCapture.current;
+    if (!editor) throw new Error("Expected the hydrated Slate editor");
+
+    act(() => {
+      Transforms.insertText(editor, "Local ", {
+        at: { path: [0, 0], offset: 0 },
+      });
+    });
+    await screen.findByText("Local Focused source block");
+    act(() =>
+      publishPageState({
+        body: "Server replacement ^abc123DEF0\n",
+        revision: "revision-b",
+      }),
+    );
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "abc123DEF0",
+        });
+    });
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(editorCapture.current).toBe(editor);
+    expect(editor.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    });
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "alpha")
+        ?.focusBlockId,
+    ).toBeUndefined();
+  });
+
+  it("consumes a retained-data terminal error request as missing", async () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    await screen.findByText("Focused source block");
+    const editor = editorCapture.current;
+    if (!editor) throw new Error("Expected the hydrated Slate editor");
+    act(() => {
+      Transforms.insertText(editor, "Local ", {
+        at: { path: [0, 0], offset: 0 },
+      });
+    });
+    await screen.findByText("Local Focused source block");
+
+    act(() =>
+      publishPageState({
+        body: "Retained server body ^abc123DEF0\n",
+        error: new Error("Refetch failed"),
+        revision: "revision-b",
+      }),
+    );
+    await screen.findByText("Folio not found.");
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "abc123DEF0",
+        });
+    });
+
+    await waitFor(() =>
+      expect(
+        useWorkspaceStore.getState().tabs.find((tab) => tab.id === "alpha")
+          ?.focusBlockId,
+      ).toBeUndefined(),
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("focuses a source block when reopening an existing page tab", async () => {

@@ -661,15 +661,26 @@ export function usePageEditor(
 
   const getRevision = useCallback(() => revisionRef.current, []);
 
+  const localEditorIsDirty =
+    bodyEditGenRef.current > savedBodyGenRef.current ||
+    metaEditGenRef.current > savedMetaGenRef.current;
+  const editorRemountPending =
+    previousPathRef.current !== path ||
+    (page?.encrypted === true &&
+      previousLockEpochRef.current !== lockEpoch) ||
+    (page !== undefined &&
+      plainBody !== null &&
+      !conflictRef.current &&
+      !localEditorIsDirty &&
+      (editorValueRef.current.length === 0 ||
+        savedRef.current.body !== plainBody));
   const isEditorSynchronized =
     !isLoading &&
-    (isDraft ||
-      (!page && error != null) ||
+    (error != null ||
+      (isDraft && !editorRemountPending) ||
       (page !== undefined &&
         plainBody !== null &&
-        previousPathRef.current === path &&
-        revisionRef.current === page.revision &&
-        editorValueRef.current.length > 0));
+        !editorRemountPending));
 
   return {
     isLoading,
