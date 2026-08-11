@@ -71,6 +71,7 @@ const activeFeedList: FeedList = {
     },
   ],
   manifest_revision: "revision-1",
+  preference_namespace: "fixture-feed-preferences",
 };
 
 beforeEach(() => {
@@ -105,6 +106,7 @@ describe("FeedRiverPanel", () => {
       diagnostics: [],
       groups: [],
       manifest_revision: "empty-revision",
+      preference_namespace: "fixture-feed-preferences",
     };
 
     render(<FeedRiverPanel />);

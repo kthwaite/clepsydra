@@ -113,6 +113,7 @@ const feedList: FeedListWithCounts = {
     },
   ],
   manifest_revision: "revision-1",
+  preference_namespace: "fixture-feed-preferences",
   counts: { unread: 1, all: 1, saved: 0 },
 };
 
@@ -208,6 +209,7 @@ describe("FeedManagement", () => {
       diagnostics: [],
       groups: [],
       manifest_revision: "empty-revision",
+      preference_namespace: "fixture-feed-preferences",
       counts: { unread: 0, all: 0, saved: 0 },
     } satisfies FeedListWithCounts;
 

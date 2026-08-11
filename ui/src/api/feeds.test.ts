@@ -520,6 +520,56 @@ describe("usePatchFeedEntry", () => {
     detail.unmount();
   });
 
+  it("restarts a list mounted during patch so a late stale GET cannot win", async () => {
+    const entry = makeEntry({ read: false });
+    const patched = { ...entry, read: true };
+    const client = freshClient();
+    client.setQueryData(entryDetailKey(entry.id), entry);
+    const patchResponse = deferred<Response>();
+    const staleListResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(staleListResponse.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({ entries: [patched], next_cursor: null }),
+      );
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const listObserver = new InfiniteQueryObserver(
+      client,
+      feedEntriesInfiniteOptions({ view: "all" }),
+    );
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    patchResponse.resolve(jsonResponse(patched));
+    await waitFor(() =>
+      expect(
+        client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
+      ).toBe(true),
+    );
+    staleListResponse.resolve(
+      jsonResponse({ entries: [entry], next_cursor: null }),
+    );
+    await mutation;
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(
+      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
+    ).toBe(true);
+    expect(
+      client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
+    ).toBe(true);
+    unsubscribeList();
+  });
+
   it("promotes detail to successful idle state when patch wins the pending GET race", async () => {
     const entry = makeEntry({ read: false });
     const client = freshClient();

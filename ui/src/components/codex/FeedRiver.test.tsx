@@ -163,6 +163,7 @@ const feeds = {
     },
   ],
   manifest_revision: "revision-1",
+  preference_namespace: "fixture-feed-preferences",
   counts: { unread: 1, all: 1, saved: 0 },
 };
 
