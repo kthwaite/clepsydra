@@ -5,22 +5,37 @@ import { invalidatePageContent, queryKeys } from "./keys";
 
 export type BlockResponse = components["schemas"]["BlockResponse"];
 
-function apiError(error: components["schemas"]["ApiError"], fallback: string) {
-  return new Error(error.error || fallback);
+function apiError(
+  error: components["schemas"]["ApiError"],
+  fallback: string,
+  status?: number,
+) {
+  return Object.assign(new Error(error.error || fallback), { status });
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 404
+  );
 }
 
 export function useBlock(blockId: string) {
   return useQuery({
     queryKey: queryKeys.blocks.detail(blockId),
     queryFn: async () => {
-      const { data, error } = await fetchClient.GET(
+      const { data, error, response } = await fetchClient.GET(
         "/api/vault/blocks/{block_id}",
         { params: { path: { block_id: blockId } } },
       );
-      if (error) throw apiError(error, "Block not found");
+      if (error) throw apiError(error, "Block not found", response.status);
       if (!data) throw new Error("Block response was empty");
       return data;
     },
+    throwOnError: false,
+    retry: (failureCount, error) => !isNotFound(error) && failureCount < 3,
     enabled: !!blockId,
   });
 }
