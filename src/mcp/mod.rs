@@ -8,6 +8,7 @@
 pub mod client;
 mod edit;
 pub mod server;
+pub mod tasking;
 
 use std::net::IpAddr;
 use std::sync::Arc;
