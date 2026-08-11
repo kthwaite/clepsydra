@@ -50,6 +50,24 @@ impl Kind {
         }
     }
 
+    /// The canonical lowercase tag derived from this kind.
+    pub const fn computed_tag(self) -> &'static str {
+        match self {
+            Kind::Note => "note",
+            Kind::Project => "project",
+            Kind::Journal => "journal",
+            Kind::Todo => "todo",
+            Kind::Quote => "quote",
+            Kind::Book => "book",
+            Kind::Capture => "capture",
+            Kind::Code => "code",
+            Kind::Person => "person",
+            Kind::Task => "task",
+            Kind::Cycle => "cycle",
+            Kind::AiConversation => "ai_conversation",
+        }
+    }
+
     /// The UPPERCASE wire/storage token.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -106,6 +124,53 @@ impl Kind {
             _ => None,
         }
     }
+}
+
+/// Whether `tag` is the computed classification for `kind`.
+pub fn is_computed_tag(kind: Kind, tag: &str) -> bool {
+    tag.trim().eq_ignore_ascii_case(kind.computed_tag())
+}
+
+/// Return stored tags that remain user-editable for `kind`.
+///
+/// Redundant computed values and later normalized duplicates are omitted while
+/// first-seen spelling and order are retained.
+pub fn editable_tags<'a>(kind: Kind, stored: &'a [String]) -> Vec<&'a str> {
+    let mut editable: Vec<&'a str> = Vec::with_capacity(stored.len());
+
+    for tag in stored {
+        let normalized = tag.trim();
+        if is_computed_tag(kind, normalized)
+            || editable
+                .iter()
+                .any(|seen| seen.trim().eq_ignore_ascii_case(normalized))
+        {
+            continue;
+        }
+        editable.push(tag.as_str());
+    }
+
+    editable
+}
+
+/// Merge editable stored tags with the canonical computed classification.
+pub fn effective_tags(kind: Kind, stored: &[String]) -> Vec<String> {
+    let mut effective: Vec<String> = Vec::with_capacity(stored.len() + 1);
+
+    for tag in stored {
+        let normalized = tag.trim();
+        if is_computed_tag(kind, normalized)
+            || effective
+                .iter()
+                .any(|seen| seen.trim().eq_ignore_ascii_case(normalized))
+        {
+            continue;
+        }
+        effective.push(tag.clone());
+    }
+
+    effective.push(kind.computed_tag().to_string());
+    effective
 }
 
 impl fmt::Display for Kind {
@@ -232,6 +297,76 @@ mod tests {
             Some(Kind::AiConversation)
         );
         assert_eq!(Kind::from_folder("chats"), Some(Kind::AiConversation));
+    }
+
+    #[test]
+    fn computed_tags_are_canonical_lowercase_kind_tokens() {
+        let expected = [
+            (Kind::Note, "note"),
+            (Kind::Project, "project"),
+            (Kind::Journal, "journal"),
+            (Kind::Todo, "todo"),
+            (Kind::Quote, "quote"),
+            (Kind::Book, "book"),
+            (Kind::Capture, "capture"),
+            (Kind::Code, "code"),
+            (Kind::Person, "person"),
+            (Kind::Task, "task"),
+            (Kind::Cycle, "cycle"),
+            (Kind::AiConversation, "ai_conversation"),
+        ];
+
+        for (kind, tag) in expected {
+            assert_eq!(kind.computed_tag(), tag, "wrong computed tag for {kind:?}");
+        }
+    }
+
+    #[test]
+    fn computed_tag_matching_trims_and_folds_ascii_case() {
+        assert!(is_computed_tag(Kind::Journal, "\t JoUrNaL \n"));
+        assert!(is_computed_tag(Kind::AiConversation, " AI_CONVERSATION "));
+        assert!(!is_computed_tag(Kind::Journal, "journal-entry"));
+        assert!(!is_computed_tag(Kind::Note, " journal "));
+    }
+
+    #[test]
+    fn legacy_computed_tags_and_editable_duplicates_collapse_in_stable_order() {
+        let stored = vec![
+            "Research".to_string(),
+            " JOURNAL ".to_string(),
+            " research ".to_string(),
+            "Rust".to_string(),
+            "journal".to_string(),
+            "RUST ".to_string(),
+            "Drafts".to_string(),
+        ];
+
+        assert_eq!(
+            editable_tags(Kind::Journal, &stored),
+            ["Research", "Rust", "Drafts"]
+        );
+        assert_eq!(
+            effective_tags(Kind::Journal, &stored),
+            ["Research", "Rust", "Drafts", "journal"]
+        );
+    }
+
+    #[test]
+    fn same_spelling_tag_is_ordinary_for_a_different_kind() {
+        let stored = vec![
+            "journal".to_string(),
+            "Research".to_string(),
+            " JOURNAL ".to_string(),
+        ];
+
+        assert_eq!(
+            editable_tags(Kind::Note, &stored),
+            ["journal", "Research"]
+        );
+        assert_eq!(
+            effective_tags(Kind::Note, &stored),
+            ["journal", "Research", "note"]
+        );
     }
 
     #[test]
