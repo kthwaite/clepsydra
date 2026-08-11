@@ -480,6 +480,23 @@ describe("KanbanView — column + button", () => {
 // ── drag-and-drop ─────────────────────────────────────────────────────────────
 
 describe("KanbanView — drag-and-drop", () => {
+  it("writes the task id to dataTransfer on drag start", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const setData = vi.fn();
+    const card = screen.getByTestId("task-card-t1");
+    fireEvent.dragStart(card, {
+      dataTransfer: { setData, effectAllowed: "" },
+    });
+    expect(setData).toHaveBeenCalledWith("text/plain", "t1");
+  });
+
   it("drop fires PATCH to /api/vault/board/tasks/{id} with {status: colId}", async () => {
     const stub = makeStub();
     vi.stubGlobal("fetch", stub);

@@ -62,7 +62,14 @@ export function TaskCard({
       className="group relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
       style={isDragging ? { opacity: 0.35, borderStyle: "dashed" } : undefined}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={(e) => {
+        // Firefox refuses to initiate an HTML5 drag without setData.
+        if (e.dataTransfer) {
+          e.dataTransfer.setData("text/plain", t.id);
+          e.dataTransfer.effectAllowed = "move";
+        }
+        onDragStart(e);
+      }}
       onDragEnd={onDragEnd}
       onClick={onClick}
       data-testid={`task-card-${t.id}`}
