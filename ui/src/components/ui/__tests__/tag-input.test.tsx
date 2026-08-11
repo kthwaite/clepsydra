@@ -514,6 +514,41 @@ describe("TagInput", () => {
     expect(onChange).toHaveBeenCalledWith(["rust", "react"]);
   });
 
+  it("normalizes one display prefix on keyboard and blur commits", async () => {
+    const user = userEvent.setup();
+    const keyboardChange = vi.fn();
+    const blurChange = vi.fn();
+    render(
+      <>
+        <TagInput
+          label="Keyboard Tags"
+          values={[]}
+          valuePrefix="#"
+          onChange={keyboardChange}
+        />
+        <TagInput
+          label="Blur Tags"
+          values={[]}
+          valuePrefix="#"
+          onChange={blurChange}
+        />
+      </>,
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Add keyboard tags" }),
+      "##rust{Enter}",
+    );
+    expect(keyboardChange).toHaveBeenCalledWith(["#rust"]);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Add blur tags" }),
+      "##rust",
+    );
+    await user.tab();
+    expect(blurChange).toHaveBeenCalledWith(["#rust"]);
+  });
+
   it("swallows Escape while suggestions are open, then bubbles it", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

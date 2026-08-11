@@ -75,7 +75,7 @@ export function TagInput({
 
   const addValue = useCallback(
     (val: string) => {
-      const trimmed = stripValuePrefix(val.trim());
+      const trimmed = val.trim();
       if (
         trimmed &&
         !values.includes(trimmed) &&
@@ -88,7 +88,7 @@ export function TagInput({
       setNavigated(false);
       setDismissed(false);
     },
-    [values, readOnlyValues, onChange, stripValuePrefix],
+    [values, readOnlyValues, onChange],
   );
 
   const handleRemove = useCallback(
@@ -242,7 +242,7 @@ export function TagInput({
         }}
         onKeyDown={handleKeyDown}
         onBlur={() => {
-          if (inputValue.trim()) addValue(inputValue);
+          if (inputValue.trim()) addValue(query);
           onBlur?.();
         }}
         placeholder={
