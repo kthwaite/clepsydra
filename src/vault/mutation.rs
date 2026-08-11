@@ -292,19 +292,20 @@ impl MutationPlan {
                             .ok_or_else(|| IndexError::Other("rename missing destination".into()))?,
                     )
                     .map_err(vp_err)?;
-                    let represented = primary_intents.iter().any(|intent| {
-                        matches!(
-                            intent,
-                            BatchPathIntent::Move {
-                                source: planned_source,
-                                ..
-                            } if planned_source == &source
-                                || planned_source
-                                    .as_str()
-                                    .strip_prefix(source.as_str())
-                                    .is_some_and(|suffix| suffix.starts_with('/'))
-                        )
-                    });
+                    let represented = remove_directories.contains(&source)
+                        || primary_intents.iter().any(|intent| {
+                            matches!(
+                                intent,
+                                BatchPathIntent::Move {
+                                    source: planned_source,
+                                    ..
+                                } if planned_source == &source
+                                    || planned_source
+                                        .as_str()
+                                        .strip_prefix(source.as_str())
+                                        .is_some_and(|suffix| suffix.starts_with('/'))
+                            )
+                        });
                     if !represented {
                         let source_absolute = vault.resolve(&source);
                         if source_absolute.is_dir() {

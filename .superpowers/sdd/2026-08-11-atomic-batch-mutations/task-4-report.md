@@ -105,3 +105,18 @@ No known functional concerns. Folder batches deliberately reject non-empty sourc
 - `cargo test --test mutation_test -- --nocapture`: 46 passed.
 - `cargo test --lib vault::batch_mutation::tests -- --nocapture`: 29 passed, 832 filtered out.
 - `cargo test --lib rolls_back_ -- --nocapture`: 2 passed, 859 filtered out.
+
+## Review round 3 fix
+
+### RED evidence
+
+- `cargo test --test mutation_test empty_folder_plan_does_not_adopt_a_late_file_during_conversion -- --nocapture` failed because conversion rewalked an empty planned folder and created a `Move` intent for `notes/late.md`, despite the planner snapshot having no file, index event, or move-hook metadata for it.
+
+### Fix
+
+- Folder planning already records its exact source-directory inventory in private removal metadata. `into_batch_command` now treats a rename whose source is in that planner-owned metadata as represented even when the folder was empty and therefore produced no primary file intents. Manually assembled public folder renames can still use the conversion fallback, while planner-produced folders are never rewalked.
+
+### Final GREEN evidence
+
+- `cargo test --test mutation_test empty_folder_plan_does_not_adopt_a_late_file_during_conversion -- --nocapture`: 1 passed, 45 filtered out.
+- `cargo test --test mutation_test -- --nocapture`: 47 passed.

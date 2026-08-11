@@ -399,6 +399,39 @@ fn folder_plan_batch_uses_the_planner_inventory_without_rewalking() {
 }
 
 #[test]
+fn empty_folder_plan_does_not_adopt_a_late_file_during_conversion() {
+    let (_tmp, vault) = setup_vault(&[]);
+    fs::create_dir(vault.root().join("notes")).unwrap();
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MoveFolder {
+            source: "notes".to_string(),
+            destination: "archive/notes".to_string(),
+        })
+        .unwrap();
+    fs::write(vault.root().join("notes/late.md"), "late arrival").unwrap();
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert!(command.intents.is_empty());
+    assert!(command.index_events.is_empty());
+    assert!(command.moved_pages.is_empty());
+    assert_eq!(
+        command
+            .affected_paths()
+            .into_iter()
+            .map(|path| path.as_str().to_string())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "archive".to_string(),
+            "archive/notes".to_string(),
+            "notes".to_string(),
+        ])
+    );
+}
+
+#[test]
 fn explicit_create_dir_plan_becomes_preparation_metadata() {
     let (_tmp, vault) = setup_vault(&[]);
     let mut plan = MutationPlan::empty();
