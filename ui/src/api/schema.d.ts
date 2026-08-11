@@ -1530,6 +1530,12 @@ export interface components {
             /** Format: int64 */
             size: number;
         };
+        AttachmentUploadForm: {
+            /** Format: binary */
+            file: string;
+            /** @enum {boolean} */
+            plaintext_acknowledged: true;
+        };
         BacklinkEntry: {
             context: string;
             kind: string;
@@ -3514,7 +3520,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["AttachmentUploadForm"];
             };
         };
         responses: {

@@ -43,7 +43,7 @@ describe("attachment helpers", () => {
 });
 
 describe("useUploadAttachment", () => {
-  it("sends the selected file as multipart data to its encoded path", async () => {
+  it("sends multipart acknowledgement with the selected file", async () => {
     const post = vi.spyOn(fetchClient, "POST").mockResolvedValue({
       data: { name: "chart.png", path: "chart.png", size: 4 },
       error: undefined,
@@ -71,5 +71,8 @@ describe("useUploadAttachment", () => {
     expect(request?.params?.path).toEqual({ path: "chart.png" });
     expect(request?.body).toBeInstanceOf(FormData);
     expect((request?.body as unknown as FormData).get("file")).toBe(file);
+    expect(
+      (request?.body as unknown as FormData).get("plaintext_acknowledged"),
+    ).toBe("true");
   });
 });
