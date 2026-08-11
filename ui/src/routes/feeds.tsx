@@ -5,9 +5,12 @@ import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
 import { FeedManagement } from "#/components/codex/FeedManagement";
 import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
+import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 
 type FeedsSearch = FeedRiverFilters & {
   manage: boolean;
+  entry?: number;
 };
 
 export const Route = createFileRoute("/feeds")({
@@ -17,6 +20,12 @@ export const Route = createFileRoute("/feeds")({
         ? search.feed
         : typeof search.feed === "string"
           ? Number(search.feed)
+          : undefined;
+    const parsedEntry =
+      typeof search.entry === "number"
+        ? search.entry
+        : typeof search.entry === "string"
+          ? Number(search.entry)
           : undefined;
     return {
       view:
@@ -34,6 +43,12 @@ export const Route = createFileRoute("/feeds")({
       tag:
         typeof search.tag === "string" && search.tag ? search.tag : undefined,
       manage: search.manage === true || search.manage === "true",
+      entry:
+        parsedEntry !== undefined &&
+        Number.isSafeInteger(parsedEntry) &&
+        parsedEntry > 0
+          ? parsedEntry
+          : undefined,
     };
   },
   component: FeedsPage,
@@ -43,6 +58,7 @@ function FeedsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/feeds" });
   const feedsQuery = useFeeds();
+  const isMobile = useMobileLayout();
   const [tagDraft, setTagDraft] = useState(search.tag ?? "");
   useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
   const filters: FeedRiverFilters = {
@@ -53,13 +69,20 @@ function FeedsPage() {
   };
   const groups = feedsQuery.data?.groups ?? [];
   const feeds = groups.flatMap((group) => group.feeds);
+  const selectedFeed =
+    search.feed === undefined
+      ? undefined
+      : feeds.find((feed) => feed.id === search.feed);
 
-  const updateSearch = (patch: Partial<FeedsSearch>) => {
-    void navigate({ search: (current) => ({ ...current, ...patch }) });
+  const updateSearch = (patch: Partial<FeedsSearch>, replace = false) => {
+    void navigate({
+      replace,
+      search: (current) => ({ ...current, ...patch }),
+    });
   };
 
   return (
-    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:px-4 md:py-4">
+    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-dvh md:grid-rows-[auto_auto_minmax(0,1fr)] md:overflow-hidden md:px-4 md:py-4">
       <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
         <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
           <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
@@ -198,13 +221,27 @@ function FeedsPage() {
             </div>
           </Card>
 
-          <Card
-            label="Feed river"
-            caption={search.view.toUpperCase()}
-            pip="cool"
-          >
-            <FeedRiver filters={filters} />
-          </Card>
+          <div className="grid min-h-0 gap-3.5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <section
+              aria-label="Entry list"
+              hidden={isMobile && search.entry !== undefined}
+              className="min-h-0 overflow-y-auto border border-rule bg-paper-2 p-3.5"
+            >
+              <FeedRiver
+                filters={filters}
+                selectedEntryId={search.entry}
+                onSelectEntry={(entry) => updateSearch({ entry })}
+              />
+            </section>
+            <div hidden={isMobile && search.entry === undefined} className="min-h-0">
+              <FeedReaderPane
+                selectedEntryId={search.entry}
+                feedName={selectedFeed?.title_override ?? selectedFeed?.title}
+                onBack={() => updateSearch({ entry: undefined })}
+                onMissing={() => updateSearch({ entry: undefined }, true)}
+              />
+            </div>
+          </div>
         </>
       )}
     </div>

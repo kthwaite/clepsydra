@@ -10,6 +10,10 @@ import {
   usePatchFeedEntry,
 } from "#/api/feeds";
 import { feedEntryBoundary, formatFeedDay, formatFeedTime } from "#/lib/time";
+import {
+  normalizeFeedEntryTags,
+  safeFeedEntryUrl,
+} from "./FeedReaderPane";
 
 export type FeedRiverFilters = {
   view: EntryView;
@@ -21,9 +25,13 @@ export type FeedRiverFilters = {
 export function FeedRiver({
   filters,
   compact = false,
+  selectedEntryId,
+  onSelectEntry,
 }: {
   filters: FeedRiverFilters;
   compact?: boolean;
+  selectedEntryId?: number;
+  onSelectEntry?: (id: number) => void;
 }) {
   const entriesQuery = useInfiniteQuery(feedEntriesInfiniteOptions(filters));
   const feedsQuery = useFeeds();
@@ -118,7 +126,8 @@ export function FeedRiver({
     }
     return names;
   }, [feedsQuery.data]);
-  const days = useMemo(() => groupByDay(visibleEntries), [visibleEntries]);
+  const riverEntries = compact ? visibleEntries : entries;
+  const days = useMemo(() => groupByDay(riverEntries), [riverEntries]);
 
   if (entriesQuery.isPending || entriesQuery.isLoading) {
     return (
@@ -135,7 +144,11 @@ export function FeedRiver({
   return (
     <section
       aria-label="Feed river"
-      className={compact ? "max-h-[36rem] overflow-y-auto" : undefined}
+      className={
+        compact
+          ? "max-h-[36rem] overflow-y-auto"
+          : "h-full min-h-0 overflow-y-auto"
+      }
     >
       {!compact && feedsQuery.isError ? (
         <div
@@ -182,7 +195,7 @@ export function FeedRiver({
         </div>
       ) : null}
 
-      {!entriesQuery.isError && visibleEntries.length === 0 ? (
+      {!entriesQuery.isError && riverEntries.length === 0 ? (
         <div className="border border-dashed border-rule px-4 py-8 text-center">
           <p className="font-sans text-[14px] font-semibold text-ink">
             {emptyTitle(filters.view)}
@@ -191,7 +204,7 @@ export function FeedRiver({
         </div>
       ) : null}
 
-      {filters.view === "unread" && visibleEntries.length > 0 ? (
+      {filters.view === "unread" && riverEntries.length > 0 ? (
         <div className="mb-3 flex justify-end">
           <Button
             className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -232,14 +245,13 @@ export function FeedRiver({
               />
             </div>
             <div className="border-t border-rule">
-              {dayEntries.map((entry) => {
-                const isExpanded = activeExpandedEntry?.id === entry.id;
-                return (
+              {dayEntries.map((entry) =>
+                compact ? (
                   <EntryDisclosure
                     key={entry.id}
                     entry={entry}
                     feedName={feedNames.get(entry.feed_id)}
-                    isExpanded={isExpanded}
+                    isExpanded={activeExpandedEntry?.id === entry.id}
                     isEditingTags={tagEditorId === entry.id}
                     isPatchPending={patchEntry.isPending}
                     onExpandedChange={(expanded) => {
@@ -306,14 +318,32 @@ export function FeedRiver({
                       }
                     }}
                   />
-                );
-              })}
+                ) : (
+                  <EntrySelectionRow
+                    key={entry.id}
+                    entry={entry}
+                    feedName={feedNames.get(entry.feed_id)}
+                    isSelected={selectedEntryId === entry.id}
+                    onSelect={() => {
+                      onSelectEntry?.(entry.id);
+                      if (!entry.read) {
+                        patchEntry.reset();
+                        void patchEntry
+                          .mutateAsync({ id: entry.id, read: true })
+                          .catch(() => {
+                            // The shared optimistic mutation restores the unread row on failure.
+                          });
+                      }
+                    }}
+                  />
+                ),
+              )}
             </div>
           </section>
         ))}
       </div>
 
-      {compact && visibleEntries.length > 0 ? (
+      {compact && riverEntries.length > 0 ? (
         <a
           className="cl-btn cl-btn-hot mt-3 w-full justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
           href={fullReaderHref(filters)}
@@ -330,6 +360,66 @@ export function FeedRiver({
         </Button>
       ) : null}
     </section>
+  );
+}
+
+function EntrySelectionRow({
+  entry,
+  feedName,
+  isSelected,
+  onSelect,
+}: {
+  entry: FeedEntry;
+  feedName?: string;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const titleId = `feed-entry-title-${entry.id}`;
+  return (
+    <article
+      aria-current={isSelected ? "true" : undefined}
+      aria-labelledby={titleId}
+      className={`min-w-0 border-b border-rule ${isSelected ? "bg-highlight" : "bg-paper-2"}`}
+    >
+      <h3 id={titleId} className="m-0">
+        <Button
+          className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 text-left outline-none hover:bg-paper-edge focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
+          onPress={onSelect}
+        >
+          <span
+            aria-hidden="true"
+            className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
+          />
+          <span className="sr-only">
+            {entry.read ? "Read entry" : "Unread entry"}
+          </span>
+          <span className="min-w-0">
+            <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
+              {entry.title}
+            </span>
+            <span className="cl-mono mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+              {feedName ? <span className="text-ink-2">{feedName}</span> : null}
+              {entry.author ? <span>{entry.author}</span> : null}
+              <time dateTime={entry.published_at ?? entry.fetched_at}>
+                {formatFeedTime(entry.published_at ?? entry.fetched_at)}
+              </time>
+              {entry.bookmarked ? (
+                <span className="text-accent">Saved</span>
+              ) : null}
+              {entry.tags.map((tag) => (
+                <span key={tag}>#{tag}</span>
+              ))}
+            </span>
+          </span>
+          <span
+            aria-hidden="true"
+            className={`cl-mono mt-0.5 text-[12px] ${isSelected ? "text-accent" : "text-ink-mute"}`}
+          >
+            →
+          </span>
+        </Button>
+      </h3>
+    </article>
   );
 }
 
@@ -359,7 +449,7 @@ function EntryDisclosure({
   onSaveTags: (tags: string[]) => Promise<void>;
 }) {
   const titleId = `feed-entry-title-${entry.id}`;
-  const originalUrl = safeHostedUrl(entry.url);
+  const originalUrl = safeFeedEntryUrl(entry.url);
   return (
     <article
       aria-labelledby={titleId}
@@ -489,7 +579,7 @@ function TagEditor({
       className="mt-3 grid gap-2 border-l-2 border-accent pl-3 sm:grid-cols-[minmax(0,1fr)_auto]"
       onSubmit={(event) => {
         event.preventDefault();
-        void onSave(normalizeTags(value));
+        void onSave(normalizeFeedEntryTags(value));
       }}
     >
       <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
@@ -544,28 +634,6 @@ function groupByDay(entries: FeedEntry[]) {
   }));
 }
 
-function safeHostedUrl(value: string | null | undefined): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeTags(value: string) {
-  return [
-    ...new Set(
-      value
-        .split(",")
-        .map((tag) => tag.trim().replace(/^#+/, ""))
-        .filter(Boolean),
-    ),
-  ];
-}
 
 function fullReaderHref(filters: FeedRiverFilters) {
   const params = new URLSearchParams({ view: filters.view });
