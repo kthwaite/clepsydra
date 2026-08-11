@@ -1482,6 +1482,7 @@ fn collect_missing_assignment_directories(
 fn plan_bulk_assignment(
     state: &AppState,
     body: &BulkAssignRequest,
+    paths: &[VaultPath],
     indexed_paths: &BTreeSet<String>,
     now: chrono::DateTime<Utc>,
 ) -> Result<BatchMutationCommand, ApiError> {
@@ -1499,28 +1500,19 @@ fn plan_bulk_assignment(
         validate_project_slug(project).map_err(ApiError::bad_request)?;
     }
 
-    let mut seen_sources = BTreeSet::new();
+    let source_paths = paths
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<BTreeSet<_>>();
     let mut final_paths = BTreeSet::new();
-    let mut source_paths = BTreeSet::new();
-    for source in &body.paths {
-        let path = crate::api::error::parse_request_path(source, "invalid path")?;
-        if !seen_sources.insert(path.as_str().to_string()) {
-            return Err(ApiError::bad_request(format!(
-                "duplicate assignment path: {}",
-                path.as_str()
-            )));
-        }
-        source_paths.insert(path.as_str().to_string());
-    }
-
-    let mut intents = Vec::with_capacity(body.paths.len() * 2);
+    let mut intents = Vec::with_capacity(paths.len() * 2);
     let mut directories = BTreeSet::new();
     let mut upserted = BTreeSet::new();
     let mut removed = BTreeSet::new();
     let mut moved_pages = Vec::new();
 
-    for source in &body.paths {
-        let path = crate::api::error::parse_request_path(source, "invalid path")?;
+    for path in paths {
+        let path = path.clone();
         let (expected, mut meta, page_body) =
             read_assignment_page_once(state, &path, indexed_paths)?;
         if let Some(kind) = assigned_kind {
@@ -1634,7 +1626,22 @@ pub async fn assign_bulk(
         }));
     }
 
-    let requested_paths = body.paths.clone();
+    let mut seen_paths = BTreeSet::new();
+    let mut normalized_paths = Vec::with_capacity(body.paths.len());
+    for requested in &body.paths {
+        let path = crate::api::error::parse_request_path(requested, "invalid path")?;
+        if !seen_paths.insert(path.as_str().to_string()) {
+            return Err(ApiError::bad_request(format!(
+                "duplicate assignment path: {}",
+                path.as_str()
+            )));
+        }
+        normalized_paths.push(path);
+    }
+    let requested_paths = normalized_paths
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<Vec<_>>();
     let indexed_paths = state
         .index
         .with_index(move |index, _vault| {
@@ -1654,17 +1661,25 @@ pub async fn assign_bulk(
         .map_err(|error| ApiError::internal(error.to_string()))?;
 
     if body.kind.is_none() && body.project.is_none() && !body.clear_project {
-        for source in &body.paths {
-            let path = crate::api::error::parse_request_path(source, "invalid path")?;
-            read_assignment_page_once(&state, &path, &indexed_paths)?;
+        for path in &normalized_paths {
+            read_assignment_page_once(&state, path, &indexed_paths)?;
         }
         return Ok(Json(BulkAssignResponse {
             moved: Vec::new(),
-            unchanged: body.paths,
+            unchanged: normalized_paths
+                .into_iter()
+                .map(|path| path.as_str().to_string())
+                .collect(),
         }));
     }
 
-    let command = plan_bulk_assignment(&state, &body, &indexed_paths, state.clock.now())?;
+    let command = plan_bulk_assignment(
+        &state,
+        &body,
+        &normalized_paths,
+        &indexed_paths,
+        state.clock.now(),
+    )?;
     let moved = command
         .moved_pages
         .iter()
@@ -1679,11 +1694,10 @@ pub async fn assign_bulk(
         .iter()
         .map(|(source, _)| source.as_str())
         .collect::<BTreeSet<_>>();
-    let unchanged = body
-        .paths
+    let unchanged = normalized_paths
         .iter()
         .filter(|path| !moved_sources.contains(path.as_str()))
-        .cloned()
+        .map(|path| path.as_str().to_string())
         .collect();
 
     state

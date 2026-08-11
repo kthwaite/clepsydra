@@ -56,3 +56,23 @@ This report is part of commit `fix(api): commit cycle and bulk page changes atom
 ## Concerns
 
 No known functional concerns. The deterministic publication setter is intentionally `#[doc(hidden)]`, defaults to no injection, consumes its pending value once, and is used only by integration coverage. Existing batch-module dead-code warnings remain unchanged in scope.
+
+## Review fix: canonical bulk-assignment paths
+
+### RED evidence
+
+- `cargo test --test api_test bulk_assign_rolls_back -- --exact --nocapture` failed with `404 Not Found` instead of the required stale `409 Conflict` when the deleted indexed second page was requested as the normalizing alias `notes//second.md`.
+- `cargo test --test api_test bulk_assign_reports_canonical_paths_for_normalizing_aliases -- --exact --nocapture` failed because a successful aliased relocation returned `notes//aliased.md` in `unchanged` while also returning the canonical source in `moved`.
+
+### Fix
+
+- `assign_bulk` now parses every requested path exactly once before index lookup or planning.
+- Canonical duplicates are rejected at that normalization boundary.
+- Indexed stale detection, batch planning, moved/unchanged partitioning, and response paths all consume the same canonical `VaultPath` values.
+
+### GREEN evidence
+
+- `cargo test --test api_test bulk_assign_rolls_back -- --exact --nocapture`: 1 passed, 120 filtered out.
+- `cargo test --test api_test bulk_assign_reports_canonical_paths_for_normalizing_aliases -- --exact --nocapture`: 1 passed, 120 filtered out.
+- `cargo test --lib api::pages::tests::bulk_assign -- --nocapture`: 3 passed, 859 filtered out.
+- `cargo test --test api_test -- --nocapture`: 121 passed.

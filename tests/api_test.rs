@@ -2577,7 +2577,7 @@ Second body.
     let response = server
         .post("/api/vault/pages-assign-bulk")
         .json(&serde_json::json!({
-            "paths": ["notes/first.md", "notes/second.md"],
+            "paths": ["notes/first.md", "notes//second.md"],
             "kind": "QUOTE"
         }))
         .await;
@@ -2591,6 +2591,39 @@ Second body.
     assert!(
         !vault_root.join("quotes/first.md").exists(),
         "the first page must not be relocated"
+    );
+}
+
+#[tokio::test]
+async fn bulk_assign_reports_canonical_paths_for_normalizing_aliases() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000222
+title: Aliased
+type: NOTE
+---
+Aliased body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/aliased.md", source)]);
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes//aliased.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["moved"],
+        serde_json::json!([["notes/aliased.md", "quotes/aliased.md"]])
+    );
+    assert_eq!(body["unchanged"], serde_json::json!([]));
+    assert!(
+        tmp.path().join("vault/quotes/aliased.md").exists(),
+        "the canonical destination must be published"
     );
 }
 
