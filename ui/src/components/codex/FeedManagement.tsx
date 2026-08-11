@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "react-aria-components";
 import { toast } from "sonner";
 import {
@@ -14,6 +14,10 @@ import {
 import { formatRelativeTime } from "#/lib/time";
 import { Card } from "./Card";
 import { CodexModalShell } from "./CodexModalShell";
+import {
+  canonicalFeedGroups,
+  FeedGroupComboBox,
+} from "./FeedGroupComboBox";
 
 export function FeedManagement() {
   const feedsQuery = useFeeds();
@@ -25,6 +29,13 @@ export function FeedManagement() {
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<Feed | null>(null);
   const surfaceError = refreshFeeds.error ?? importOpml.error;
+  const feedGroups = useMemo(
+    () =>
+      canonicalFeedGroups(
+        feedsQuery.data?.groups.map((group) => group.name) ?? [],
+      ),
+    [feedsQuery.data?.groups],
+  );
 
   return (
     <div className="space-y-3.5">
@@ -36,6 +47,7 @@ export function FeedManagement() {
       ) : null}
       <Card label="Subscribe" caption="MANIFEST · feeds.md" pip="cool">
         <SubscribeForm
+          groups={feedGroups}
           error={subscribeFeed.error}
           isPending={subscribeFeed.isPending}
           onSubmit={async (values) => {
@@ -137,6 +149,7 @@ export function FeedManagement() {
       {editingFeed ? (
         <EditFeedDialog
           feed={editingFeed}
+          groups={feedGroups}
           error={updateFeed.error}
           isPending={updateFeed.isPending}
           onDismiss={() => setEditingFeed(null)}
@@ -174,10 +187,12 @@ export function FeedManagement() {
 }
 
 function SubscribeForm({
+  groups,
   error,
   isPending,
   onSubmit,
 }: {
+  groups: string[];
   error: unknown;
   isPending: boolean;
   onSubmit: (values: { url: string; group: string | null }) => Promise<void>;
@@ -215,12 +230,12 @@ function SubscribeForm({
       </label>
       <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
         Group
-        <input
-          disabled={isPending}
+        <FeedGroupComboBox
           value={group}
-          onChange={(event) => setGroup(event.target.value)}
-          placeholder="Optional"
-          className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+          groups={groups}
+          ariaLabel="Group"
+          disabled={isPending}
+          onChange={setGroup}
         />
       </label>
       {error ? (
@@ -408,11 +423,13 @@ function OpmlActions({
 
 function EditFeedDialog({
   feed,
+  groups,
   isPending,
   error,
   onDismiss,
   onSave,
 }: {
+  groups: string[];
   feed: Feed;
   error: unknown;
   isPending: boolean;
@@ -448,12 +465,16 @@ function EditFeedDialog({
           isDisabled={isPending}
           onChange={setNextTitle}
         />
-        <DialogField
-          label="Group"
-          value={nextGroup}
-          isDisabled={isPending}
-          onChange={setNextGroup}
-        />
+        <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          Group
+          <FeedGroupComboBox
+            value={nextGroup}
+            groups={groups}
+            ariaLabel="Group"
+            disabled={isPending}
+            onChange={setNextGroup}
+          />
+        </label>
         {error ? (
           <MutationAlert
             error={error}
