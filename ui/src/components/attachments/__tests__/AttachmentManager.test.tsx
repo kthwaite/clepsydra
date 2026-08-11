@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AttachmentManager } from "#/components/attachments/AttachmentManager";
@@ -41,6 +48,19 @@ function chooseFile(file: File) {
   });
 }
 
+interface PromiseConstructorWithResolvers extends PromiseConstructor {
+  withResolvers<Value>(): {
+    promise: Promise<Value>;
+    resolve: (value: Value) => void;
+    reject: (reason?: unknown) => void;
+  };
+}
+
+// Bun supports this runtime API; the app's current TypeScript lib predates it.
+const promiseWithResolvers =
+  Promise as unknown as PromiseConstructorWithResolvers;
+
+
 describe("AttachmentManager", () => {
   it("shows honest loading and empty states", () => {
     mocks.useAttachments.mockReturnValueOnce({
@@ -55,7 +75,7 @@ describe("AttachmentManager", () => {
     expect(screen.getByText(/no attachments/i)).toBeVisible();
   });
 
-  it("discloses and immediately uploads an unprotected attachment", async () => {
+  it("explicitly discloses and immediately uploads an unprotected attachment without inserting", async () => {
     const onInsertMarkdown = vi.fn();
     const uploaded = { name: "diagram.png", path: "diagram.png", size: 5 };
     mocks.upload.mockResolvedValueOnce(uploaded);
@@ -65,15 +85,16 @@ describe("AttachmentManager", () => {
     chooseFile(file);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/uploads are stored as plaintext/i),
-    ).toBeVisible();
+    const disclosure = screen.getByText(
+      /attachment bytes, filename, path, MIME type, and size are stored as plaintext and are not encrypted/i,
+    );
+    expect(disclosure).toBeVisible();
+    expect(disclosure.parentElement).toContainElement(
+      screen.getByLabelText("Upload attachment"),
+    );
     expect(mocks.upload).toHaveBeenCalledWith({ file });
-    await waitFor(() => {
-      expect(onInsertMarkdown).toHaveBeenCalledWith(
-        "![diagram.png](/api/vault/attachments/diagram.png)",
-      );
-    });
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledOnce());
+    expect(onInsertMarkdown).not.toHaveBeenCalled();
   });
 
   it("cancels a protected upload without uploading or inserting", async () => {
@@ -99,14 +120,13 @@ describe("AttachmentManager", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("uploads a protected attachment then inserts it only after success", async () => {
+  it("guards a protected upload in flight and inserts exactly once after success", async () => {
     const user = userEvent.setup();
     const onInsertMarkdown = vi.fn();
     const uploaded = { name: "diagram.png", path: "diagram.png", size: 5 };
-    mocks.upload.mockImplementationOnce(async () => {
-      expect(onInsertMarkdown).not.toHaveBeenCalled();
-      return uploaded;
-    });
+    const uploadResult =
+      promiseWithResolvers.withResolvers<typeof uploaded>();
+    mocks.upload.mockReturnValueOnce(uploadResult.promise);
     render(
       <AttachmentManager
         protectedPage
@@ -116,43 +136,72 @@ describe("AttachmentManager", () => {
     const file = new File(["image"], "diagram.png", { type: "image/png" });
 
     chooseFile(file);
-    expect(mocks.upload).not.toHaveBeenCalled();
-
-    await user.click(
-      screen.getByRole("button", { name: "I understand, upload" }),
-    );
-    expect(mocks.upload).toHaveBeenCalledWith({ file });
-    await waitFor(() => {
-      expect(onInsertMarkdown).toHaveBeenCalledWith(
-        "![diagram.png](/api/vault/attachments/diagram.png)",
-      );
+    const acknowledge = screen.getByRole("button", {
+      name: "I understand, upload",
     });
+    await user.click(acknowledge);
+
+    expect(mocks.upload).toHaveBeenCalledOnce();
+    expect(mocks.upload).toHaveBeenCalledWith({ file });
+    expect(onInsertMarkdown).not.toHaveBeenCalled();
+    expect(acknowledge).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    fireEvent.click(acknowledge);
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(mocks.upload).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog")).toBeVisible();
+
+    await act(async () => {
+      uploadResult.resolve(uploaded);
+      await uploadResult.promise;
+    });
+
+    expect(onInsertMarkdown).toHaveBeenCalledOnce();
+    expect(onInsertMarkdown).toHaveBeenCalledWith(
+      "![diagram.png](/api/vault/attachments/diagram.png)",
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("does not insert when a confirmed protected upload fails", async () => {
+  it("keeps a failed protected upload open with its error and retries the same file", async () => {
     const user = userEvent.setup();
     const onInsertMarkdown = vi.fn();
-    mocks.upload.mockRejectedValueOnce(new Error("upload unavailable"));
+    const uploaded = { name: "diagram.png", path: "diagram.png", size: 5 };
+    mocks.upload
+      .mockRejectedValueOnce(new Error("upload unavailable"))
+      .mockResolvedValueOnce(uploaded);
     render(
       <AttachmentManager
         protectedPage
         onInsertMarkdown={onInsertMarkdown}
       />,
     );
+    const file = new File(["image"], "diagram.png", { type: "image/png" });
 
-    chooseFile(
-      new File(["image"], "diagram.png", { type: "image/png" }),
-    );
+    chooseFile(file);
     await user.click(
       screen.getByRole("button", { name: "I understand, upload" }),
     );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const dialog = await screen.findByRole("dialog", {
+      name: "Store plaintext attachment?",
+    });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
       "upload unavailable",
     );
+    expect(screen.getByText("Filename: diagram.png")).toBeVisible();
+    expect(mocks.upload).toHaveBeenCalledOnce();
     expect(onInsertMarkdown).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "I understand, upload" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(mocks.upload).toHaveBeenCalledTimes(2);
+    expect(mocks.upload).toHaveBeenNthCalledWith(2, { file });
+    expect(onInsertMarkdown).toHaveBeenCalledOnce();
   });
 
   it("inserts attachment Markdown through the page callback", async () => {

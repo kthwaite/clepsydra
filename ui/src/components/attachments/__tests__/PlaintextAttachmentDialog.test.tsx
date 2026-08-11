@@ -1,11 +1,35 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
   type PendingAttachmentAction,
   PlaintextAttachmentDialog,
 } from "#/components/attachments/PlaintextAttachmentDialog";
 
+
+const uploadAction: PendingAttachmentAction = {
+  kind: "upload",
+  file: new File(["image"], "diagram.png", { type: "image/png" }),
+};
+
+function DialogHarness() {
+  const [action, setAction] = useState<PendingAttachmentAction | null>(null);
+  return (
+    <>
+      <button type="button" onClick={() => setAction(uploadAction)}>
+        Open upload confirmation
+      </button>
+      <PlaintextAttachmentDialog
+        action={action}
+        error={null}
+        isPending={false}
+        onCancel={() => setAction(null)}
+        onAcknowledge={() => setAction(null)}
+      />
+    </>
+  );
+}
 describe("PlaintextAttachmentDialog", () => {
   it("names the plaintext metadata before acknowledging an upload", async () => {
     const user = userEvent.setup();
@@ -86,5 +110,57 @@ describe("PlaintextAttachmentDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("moves focus into the dialog, restores it, and closes by Escape or the close button", async () => {
+    const user = userEvent.setup();
+    render(<DialogHarness />);
+    const trigger = screen.getByRole("button", {
+      name: "Open upload confirmation",
+    });
+
+    await user.click(trigger);
+    const firstDialog = screen.getByRole("dialog");
+    await waitFor(() => {
+      expect(firstDialog.contains(document.activeElement)).toBe(true);
+    });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    await user.click(trigger);
+    const secondDialog = screen.getByRole("dialog");
+    await waitFor(() => {
+      expect(secondDialog.contains(document.activeElement)).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("prevents acknowledgement and every dismissal while an action is pending", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const onAcknowledge = vi.fn();
+    render(
+      <PlaintextAttachmentDialog
+        action={uploadAction}
+        error={null}
+        isPending
+        onCancel={onCancel}
+        onAcknowledge={onAcknowledge}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "I understand, upload" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onAcknowledge).not.toHaveBeenCalled();
   });
 });

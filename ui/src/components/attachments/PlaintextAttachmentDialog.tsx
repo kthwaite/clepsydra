@@ -8,6 +8,8 @@ export type PendingAttachmentAction =
 
 export interface PlaintextAttachmentDialogProps {
   action: PendingAttachmentAction | null;
+  error?: string | null;
+  isPending?: boolean;
   onCancel: () => void;
   onAcknowledge: (action: PendingAttachmentAction) => void;
 }
@@ -20,6 +22,8 @@ function formatSize(bytes: number): string {
 
 export function PlaintextAttachmentDialog({
   action,
+  error = null,
+  isPending = false,
   onCancel,
   onAcknowledge,
 }: PlaintextAttachmentDialogProps) {
@@ -33,18 +37,24 @@ export function PlaintextAttachmentDialog({
     <Dialog
       isOpen={action !== null}
       onOpenChange={(open) => {
-        if (!open) onCancel();
+        if (!open && !isPending) onCancel();
       }}
       title={title}
       description="This acknowledgement applies only to this attachment action."
       size="md"
+      isDismissable={!isPending}
       footer={
         <>
-          <Button variant="secondary" onPress={onCancel}>
+          <Button
+            variant="secondary"
+            onPress={onCancel}
+            isDisabled={isPending}
+          >
             Cancel
           </Button>
           <Button
             variant="primary"
+            isDisabled={isPending}
             onPress={() => {
               if (action) onAcknowledge(action);
             }}
@@ -83,6 +93,11 @@ export function PlaintextAttachmentDialog({
               Uploading stores this file outside the protected note body.
             </p>
           )}
+          {error ? (
+            <p role="alert" className="text-danger">
+              {error}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </Dialog>

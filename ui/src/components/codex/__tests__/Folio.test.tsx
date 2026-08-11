@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as AttachmentsApi from "#/api/attachments";
 import type { TagCount } from "#/api/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
@@ -8,15 +9,20 @@ import type { TagCount } from "#/api/types";
 // early-return branch renders FolioNotFound. Mock the editor + data hooks so
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
 const {
+  attachmentRemoveMock,
+  attachmentUploadMock,
   mobileLayoutState,
   navigateMock,
   routerHistory,
+  useAttachmentsMock,
   useCollapsibleRailMock,
   usePageEditorMock,
   useTagsMock,
   useScrollSpyMock,
 } = vi.hoisted(() => ({
   mobileLayoutState: { matches: false },
+  attachmentRemoveMock: vi.fn(),
+  attachmentUploadMock: vi.fn(),
   navigateMock: vi.fn(),
   routerHistory: {
     back: vi.fn(),
@@ -36,6 +42,11 @@ const {
       { tag: "research", count: 4 },
       { tag: "ritual", count: 1 },
     ],
+  })),
+  useAttachmentsMock: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
   })),
   usePageEditorMock: vi.fn(),
   useScrollSpyMock: vi.fn(() => ({
@@ -65,6 +76,21 @@ vi.mock("#/api/index", () => ({
   useSimilar: () => ({ data: undefined }),
   useTags: useTagsMock,
 }));
+vi.mock("#/api/attachments", async (importOriginal) => {
+  const actual = await importOriginal<typeof AttachmentsApi>();
+  return {
+    ...actual,
+    useAttachments: useAttachmentsMock,
+    useUploadAttachment: () => ({
+      mutateAsync: attachmentUploadMock,
+      isPending: false,
+    }),
+    useDeleteAttachment: () => ({
+      mutateAsync: attachmentRemoveMock,
+      isPending: false,
+    }),
+  };
+});
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
@@ -124,6 +150,17 @@ beforeEach(() => {
       { tag: "ritual", count: 1 },
     ],
   });
+  useAttachmentsMock.mockReturnValue({
+    data: [],
+    isLoading: false,
+    error: null,
+  });
+  attachmentUploadMock.mockReset().mockResolvedValue({
+    name: "diagram.png",
+    path: "diagram.png",
+    size: 5,
+  });
+  attachmentRemoveMock.mockReset().mockResolvedValue(undefined);
 });
 
 function errorEditor() {
@@ -273,6 +310,62 @@ describe("Folio invalid-tab recovery", () => {
     expect(screen.queryByTestId("slate-editor")).toBeNull();
     expect(document.body.textContent).not.toContain(armor);
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+});
+
+describe("Folio attachment protection plumbing", () => {
+  beforeEach(() => {
+    mobileLayoutState.matches = false;
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+  });
+
+  it("gates encrypted-page uploads while plaintext-page uploads remain immediate", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      encrypted: true,
+    });
+    const protectedView = render(
+      <Folio tabId="t1" path="notes/alpha.md" />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Upload attachment"), {
+      target: {
+        files: [
+          new File(["image"], "diagram.png", { type: "image/png" }),
+        ],
+      },
+    });
+    expect(
+      screen.getByRole("dialog", { name: "Store plaintext attachment?" }),
+    ).toBeVisible();
+    expect(attachmentUploadMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    protectedView.unmount();
+
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Upload attachment"), {
+      target: {
+        files: [
+          new File(["image"], "diagram.png", { type: "image/png" }),
+        ],
+      },
+    });
+
+    await waitFor(() => expect(attachmentUploadMock).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 

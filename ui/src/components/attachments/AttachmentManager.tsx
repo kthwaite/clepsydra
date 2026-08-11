@@ -1,5 +1,5 @@
 import { File, Image, Paperclip, Trash2, Upload } from "lucide-react";
-import { type ChangeEvent, useState } from "react";
+import { type ChangeEvent, useRef, useState } from "react";
 import {
   type AttachmentInfo,
   attachmentMarkdown,
@@ -41,6 +41,8 @@ export function AttachmentManager({
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] =
     useState<PendingAttachmentAction | null>(null);
+  const pendingActionInFlight = useRef<PendingAttachmentAction | null>(null);
+  const [isPendingAction, setIsPendingAction] = useState(false);
 
   const uploadFile = async (file: File): Promise<AttachmentInfo | null> => {
     setActionError(null);
@@ -64,27 +66,38 @@ export function AttachmentManager({
       return;
     }
 
-    const attachment = await uploadFile(file);
-    if (attachment && onInsertMarkdown) {
-      onInsertMarkdown(attachmentMarkdown(attachment));
-    }
+    await uploadFile(file);
   };
 
   const acknowledgePendingAction = async (
     action: PendingAttachmentAction,
   ) => {
+    if (pendingActionInFlight.current) return;
+    pendingActionInFlight.current = action;
+    setIsPendingAction(true);
+    let succeeded = false;
     try {
       if (action.kind === "upload") {
         const attachment = await uploadFile(action.file);
-        if (attachment && onInsertMarkdown) {
-          onInsertMarkdown(attachmentMarkdown(attachment));
-        }
+        if (!attachment) return;
+        onInsertMarkdown?.(attachmentMarkdown(attachment));
       } else {
         onInsertMarkdown?.(action.markdown);
       }
+      succeeded = true;
     } finally {
-      setPendingAction((current) => (current === action ? null : current));
+      pendingActionInFlight.current = null;
+      setIsPendingAction(false);
+      if (succeeded) {
+        setPendingAction((current) => (current === action ? null : current));
+      }
     }
+  };
+
+  const cancelPendingAction = () => {
+    if (pendingActionInFlight.current) return;
+    setPendingAction(null);
+    setActionError(null);
   };
 
   const confirmDelete = async (attachment: AttachmentInfo) => {
@@ -123,7 +136,8 @@ export function AttachmentManager({
         </label>
         {!protectedPage ? (
           <p className="mt-1 text-ink-mute">
-            Uploads are stored as plaintext, including filenames and metadata.
+            Attachment bytes, filename, path, MIME type, and size are stored as
+            plaintext and are not encrypted.
           </p>
         ) : null}
       </div>
@@ -238,7 +252,9 @@ export function AttachmentManager({
       )}
       <PlaintextAttachmentDialog
         action={pendingAction}
-        onCancel={() => setPendingAction(null)}
+        error={actionError}
+        isPending={isPendingAction}
+        onCancel={cancelPendingAction}
         onAcknowledge={(action) => void acknowledgePendingAction(action)}
       />
     </section>
