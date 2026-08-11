@@ -527,6 +527,33 @@ fn startup_index_error(
     )
 }
 
+fn startup_transaction_error(
+    operation: &'static str,
+    source: impl std::fmt::Display,
+    vault_root: &Path,
+) -> String {
+    let transactions = vault_root.join(".clepsydra/transactions");
+    match vault::batch_mutation::retained_transaction_directories(vault_root) {
+        Ok(retained) if retained.is_empty() => format!(
+            "{operation} failed after transaction workspace removal; no retained transaction \
+             workspace was observed and transaction-directory durability may be incomplete: {source}"
+        ),
+        Ok(retained) => {
+            let retained = retained
+                .iter()
+                .map(|directory| directory.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{operation} failed; observed retained transaction paths: {retained}: {source}")
+        }
+        Err(inspection) => format!(
+            "{operation} failed; unable to inspect retained transaction paths under {}: \
+             {inspection}: {source}",
+            transactions.display()
+        ),
+    }
+}
+
 /// Build the shared application state with the configured RSS runtime.
 pub async fn build_app_state_with_feeds(
     vault_root: &Path,
@@ -535,14 +562,7 @@ pub async fn build_app_state_with_feeds(
     let vault = Vault::open(vault_root)?;
     let recovered_batches =
         vault::batch_mutation::recover_pending(vault.root()).map_err(|source| {
-            let retained = vault::batch_mutation::retained_transaction_directories(vault.root())
-                .iter()
-                .map(|directory| directory.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "startup filesystem recovery failed; retained transaction paths: {retained}: {source}"
-            )
+            startup_transaction_error("startup filesystem recovery", source, vault.root())
         })?;
 
     let db_path = vault.root().join(INDEX_DB_RELATIVE);
@@ -564,12 +584,8 @@ pub async fn build_app_state_with_feeds(
         .map_err(|source| startup_index_error("link resolution", source, &recovered_batches))?;
 
     for recovered in recovered_batches {
-        let directory = recovered.directory().to_path_buf();
         recovered.finish().map_err(|source| {
-            format!(
-                "startup transaction finalization failed; retained transaction {}: {source}",
-                directory.display()
-            )
+            startup_transaction_error("startup transaction finalization", source, vault.root())
         })?;
     }
     let cas_path_raw = &vault.config().archive.cas_path;

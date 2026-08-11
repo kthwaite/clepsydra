@@ -37,9 +37,18 @@ fn seed_write_transaction(
     phase: &str,
     files: &[(&str, &[u8], &[u8], bool)],
 ) -> PathBuf {
+    seed_write_transaction_at(root, TRANSACTION_ID, phase, files)
+}
+
+fn seed_write_transaction_at(
+    root: &Path,
+    transaction_id: &str,
+    phase: &str,
+    files: &[(&str, &[u8], &[u8], bool)],
+) -> PathBuf {
     let directory = root
         .join(".clepsydra/transactions")
-        .join(TRANSACTION_ID);
+        .join(transaction_id);
     fs::create_dir_all(directory.join("staged")).unwrap();
     fs::create_dir_all(directory.join("rollback")).unwrap();
     fs::create_dir_all(directory.join("created")).unwrap();
@@ -336,6 +345,62 @@ async fn transaction_recovery_indexes_and_finalizes_filesystem_committed_transac
         .await
         .json();
     assert_eq!(results[0]["path"], "gamma.md");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn transaction_recovery_finalization_failure_reports_all_observed_retained_workspaces() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let root = init_production_vault(&tmp);
+    let first = seed_write_transaction_at(
+        &root,
+        "0198a4df-f5c2-7cf0-8000-000000000006",
+        "filesystem_committed",
+        &[(
+            "first.md",
+            b"# First\nrollbackfirst\n",
+            b"# First\ncommittedfirst\n",
+            true,
+        )],
+    );
+    let second = seed_write_transaction_at(
+        &root,
+        "0198a4df-f5c2-7cf0-8000-000000000008",
+        "filesystem_committed",
+        &[(
+            "second.md",
+            b"# Second\nrollbacksecond\n",
+            b"# Second\ncommittedsecond\n",
+            true,
+        )],
+    );
+    let mut permissions = fs::metadata(&first).unwrap().permissions();
+    permissions.set_mode(0o500);
+    fs::set_permissions(&first, permissions).unwrap();
+
+    let error = clepsydra::build_app_state(&root)
+        .await
+        .err()
+        .expect("first workspace cleanup failure must block startup");
+
+    let mut permissions = fs::metadata(&first).unwrap().permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&first, permissions).unwrap();
+    let message = error.to_string();
+    assert!(
+        message.contains(&first.display().to_string()),
+        "startup error must report observed retained workspace {}: {message}",
+        first.display()
+    );
+    assert!(
+        message.contains(&second.display().to_string()),
+        "startup error must report unattempted retained workspace {}: {message}",
+        second.display()
+    );
+    assert!(first.is_dir());
+    assert!(second.is_dir());
 }
 
 #[tokio::test]
