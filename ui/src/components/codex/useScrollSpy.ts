@@ -46,7 +46,10 @@ export function useScrollSpy(
       mapRef.current = EMPTY_MAP;
       return;
     }
-    const hs = Array.from(el.querySelectorAll<HTMLElement>(HEADING_SELECTOR));
+    const editor = el.querySelector<HTMLElement>("[data-slate-editor]");
+    const hs = Array.from(
+      editor?.querySelectorAll<HTMLElement>(HEADING_SELECTOR) ?? [],
+    );
     const containerTop = el.getBoundingClientRect().top;
     const headingTops = hs.map(
       (h) => h.getBoundingClientRect().top - containerTop + el.scrollTop,
