@@ -275,11 +275,13 @@ git commit -m "refactor(ui): consolidate Codex tag input"
 
 **Files:**
 - Modify: `src/components/tasking/fields.tsx:9-139`
+- Modify: `src/components/ui/radio-group.tsx:11-39`
 - Modify: `src/components/tasking/__tests__/NewTaskModal.test.tsx:125-155,190-200`
 - Modify: `src/components/tasking/__tests__/TaskEditPanel.test.tsx:260-292`
 
 **Interfaces:**
 - Consumes: `RadioGroup` and `Radio` from `#/components/ui/radio-group`.
+- Produces: `optionsClassName?: string` on `RadioGroupProps`, styling only the inner option container.
 - Preserves: `DispositionRow` and `PriorityRow` props and every existing `data-testid`.
 - Produces: groups named `Disposition` and `Priority`, each with string-valued radios.
 
@@ -310,16 +312,22 @@ bun run test -- src/components/tasking/__tests__/NewTaskModal.test.tsx src/compo
 
 Expected: FAIL because the current choices are independent buttons.
 
-- [ ] **Step 3: Replace buttons with shared radio primitives**
+- [ ] **Step 3: Extend RadioGroup layout and replace tasking buttons**
 
-Use controlled string groups while retaining tasking styles:
+Add `optionsClassName?: string` to `RadioGroupProps` and apply it only to the inner options container:
+
+```tsx
+<div className={cn("flex gap-0", optionsClassName)}>{children}</div>
+```
+
+Then use controlled string groups while retaining tasking styles:
 
 ```tsx
 <RadioGroup
   aria-label="Disposition"
   value={value}
   onChange={onChange}
-  className="gap-0"
+  optionsClassName="gap-[6px]"
 >
   {COL_ORDER.map((colId) => (
     <Radio
@@ -350,7 +358,7 @@ Expected: PASS, including existing style and mutation assertions.
 - [ ] **Step 5: Commit the semantic migration**
 
 ```bash
-git add src/components/tasking/fields.tsx src/components/tasking/__tests__/NewTaskModal.test.tsx src/components/tasking/__tests__/TaskEditPanel.test.tsx
+git add src/components/ui/radio-group.tsx src/components/tasking/fields.tsx src/components/tasking/__tests__/NewTaskModal.test.tsx src/components/tasking/__tests__/TaskEditPanel.test.tsx
 git commit -m "refactor(ui): use radio semantics for task choices"
 ```
 
@@ -359,14 +367,13 @@ git commit -m "refactor(ui): use radio semantics for task choices"
 ### Task 4: Add shared SegmentedControl and migrate Settings choices
 
 **Files:**
-- Modify: `src/components/ui/radio-group.tsx:11-39`
 - Create: `src/components/ui/segmented-control.tsx`
 - Create: `src/components/ui/__tests__/segmented-control.test.tsx`
 - Create: `src/components/__tests__/SettingsModal.appearance.test.tsx`
 - Modify: `src/components/SettingsModal.tsx:1-15,212-287,355-394`
 
 **Interfaces:**
-- Adds `optionsClassName?: string` to `RadioGroupProps`; it styles only the inner option container.
+- Consumes: `RadioGroupProps.optionsClassName` from Task 3.
 - Produces:
 
 ```ts
@@ -429,22 +436,9 @@ bun run test -- src/components/ui/__tests__/segmented-control.test.tsx
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 3: Add the narrow RadioGroup layout extension and SegmentedControl**
+- [ ] **Step 3: Implement SegmentedControl**
 
-Update the shared group:
-
-```tsx
-export interface RadioGroupProps extends RACRadioGroupProps {
-  label?: string;
-  description?: string;
-  children?: ReactNode;
-  optionsClassName?: string;
-}
-
-<div className={cn("flex gap-0", optionsClassName)}>{children}</div>
-```
-
-Implement `SegmentedControl` solely by composing shared `RadioGroup` and `Radio`. Use `aria-label={label}` on the group, `value`, and `onChange`. Render `visual` with `aria-hidden` and render the textual label for the accessible name.
+Implement `SegmentedControl` solely by composing shared `RadioGroup` and `Radio`. Use `aria-label={label}` on the group, `value`, and `onChange`. Forward `optionsClassName` to the shared group. Render `visual` with `aria-hidden` and render the textual label for the accessible name.
 
 - [ ] **Step 4: Add a failing Settings appearance integration test**
 
