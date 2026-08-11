@@ -149,8 +149,7 @@ pub struct LinksParams {
 }
 
 /// The kind vocabulary, spelled out for tool schemas and error messages.
-const KIND_TOKENS: &str =
-    "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION";
+const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
