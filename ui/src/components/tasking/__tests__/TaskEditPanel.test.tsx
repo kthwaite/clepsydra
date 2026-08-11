@@ -28,7 +28,12 @@ import type { BoardOperation, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
 import { TaskEditPanel } from "../TaskEditPanel";
-import { BOARD_FIXTURE, NO_SLUG_OP } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  BOARD_FIXTURE_WITH_CLOSED_CYCLE,
+  NO_SLUG_OP,
+  SEALED_IN_CLOSED_CYCLE_TASK,
+} from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -64,6 +69,7 @@ const HELD_TASK: BoardTask = {
 interface WrapOpts {
   task?: BoardTask;
   operations?: BoardOperation[];
+  cycles?: typeof cycles;
   onClose?: () => void;
   onOpenPage?: (path: string) => void;
   onOpenDossier?: (link: string) => void;
@@ -75,6 +81,7 @@ interface WrapOpts {
 function wrap({
   task = FULL_TASK,
   operations: opsOverride = operations,
+  cycles: cyclesOverride = cycles,
   onClose = vi.fn(),
   onOpenPage = vi.fn(),
   onOpenDossier = vi.fn(),
@@ -101,7 +108,7 @@ function wrap({
         <TaskEditPanel
           task={task}
           operations={opsOverride}
-          cycles={cycles}
+          cycles={cyclesOverride}
           onClose={onClose}
           onOpenPage={onOpenPage}
           onOpenDossier={onOpenDossier}
@@ -232,6 +239,35 @@ describe("TaskEditPanel — render", () => {
     const opSelect = screen.getByTestId("edit-panel-operation");
     expect(opSelect).toHaveTextContent("OPS-1");
     expect(opSelect).not.toHaveTextContent("OPS-3");
+  });
+
+  it("omits CLOSED cycles from the CYCLE dropdown when task is not in that cycle", () => {
+    // FULL_TASK is in C-01, not C-00 (CLOSED)
+    wrap({
+      task: FULL_TASK,
+      operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
+      cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
+    });
+    const cycleSelect = screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
+    // C-01 and C-02 should be present
+    expect(cycleSelect).toHaveTextContent("C-01");
+    expect(cycleSelect).toHaveTextContent("C-02");
+    // C-00 (CLOSED) should NOT be present
+    expect(cycleSelect).not.toHaveTextContent("C-00");
+  });
+
+  it("includes CLOSED cycle in dropdown when task is currently assigned to it", () => {
+    // SEALED_IN_CLOSED_CYCLE_TASK is in C-00 (CLOSED), and it must stay representable
+    wrap({
+      task: SEALED_IN_CLOSED_CYCLE_TASK,
+      operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
+      cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
+    });
+    const cycleSelect = screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
+    // C-00 (CLOSED) should be present because the task is in it
+    expect(cycleSelect).toHaveTextContent("C-00");
+    // Verify it's selected
+    expect(cycleSelect.value).toBe("C-00");
   });
 });
 

@@ -338,6 +338,12 @@ export function TaskEditPanel({
   // a task can't be reassigned to it.
   const assignableOps = operations.filter((op) => Boolean(op.project));
 
+  // Closed cycles are not assignable except to tasks already in them
+  // (so the current value remains representable).
+  const selectableCycles = cycles.filter(
+    (c) => c.state !== "CLOSED" || c.code === task.cycle,
+  );
+
   // Active operation code for header display
   const opCode = task.project
     ? (operations.find((op) => op.project === task.project)?.code ??
@@ -486,7 +492,7 @@ export function TaskEditPanel({
                 data-testid="edit-panel-cycle"
               >
                 <option value="BACKLOG">BACKLOG</option>
-                {cycles.map((c) => (
+                {selectableCycles.map((c) => (
                   <option key={c.id} value={c.code}>
                     {c.code} ({c.state})
                   </option>

@@ -14,7 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { NewTaskModal } from "../NewTaskModal";
-import { BOARD_FIXTURE, NO_SLUG_OP } from "./fixtures";
+import { BOARD_FIXTURE, BOARD_FIXTURE_WITH_CLOSED_CYCLE, NO_SLUG_OP } from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -214,6 +214,27 @@ describe("NewTaskModal — render", () => {
     const cycleSelect = screen.getByTestId("new-task-cycle");
     expect(cycleSelect).toHaveTextContent("C-01");
     expect(cycleSelect).toHaveTextContent("C-02");
+  });
+
+  it("omits CLOSED cycles from the CYCLE dropdown", () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    useBoardStore.setState({ taskModal: {} });
+    render(
+      <QueryClientProvider client={qc}>
+        <NewTaskModal
+          operations={BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations}
+          cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
+        />
+      </QueryClientProvider>,
+    );
+    const cycleSelect = screen.getByTestId("new-task-cycle");
+    // C-01 (ACTIVE) and C-02 (PLANNED) should be present
+    expect(cycleSelect).toHaveTextContent("C-01");
+    expect(cycleSelect).toHaveTextContent("C-02");
+    // C-00 (CLOSED) should NOT be present
+    expect(cycleSelect).not.toHaveTextContent("C-00");
   });
 
   it("DUE input is a date field", () => {

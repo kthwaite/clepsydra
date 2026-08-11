@@ -95,6 +95,9 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
   // a task can't be misfiled to it.
   const assignableOps = operations.filter((op) => Boolean(op.project));
 
+  // Closed cycles are not assignable to new tasks.
+  const selectableCycles = cycles.filter((c) => c.state !== "CLOSED");
+
   // Derived display for the sub-header
   const opLabel = project
     ? (operations.find((op) => opKey(op) === project)?.code ?? project)
@@ -213,7 +216,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
               data-testid="new-task-cycle"
             >
               <option value="BACKLOG">BACKLOG / UNSCHEDULED</option>
-              {cycles.map((c) => (
+              {selectableCycles.map((c) => (
                 <option key={c.id} value={c.code}>
                   {c.code} · {c.label} ({c.state})
                 </option>
