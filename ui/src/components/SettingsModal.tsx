@@ -10,6 +10,7 @@ import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 import { useTheme } from "#/components/ThemeProvider";
 import { Badge } from "#/components/ui/badge";
 import { IconButton } from "#/components/ui/icon-button";
+import { SegmentedControl } from "#/components/ui/segmented-control";
 import { cn } from "#/lib/cn";
 import { ACCENTS, DENSITIES } from "#/lib/theme";
 import { formatRelativeTime } from "#/lib/time";
@@ -224,49 +225,54 @@ function OperatorPreferences() {
   return (
     <div className="space-y-5">
       <Row label="Mode">
-        <Segmented
+        <SegmentedControl
+          label="Mode"
           value={resolvedTheme}
           options={[
             { id: "dark", label: "Dark" },
             { id: "light", label: "Paper" },
           ]}
-          onChange={(v) => setMode(v as "dark" | "light")}
+          onChange={(value) => setMode(value as "dark" | "light")}
+          className="w-fit gap-0 border border-border"
+          itemClassName="cl-mono ml-0 border-0 border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground last:border-r-0 data-[hovered]:bg-transparent data-[hovered]:text-foreground data-[selected]:border-border data-[selected]:bg-accent data-[selected]:font-normal data-[selected]:text-black [&[data-hovered][data-selected]]:text-black"
         />
       </Row>
 
       <Row label="Accent">
-        <div className="flex flex-wrap gap-1.5">
-          {ACCENTS.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => setAccent(a.id)}
-              title={a.label}
-              aria-label={a.label}
-              className={cn(
-                "flex items-center gap-1.5 border px-2 py-1",
-                accent === a.id
-                  ? "border-accent text-foreground"
-                  : "border-border text-muted-foreground",
-              )}
-            >
+        <SegmentedControl
+          label="Accent"
+          value={accent}
+          options={ACCENTS.map((item) => ({
+            id: item.id,
+            label: item.label,
+            visual: (
               <span
                 className="inline-block h-[10px] w-[10px]"
-                style={{ background: swatch(a.id) }}
+                style={{ background: swatch(item.id) }}
               />
-              <span className="cl-mono text-[9px] uppercase tracking-[0.1em]">
-                {a.id}
-              </span>
-            </button>
-          ))}
-        </div>
+            ),
+          }))}
+          onChange={(value) =>
+            setAccent(value as (typeof ACCENTS)[number]["id"])
+          }
+          optionsClassName="flex-wrap gap-1.5"
+          itemClassName="cl-mono ml-0 flex items-center gap-1.5 border px-2 py-1 text-[9px] uppercase tracking-[0.1em] data-[hovered]:border-border data-[hovered]:bg-transparent data-[hovered]:text-muted-foreground data-[selected]:border-accent data-[selected]:bg-transparent data-[selected]:font-normal data-[selected]:text-foreground [&[data-hovered][data-selected]]:border-accent [&[data-hovered][data-selected]]:text-foreground"
+        />
       </Row>
 
       <Row label="Density">
-        <Segmented
+        <SegmentedControl
+          label="Density"
           value={density}
-          options={DENSITIES.map((d) => ({ id: d, label: d }))}
-          onChange={(v) => setDensity(v as (typeof DENSITIES)[number])}
+          options={DENSITIES.map((item) => ({
+            id: item,
+            label: item,
+          }))}
+          onChange={(value) =>
+            setDensity(value as (typeof DENSITIES)[number])
+          }
+          className="w-fit gap-0 border border-border"
+          itemClassName="cl-mono ml-0 border-0 border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground last:border-r-0 data-[hovered]:bg-transparent data-[hovered]:text-foreground data-[selected]:border-border data-[selected]:bg-accent data-[selected]:font-normal data-[selected]:text-black [&[data-hovered][data-selected]]:text-black"
         />
       </Row>
 
@@ -359,36 +365,6 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
         {label}
       </span>
       {children}
-    </div>
-  );
-}
-
-function Segmented({
-  value,
-  options,
-  onChange,
-}: {
-  value: string;
-  options: { id: string; label: string }[];
-  onChange: (id: string) => void;
-}) {
-  return (
-    <div className="flex w-fit border border-border">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          onClick={() => onChange(o.id)}
-          className={cn(
-            "cl-mono border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] last:border-r-0",
-            value === o.id
-              ? "bg-accent text-black"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
     </div>
   );
 }
