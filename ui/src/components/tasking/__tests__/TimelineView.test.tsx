@@ -471,6 +471,19 @@ describe("TimelineView — bar positioning", () => {
     expect(bar.className).toContain("FIELD");
   });
 
+  it("positions bars absolutely inside a relative track", () => {
+    wrap(
+      <TimelineView
+        tasks={[TL_TASK_ALPHA]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
+    const bar = screen.getByTestId(`tl-bar-${TL_TASK_ALPHA.id}`);
+    expect(bar.className).toContain("absolute");
+    expect(bar.parentElement?.className).toContain("relative");
+  });
+
   it("bar has hold class when task.hold is set", () => {
     wrap(
       <TimelineView
