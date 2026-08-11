@@ -509,13 +509,93 @@ describe("usePatchFeedEntry", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     detailResponse.resolve(jsonResponse(entry));
     await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
-    expect(detail.result.current.data?.read).toBe(false);
+    expect(detail.result.current.data?.read).toBe(true);
 
     patchResponse.resolve(jsonResponse({ ...entry, read: true }));
     await mutation;
 
     expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
       true,
+    );
+    detail.unmount();
+  });
+
+  it("promotes detail to successful idle state when patch wins the pending GET race", async () => {
+    const entry = makeEntry({ read: false });
+    const client = freshClient();
+    const patchResponse = deferred<Response>();
+    const detailResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(detailResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const detail = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(detail.result.current.fetchStatus).toBe("fetching");
+
+    patchResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await mutation;
+
+    await waitFor(() => {
+      expect(detail.result.current.isSuccess).toBe(true);
+      expect(detail.result.current.fetchStatus).toBe("idle");
+      expect(detail.result.current.data?.read).toBe(true);
+    });
+    detailResponse.resolve(jsonResponse(entry));
+    detail.unmount();
+  });
+
+  it("preserves invocation order for overlapping patches started before detail exists", async () => {
+    const entry = makeEntry({ read: false });
+    const client = freshClient();
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    const detailResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise)
+      .mockReturnValueOnce(detailResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: false,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const detail = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    detailResponse.resolve(jsonResponse(entry));
+    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
+
+    newerResponse.resolve(jsonResponse({ ...entry, read: false }));
+    await newerMutation;
+    olderResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await olderMutation;
+
+    expect(detail.result.current.fetchStatus).toBe("idle");
+    expect(detail.result.current.data?.read).toBe(false);
+    expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
+      false,
     );
     detail.unmount();
   });
@@ -647,7 +727,7 @@ describe("usePatchFeedEntry", () => {
     for (const name of Object.keys(keys) as Array<keyof typeof keys>) {
       expect(client.getQueryData(keys[name])).toBe(before[name]);
     }
-    expect(client.getQueryData(detailKey)).toBe(entry);
+    expect(client.getQueryData(detailKey)).toStrictEqual(entry);
   });
 
   it("invalidates feed summaries and all entry filters so newly matching tag views refetch", async () => {
