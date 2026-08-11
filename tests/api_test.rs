@@ -4544,6 +4544,30 @@ async fn attachment_upload_rejects_duplicate_named_fields_and_unknown_binary_fie
 }
 
 #[tokio::test]
+async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
+    let (server, tmp) = setup_server();
+    let boundary = "----filenamelessunknownbinaryboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"payload.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"unexpected\"\r\nContent-Type: application/octet-stream\r\n\r\nother\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post("/api/vault/attachments/filenameless.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status_bad_request();
+
+    assert!(
+        !tmp
+            .path()
+            .join("vault/_attachments/filenameless.bin")
+            .exists()
+    );
+    assert_no_attachment_temporaries(&tmp);
+}
+
+#[tokio::test]
 async fn attachment_upload_openapi_documents_named_multipart_fields() {
     let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
     let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]
@@ -4563,6 +4587,10 @@ async fn attachment_upload_openapi_documents_named_multipart_fields() {
     assert_eq!(
         form["properties"]["plaintext_acknowledged"]["type"],
         "boolean"
+    );
+    assert_eq!(
+        form["properties"]["plaintext_acknowledged"]["enum"],
+        serde_json::json!([true])
     );
 }
 

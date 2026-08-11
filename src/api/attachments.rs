@@ -15,6 +15,7 @@ use axum::routing::get;
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 use utoipa::ToSchema;
+use utoipa::openapi::schema::{Object, ObjectBuilder, Type};
 
 use super::AppState;
 use super::error::ApiError;
@@ -32,10 +33,18 @@ pub struct AttachmentInfo {
     pub size: u64,
 }
 
+fn plaintext_acknowledged_schema() -> Object {
+    ObjectBuilder::new()
+        .schema_type(Type::Boolean)
+        .enum_values(Some([true]))
+        .build()
+}
+
 #[derive(ToSchema)]
 pub struct AttachmentUploadForm {
     #[schema(value_type = String, format = Binary)]
     pub file: String,
+    #[schema(schema_with = plaintext_acknowledged_schema)]
     pub plaintext_acknowledged: bool,
 }
 
@@ -320,17 +329,16 @@ pub async fn upload_attachment(
                     )
                 })? == "true";
             }
-            Some(name) if has_file_name => {
+            Some(name) => {
                 return Err(ApiError::bad_request(format!(
-                    "unknown binary multipart field: {name}"
+                    "unknown multipart field: {name}"
                 )));
             }
-            None if has_file_name => {
+            None => {
                 return Err(ApiError::bad_request(
-                    "unknown unnamed binary multipart field".to_string(),
+                    "unnamed multipart field is not allowed".to_string(),
                 ));
             }
-            _ => {}
         }
     }
 
