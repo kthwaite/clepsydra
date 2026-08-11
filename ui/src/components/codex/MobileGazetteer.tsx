@@ -13,6 +13,7 @@ import {
 import type { ContentEntry, TagCount } from "#/api/types";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { Button } from "#/components/ui/button";
+import { TagInput } from "#/components/ui/tag-input";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { TextField } from "#/components/ui/text-field";
 import {
@@ -34,6 +35,9 @@ export interface MobileGazetteerProps {
   sort: GazetteerSort;
   rows: ContentEntry[];
   tags: TagCount[];
+  tagsLoading: boolean;
+  tagsError: unknown;
+  onRetryTags: () => void;
   totalCount: number;
   filteredCount: number;
   page: number;
@@ -66,6 +70,9 @@ export function MobileGazetteer({
   sort,
   rows,
   tags,
+  tagsLoading,
+  tagsError,
+  onRetryTags,
   totalCount,
   filteredCount,
   page,
@@ -80,13 +87,6 @@ export function MobileGazetteer({
 }: MobileGazetteerProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const toggleTag = (tag: string) => {
-    onSelectedTagsChange(
-      selectedTags.includes(tag)
-        ? selectedTags.filter((selected) => selected !== tag)
-        : [...selectedTags, tag],
-    );
-  };
   const activeFilterCount =
     selectedTags.length + (query ? 1 : 0) + (kind ? 1 : 0) + (project ? 1 : 0);
 
@@ -307,31 +307,27 @@ export function MobileGazetteer({
                 >
                   Tags · all selected tags must match
                 </h2>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    aria-label="Show all tags"
-                    aria-pressed={selectedTags.length === 0}
-                    variant={
-                      selectedTags.length === 0 ? "primary" : "secondary"
-                    }
-                    onPress={() => onSelectedTagsChange([])}
-                  >
-                    All · {totalCount}
-                  </Button>
-                  {tags.map((tag) => {
-                    const selected = selectedTags.includes(tag.tag);
-                    return (
-                      <Button
-                        key={tag.tag}
-                        aria-label={`Filter by ${tag.tag}`}
-                        aria-pressed={selected}
-                        variant={selected ? "primary" : "secondary"}
-                        onPress={() => toggleTag(tag.tag)}
-                      >
-                        #{tag.tag} · {tag.count}
-                      </Button>
-                    );
-                  })}
+                <div className="mt-2">
+                  <TagInput
+                    label="Tags"
+                    ariaLabel="Filter by tags"
+                    values={selectedTags}
+                    suggestions={tags.map((tag) => tag.tag)}
+                    suggestionsLoading={tagsLoading}
+                    suggestionsError={tagsError}
+                    onRetrySuggestions={onRetryTags}
+                    allowCreate={false}
+                    onChange={onSelectedTagsChange}
+                    placeholder="filter tags…"
+                    variant="codex"
+                    valuePrefix="#"
+                    maxSuggestions={8}
+                  />
+                  {selectedTags.length > 0 ? (
+                    <Button onPress={() => onSelectedTagsChange([])}>
+                      Clear tags
+                    </Button>
+                  ) : null}
                 </div>
               </section>
 

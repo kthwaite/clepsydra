@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
@@ -78,12 +78,80 @@ function Harness() {
   return (
     <div ref={ref} data-scroll-container data-testid="container">
       <output data-testid="active">{api.activeIndex}</output>
-      {HEADING_OFFSETS.map((offset, i) => (
-        <h2 key={offset} data-offset={offset}>
-          Heading {i}
-        </h2>
-      ))}
+      <div data-folio-heading-root>
+        {HEADING_OFFSETS.map((offset, i) => (
+          <h2 key={offset} data-offset={offset}>
+            Heading {i}
+          </h2>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function JournalFolioHarness() {
+  const ref = useRef<HTMLDivElement>(null);
+  api = useScrollSpy(ref, 0);
+  return (
+    <>
+      <nav aria-label="Contents">
+        <button type="button" onClick={() => api.scrollTo(0)}>
+          09:07
+        </button>
+        <button type="button" onClick={() => api.scrollTo(1)}>
+          Ordinary section
+        </button>
+      </nav>
+      <div ref={ref} data-scroll-container data-testid="journal-container">
+        <output data-testid="journal-active">{api.activeIndex}</output>
+        <h1 data-offset={100}>Tuesday, August 11</h1>
+        <div data-folio-heading-root>
+          <h2 data-offset={600}>09:07</h2>
+          <h3 data-offset={1200}>Ordinary section</h3>
+        </div>
+      </div>
+      <nav aria-label="Reading position">
+        <button
+          type="button"
+          aria-label="1 09:07"
+          onClick={() => api.scrollTo(0)}
+        />
+        <button
+          type="button"
+          aria-label="1.1 Ordinary section"
+          onClick={() => api.scrollTo(1)}
+        />
+      </nav>
+    </>
+  );
+}
+
+function StructuredRecipeHarness() {
+  const ref = useRef<HTMLDivElement>(null);
+  api = useScrollSpy(ref, 0);
+  return (
+    <>
+      <nav aria-label="Recipe contents">
+        {["Ingredients", "Steps", "Notes"].map((heading, index) => (
+          <button
+            key={heading}
+            type="button"
+            onClick={() => api.scrollTo(index)}
+          >
+            {heading}
+          </button>
+        ))}
+      </nav>
+      <div ref={ref} data-scroll-container data-testid="recipe-container">
+        <output data-testid="recipe-active">{api.activeIndex}</output>
+        <h1 data-offset={100}>Weeknight pasta</h1>
+        <main data-folio-heading-root>
+          <h2 data-offset={500}>Ingredients</h2>
+          <h2 data-offset={900}>Steps</h2>
+          <h2 data-offset={1300}>Notes</h2>
+        </main>
+      </div>
+    </>
   );
 }
 
@@ -120,5 +188,47 @@ describe("useScrollSpy", () => {
     act(() => api.scrollTo(1));
     expect(container.scrollTop).toBe(HEADING_OFFSETS[1] - 16);
     expect(screen.getByTestId("active")).toHaveTextContent("1");
+  });
+
+  it("keeps journal Contents and ticks aligned to Slate body headings", () => {
+    render(<JournalFolioHarness />);
+    const container = screen.getByTestId("journal-container");
+    const contents = screen.getByRole("navigation", { name: "Contents" });
+    const ticks = screen.getByRole("navigation", {
+      name: "Reading position",
+    });
+
+    fireEvent.click(within(contents).getByRole("button", { name: "09:07" }));
+    expect(container.scrollTop).toBe(600 - 16);
+    expect(screen.getByTestId("journal-active")).toHaveTextContent("0");
+
+    fireEvent.click(
+      within(ticks).getByRole("button", {
+        name: "1.1 Ordinary section",
+      }),
+    );
+    expect(container.scrollTop).toBe(1200 - 16);
+    expect(screen.getByTestId("journal-active")).toHaveTextContent("1");
+  });
+
+  it("jumps structured presentation headings in marked-root order", () => {
+    render(<StructuredRecipeHarness />);
+    const container = screen.getByTestId("recipe-container");
+    const contents = screen.getByRole("navigation", {
+      name: "Recipe contents",
+    });
+    const jumps = [
+      ["Ingredients", 500],
+      ["Steps", 900],
+      ["Notes", 1300],
+    ] as const;
+
+    for (const [index, [heading, offset]] of jumps.entries()) {
+      fireEvent.click(within(contents).getByRole("button", { name: heading }));
+      expect(container.scrollTop).toBe(offset - 16);
+      expect(screen.getByTestId("recipe-active")).toHaveTextContent(
+        String(index),
+      );
+    }
   });
 });

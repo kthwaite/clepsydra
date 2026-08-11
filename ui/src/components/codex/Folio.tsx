@@ -22,6 +22,10 @@ import { AiConversationControls } from "#/components/codex/AiConversationControl
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import {
+  buildToc,
+  type TocEntry,
+} from "#/components/codex/folioToc";
+import {
   countWordsFromSlate,
   shortFolio,
 } from "#/components/codex/folio-utils";
@@ -1541,42 +1545,4 @@ function OpenRow({
       </button>
     </div>
   );
-}
-
-/* ── TOC extraction from initial Slate value ──────────────────────────── */
-
-type TocEntry = { number: string; depth: number; text: string };
-
-interface SlateNode {
-  type?: string;
-  level?: number;
-  children?: Array<SlateNode | { text?: string }>;
-}
-
-function buildToc(value: unknown): TocEntry[] {
-  if (!Array.isArray(value)) return [];
-  const counters = [0, 0, 0, 0, 0, 0];
-  const out: TocEntry[] = [];
-  for (const node of value as SlateNode[]) {
-    if (node?.type === "heading" && typeof node.level === "number") {
-      const depth = Math.max(1, Math.min(node.level, 6));
-      counters[depth - 1] += 1;
-      for (let i = depth; i < counters.length; i++) counters[i] = 0;
-      const number = counters
-        .slice(0, depth)
-        .filter((n) => n > 0)
-        .join(".");
-      const text = nodeText(node).trim() || "(untitled)";
-      out.push({ number, depth, text });
-    }
-  }
-  return out;
-}
-
-function nodeText(node: SlateNode | { text?: string }): string {
-  if ("text" in node && typeof node.text === "string") return node.text;
-  if ("children" in node && Array.isArray(node.children)) {
-    return node.children.map(nodeText).join("");
-  }
-  return "";
 }

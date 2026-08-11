@@ -53,6 +53,18 @@ describe("InscribeModal", () => {
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
   });
 
+  it("cancels without creating, assigning, or opening a page", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+
+    await user.click(screen.getByRole("button", { name: "cancel" }));
+
+    expect(useUiStore.getState().isInscribeOpen).toBe(false);
+    expect(createMutate).not.toHaveBeenCalled();
+    expect(assignMutate).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
+  });
+
   it("resets local fields after backdrop dismissal", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<InscribeModal />);
@@ -102,6 +114,22 @@ describe("InscribeModal", () => {
       "Hello",
     );
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
+  });
+
+  it("keeps the dialog open with the create API error", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementationOnce((_vars, opts) =>
+      opts?.onError?.({ error: "page already exists" }),
+    );
+    render(<InscribeModal />);
+
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Hello");
+    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+
+    expect(useUiStore.getState().isInscribeOpen).toBe(true);
+    expect(screen.getByText(/page already exists/)).toBeInTheDocument();
+    expect(assignMutate).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
   });
 
   it("requires a title", async () => {

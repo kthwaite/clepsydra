@@ -149,7 +149,10 @@ export function useRebuildIndex() {
 }
 
 export function useTags(enabled = true) {
-  return $api.useQuery("get", "/api/vault/index/tags", {}, { enabled });
+  return $api.useQuery("get", "/api/vault/index/tags", {}, {
+    enabled,
+    throwOnError: false,
+  });
 }
 
 export function useTagSuggestions(query: string, limit = 12, enabled = true) {
