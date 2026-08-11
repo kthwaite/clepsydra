@@ -92,6 +92,11 @@ const optimisticEntryMutationLayers = new WeakMap<
   QueryClient,
   EntryOptimisticLayer[]
 >();
+const optimisticEntryQuerySubscriptions = new WeakMap<
+  QueryClient,
+  () => void
+>();
+const recreatingOptimisticEntryQueries = new WeakSet<QueryClient>();
 
 function isEntryQueryKey(queryKey: readonly unknown[]) {
   return queryKey[0] === "get" && queryKey[1] === ENTRIES_PATH;
@@ -190,6 +195,9 @@ function invalidateEntryMutationQueries(queryClient: QueryClient) {
   if (layers?.some((layer) => layer.status === "pending")) {
     return Promise.resolve();
   }
+  const unsubscribe = optimisticEntryQuerySubscriptions.get(queryClient);
+  unsubscribe?.();
+  optimisticEntryQuerySubscriptions.delete(queryClient);
   optimisticEntryMutationLayers.delete(queryClient);
   return Promise.all([
     queryClient.invalidateQueries({
@@ -264,7 +272,12 @@ function rebaseEntryQuery(
     return;
   }
 
-  queryClient.setQueryData(state.queryKey, pages);
+  recreatingOptimisticEntryQueries.add(queryClient);
+  try {
+    queryClient.setQueryData(state.queryKey, pages);
+  } finally {
+    recreatingOptimisticEntryQueries.delete(queryClient);
+  }
   const recreatedQuery = queryClient
     .getQueryCache()
     .find({ queryKey: state.queryKey, exact: true }) as EntryQuery | undefined;
@@ -281,6 +294,20 @@ function beginEntryMutationLayer(
     optimisticEntryMutationLayers.set(queryClient, layers);
   }
   layers.push(layer);
+  if (!optimisticEntryQuerySubscriptions.has(queryClient)) {
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        recreatingOptimisticEntryQueries.has(queryClient) ||
+        event.type !== "updated" ||
+        event.action.type !== "success" ||
+        !isEntryQueryKey(event.query.queryKey)
+      ) {
+        return;
+      }
+      reconcileUpdatedEntryQuery(queryClient, event.query as EntryQuery);
+    });
+    optimisticEntryQuerySubscriptions.set(queryClient, unsubscribe);
+  }
 }
 
 function foldSettledEntryQueryLayers(state: EntryOptimisticState) {
@@ -338,6 +365,47 @@ function hydrateEntryQueries(queryClient: QueryClient) {
     if (state.layers.length === 0) states.delete(query.queryHash);
   }
 
+  if (states.size === 0) optimisticEntryStates.delete(queryClient);
+}
+
+function reconcileUpdatedEntryQuery(
+  queryClient: QueryClient,
+  query: EntryQuery,
+) {
+  const layers = optimisticEntryMutationLayers.get(queryClient);
+  const pages = query.state.data;
+  if (layers === undefined || layers.length === 0 || pages === undefined) return;
+
+  let states = optimisticEntryStates.get(queryClient);
+  if (states === undefined) {
+    states = new Map();
+    optimisticEntryStates.set(queryClient, states);
+  }
+  let state = states.get(query.queryHash);
+  if (state === undefined) {
+    state = {
+      query,
+      queryKey: query.queryKey,
+      baseline: pages,
+      filters: filtersFromEntryQueryKey(query.queryKey),
+      layers: [...layers],
+    };
+    states.set(query.queryHash, state);
+  } else {
+    state.query = query;
+    state.baseline = pages;
+    for (const layer of layers) {
+      if (
+        layer.status === "pending" &&
+        !state.layers.some((candidate) => candidate.id === layer.id)
+      ) {
+        state.layers.push(layer);
+      }
+    }
+  }
+  foldSettledEntryQueryLayers(state);
+  rebaseEntryQuery(queryClient, state);
+  if (state.layers.length === 0) states.delete(query.queryHash);
   if (states.size === 0) optimisticEntryStates.delete(queryClient);
 }
 

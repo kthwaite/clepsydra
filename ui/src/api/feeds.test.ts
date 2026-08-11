@@ -570,6 +570,54 @@ describe("usePatchFeedEntry", () => {
     unsubscribeList();
   });
 
+  it("projects a list GET that resolves while its patch remains pending", async () => {
+    const entry = makeEntry({ read: false });
+    const patched = { ...entry, read: true };
+    const client = freshClient();
+    client.setQueryData(entryDetailKey(entry.id), entry);
+    const patchResponse = deferred<Response>();
+    const staleListResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(staleListResponse.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({ entries: [patched], next_cursor: null }),
+      );
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const listObserver = new InfiniteQueryObserver(
+      client,
+      feedEntriesInfiniteOptions({ view: "all" }),
+    );
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    staleListResponse.resolve(
+      jsonResponse({ entries: [entry], next_cursor: null }),
+    );
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    expect(patch.result.current.isPending).toBe(true);
+    expect(
+      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
+    ).toBe(true);
+    expect(
+      client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
+    ).toBe(true);
+
+    patchResponse.resolve(jsonResponse(patched));
+    await mutation;
+    unsubscribeList();
+  });
+
   it("promotes detail to successful idle state when patch wins the pending GET race", async () => {
     const entry = makeEntry({ read: false });
     const client = freshClient();
@@ -1165,7 +1213,7 @@ describe("usePatchFeedEntry", () => {
     expect(client.getQueryData(key)).toBe(baseline);
   });
 
-  it("adopts an independently recreated query and restores the exact captured baseline", async () => {
+  it("projects an independently recreated query and restores its exact baseline", async () => {
     const entry = makeEntry({ read: false });
     const baseline = makePages([entry], ["captured-page"]);
     const key = entriesKey({ view: "all" });
@@ -1204,7 +1252,9 @@ describe("usePatchFeedEntry", () => {
     expect(replacementQuery).toBeDefined();
     expect(replacementQuery).not.toBe(originalQuery);
     expect(replacementQuery?.queryKey).toEqual(key);
-    expect(client.getQueryData(key)).toBe(independentClone);
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0].read,
+    ).toBe(true);
     expect(independentClone).toEqual(baseline);
     expect(independentClone).not.toBe(baseline);
 
@@ -1218,7 +1268,7 @@ describe("usePatchFeedEntry", () => {
     expect(client.getQueryCache().find({ queryKey: key, exact: true })).toBe(
       replacementQuery,
     );
-    expect(client.getQueryData(key)).toBe(baseline);
+    expect(client.getQueryData(key)).toBe(independentClone);
   });
 });
 
