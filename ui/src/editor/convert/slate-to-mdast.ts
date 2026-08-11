@@ -67,6 +67,58 @@ function singleTildeStrikethroughExtension(): Options {
   };
 }
 
+/**
+ * mdast-util-gfm's task-list handler delegates to the default list-item
+ * handler before adding the checkbox marker. For an empty paragraph, the
+ * default handler ends its bare marker with a newline and the GFM handler
+ * appends the checkbox after that newline. Wrap only that handler so the
+ * split marker and checkbox become one parseable task line.
+ */
+function gfmToMarkdownWithEmptyTasks(): Options {
+  const gfm = gfmToMarkdown();
+  return {
+    ...gfm,
+    extensions: gfm.extensions?.map((extension): Options => {
+      const listItem = extension.handlers?.listItem;
+      if (!listItem) return extension;
+
+      return {
+        ...extension,
+        handlers: {
+          ...extension.handlers,
+          listItem(node, parent, state, info) {
+            let value = listItem(node, parent, state, info);
+            if (
+              node.type !== "listItem" ||
+              typeof node.checked !== "boolean" ||
+              node.children[0]?.type !== "paragraph"
+            ) {
+              return value;
+            }
+
+            const splitEmptyTask = value.match(
+              /^((?:[*+-]|\d+\.))\r?\n\[([ xX])\][ \t]*$/,
+            );
+            if (splitEmptyTask) {
+              return `${splitEmptyTask[1]} [${splitEmptyTask[2]}] `;
+            }
+
+            value = value.replace(
+              /^(?:[*+-]|\d+\.)(?=\r?\n|$)/,
+              (marker) =>
+                `${marker} [${node.checked ? "x" : " "}] `,
+            );
+            return value.replace(
+              /^((?:[*+-]|\d+\.)[ \t]+\[[ xX]\])(?=\r?\n|$)/,
+              "$1 ",
+            );
+          },
+        },
+      };
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Text leaf → mdast phrasing content
 // ---------------------------------------------------------------------------
@@ -387,7 +439,7 @@ export function slateToMdast(nodes: Descendant[]): string {
     extensions: [
       baseFenceToMarkdown(),
       folioMathToMarkdown(),
-      gfmToMarkdown(),
+      gfmToMarkdownWithEmptyTasks(),
       wikiLinkToMarkdownExtension(),
       singleTildeStrikethroughExtension(),
     ],
