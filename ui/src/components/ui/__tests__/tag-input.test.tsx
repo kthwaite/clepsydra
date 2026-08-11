@@ -712,4 +712,81 @@ describe("TagInput", () => {
     await user.keyboard("{Escape}");
     expect(containerKey).toHaveBeenCalledTimes(1);
   });
+  it("rejects a non-vocabulary draft when creation is disabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research", "rust"]}
+        allowCreate={false}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "unknown{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it("commits canonical vocabulary spelling when creation is disabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["Research"]}
+        allowCreate={false}
+        onChange={onChange}
+      />,
+    );
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Add tags" }),
+      " research {Enter}",
+    );
+    expect(onChange).toHaveBeenCalledWith(["Research"]);
+  });
+
+  it("keeps free tag creation enabled by default", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={[]}
+        onChange={onChange}
+      />,
+    );
+    await user.type(
+      screen.getByRole("combobox", { name: "Add tags" }),
+      "new-tag{Enter}",
+    );
+    expect(onChange).toHaveBeenCalledWith(["new-tag"]);
+  });
+
+  it("rejects an unknown draft on blur when creation is disabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <>
+        <TagInput
+          label="Tags"
+          values={[]}
+          suggestions={["research"]}
+          allowCreate={false}
+          onChange={onChange}
+        />
+        <button type="button">Elsewhere</button>
+      </>,
+    );
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Add tags" }),
+      "unknown",
+    );
+    await user.click(screen.getByRole("button", { name: "Elsewhere" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

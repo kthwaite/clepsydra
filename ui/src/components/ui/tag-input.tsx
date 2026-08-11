@@ -18,6 +18,7 @@ export interface TagInputProps {
   values: string[];
   readOnlyValues?: string[];
   suggestions?: string[];
+  allowCreate?: boolean;
   onSuggestionQueryChange?: (query: string) => void;
   suggestionsLoading?: boolean;
   suggestionsError?: unknown;
@@ -42,6 +43,7 @@ export function TagInput({
   values,
   readOnlyValues = [],
   suggestions,
+  allowCreate = true,
   onSuggestionQueryChange,
   suggestionsLoading = false,
   suggestionsError = null,
@@ -87,15 +89,27 @@ export function TagInput({
   const selected = Math.min(highlight, Math.max(matches.length - 1, 0));
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const resolveCandidate = useCallback(
+    (value: string): string | null => {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (allowCreate) return trimmed;
+      return (
+        suggestions?.find((suggestion) => tagsEqual(suggestion, trimmed)) ?? null
+      );
+    },
+    [allowCreate, suggestions],
+  );
+
   const addValue = useCallback(
     (val: string) => {
-      const trimmed = val.trim();
+      const candidate = resolveCandidate(val);
       if (
-        trimmed &&
-        !values.some((value) => tagsEqual(trimmed, value)) &&
-        !readOnlyValues.some((value) => tagsEqual(trimmed, value))
+        candidate &&
+        !values.some((value) => tagsEqual(candidate, value)) &&
+        !readOnlyValues.some((value) => tagsEqual(candidate, value))
       ) {
-        onChange([...values, trimmed]);
+        onChange([...values, candidate]);
       }
       setInputValue("");
       setHighlight(0);
@@ -103,7 +117,13 @@ export function TagInput({
       setDismissed(false);
       onSuggestionQueryChange?.("");
     },
-    [values, readOnlyValues, onChange, onSuggestionQueryChange],
+    [
+      resolveCandidate,
+      values,
+      readOnlyValues,
+      onChange,
+      onSuggestionQueryChange,
+    ],
   );
 
   const handleRemove = useCallback(
