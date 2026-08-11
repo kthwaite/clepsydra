@@ -114,6 +114,33 @@ describe("TaskingScreen smoke", () => {
     ).toBeInTheDocument();
   });
 
+  it("RETRY button refetches and renders board on success", async () => {
+    let fetchAttempt = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        fetchAttempt++;
+        if (fetchAttempt === 1) {
+          return Promise.reject(new Error("network down"));
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(BOARD_FIXTURE),
+        } as Response);
+      }),
+    );
+    renderScreen();
+    expect(
+      await screen.findByText(/ERROR — board unavailable/),
+    ).toBeInTheDocument();
+
+    const retryButton = screen.getByRole("button", { name: /retry/i });
+    await userEvent.click(retryButton);
+
+    expect(await screen.findByTestId("kb-col-INTAKE")).toBeInTheDocument();
+  });
+
+
   it("renders the board shell when data loads successfully", async () => {
     stubBoardFetch();
     renderScreen();

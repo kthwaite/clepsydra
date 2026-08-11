@@ -58,7 +58,7 @@ export function TaskingScreen({
   onOpenDossier?: (link: string) => void;
   onOpenPage?: (path: string) => void;
 } = {}) {
-  const { data, isLoading, isError } = useBoard();
+  const { data, isLoading, isError, refetch } = useBoard();
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const opFilter = useBoardStore((s) => s.opFilter);
@@ -141,8 +141,11 @@ export function TaskingScreen({
 
   if (isError || !data) {
     return (
-      <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-[var(--hot)]">
+      <div className="cl-mono flex h-full flex-col items-center justify-center gap-[12px] text-[11px] uppercase tracking-[0.18em] text-[var(--hot)]">
         ERROR — board unavailable
+        <button type="button" className="cl-btn" onClick={() => refetch()}>
+          RETRY
+        </button>
       </div>
     );
   }
