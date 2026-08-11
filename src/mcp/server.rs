@@ -1258,6 +1258,86 @@ impl VaultMcpServer {
         render(&value)
     }
 
+    #[tool(
+        name = "vault_cycle_create",
+        description = "Create a sprint cycle for the TASKING board (a CYCLE page under cycles/). Omit 'code' to auto-generate the next S-{n}; an explicit code conflicts if it already exists. State defaults to PLANNED (ACTIVE also allowed); CLOSED is rejected at creation — seal a finished cycle with vault_cycle_update instead.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_cycle_create(
+        &self,
+        Parameters(params): Parameters<CycleCreateParams>,
+    ) -> Result<String, String> {
+        let label = params.label.trim();
+        if label.is_empty() {
+            return Err("label must not be empty".to_string());
+        }
+        let create_body = serde_json::json!({
+            "code": params.code,
+            "label": label,
+            "start": params.start,
+            "end": params.end,
+            "goal": params.goal,
+            "state": params.state,
+        });
+        let value = self
+            .client
+            .post_json(&format!("{BOARD_URL}/cycles"), &create_body)
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_cycle_update",
+        description = "Update a cycle on the TASKING board, addressed by S code, vault path, or page UUID. Fields update when present (state PLANNED/ACTIVE/CLOSED, goal, start, end). Sealing with carryover: set state CLOSED and pass carry_to to re-home the cycle's unsealed tasks — \"BACKLOG\" clears their cycle, a cycle code (e.g. \"S-14\") re-assigns them. carry_to is only valid with state CLOSED; without it, sealed cycles leave their tasks untouched.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_cycle_update(
+        &self,
+        Parameters(params): Parameters<CycleUpdateParams>,
+    ) -> Result<String, String> {
+        let mut patch_body = serde_json::Map::new();
+        if let Some(state) = params.state {
+            patch_body.insert("state".to_string(), Value::String(state));
+        }
+        if let Some(goal) = params.goal {
+            patch_body.insert("goal".to_string(), Value::String(goal));
+        }
+        if let Some(start) = params.start {
+            patch_body.insert("start".to_string(), Value::String(start));
+        }
+        if let Some(end) = params.end {
+            patch_body.insert("end".to_string(), Value::String(end));
+        }
+        if let Some(carry_to) = params.carry_to {
+            patch_body.insert("carry_to".to_string(), Value::String(carry_to));
+        }
+        if patch_body.is_empty() {
+            return Err("nothing to update — provide at least one field to change".to_string());
+        }
+
+        let id = self
+            .resolve_board_ref(&params.cycle, BoardKind::Cycle)
+            .await?;
+        let value = self
+            .client
+            .patch_json(
+                &format!("{BOARD_URL}/cycles/{id}"),
+                &Value::Object(patch_body),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        render(&value)
+    }
+
     /// Resolve a free-form task/cycle reference to its page UUID: a UUID
     /// passes through, a vault path reads the page's `meta.id`, and a code
     /// looks itself up on the board.
@@ -1408,6 +1488,8 @@ mod tests {
                 "vault_board",
                 "vault_capture_conversation",
                 "vault_create_page",
+                "vault_cycle_create",
+                "vault_cycle_update",
                 "vault_delete_page",
                 "vault_edit_page",
                 "vault_folder",
@@ -2717,6 +2799,170 @@ mod tests {
         let (server, _tmp) = serve_board_vault().await;
         let err = server
             .vault_task_update(Parameters(task_update_params("TSK-0001")))
+            .await
+            .expect_err("empty update should be rejected");
+        assert!(err.contains("nothing to update"), "{err}");
+    }
+
+    fn cycle_create_params(label: &str) -> CycleCreateParams {
+        CycleCreateParams {
+            label: label.to_string(),
+            start: "2026-08-10".to_string(),
+            end: "2026-08-24".to_string(),
+            code: None,
+            goal: None,
+            state: None,
+        }
+    }
+
+    fn cycle_update_params(cycle: &str) -> CycleUpdateParams {
+        CycleUpdateParams {
+            cycle: cycle.to_string(),
+            state: None,
+            goal: None,
+            start: None,
+            end: None,
+            carry_to: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cycle_create_auto_generates_sequential_codes() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let first = parse(
+            server
+                .vault_cycle_create(Parameters(cycle_create_params("Sprint One")))
+                .await,
+        );
+        assert_eq!(first["code"], "S-1");
+        assert_eq!(first["state"], "PLANNED");
+        assert_eq!(first["label"], "Sprint One");
+
+        let second = parse(
+            server
+                .vault_cycle_create(Parameters(CycleCreateParams {
+                    state: Some("ACTIVE".to_string()),
+                    ..cycle_create_params("Sprint Two")
+                }))
+                .await,
+        );
+        assert_eq!(second["code"], "S-2");
+        assert_eq!(second["state"], "ACTIVE");
+    }
+
+    #[tokio::test]
+    async fn cycle_create_rejects_closed_and_duplicate_codes() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let err = server
+            .vault_cycle_create(Parameters(CycleCreateParams {
+                state: Some("CLOSED".to_string()),
+                ..cycle_create_params("Stillborn")
+            }))
+            .await
+            .expect_err("CLOSED at creation should be rejected");
+        assert!(err.contains("CLOSED"), "{err}");
+
+        server
+            .vault_cycle_create(Parameters(CycleCreateParams {
+                code: Some("S-7".to_string()),
+                ..cycle_create_params("Explicit")
+            }))
+            .await
+            .unwrap();
+        let err = server
+            .vault_cycle_create(Parameters(CycleCreateParams {
+                code: Some("S-7".to_string()),
+                ..cycle_create_params("Duplicate")
+            }))
+            .await
+            .expect_err("duplicate explicit code should conflict");
+        assert!(err.contains("409"), "{err}");
+        assert!(err.contains("S-7"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cycle_update_by_code_sets_fields() {
+        let (server, _tmp) = serve_board_vault().await;
+        let value = parse(
+            server
+                .vault_cycle_update(Parameters(CycleUpdateParams {
+                    state: Some("ACTIVE".to_string()),
+                    goal: Some("Ship the board tools".to_string()),
+                    ..cycle_update_params("s-1")
+                }))
+                .await,
+        );
+        assert_eq!(value["code"], "S-1");
+        assert_eq!(value["state"], "ACTIVE");
+        assert_eq!(value["goal"], "Ship the board tools");
+    }
+
+    #[tokio::test]
+    async fn cycle_seal_with_carry_to_rehomes_unsealed_tasks() {
+        let (server, _tmp) = serve_board_vault().await;
+        server
+            .vault_cycle_create(Parameters(cycle_create_params("Sprint Two")))
+            .await
+            .unwrap();
+        server
+            .vault_task_create(Parameters(TaskCreateParams {
+                cycle: Some("S-1".to_string()),
+                ..task_create_params("Unfinished work")
+            }))
+            .await
+            .unwrap();
+
+        let sealed = parse(
+            server
+                .vault_cycle_update(Parameters(CycleUpdateParams {
+                    state: Some("CLOSED".to_string()),
+                    carry_to: Some("S-2".to_string()),
+                    ..cycle_update_params("S-1")
+                }))
+                .await,
+        );
+        assert_eq!(sealed["state"], "CLOSED");
+
+        let board = parse(
+            server
+                .vault_board(Parameters(BoardParams { project: None }))
+                .await,
+        );
+        assert_eq!(
+            board["tasks"][0]["cycle"], "S-2",
+            "unsealed task should carry over: {board}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cycle_update_rejects_carry_to_without_closed() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_cycle_update(Parameters(CycleUpdateParams {
+                carry_to: Some("BACKLOG".to_string()),
+                ..cycle_update_params("S-1")
+            }))
+            .await
+            .expect_err("carry_to without CLOSED should be rejected");
+        assert!(err.contains("carry_to"), "{err}");
+        assert!(err.contains("CLOSED"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn cycle_update_rejects_unknown_codes_and_empty_updates() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_cycle_update(Parameters(CycleUpdateParams {
+                state: Some("ACTIVE".to_string()),
+                ..cycle_update_params("S-99")
+            }))
+            .await
+            .expect_err("unknown code should be rejected");
+        assert!(err.contains("no cycle with code 'S-99'"), "{err}");
+        assert!(err.contains("vault_board"), "{err}");
+
+        let err = server
+            .vault_cycle_update(Parameters(cycle_update_params("S-1")))
             .await
             .expect_err("empty update should be rejected");
         assert!(err.contains("nothing to update"), "{err}");
