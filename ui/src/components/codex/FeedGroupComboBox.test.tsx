@@ -17,27 +17,34 @@ function renderCombo({
   disabled?: boolean;
   onChange?: (value: string) => void;
 } = {}) {
-  render(
+  const control = (nextValue: string) => (
     <div>
       <FeedGroupComboBox
-        value={value}
+        value={nextValue}
         groups={groups}
         ariaLabel="Feed group"
         disabled={disabled}
         onChange={onChange}
       />
       <button type="button">Outside</button>
-    </div>,
+    </div>
   );
+  const view = render(control(value));
   return {
     input: screen.getByRole("combobox", { name: "Feed group" }),
     onChange,
+    rerenderValue: (nextValue: string) => view.rerender(control(nextValue)),
   };
 }
 
 describe("canonicalFeedGroups", () => {
   it("keeps the first trimmed manifest spelling and order for ASCII-case duplicates", () => {
     expect(canonicalFeedGroups(groups)).toEqual(["Research", "Design"]);
+  });
+
+  it("reuses an already canonical group list", () => {
+    const canonical = ["Research", "Design"];
+    expect(canonicalFeedGroups(canonical)).toBe(canonical);
   });
 });
 
@@ -109,6 +116,41 @@ describe("FeedGroupComboBox", () => {
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("New Group");
+  });
+
+  it("restores a committed manifest spelling after an equivalent draft blur", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { input, rerenderValue } = renderCombo({
+      value: "Research",
+      onChange,
+    });
+
+    await user.clear(input);
+    await user.type(input, " research ");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Outside" }));
+    rerenderValue("Research");
+
+    expect(input).toHaveValue("Research");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("restores a committed novel spelling after a trim/case-equivalent blur", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { input, rerenderValue } = renderCombo({
+      value: "New Group",
+      onChange,
+    });
+
+    await user.clear(input);
+    await user.type(input, " new group ");
+    await user.click(screen.getByRole("button", { name: "Outside" }));
+    rerenderValue("New Group");
+
+    expect(input).toHaveValue("New Group");
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("closes suggestions on Escape without clearing the draft", async () => {

@@ -24,17 +24,25 @@ function groupKey(value: string): string {
 
 export function canonicalFeedGroups(groups: string[]): string[] {
   const seen = new Set<string>();
-  const canonical: string[] = [];
+  let canonical: string[] | null = null;
 
-  for (const group of groups) {
+  for (const [index, group] of groups.entries()) {
     const spelling = group.trim();
     const key = groupKey(spelling);
-    if (!key || seen.has(key)) continue;
+    if (!key || seen.has(key)) {
+      canonical ??= groups.slice(0, index);
+      continue;
+    }
     seen.add(key);
-    canonical.push(spelling);
+    if (canonical) {
+      canonical.push(spelling);
+    } else if (spelling !== group) {
+      canonical = groups.slice(0, index);
+      canonical.push(spelling);
+    }
   }
 
-  return canonical;
+  return canonical ?? groups;
 }
 
 export function FeedGroupComboBox({
@@ -65,7 +73,13 @@ export function FeedGroupComboBox({
   };
 
   const commitValue = (nextValue: string) => {
-    if (disabled || nextValue === lastCommittedRef.current) return;
+    if (disabled) return;
+    const previousValue = lastCommittedRef.current;
+    const key = groupKey(nextValue);
+    if (key === groupKey(previousValue)) {
+      setInputDraft(optionByKey.get(key) ?? previousValue);
+      return;
+    }
     lastCommittedRef.current = nextValue;
     setInputDraft(nextValue);
     onChange(nextValue);
