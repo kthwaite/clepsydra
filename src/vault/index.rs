@@ -1212,11 +1212,24 @@ impl VaultIndex {
         ranked
     }
 
-    /// Full-text search across page titles and bodies.
+    /// Human-oriented full-text search across page titles and bodies.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, IndexError> {
         let Some(query) = fts_prefix_query(query) else {
             return Ok(Vec::new());
         };
+        self.search_fts(&query, limit)
+    }
+
+    /// Execute an already prepared FTS5 expression.
+    ///
+    /// This is crate-scoped so CLI callers can deliberately preserve exact
+    /// phrase and raw operator semantics without exposing FTS syntax to API
+    /// search callers.
+    pub(crate) fn search_fts(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, IndexError> {
         let mut stmt = self.conn.prepare(
             "SELECT f.page_id, f.path, p.title,
                     snippet(pages_fts, 3, '<mark>', '</mark>', '\u{2026}', 32),

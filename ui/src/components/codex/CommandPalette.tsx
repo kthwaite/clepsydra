@@ -71,6 +71,11 @@ function CommandPaletteContent() {
     refetch: retrySearch,
   } = useSearch(open && debouncedQ.length > 0 ? debouncedQ : "", 12);
   const { data: tags } = useTags(open);
+  const searchIsCurrent = q === debouncedQ;
+  const currentSearchResults = searchIsCurrent ? searchResults : undefined;
+  const showSearchLoading =
+    q.length > 0 && (!searchIsCurrent || searchIsFetching);
+  const showSearchError = searchIsCurrent && searchIsError;
 
   useEffect(() => {
     if (open) {
@@ -192,15 +197,15 @@ function CommandPaletteContent() {
   );
 
   const noteCommands = useMemo<Command[]>(() => {
-    if (!searchResults) return [];
-    return searchResults.map((r) => ({
+    if (!currentSearchResults) return [];
+    return currentSearchResults.map((r) => ({
       kind: "note" as const,
       id: shortFolio(r.path),
       title: r.title || r.path,
       sub: r.snippet?.replace(/<\/?mark>/g, "") || r.path,
       action: () => openTab("page", r.path, r.title || r.path),
     }));
-  }, [searchResults, openTab]);
+  }, [currentSearchResults, openTab]);
 
   const tagCommands = useMemo<Command[]>(() => {
     if (!tags) return [];
@@ -314,7 +319,7 @@ function CommandPaletteContent() {
       </div>
       {/* results */}
       <div className="cl-noscroll max-h-[340px] overflow-auto py-[4px]">
-        {searchIsFetching && (
+        {showSearchLoading && (
           <div
             role="status"
             aria-live="polite"
@@ -323,7 +328,7 @@ function CommandPaletteContent() {
             — SEARCHING —
           </div>
         )}
-        {searchIsError && (
+        {showSearchError && (
           <div
             role="alert"
             className="cl-mono flex items-center justify-between gap-3 px-3 py-[16px] text-[11px] tracking-[0.08em] text-warn"
@@ -339,7 +344,7 @@ function CommandPaletteContent() {
             </button>
           </div>
         )}
-        {!searchIsFetching && !searchIsError && filtered.length === 0 && (
+        {!showSearchLoading && !showSearchError && filtered.length === 0 && (
           <div className="cl-mono px-3 py-[24px] text-center text-[11px] tracking-[0.16em] text-ink-faint">
             — NO RESULTS —
           </div>

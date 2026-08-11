@@ -22,7 +22,7 @@ pub fn run(
     } else {
         fts_quote(query)
     };
-    index.search(&prepared, limit)
+    index.search_fts(&prepared, limit)
 }
 
 /// Quote a raw user query as a single FTS5 phrase: surround in double quotes
@@ -239,6 +239,17 @@ mod tests {
         render_human(&[], &mut buf).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.to_lowercase().contains("no matches"));
+    }
+
+    #[test]
+    fn run_non_raw_preserves_exact_phrase_semantics() {
+        let (_dir, _vault, index) = vault_with_note(
+            "Phrase.md",
+            "---\ntitle: Phrase\n---\nalpha beta appears in this order.\n",
+        );
+
+        assert_eq!(run(&index, "alpha beta", 20, false).unwrap().len(), 1);
+        assert!(run(&index, "beta alpha", 20, false).unwrap().is_empty());
     }
 
     #[test]
