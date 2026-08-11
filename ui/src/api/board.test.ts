@@ -1,10 +1,46 @@
-import { describe, expect, it } from "vitest";
+import {
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardResponse, BoardTask } from "#/api/board";
-import { applyTaskPatch } from "#/api/board";
+import {
+  applyTaskPatch,
+  useCreateTask,
+  usePatchTask,
+  useDeleteTask,
+  useCreateCycle,
+  usePatchCycle,
+} from "#/api/board";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn() },
+}));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+function wrapper(queryClient: QueryClient) {
+  return ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
+function freshQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
 
 function makeTask(overrides: Partial<BoardTask> = {}): BoardTask {
   return {
@@ -131,5 +167,173 @@ describe("applyTaskPatch", () => {
     expect(result.tasks[0].status).toBe("DONE");
     expect(result.tasks[1].status).toBe("DOING");
     expect(result.tasks[1]).toBe(t2); // same reference for untouched task
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mutation Error Toast Tests
+// ---------------------------------------------------------------------------
+
+describe("Board mutation error toasts", () => {
+  it("toasts when a patch fails and rolls back", async () => {
+    const queryClient = freshQueryClient();
+    const board: BoardResponse = {
+      columns: [],
+      cycles: [],
+      operations: [],
+      tasks: [makeTask({ id: "task-1", status: "BACKLOG" })],
+    };
+    queryClient.setQueryData(["board", "all"], board);
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+
+    const { result } = renderHook(() => usePatchTask(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    try {
+      await result.current.mutateAsync({
+        id: "task-1",
+        patch: { status: "DOING" },
+      });
+    } catch {
+      // Expected error
+    }
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("TASK EDIT FAILED — REVERTED");
+    });
+
+    // Verify rollback occurred: data should be back to original
+    const cachedBoard = queryClient.getQueryData<BoardResponse>([
+      "board",
+      "all",
+    ]);
+    expect(cachedBoard?.tasks[0].status).toBe("BACKLOG");
+  });
+
+  it("toasts when create task fails", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(["board", "all"], {
+      columns: [],
+      cycles: [],
+      operations: [],
+      tasks: [],
+    });
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+
+    const { result } = renderHook(() => useCreateTask(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    try {
+      await result.current.mutateAsync({
+        title: "New task",
+      });
+    } catch {
+      // Expected error
+    }
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("TASK CREATION FAILED");
+    });
+  });
+
+  it("toasts when delete task fails", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(["board", "all"], {
+      columns: [],
+      cycles: [],
+      operations: [],
+      tasks: [makeTask()],
+    });
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+
+    const { result } = renderHook(() => useDeleteTask(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    try {
+      await result.current.mutateAsync({
+        path: "tasks/T-1.md",
+      });
+    } catch {
+      // Expected error
+    }
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("TASK DESTROY FAILED");
+    });
+  });
+
+  it("toasts when create cycle fails", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(["board", "all"], {
+      columns: [],
+      cycles: [],
+      operations: [],
+      tasks: [],
+    });
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+
+    const { result } = renderHook(() => useCreateCycle(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    try {
+      await result.current.mutateAsync({
+        label: "New cycle",
+        start: "2026-08-11",
+        end: "2026-08-25",
+      });
+    } catch {
+      // Expected error
+    }
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("CYCLE CREATION FAILED");
+    });
+  });
+
+  it("toasts when patch cycle fails", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(["board", "all"], {
+      columns: [],
+      cycles: [],
+      operations: [],
+      tasks: [],
+    });
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(
+      new Error("Network error"),
+    );
+
+    const { result } = renderHook(() => usePatchCycle(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    try {
+      await result.current.mutateAsync({
+        id: "cycle-1",
+        patch: { state: "ACTIVE" },
+      });
+    } catch {
+      // Expected error
+    }
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("CYCLE UPDATE FAILED");
+    });
   });
 });
