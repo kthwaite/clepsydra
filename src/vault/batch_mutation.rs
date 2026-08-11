@@ -1371,9 +1371,23 @@ fn hit_test_failpoint(
 
 #[cfg(not(test))]
 fn hit_test_failpoint(
-    _failpoint: TestFailpoint,
+    failpoint: TestFailpoint,
     _path: &Path,
 ) -> Result<(), BatchMutationError> {
+    match failpoint {
+        TestFailpoint::Publication(index)
+        | TestFailpoint::DirectoryOwnershipPublication(index)
+        | TestFailpoint::RollbackPublication(index) => {
+            let _ = index;
+        }
+        TestFailpoint::PhaseFlush(phase) | TestFailpoint::PhasePublication(phase) => {
+            let _ = phase;
+        }
+        TestFailpoint::ManifestFlush
+        | TestFailpoint::WorkspaceParentSync
+        | TestFailpoint::WorkspaceRemoval
+        | TestFailpoint::DirectoryParentSync => {}
+    }
     Ok(())
 }
 

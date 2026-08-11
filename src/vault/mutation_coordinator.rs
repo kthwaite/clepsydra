@@ -206,9 +206,9 @@ pub enum MutationError {
     )]
     BatchRollback {
         directory: PathBuf,
-        publish: BatchMutationError,
+        publish: Box<BatchMutationError>,
         #[source]
-        rollback: BatchMutationError,
+        rollback: Box<BatchMutationError>,
     },
     #[error("batch recovery required for retained transaction {directory}: {source}")]
     BatchRecovery {
@@ -342,8 +342,8 @@ fn publish_batch(
             Ok(()) => Err(MutationError::BatchPublish { source: publish }),
             Err(rollback) => Err(MutationError::BatchRollback {
                 directory,
-                publish,
-                rollback,
+                publish: Box::new(publish),
+                rollback: Box::new(rollback),
             }),
         };
     }
@@ -1921,11 +1921,11 @@ mod tests {
             .await
             .expect("overlapping reversed-order batches deadlocked");
 
-        assert_ne!(first_result.is_ok(), second_result.is_ok());
-        let stale = if first_result.is_err() {
-            first_result.unwrap_err()
-        } else {
-            second_result.unwrap_err()
+        let stale = match (first_result, second_result) {
+            (Err(stale), Ok(_)) | (Ok(_), Err(stale)) => stale,
+            (first_result, second_result) => panic!(
+                "expected exactly one stale batch result, got {first_result:?} and {second_result:?}"
+            ),
         };
         assert!(matches!(stale, MutationError::Stale(_)));
         assert_eq!(notify_count.load(Ordering::SeqCst), 1);
