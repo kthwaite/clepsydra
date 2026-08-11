@@ -509,25 +509,49 @@ pub async fn build_app_state(
     build_app_state_with_feeds(vault_root, &FeedsSettings::default()).await
 }
 
+fn startup_index_error(
+    operation: &'static str,
+    source: impl std::fmt::Display,
+    recovered_batches: &[vault::batch_mutation::RecoveredBatch],
+) -> String {
+    if recovered_batches.is_empty() {
+        return source.to_string();
+    }
+    let retained = recovered_batches
+        .iter()
+        .map(|recovered| recovered.directory().display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "startup index {operation} failed; retained transaction paths: {retained}: {source}"
+    )
+}
+
 /// Build the shared application state with the configured RSS runtime.
 pub async fn build_app_state_with_feeds(
     vault_root: &Path,
     feed_settings: &FeedsSettings,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let vault = Vault::open(vault_root)?;
-
-    let cas_path_raw = &vault.config().archive.cas_path;
-    let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
-    let cas = vault::cas::ContentStore::open(&cas_path)?;
-    let feeds =
-        crate::feeds::store::FeedStoreHandle::open(&vault.root().join(".clepsydra/feeds.db"))?;
-    let feed_client =
-        crate::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)?;
+    let recovered_batches =
+        vault::batch_mutation::recover_pending(vault.root()).map_err(|source| {
+            let retained = vault::batch_mutation::retained_transaction_directories(vault.root())
+                .iter()
+                .map(|directory| directory.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "startup filesystem recovery failed; retained transaction paths: {retained}: {source}"
+            )
+        })?;
 
     let db_path = vault.root().join(INDEX_DB_RELATIVE);
-    let mut index = VaultIndex::open(&db_path)?;
+    let mut index = VaultIndex::open(&db_path)
+        .map_err(|source| startup_index_error("open", source, &recovered_batches))?;
 
-    let stats = index.build(&vault)?;
+    let stats = index
+        .build(&vault)
+        .map_err(|source| startup_index_error("build", source, &recovered_batches))?;
     info!(
         pages_indexed = stats.pages_indexed,
         pages_skipped = stats.pages_skipped,
@@ -535,7 +559,26 @@ pub async fn build_app_state_with_feeds(
         warnings = stats.warnings.len(),
         "index built"
     );
-    index.resolve_links()?;
+    index
+        .resolve_links()
+        .map_err(|source| startup_index_error("link resolution", source, &recovered_batches))?;
+
+    for recovered in recovered_batches {
+        let directory = recovered.directory().to_path_buf();
+        recovered.finish().map_err(|source| {
+            format!(
+                "startup transaction finalization failed; retained transaction {}: {source}",
+                directory.display()
+            )
+        })?;
+    }
+    let cas_path_raw = &vault.config().archive.cas_path;
+    let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
+    let cas = vault::cas::ContentStore::open(&cas_path)?;
+    let feeds =
+        crate::feeds::store::FeedStoreHandle::open(&vault.root().join(".clepsydra/feeds.db"))?;
+    let feed_client =
+        crate::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)?;
 
     let index_handle = IndexHandle::spawn(index, vault.clone());
     let (change_broadcast_tx, _) =

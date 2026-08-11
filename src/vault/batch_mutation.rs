@@ -671,6 +671,28 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
     Ok(recovered)
 }
 
+pub(crate) fn retained_transaction_directories(root: &Path) -> Vec<PathBuf> {
+    let transactions = root.join(".clepsydra").join("transactions");
+    let Ok(entries) = fs::read_dir(&transactions) else {
+        return vec![transactions];
+    };
+    let mut directories: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|file_type| file_type.is_dir())
+                .map(|_| entry.path())
+        })
+        .collect();
+    directories.sort();
+    if directories.is_empty() {
+        directories.push(transactions);
+    }
+    directories
+}
+
 impl From<&ChangeEvent> for ManifestChangeEvent {
     fn from(event: &ChangeEvent) -> Self {
         match event {

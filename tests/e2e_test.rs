@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
@@ -15,6 +16,81 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use tempfile::TempDir;
+
+const TRANSACTION_ID: &str = "0198a4df-f5c2-7cf0-8000-000000000007";
+
+fn init_production_vault(tmp: &TempDir) -> PathBuf {
+    let root = tmp.path().join("vault");
+    init_vault(&root).unwrap();
+    let config_path = root.join(".clepsydra/config.toml");
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(&format!(
+        "\n[archive]\ncas_path = {:?}\n",
+        root.join(".clepsydra/cas").to_string_lossy()
+    ));
+    fs::write(config_path, config).unwrap();
+    root.canonicalize().unwrap()
+}
+
+fn seed_write_transaction(
+    root: &Path,
+    phase: &str,
+    files: &[(&str, &[u8], &[u8], bool)],
+) -> PathBuf {
+    let directory = root
+        .join(".clepsydra/transactions")
+        .join(TRANSACTION_ID);
+    fs::create_dir_all(directory.join("staged")).unwrap();
+    fs::create_dir_all(directory.join("rollback")).unwrap();
+    fs::create_dir_all(directory.join("created")).unwrap();
+
+    let mut intents = Vec::with_capacity(files.len());
+    let mut index_events = Vec::with_capacity(files.len());
+    for (index, (path, before, after, published)) in files.iter().enumerate() {
+        fs::write(root.join(path), if *published { after } else { before }).unwrap();
+        fs::write(directory.join("staged").join(index.to_string()), after).unwrap();
+        fs::write(
+            directory.join("rollback").join(index.to_string()),
+            before,
+        )
+        .unwrap();
+        intents.push(serde_json::json!({
+            "kind": "write",
+            "path": path,
+            "before_hash": blake3::hash(before).to_hex().to_string(),
+            "after_hash": blake3::hash(after).to_hex().to_string(),
+        }));
+        index_events.push(serde_json::json!({
+            "kind": "upsert",
+            "path": path,
+        }));
+    }
+
+    fs::write(
+        directory.join("manifest.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "phase": phase,
+            "create_directories": [],
+            "created_directories": [],
+            "remove_directories": [],
+            "intents": intents,
+            "index_events": index_events,
+            "moved_pages": [],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    directory
+}
+
+fn server_for_state(state: Arc<AppState>) -> TestServer {
+    TestServer::new(
+        Router::new()
+            .nest("/api/vault", api_router())
+            .with_state(state),
+    )
+    .unwrap()
+}
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
     Arc::new(vec![Box::new(AcademicMoveHook)])
@@ -196,6 +272,126 @@ async fn full_vault_lifecycle() {
     res.assert_status_ok();
     let stats: serde_json::Value = res.json();
     assert_eq!(stats["pages"], 1);
+}
+
+#[tokio::test]
+async fn transaction_recovery_restores_partially_committed_files_before_startup_index_build() {
+    let tmp = TempDir::new().unwrap();
+    let root = init_production_vault(&tmp);
+    let before_alpha = b"# Alpha\nrollbackalpha\n";
+    let after_alpha = b"# Alpha\ncommittedalpha\n";
+    let before_beta = b"# Beta\nrollbackbeta\n";
+    let after_beta = b"# Beta\ncommittedbeta\n";
+    let directory = seed_write_transaction(
+        &root,
+        "committing",
+        &[
+            ("alpha.md", before_alpha, after_alpha, true),
+            ("beta.md", before_beta, after_beta, false),
+        ],
+    );
+
+    let state = clepsydra::build_app_state(&root).await.unwrap();
+
+    let alpha_bytes = fs::read(root.join("alpha.md")).unwrap();
+    assert!(alpha_bytes.ends_with(before_alpha));
+    assert!(!alpha_bytes.windows(after_alpha.len()).any(|bytes| bytes == after_alpha));
+    let beta_bytes = fs::read(root.join("beta.md")).unwrap();
+    assert!(beta_bytes.ends_with(before_beta));
+    assert!(!beta_bytes.windows(after_beta.len()).any(|bytes| bytes == after_beta));
+    assert!(!directory.exists());
+
+    let server = server_for_state(state);
+    let alpha_results: serde_json::Value = server
+        .get("/api/vault/index/search?q=rollbackalpha")
+        .await
+        .json();
+    assert_eq!(alpha_results[0]["path"], "alpha.md");
+    let beta_results: serde_json::Value = server
+        .get("/api/vault/index/search?q=rollbackbeta")
+        .await
+        .json();
+    assert_eq!(beta_results[0]["path"], "beta.md");
+}
+
+#[tokio::test]
+async fn transaction_recovery_indexes_and_finalizes_filesystem_committed_transaction() {
+    let tmp = TempDir::new().unwrap();
+    let root = init_production_vault(&tmp);
+    let before = b"# Gamma\nrollbackgamma\n";
+    let after = b"# Gamma\ncommittedgamma\n";
+    let directory = seed_write_transaction(
+        &root,
+        "filesystem_committed",
+        &[("gamma.md", before, after, true)],
+    );
+
+    let state = clepsydra::build_app_state(&root).await.unwrap();
+
+    assert!(fs::read(root.join("gamma.md")).unwrap().ends_with(after));
+    assert!(!directory.exists());
+    let server = server_for_state(state);
+    let results: serde_json::Value = server
+        .get("/api/vault/index/search?q=committedgamma")
+        .await
+        .json();
+    assert_eq!(results[0]["path"], "gamma.md");
+}
+
+#[tokio::test]
+async fn transaction_recovery_retains_committed_workspace_and_reports_it_when_index_open_fails() {
+    let tmp = TempDir::new().unwrap();
+    let root = init_production_vault(&tmp);
+    let before = b"# Epsilon\nrollbackepsilon\n";
+    let after = b"# Epsilon\ncommittedepsilon\n";
+    let directory = seed_write_transaction(
+        &root,
+        "filesystem_committed",
+        &[("epsilon.md", before, after, true)],
+    );
+    fs::create_dir(root.join(".clepsydra/cache.db")).unwrap();
+
+    let error = clepsydra::build_app_state(&root)
+        .await
+        .err()
+        .expect("index open failure must block startup");
+
+    assert!(
+        error.to_string().contains(&directory.display().to_string()),
+        "startup error must identify retained workspace {}: {error}",
+        directory.display()
+    );
+    assert!(directory.is_dir());
+    assert_eq!(fs::read(root.join("epsilon.md")).unwrap(), after);
+}
+
+#[tokio::test]
+async fn transaction_recovery_failure_blocks_startup_and_reports_retained_workspace() {
+    let tmp = TempDir::new().unwrap();
+    let root = init_production_vault(&tmp);
+    let before = b"# Delta\nrollbackdelta\n";
+    let after = b"# Delta\ncommitteddelta\n";
+    let directory = seed_write_transaction(
+        &root,
+        "committing",
+        &[("delta.md", before, after, true)],
+    );
+    let external = b"# Delta\nexternaldelta\n";
+    fs::write(root.join("delta.md"), external).unwrap();
+
+    let error = clepsydra::build_app_state(&root)
+        .await
+        .err()
+        .expect("conflicting retained transaction must block startup");
+
+    assert!(
+        error.to_string().contains(&directory.display().to_string()),
+        "startup error must identify retained workspace {}: {error}",
+        directory.display()
+    );
+    assert!(directory.is_dir());
+    assert_eq!(fs::read(root.join("delta.md")).unwrap(), external);
+    assert!(!root.join(".clepsydra/cache.db").exists());
 }
 
 #[tokio::test]
