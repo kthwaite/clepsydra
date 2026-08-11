@@ -8,6 +8,10 @@ import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
+import {
+  blockIdFromHref,
+  remarkBlockReferences,
+} from "#/lib/markdown/blockReferences";
 import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {
@@ -45,6 +49,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
 const remarkPlugins: PluggableList = [
   remarkFolioMath,
   remarkGfm,
+  remarkBlockReferences,
   [
     wikiLinkPlugin,
     {
@@ -55,6 +60,7 @@ const remarkPlugins: PluggableList = [
 ];
 
 function transformMarkdownUrl(url: string): string {
+  if (blockIdFromHref(url)) return url;
   return isCasResource(url)
     ? resolveResourceUrl(url)
     : defaultUrlTransform(url);

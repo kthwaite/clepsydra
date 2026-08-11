@@ -134,4 +134,22 @@ w = z^2
       "/api/vault/cas/sha256:image",
     );
   });
+
+  it("renders block references with only their private scheme preserved", () => {
+    render(
+      <MarkdownRenderer
+        content={
+          "Before ((abc123DEF0)) after [Unknown](other-scheme:abc123DEF0)"
+        }
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "((abc123DEF0))" }),
+    ).toHaveAttribute("href", "clepsydra-block:abc123DEF0");
+    expect(screen.getByText("Unknown").closest("a")).toHaveAttribute(
+      "href",
+      "",
+    );
+  });
 });
