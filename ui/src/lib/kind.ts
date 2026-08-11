@@ -29,6 +29,7 @@ export const KINDS = [
   "PERSON",
   "TASK",
   "CYCLE",
+  "RECIPE",
   "AI_CONVERSATION",
 ] as const satisfies readonly Kind[];
 
@@ -60,6 +61,7 @@ export const KIND_META: Record<Kind, KindMeta> = {
   NOTE: { label: "NOTE", color: "var(--ink-mute)" },
   TASK: { label: "TASK", color: "var(--hot)" },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
+  RECIPE: { label: "RECIPE", color: "var(--accent-deep)" },
   AI_CONVERSATION: { label: "AI CONVERSATION", color: "var(--cool)" },
 };
 
@@ -102,6 +104,8 @@ const FOLDER_KIND: Record<string, Kind> = {
   persons: "PERSON",
   person: "PERSON",
   contacts: "PERSON",
+  recipes: "RECIPE",
+  recipe: "RECIPE",
   conversations: "AI_CONVERSATION",
   conversation: "AI_CONVERSATION",
   chats: "AI_CONVERSATION",

@@ -28,6 +28,8 @@ describe("resolveKindFromPath", () => {
       "AI_CONVERSATION",
     );
     expect(resolveKindFromPath("chats/example.md")).toBe("AI_CONVERSATION");
+    expect(resolveKindFromPath("recipes/pho-ga.md")).toBe("RECIPE");
+    expect(resolveKindFromPath("recipe/pho-ga.md")).toBe("RECIPE");
   });
 
   it("tolerates leading slashes and nested paths", () => {
@@ -98,8 +100,16 @@ describe("KIND_META", () => {
     expect(KINDS).toContain("AI_CONVERSATION");
   });
 
+  it("includes recipes in the runtime kind list", () => {
+    expect(KINDS).toContain("RECIPE");
+  });
+
   it("uses the exact AI conversation label", () => {
     expect(kindLabel("AI_CONVERSATION")).toBe("AI CONVERSATION");
+  });
+
+  it("uses the exact recipe label", () => {
+    expect(kindLabel("RECIPE")).toBe("RECIPE");
   });
   it("has a label and color var for every kind", () => {
     for (const k of KINDS) {

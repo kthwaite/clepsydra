@@ -16,6 +16,10 @@ describe("presentationFor", () => {
     );
   });
 
+  it("selects the recipe presentation for recipes", () => {
+    expect(presentationFor("RECIPE").bodyPresentation).toBe("recipe");
+  });
+
   it("retains Journal's title and metadata presentation", () => {
     const presentation = presentationFor("JOURNAL");
 
