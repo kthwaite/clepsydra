@@ -114,6 +114,140 @@ describe("useWorkspaceStore block focus requests", () => {
     ).toBeUndefined();
   });
 
+  it("claims each focus request once and permits a later request for the same block", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+
+    const first = useWorkspaceStore.getState().tabs[0];
+    expect(first.focusRequestId).toBeDefined();
+    expect(
+      useWorkspaceStore
+        .getState()
+        .takeTabFocus(first.id, first.focusRequestId!),
+    ).toBe("abc123DEF0");
+    expect(
+      useWorkspaceStore
+        .getState()
+        .takeTabFocus(first.id, first.focusRequestId!),
+    ).toBeUndefined();
+
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+    const second = useWorkspaceStore.getState().tabs[0];
+    expect(second.focusRequestId).not.toBe(first.focusRequestId);
+    expect(
+      useWorkspaceStore
+        .getState()
+        .takeTabFocus(second.id, second.focusRequestId!),
+    ).toBe("abc123DEF0");
+  });
+
+  it("cancels a pending request when another tab is activated", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "other",
+          type: "page",
+          path: "other.md",
+          label: "Other",
+        },
+      ],
+      activeTabId: "other",
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+    const source = useWorkspaceStore
+      .getState()
+      .tabs.find((tab) => tab.path === "source.md")!;
+
+    useWorkspaceStore.getState().activateTab("other");
+
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === source.id)
+        ?.focusBlockId,
+    ).toBeUndefined();
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === source.id)
+        ?.focusRequestId,
+    ).toBeUndefined();
+  });
+
+  it("cancels a retained pinned request when close-other-tabs activates another tab", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "source",
+          type: "page",
+          path: "source.md",
+          label: "Source",
+          pinned: true,
+          focusBlockId: "abc123DEF0",
+          focusRequestId: "request-1",
+        },
+        {
+          id: "other",
+          type: "page",
+          path: "other.md",
+          label: "Other",
+        },
+      ],
+      activeTabId: "source",
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+
+    useWorkspaceStore.getState().closeOtherTabs("other");
+
+    const source = useWorkspaceStore
+      .getState()
+      .tabs.find((tab) => tab.id === "source");
+    expect(useWorkspaceStore.getState().activeTabId).toBe("other");
+    expect(source?.focusBlockId).toBeUndefined();
+    expect(source?.focusRequestId).toBeUndefined();
+  });
+
+  it("retains a pending request when an inactive tab closes", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "other",
+          type: "page",
+          path: "other.md",
+          label: "Other",
+        },
+      ],
+      activeTabId: "other",
+      navigationMode: "new",
+      openHistory: [],
+      quires: {},
+    });
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
+
+    useWorkspaceStore.getState().closeTab("other");
+
+    const source = useWorkspaceStore
+      .getState()
+      .tabs.find((tab) => tab.path === "source.md");
+    expect(source?.focusBlockId).toBe("abc123DEF0");
+    expect(source?.focusRequestId).toBeDefined();
+  });
+
   it("does not persist transient block focus requests", () => {
     window.localStorage.clear();
     useWorkspaceStore.setState({
@@ -124,6 +258,7 @@ describe("useWorkspaceStore block focus requests", () => {
           path: "source.md",
           label: "Source",
           focusBlockId: "abc123DEF0",
+          focusRequestId: "request-1",
         },
       ],
       activeTabId: "source",
@@ -136,6 +271,7 @@ describe("useWorkspaceStore block focus requests", () => {
       window.localStorage.getItem("clepsydra.workspace") ?? "{}",
     );
     expect(persisted.state.tabs[0].focusBlockId).toBeUndefined();
+    expect(persisted.state.tabs[0].focusRequestId).toBeUndefined();
   });
 });
 

@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { Editor, Element as SlateElement, Transforms } from "slate";
+import { ReactEditor } from "slate-react";
 import { useBacklinks, useOutlinks, useSimilar, useTags } from "#/api/index";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
@@ -97,10 +99,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
-  const focusBlockId = useWorkspaceStore(
-    (state) => state.tabs.find((tab) => tab.id === tabId)?.focusBlockId,
+  const focusRequestId = useWorkspaceStore(
+    (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
   );
-  const clearTabFocus = useWorkspaceStore((state) => state.clearTabFocus);
+  const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       void navigate({ to: "/" });
@@ -141,7 +143,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const [conversationMode, setConversationMode] = useState<"read" | "edit">(
     "read",
   );
-  const conversationEditorRef = useRef<CustomEditor | null>(null);
+  const pageEditorRef = useRef<CustomEditor | null>(null);
   useEffect(() => {
     setConversationMode("read");
   }, [path]);
@@ -188,29 +190,6 @@ export function Folio({ tabId, path }: FolioProps) {
     if (editor.title) updateTabLabel(tabId, editor.title);
   }, [tabId, editor.title, updateTabLabel]);
 
-  useEffect(() => {
-    if (!focusBlockId || editor.isLoading) return;
-
-    const target = Array.from(
-      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
-    ).find((element) => element.dataset.blockId === focusBlockId);
-
-    if (target) {
-      target.scrollIntoView({ block: "center", inline: "nearest" });
-      const hadTabIndex = target.hasAttribute("tabindex");
-      if (!hadTabIndex) target.tabIndex = -1;
-      target.focus({ preventScroll: true });
-      if (!hadTabIndex) target.removeAttribute("tabindex");
-    }
-
-    clearTabFocus(tabId);
-  }, [
-    clearTabFocus,
-    editor.editorRevision,
-    editor.isLoading,
-    focusBlockId,
-    tabId,
-  ]);
 
   useEffect(() => {
     setProgress(0);
@@ -236,6 +215,46 @@ export function Folio({ tabId, path }: FolioProps) {
   const conversationReadOnly =
     isAiConversation && conversationMode === "read";
   const isJournal = kind === "JOURNAL";
+  useEffect(() => {
+    if (!focusRequestId || editor.isLoading) return;
+    const focusBlockId = takeTabFocus(tabId, focusRequestId);
+    if (!focusBlockId) return;
+
+    const target = Array.from(
+      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
+    ).find((element) => element.dataset.blockId === focusBlockId);
+    if (!target) return;
+
+    target.scrollIntoView({ block: "center", inline: "nearest" });
+    if (!conversationReadOnly && pageEditorRef.current) {
+      const editorInstance = pageEditorRef.current;
+      const entry = Editor.nodes(editorInstance, {
+        at: [],
+        match: (node) =>
+          SlateElement.isElement(node) &&
+          node.type !== "block-ref" &&
+          "blockId" in node &&
+          node.blockId === focusBlockId,
+      }).next().value;
+      if (entry) {
+        Transforms.select(editorInstance, Editor.start(editorInstance, entry[1]));
+        ReactEditor.focus(editorInstance);
+      }
+      return;
+    }
+
+    const hadTabIndex = target.hasAttribute("tabindex");
+    if (!hadTabIndex) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    if (!hadTabIndex) target.removeAttribute("tabindex");
+  }, [
+    conversationReadOnly,
+    editor.editorRevision,
+    editor.isLoading,
+    focusRequestId,
+    tabId,
+    takeTabFocus,
+  ]);
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
@@ -315,8 +334,8 @@ export function Folio({ tabId, path }: FolioProps) {
     [editor.bodyMarkdown, isAiConversation],
   );
   const addConversationTurn = useCallback(() => {
-    if (!conversationEditorRef.current) return;
-    insertConversationTurn(conversationEditorRef.current);
+    if (!pageEditorRef.current) return;
+    insertConversationTurn(pageEditorRef.current);
   }, []);
   const { activeIndex, scrollTo } = useScrollSpy(
     bodyRef,
@@ -466,9 +485,7 @@ export function Folio({ tabId, path }: FolioProps) {
               insertionRequest={attachmentInsertion}
               onInsertionHandled={finishAttachmentInsertion}
               readOnly={conversationReadOnly}
-              editorRef={
-                isAiConversation ? conversationEditorRef : undefined
-              }
+              editorRef={pageEditorRef}
             />
           </ConversationPresentationProvider>
         </WikilinkResolutionProvider>

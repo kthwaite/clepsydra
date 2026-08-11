@@ -6,15 +6,35 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
+import {
+  StrictMode,
+  useEffect,
+  useMemo,
+  type MutableRefObject,
+} from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createEditor, type Descendant } from "slate";
+import { Editable, Slate, withReact } from "slate-react";
 import { Folio } from "#/components/codex/Folio";
 import { Constellation } from "#/components/codex/Constellation";
+import { renderElement } from "#/editor/elements/renderElement";
+import type { CustomEditor } from "#/editor/types";
+import { withSchema } from "#/editor/schema/withSchema";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useConstellationStore } from "#/store/constellation";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { useWorkspaceStore } from "#/store/workspace";
+
+const { editorCapture, pageEditorState } = vi.hoisted(() => ({
+  editorCapture: { current: null as CustomEditor | null },
+  pageEditorState: {
+    isLoading: false,
+    kind: "NOTE",
+    bodyMarkdown: "Editable body",
+  },
+}));
 
 vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => true }));
 vi.mock("#/api/index", () => ({
@@ -60,16 +80,39 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
   useScrollSpy: () => ({ activeIndex: -1, scrollTo: vi.fn() }),
 }));
 vi.mock("#/editor/SlateEditor", () => ({
-  SlateEditor: () => (
-    <div>
-      <p data-block-id="abc123DEF0">Focused source block</p>
-      <textarea aria-label="Page body" defaultValue="Editable body" />
-    </div>
-  ),
+  SlateEditor: ({
+    initialValue,
+    readOnly = false,
+    editorRef,
+  }: {
+    initialValue: Descendant[];
+    readOnly?: boolean;
+    editorRef?: MutableRefObject<CustomEditor | null>;
+  }) => {
+    const editor = useMemo(() => withReact(withSchema(createEditor())), []);
+    if (editorRef) editorRef.current = editor;
+    editorCapture.current = editorRef ? editor : null;
+    useEffect(
+      () => () => {
+        if (editorRef?.current === editor) editorRef.current = null;
+        if (editorCapture.current === editor) editorCapture.current = null;
+      },
+      [editor, editorRef],
+    );
+    return (
+      <Slate editor={editor} initialValue={initialValue}>
+        <Editable
+          aria-label="Page body"
+          readOnly={readOnly}
+          renderElement={renderElement}
+        />
+      </Slate>
+    );
+  },
 }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: () => ({
-    isLoading: false,
+    isLoading: pageEditorState.isLoading,
     error: null,
     isDraft: false,
     title: "Alpha",
@@ -83,15 +126,23 @@ vi.mock("#/editor/usePageEditor", () => ({
     saveError: null,
     revisionConflict: null,
     reloadAfterConflict: vi.fn(),
-    kind: "NOTE",
-    bodyMarkdown: "Editable body",
+    kind: pageEditorState.kind,
+    bodyMarkdown: pageEditorState.bodyMarkdown,
     inferred: false,
     project: null,
     initialValue: [
-      { type: "paragraph", children: [{ text: "Editable body" }] },
+      {
+        type: "paragraph",
+        blockId: "abc123DEF0",
+        children: [{ text: "Focused source block" }],
+      },
     ],
     editorValue: [
-      { type: "paragraph", children: [{ text: "Editable body" }] },
+      {
+        type: "paragraph",
+        blockId: "abc123DEF0",
+        children: [{ text: "Focused source block" }],
+      },
     ],
     onSlateChange: vi.fn(),
     editorRevision: 1,
@@ -165,7 +216,7 @@ function Workspace() {
   return <p>No active workspace tab</p>;
 }
 
-function renderNavigation(initialEntry: string) {
+function renderNavigation(initialEntry: string, strictMode = false) {
   const rootRoute = createRootRoute({ component: Outlet });
   const atriumRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -191,7 +242,8 @@ function renderNavigation(initialEntry: string) {
     history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
 
-  render(<RouterProvider router={router} />);
+  const provider = <RouterProvider router={router} />;
+  render(strictMode ? <StrictMode>{provider}</StrictMode> : provider);
   return router;
 }
 
@@ -212,6 +264,10 @@ describe("mobile Folio Back", () => {
       value: scrollIntoView,
     });
     scrollIntoView.mockReset();
+    editorCapture.current = null;
+    pageEditorState.isLoading = false;
+    pageEditorState.kind = "NOTE";
+    pageEditorState.bodyMarkdown = "Editable body";
     useWorkspaceStore.setState({
       tabs: [],
       activeTabId: null,
@@ -245,9 +301,14 @@ describe("mobile Folio Back", () => {
       }),
     );
 
-    const target = await screen.findByText("Focused source block");
+    await screen.findByText("Focused source block");
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
-    expect(target).toHaveFocus();
+    const editor = editorCapture.current;
+    expect(editor?.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    });
+    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveFocus();
     expect(router.state.location.pathname).toBe("/workspace");
     const state = useWorkspaceStore.getState();
     expect(
@@ -268,7 +329,108 @@ describe("mobile Folio Back", () => {
       activeTabId: "alpha",
     });
     renderNavigation("/workspace");
-    const target = await screen.findByText("Focused source block");
+    await screen.findByText("Focused source block");
+
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "abc123DEF0",
+        });
+    });
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(editorCapture.current?.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Page body" })).toHaveFocus(),
+    );
+    expect(
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "alpha")
+        ?.focusBlockId,
+    ).toBeUndefined();
+  });
+
+  it("claims a StrictMode focus request once and accepts a later request for the same block", async () => {
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
+    renderNavigation("/workspace", true);
+
+    await screen.findByText("Focused source block");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "abc123DEF0",
+        });
+    });
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not revive a loading focus request after another tab supersedes it", async () => {
+    pageEditorState.isLoading = true;
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "other",
+          type: "page",
+          path: "notes/other.md",
+          label: "Other",
+        },
+      ],
+      activeTabId: "other",
+    });
+    useWorkspaceStore
+      .getState()
+      .openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
+    renderNavigation("/workspace");
+    await screen.findByText(/fetching folio notes\/alpha\.md/);
+
+    act(() => useWorkspaceStore.getState().activateTab("other"));
+    pageEditorState.isLoading = false;
+    act(() => useWorkspaceStore.getState().activateTab(
+      useWorkspaceStore
+        .getState()
+        .tabs.find((tab) => tab.path === "notes/alpha.md")!.id,
+    ));
+
+    await screen.findByText("Focused source block");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(
+      useWorkspaceStore
+        .getState()
+        .tabs.find((tab) => tab.path === "notes/alpha.md")?.focusBlockId,
+    ).toBeUndefined();
+  });
+
+  it("focuses the DOM block without changing Slate selection in read-only mode", async () => {
+    pageEditorState.kind = "AI_CONVERSATION";
+    pageEditorState.bodyMarkdown = "Focused source block";
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    const targetText = await screen.findByText("Focused source block");
+    const target = targetText.closest<HTMLElement>("[data-block-id]");
+    expect(target).not.toBeNull();
 
     act(() => {
       useWorkspaceStore
@@ -280,10 +442,7 @@ describe("mobile Folio Back", () => {
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
     expect(target).toHaveFocus();
-    expect(
-      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "alpha")
-        ?.focusBlockId,
-    ).toBeUndefined();
+    expect(editorCapture.current?.selection).toBeNull();
   });
 
   it("consumes a focus request when the source block is missing", async () => {
