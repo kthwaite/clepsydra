@@ -26,6 +26,7 @@ pub enum Kind {
     Person,
     Task,
     Cycle,
+    Recipe,
     #[schema(rename = "AI_CONVERSATION")]
     AiConversation,
 }
@@ -46,6 +47,7 @@ impl Kind {
             Kind::Person => "people",
             Kind::Task => "tasks",
             Kind::Cycle => "cycles",
+            Kind::Recipe => "recipes",
             Kind::AiConversation => "conversations",
         }
     }
@@ -64,6 +66,7 @@ impl Kind {
             Kind::Person => "PERSON",
             Kind::Task => "TASK",
             Kind::Cycle => "CYCLE",
+            Kind::Recipe => "RECIPE",
             Kind::AiConversation => "AI_CONVERSATION",
         }
     }
@@ -82,6 +85,7 @@ impl Kind {
             "PERSON" => Some(Kind::Person),
             "TASK" => Some(Kind::Task),
             "CYCLE" => Some(Kind::Cycle),
+            "RECIPE" => Some(Kind::Recipe),
             "AI_CONVERSATION" => Some(Kind::AiConversation),
             _ => None,
         }
@@ -102,6 +106,7 @@ impl Kind {
             "people" | "persons" | "person" | "contacts" => Some(Kind::Person),
             "tasks" | "task" => Some(Kind::Task),
             "cycles" | "cycle" | "sprints" | "sprint" => Some(Kind::Cycle),
+            "recipes" | "recipe" => Some(Kind::Recipe),
             "conversations" | "conversation" | "chats" => Some(Kind::AiConversation),
             _ => None,
         }
@@ -151,7 +156,7 @@ mod tests {
             Kind::from_token("ai_conversation"),
             Some(Kind::AiConversation)
         );
-        assert_eq!(Kind::from_token("recipe"), None);
+        assert_eq!(Kind::from_token("recipe"), Some(Kind::Recipe));
     }
 
     #[test]
@@ -161,6 +166,10 @@ mod tests {
         assert_eq!(Kind::Person.canonical_folder(), "people");
         assert_eq!(Kind::Code.canonical_folder(), "code");
         assert_eq!(Kind::AiConversation.canonical_folder(), "conversations");
+        assert_eq!(Kind::Recipe.as_str(), "RECIPE");
+        assert_eq!(Kind::Recipe.canonical_folder(), "recipes");
+        assert_eq!(Kind::from_folder("recipe"), Some(Kind::Recipe));
+        assert_eq!(Kind::from_folder("recipes"), Some(Kind::Recipe));
     }
 
     #[test]
@@ -209,6 +218,7 @@ mod tests {
             Kind::Person,
             Kind::Task,
             Kind::Cycle,
+            Kind::Recipe,
             Kind::AiConversation,
         ];
         for k in all {
@@ -240,6 +250,11 @@ mod tests {
         assert_eq!(encoded, "\"QUOTE\"");
         let decoded: Kind = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, Kind::Quote);
+
+        let encoded = serde_json::to_string(&Kind::Recipe).unwrap();
+        assert_eq!(encoded, "\"RECIPE\"");
+        let decoded: Kind = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, Kind::Recipe);
 
         let encoded = serde_json::to_string(&Kind::AiConversation).unwrap();
         assert_eq!(encoded, "\"AI_CONVERSATION\"");

@@ -65,6 +65,15 @@ fn openapi_documents_every_registered_vault_operation() {
 }
 
 #[test]
+fn openapi_kind_enum_contains_recipe() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let kinds = document["components"]["schemas"]["Kind"]["enum"]
+        .as_array()
+        .expect("Kind should be a string enum");
+    assert!(kinds.contains(&serde_json::json!("RECIPE")));
+}
+
+#[test]
 fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
     let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
     let operation = &document["paths"]["/api/vault/bases/{slug}/views/{view}/evaluate"]["post"];
