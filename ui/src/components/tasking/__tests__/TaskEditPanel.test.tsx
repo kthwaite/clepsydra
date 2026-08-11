@@ -440,7 +440,7 @@ describe("TaskEditPanel — debounced patches", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TaskEditPanel — hold toggle", () => {
-  it("hold toggle ON fires PATCH {hold: 'BLOCKED — STATE REASON'}", async () => {
+  it("hold toggle ON fires PATCH {hold: 'BLOCKED'}", async () => {
     const stub = makeStub();
     // Task starts with hold: null
     wrap({
@@ -460,7 +460,7 @@ describe("TaskEditPanel — hold toggle", () => {
         string,
         unknown
       >;
-      expect(body.hold).toBe("BLOCKED — STATE REASON");
+      expect(body.hold).toBe("BLOCKED");
     });
   });
 
@@ -481,6 +481,51 @@ describe("TaskEditPanel — hold toggle", () => {
       >;
       expect(body.hold).toBeNull();
     });
+  });
+
+  it("holds with BLOCKED and focuses the reason input selected", async () => {
+    const stub = makeStub();
+    const { rerender, qc } = wrap({
+      task: { ...FULL_TASK, hold: null },
+      fetchStub: stub,
+      seedBoard: true,
+    });
+
+    // Click toggle to turn hold on
+    await userEvent.click(screen.getByTestId("edit-panel-hold-toggle"));
+
+    // Verify the PATCH is sent with just "BLOCKED"
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter(
+        ([, opts]) => opts?.method === "PATCH",
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
+        string,
+        unknown
+      >;
+      expect(body.hold).toBe("BLOCKED");
+    });
+
+    // Re-render with task.hold = "BLOCKED" (optimistic board state)
+    const updatedTask = { ...FULL_TASK, hold: "BLOCKED" };
+    rerender(
+      <QueryClientProvider client={qc}>
+        <TaskEditPanel
+          task={updatedTask}
+          operations={operations}
+          cycles={cycles}
+          onClose={vi.fn()}
+          onOpenPage={vi.fn()}
+          onOpenDossier={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const reason = screen.getByTestId("edit-panel-hold-reason") as HTMLInputElement;
+    expect(document.activeElement).toBe(reason);
+    expect(reason.selectionStart).toBe(0);
+    expect(reason.selectionEnd).toBe("BLOCKED".length);
   });
 });
 

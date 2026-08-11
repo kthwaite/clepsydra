@@ -155,6 +155,14 @@ export function TaskEditPanel({
   const [destroying, setDestroying] = useState(false);
   const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Hold toggle focus-on-activation: when the toggle is clicked to turn hold on,
+  // set focusReasonOnHold.current to true. When the optimistic patch flips task.hold
+  // to truthy on the next render, the useEffect below fires focus + select.
+  const holdReasonRef = useRef<HTMLInputElement>(null);
+  const focusReasonOnHold = useRef(false);
+  const prevHoldRef = useRef<string | null>(task.hold ?? null);
+  const [needsFocus, setNeedsFocus] = useState(false);
+
   const disarmDestroy = useCallback(() => {
     if (disarmTimer.current) clearTimeout(disarmTimer.current);
     disarmTimer.current = null;
@@ -198,6 +206,31 @@ export function TaskEditPanel({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // When hold toggle is activated (task.hold becomes truthy from an optimistic
+  // patch), sync the reason input's state with the hold value.
+  useEffect(() => {
+    const wasNotHeld = !prevHoldRef.current;
+    const isNowHeld = !!task.hold;
+    prevHoldRef.current = task.hold ?? null;
+
+    if (wasNotHeld && isNowHeld && focusReasonOnHold.current) {
+      focusReasonOnHold.current = false;
+      // Sync the state with the new hold value so the input is populated
+      setHoldReason(task.hold ?? "");
+      // Signal that we need to focus after state updates
+      setNeedsFocus(true);
+    }
+  }, [task.hold]);
+
+  // After holdReason state has been updated, focus and select the input
+  useEffect(() => {
+    if (needsFocus && holdReasonRef.current) {
+      holdReasonRef.current.focus();
+      holdReasonRef.current.select();
+      setNeedsFocus(false);
+    }
+  }, [needsFocus]);
 
   // Hand-rolled focus handling (see header comment): move focus onto the
   // panel on open, restore it to the previously-focused element on close.
@@ -545,17 +578,19 @@ export function TaskEditPanel({
                       }
                     : undefined
                 }
-                onClick={() =>
+                onClick={() => {
+                  if (!task.hold) focusReasonOnHold.current = true;
                   patchNow({
-                    hold: task.hold ? null : "BLOCKED — STATE REASON",
-                  })
-                }
+                    hold: task.hold ? null : "BLOCKED",
+                  });
+                }}
                 data-testid="edit-panel-hold-toggle"
               >
                 {task.hold ? "▲ ON HOLD" : "ACTIVE"}
               </button>
               {task.hold && (
                 <input
+                  ref={holdReasonRef}
                   type="text"
                   className={INPUT_CLS}
                   value={holdReason}
