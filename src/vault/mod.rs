@@ -44,6 +44,7 @@ pub mod page;
 pub mod page_filename;
 pub mod path;
 pub mod projection;
+pub mod reference_issues;
 pub mod property_value;
 pub mod query;
 pub mod reconcile;

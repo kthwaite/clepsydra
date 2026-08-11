@@ -21,6 +21,7 @@ use super::derivers::properties::PropertyDeriver;
 use super::derivers::tags::TagDeriver;
 use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
+use super::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
 use super::path::VaultPath;
 
 // ---------------------------------------------------------------------------
@@ -383,6 +384,14 @@ impl VaultIndex {
     pub fn connection(&self) -> &Connection {
         &self.conn
     }
+    /// Project the current index truth into typed, deterministic repair issues.
+    pub fn reference_issues(
+        &self,
+        filter: ReferenceIssueFilter,
+    ) -> Result<ReferenceIssuePage, IndexError> {
+        super::reference_issues::project(&self.conn, filter)
+    }
+
 
     /// Mutably borrow the underlying connection for internal transactional work.
     pub(crate) fn connection_mut(&mut self) -> &mut Connection {
