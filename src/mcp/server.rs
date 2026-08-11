@@ -169,8 +169,13 @@ project documentation must wikilink its project or hub page. Use vault_journal_c
 vault_capture_conversation for those dedicated intents instead of vault_create_page. Make \
 targeted edits with vault_edit_page or vault_append_page. The vault relocates pages filed by \
 kind/project itself; vault_preview_mutation dry-runs moves and deletes before they touch linked \
-pages. Page paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical \
-top-level folders. On a conflict error, re-read the page and re-apply the change.";
+pages. Orient on the TASKING board with vault_board; it lists task TSK codes and cycle S codes. \
+Create board tasks with vault_task_create rather than vault_create_page so they receive TSK \
+codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move tasks through INTAKE → \
+TRIAGE → FIELD → REVIEW → SEALED with vault_task_update, addressing them by code, path, or id. \
+Seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks. Page \
+paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
+folders. On a conflict error, re-read the page and re-apply the change.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -1437,6 +1442,48 @@ mod tests {
             (
                 "project documentation wikilinking",
                 "substantial project documentation must wikilink its project or hub page",
+            ),
+        ] {
+            assert!(
+                normalized.contains(required_clause),
+                "server instructions are missing the {policy} policy: {required_clause:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn server_instructions_define_tasking_workflow() {
+        let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
+        let instructions = VaultMcpServer::new(Arc::new(client))
+            .get_info()
+            .instructions
+            .expect("server instructions");
+        let normalized = instructions
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+
+        for (policy, required_clause) in [
+            (
+                "board orientation",
+                "orient on the tasking board with vault_board",
+            ),
+            (
+                "task creation routes through the board",
+                "create board tasks with vault_task_create rather than vault_create_page so they receive tsk codes",
+            ),
+            (
+                "task provenance",
+                "the `ai-generated` tag policy applies to llm-authored tasks",
+            ),
+            (
+                "status progression",
+                "move tasks through intake → triage → field → review → sealed with vault_task_update, addressing them by code, path, or id",
+            ),
+            (
+                "cycle sealing with carryover",
+                "seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks",
             ),
         ] {
             assert!(
