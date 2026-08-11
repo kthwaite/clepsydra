@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useBlock } from "#/api/blocks";
+import { BlockApiError, useBlock } from "#/api/blocks";
 import { fetchClient } from "#/api/client";
 
 function wrapper(client: QueryClient) {
@@ -52,6 +52,8 @@ describe("useBlock", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(get).toHaveBeenCalledOnce();
+    expect(result.current.error).toBeInstanceOf(BlockApiError);
+    expect(result.current.error).toMatchObject({ status: 404 });
   });
 
   it("retains retry behavior for a transient block failure", async () => {

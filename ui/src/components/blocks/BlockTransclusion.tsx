@@ -1,4 +1,4 @@
-import { useBlock } from "#/api/blocks";
+import { isBlockNotFound, useBlock } from "#/api/blocks";
 import type { BlockResponse } from "#/api/blocks";
 import { cn } from "#/lib/cn";
 
@@ -8,46 +8,8 @@ export interface BlockTransclusionProps {
   className?: string;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function removeCodeFence(content: string): string {
-  const opening = content.match(/^(`{3,}|~{3,})[^\r\n]*(?:\r?\n|$)/);
-  if (!opening) return content;
-
-  const fence = opening[1];
-  const closing = new RegExp(
-    `(?:\\r?\\n)?${escapeRegExp(fence)}[ \\t]*$`,
-  );
-  return content.slice(opening[0].length).replace(closing, "");
-}
-
 export function blockDisplayContent(block: BlockResponse): string {
-  const removeTerminalId = (content: string) => {
-    if (!block.block_id) return content;
-    const terminalId = new RegExp(
-      `(?:^|[ \\t]+)\\^${escapeRegExp(block.block_id)}[ \\t]*$`,
-    );
-    return content.replace(terminalId, "");
-  };
-
-  switch (block.block_type.toLowerCase()) {
-    case "listitem":
-      return removeTerminalId(
-        block.content.replace(/^(?:[-+*]|\d+[.)])[ \t]+/, ""),
-      );
-    case "heading":
-      return removeTerminalId(
-        block.content.replace(/^#{1,6}[ \t]+/, ""),
-      );
-    case "blockquote":
-      return removeTerminalId(block.content.replace(/^>[ \t]?/, ""));
-    case "code":
-      return removeCodeFence(removeTerminalId(block.content));
-    default:
-      return removeTerminalId(block.content);
-  }
+  return block.content;
 }
 
 function UnavailableBlock({
@@ -84,7 +46,7 @@ export function BlockTransclusion({
   onOpenSource,
   className,
 }: BlockTransclusionProps) {
-  const { data, isPending, isError, refetch } = useBlock(blockId);
+  const { data, error, isPending, isError, refetch } = useBlock(blockId);
 
   if (isPending) {
     return (
@@ -95,6 +57,10 @@ export function BlockTransclusion({
         Loading referenced block
       </span>
     );
+  }
+
+  if (isError && isBlockNotFound(error)) {
+    return <UnavailableBlock className={className} />;
   }
 
   if (isError) {
@@ -117,14 +83,18 @@ export function BlockTransclusion({
 
   const sourceName = data.page_title || data.page_path;
   return (
-    <span role="group" className={cn("inline-flex max-w-full", className)}>
+    <span
+      role="group"
+      className={cn("inline-flex max-w-full items-baseline gap-1", className)}
+    >
+      <span className="max-w-full">{content}</span>
       <button
         type="button"
         aria-label={`Open referenced block in ${sourceName}`}
-        className="max-w-full cursor-pointer text-left underline decoration-dotted underline-offset-2 hover:decoration-solid"
+        className="shrink-0 cursor-pointer text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground hover:decoration-solid"
         onClick={() => onOpenSource(data)}
       >
-        {content}
+        Source
       </button>
     </span>
   );

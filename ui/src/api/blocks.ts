@@ -5,21 +5,22 @@ import { invalidatePageContent, queryKeys } from "./keys";
 
 export type BlockResponse = components["schemas"]["BlockResponse"];
 
-function apiError(
-  error: components["schemas"]["ApiError"],
-  fallback: string,
-  status?: number,
-) {
-  return Object.assign(new Error(error.error || fallback), { status });
+function apiError(error: components["schemas"]["ApiError"], fallback: string) {
+  return new Error(error.error || fallback);
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    error.status === 404
-  );
+export class BlockApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "BlockApiError";
+    this.status = status;
+  }
+}
+
+export function isBlockNotFound(error: unknown): error is BlockApiError {
+  return error instanceof BlockApiError && error.status === 404;
 }
 
 export function useBlock(blockId: string) {
@@ -30,12 +31,18 @@ export function useBlock(blockId: string) {
         "/api/vault/blocks/{block_id}",
         { params: { path: { block_id: blockId } } },
       );
-      if (error) throw apiError(error, "Block not found", response.status);
+      if (error) {
+        throw new BlockApiError(
+          error.error || "Block not found",
+          response.status,
+        );
+      }
       if (!data) throw new Error("Block response was empty");
       return data;
     },
     throwOnError: false,
-    retry: (failureCount, error) => !isNotFound(error) && failureCount < 3,
+    retry: (failureCount, error) =>
+      !isBlockNotFound(error) && failureCount < 3,
     enabled: !!blockId,
   });
 }

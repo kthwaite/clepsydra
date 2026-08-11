@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BlockApiError } from "#/api/blocks";
 import type { BlockResponse } from "#/api/blocks";
 import {
   BlockTransclusion,
@@ -11,14 +12,15 @@ const { useBlockMock } = vi.hoisted(() => ({
   useBlockMock: vi.fn(),
 }));
 
-vi.mock("#/api/blocks", () => ({
-  useBlock: useBlockMock,
-}));
+vi.mock("#/api/blocks", async () => {
+  const actual = await vi.importActual("#/api/blocks");
+  return { ...actual, useBlock: useBlockMock };
+});
 
 const block: BlockResponse = {
   block_id: "abc123DEF0",
   block_type: "listitem",
-  content: "- Important note ((nested1234)) ^abc123DEF0",
+  content: "Important note ((nested1234))",
   page_path: "source.md",
   page_title: "Source",
   span_start: 10,
@@ -39,7 +41,7 @@ function mockBlockError(status: number) {
   const refetch = vi.fn();
   useBlockMock.mockReturnValue({
     data: undefined,
-    error: Object.assign(new Error("Block request failed"), { status }),
+    error: new BlockApiError("Block request failed", status),
     isPending: false,
     isError: true,
     refetch,
@@ -52,27 +54,20 @@ beforeEach(() => {
 });
 
 describe("blockDisplayContent", () => {
-  it("removes the list marker and exact terminal block ID", () => {
+  it("returns the endpoint's normalized content unchanged", () => {
     expect(blockDisplayContent(block)).toBe(
       "Important note ((nested1234))",
     );
   });
 
-  it("removes only structure belonging to the declared block type", () => {
+  it("preserves marker-like text supplied as valid block content", () => {
     expect(
       blockDisplayContent({
         ...block,
         block_type: "heading",
-        content: "### Heading **text** ^abc123DEF0",
+        content: "# Literal **text** ^abc123DEF0",
       }),
-    ).toBe("Heading **text**");
-    expect(
-      blockDisplayContent({
-        ...block,
-        block_type: "paragraph",
-        content: "- Keep marker ^different123",
-      }),
-    ).toBe("- Keep marker ^different123");
+    ).toBe("# Literal **text** ^abc123DEF0");
   });
 });
 
@@ -105,8 +100,7 @@ describe("BlockTransclusion", () => {
     mockBlock({
       ...block,
       block_type: "paragraph",
-      content:
-        '<img src="/private.png" alt="unsafe"> **literal** ^abc123DEF0',
+      content: '<img src="/private.png" alt="unsafe"> **literal**',
     });
 
     const { container } = render(
@@ -126,6 +120,7 @@ describe("BlockTransclusion", () => {
     render(<BlockTransclusion blockId="unknown1234" onOpenSource={vi.fn()} />);
 
     expect(screen.getByText("Referenced block unavailable")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("offers retry after a transient error", async () => {
@@ -151,10 +146,10 @@ describe("BlockTransclusion", () => {
     expect(screen.getByText("Referenced block unavailable")).toBeVisible();
   });
 
-  it("uses the unavailable state when structural content is empty", () => {
+  it("uses the unavailable state when normalized content is empty", () => {
     mockBlock({
       ...block,
-      content: "- ^abc123DEF0",
+      content: "",
     });
 
     render(<BlockTransclusion blockId="abc123DEF0" onOpenSource={vi.fn()} />);
@@ -174,6 +169,11 @@ describe("BlockTransclusion", () => {
         className="reference-inline"
       />,
     );
+    const group = screen.getByRole("group");
+    const content = screen.getByText("Important note ((nested1234))");
+    expect(group).toHaveTextContent("Important note ((nested1234))");
+    expect(content.tagName).toBe("SPAN");
+    expect(content.closest("button")).toBeNull();
     await user.click(
       screen.getByRole("button", {
         name: "Open referenced block in Source",
