@@ -16,7 +16,8 @@
  * All edits are sent as optimistic PATCHes:
  *   - Immediate: disposition (status), priority, operation select, cycle select,
  *     hold toggle.
- *   - Debounced 300ms: title, assignee, estimate, due, hold reason, link, tags.
+ *   - Debounced 300ms: title, assignee, estimate, start, due, hold reason,
+ *     link, tags.
  *     Pending debounces are flushed on unmount (close/task-switch) so edits
  *     aren't dropped — unless a DESTROY is in flight (suppressed to avoid a
  *     trailing PATCH at the just-deleted task).
@@ -146,6 +147,7 @@ export function TaskEditPanel({
   const [titleVal, setTitleVal] = useState(task.title);
   const [assigneeVal, setAssigneeVal] = useState(task.assignee ?? "");
   const [estimateVal, setEstimateVal] = useState(task.estimate ?? "");
+  const [startVal, setStartVal] = useState(task.start ?? "");
   const [dueVal, setDueVal] = useState(task.due ?? "");
   const [holdReason, setHoldReason] = useState(task.hold ?? "");
   const [linkVal, setLinkVal] = useState(task.link ?? "");
@@ -190,6 +192,7 @@ export function TaskEditPanel({
     setTitleVal(task.title);
     setAssigneeVal(task.assignee ?? "");
     setEstimateVal(task.estimate ?? "");
+    setStartVal(task.start ?? "");
     setDueVal(task.due ?? "");
     setHoldReason(task.hold ?? "");
     setLinkVal(task.link ?? "");
@@ -280,6 +283,15 @@ export function TaskEditPanel({
     (v) => {
       const trimmed = v.trim() || null;
       if (trimmed !== (task.due ?? null)) patchNow({ due: trimmed });
+    },
+    suppressFlush,
+  );
+  useDebounced(
+    startVal,
+    300,
+    (v) => {
+      const trimmed = v.trim() || null;
+      if (trimmed !== (task.start ?? null)) patchNow({ start: trimmed });
     },
     suppressFlush,
   );
@@ -501,8 +513,8 @@ export function TaskEditPanel({
             </EdField>
           </div>
 
-          {/* OPERATOR / EST / DUE */}
-          <div className="grid grid-cols-3 gap-[12px]">
+          {/* OPERATOR / EST */}
+          <div className="grid grid-cols-2 gap-[12px]">
             <EdField label="OPERATOR">
               <input
                 type="text"
@@ -519,6 +531,19 @@ export function TaskEditPanel({
                 value={estimateVal}
                 onChange={(e) => setEstimateVal(e.target.value)}
                 data-testid="edit-panel-estimate"
+              />
+            </EdField>
+          </div>
+
+          {/* START / DUE */}
+          <div className="grid grid-cols-2 gap-[12px]">
+            <EdField label="START" hint="YYYY-MM-DD">
+              <input
+                type="date"
+                className={INPUT_CLS}
+                value={startVal}
+                onChange={(e) => setStartVal(e.target.value)}
+                data-testid="edit-panel-start"
               />
             </EdField>
             <EdField label="DUE" hint="YYYY-MM-DD">

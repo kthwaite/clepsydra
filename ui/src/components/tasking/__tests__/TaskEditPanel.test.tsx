@@ -234,6 +234,13 @@ describe("TaskEditPanel — render", () => {
     expect(dueInput).toHaveAttribute("type", "date");
   });
 
+  it("START input is a date field", () => {
+    wrap();
+    const startInput =
+      screen.getByTestId<HTMLInputElement>("edit-panel-start");
+    expect(startInput).toHaveAttribute("type", "date");
+  });
+
   it("omits slug-less operations from the OPERATION dropdown", () => {
     wrap({ operations: [...operations, NO_SLUG_OP] });
     const opSelect = screen.getByTestId("edit-panel-operation");
@@ -444,6 +451,38 @@ describe("TaskEditPanel — debounced patches", () => {
       unknown
     >;
     expect(body.title).toBe("UPDATED TITLE");
+  });
+
+  it("start edit fires PATCH {start} after 300ms debounce", async () => {
+    vi.useFakeTimers();
+    const stub = makeStub();
+    wrap({ fetchStub: stub, seedBoard: true });
+
+    const startInput = screen.getByTestId("edit-panel-start");
+
+    act(() => {
+      fireEvent.change(startInput, { target: { value: "2026-08-02" } });
+    });
+
+    // No PATCH yet (debounce hasn't fired)
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
+    ).toHaveLength(0);
+
+    // Advance past the 300ms debounce and flush microtasks
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    const patchCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "PATCH",
+    );
+    expect(patchCalls.length).toBeGreaterThan(0);
+    const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toEqual({ start: "2026-08-02" });
   });
 
   it("flushes a pending title edit when the panel closes before the debounce fires", async () => {

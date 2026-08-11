@@ -61,6 +61,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
   const [priority, setPriority] = useState<string>("P2");
   const [assignee, setAssignee] = useState("");
   const [estimate, setEstimate] = useState("");
+  const [start, setStart] = useState("");
   const [due, setDue] = useState("");
   const [tags, setTags] = useState("");
   const [checklist, setChecklist] = useState("");
@@ -79,6 +80,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
     setPriority("P2");
     setAssignee("");
     setEstimate("");
+    setStart("");
     setDue("");
     setTags("");
     setChecklist("");
@@ -123,6 +125,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
         cycle: cycle === "BACKLOG" ? null : cycle || null,
         assignee: assignee.trim() || null,
         estimate: estimate.trim() || null,
+        start: start.trim() || null,
         due: due.trim() || null,
         tags: tagsArr.length ? tagsArr : null,
         link: link.trim() || null,
@@ -243,8 +246,8 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
           />
         </EdField>
 
-        {/* OPERATOR / EST / DUE */}
-        <div className="grid grid-cols-3 gap-[12px]">
+        {/* OPERATOR / EST */}
+        <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="OPERATOR">
             <input
               type="text"
@@ -261,6 +264,19 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
               value={estimate}
               onChange={(e) => setEstimate(e.target.value)}
               data-testid="new-task-estimate"
+            />
+          </EdField>
+        </div>
+
+        {/* START / DUE */}
+        <div className="grid grid-cols-2 gap-[12px]">
+          <EdField label="START" hint="YYYY-MM-DD">
+            <input
+              type="date"
+              className={INPUT_CLS}
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              data-testid="new-task-start"
             />
           </EdField>
           <EdField label="DUE" hint="YYYY-MM-DD">

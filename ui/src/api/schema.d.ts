@@ -1901,6 +1901,7 @@ export interface components {
             link?: string | null;
             priority?: string | null;
             project?: string | null;
+            start?: string | null;
             status?: string | null;
             tags?: string[] | null;
             title: string;
@@ -2274,8 +2275,8 @@ export interface components {
         /**
          * @description PATCH request for updating a task. All fields are optional.
          *
-         *     For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `hold`,
-         *     `link`): absent = leave unchanged; `null` = clear the field; string value =
+         *     For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
+         *     `hold`, `link`): absent = leave unchanged; `null` = clear the field; string value =
          *     set to that value. Implemented via `#[serde(default, deserialize_with)]`
          *     which maps the outer `Option` to "present or absent" and the inner `Option`
          *     to "null or value".
@@ -2297,6 +2298,8 @@ export interface components {
             priority?: string | null;
             /** @description Leave absent to keep current project. */
             project?: string | null;
+            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            start?: string | null;
             /** @description Leave absent to keep current status. */
             status?: string | null;
             /** @description Leave absent to keep current tags. */

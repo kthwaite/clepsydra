@@ -115,6 +115,24 @@ describe("applyTaskPatch", () => {
     expect(result.tasks[0].cycle).toBeNull();
   });
 
+  it("leaves start unchanged when start is absent from patch", () => {
+    const board = makeBoard([makeTask({ start: "2026-08-01" })]);
+    const result = applyTaskPatch(board, "task-1", { status: "DOING" });
+    expect(result.tasks[0].start).toBe("2026-08-01");
+  });
+
+  it("sets start when start is a string value", () => {
+    const board = makeBoard([makeTask({ start: null })]);
+    const result = applyTaskPatch(board, "task-1", { start: "2026-08-02" });
+    expect(result.tasks[0].start).toBe("2026-08-02");
+  });
+
+  it("clears start when start is null", () => {
+    const board = makeBoard([makeTask({ start: "2026-08-01" })]);
+    const result = applyTaskPatch(board, "task-1", { start: null });
+    expect(result.tasks[0].start).toBeNull();
+  });
+
   it("replaces tags when tags array is provided", () => {
     const board = makeBoard([makeTask({ tags: ["feat", "urgent"] })]);
     const result = applyTaskPatch(board, "task-1", { tags: ["chore"] });

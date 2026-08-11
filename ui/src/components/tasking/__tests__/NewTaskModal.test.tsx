@@ -243,6 +243,12 @@ describe("NewTaskModal — render", () => {
     expect(dueInput).toHaveAttribute("type", "date");
   });
 
+  it("START input is a date field", () => {
+    wrap();
+    const startInput = screen.getByTestId<HTMLInputElement>("new-task-start");
+    expect(startInput).toHaveAttribute("type", "date");
+  });
+
   it("omits slug-less operations from the OPERATION dropdown", () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -292,6 +298,7 @@ describe("NewTaskModal — submit payload", () => {
     // Fill text fields
     await user.type(screen.getByTestId("new-task-assignee"), "Kit");
     await user.type(screen.getByTestId("new-task-estimate"), "2h");
+    await user.type(screen.getByTestId("new-task-start"), "2026-08-01");
     await user.type(screen.getByTestId("new-task-due"), "2026-12-31");
     await user.type(screen.getByTestId("new-task-tags"), "INFRA, DOCS");
     // Note: userEvent interprets "[" as a special key modifier.
@@ -324,6 +331,7 @@ describe("NewTaskModal — submit payload", () => {
       expect(body.cycle).toBe("C-01");
       expect(body.assignee).toBe("Kit");
       expect(body.estimate).toBe("2h");
+      expect(body.start).toBe("2026-08-01");
       expect(body.due).toBe("2026-12-31");
       expect(body.tags).toEqual(["INFRA", "DOCS"]);
       expect(body.link).toBe("[[alpha-dossier]]");
@@ -405,6 +413,7 @@ describe("NewTaskModal — submit payload", () => {
       >;
       expect(body.assignee).toBeNull();
       expect(body.estimate).toBeNull();
+      expect(body.start).toBeNull();
       expect(body.due).toBeNull();
       expect(body.tags).toBeNull();
       expect(body.link).toBeNull();

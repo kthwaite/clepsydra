@@ -27,7 +27,7 @@ function invalidateTaskingTelemetry(qc: ReturnType<typeof useQueryClient>) {
 
 /**
  * Apply a PatchTaskRequest to a BoardResponse, returning a new BoardResponse.
- * Tri-state semantics for cycle/assignee/estimate/due/hold/link:
+ * Tri-state semantics for cycle/assignee/estimate/due/start/hold/link:
  *   - key absent in patch → leave current value unchanged
  *   - key present as null → clear to null
  *   - key present as string → set to that value
@@ -78,6 +78,7 @@ export function applyTaskPatch(
     assignee: triState(task.assignee, "assignee"),
     estimate: triState(task.estimate, "estimate"),
     due: triState(task.due, "due"),
+    start: triState(task.start, "start"),
     hold: triState(task.hold, "hold"),
     link: triState(task.link, "link"),
     // Tags: absent = keep, present = replace
