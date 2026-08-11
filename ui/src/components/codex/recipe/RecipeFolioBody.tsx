@@ -129,7 +129,7 @@ export function RecipeFolioBody({
   };
 
   return (
-    <div className="recipe-folio-body">
+    <div className="recipe-folio-body" data-folio-heading-root>
       <div className="mb-5 flex justify-end border-b border-rule-soft pb-3">
         <SegmentedControl
           label="Recipe mode"

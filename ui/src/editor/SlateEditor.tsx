@@ -712,6 +712,7 @@ export function SlateEditor({
           <MathEditingProvider value={mathEditing}>
             <WikilinkEditingProvider value={wikilinkEditing}>
               <Editable
+                data-folio-heading-root
                 renderElement={renderElement}
                 renderLeaf={renderLeaf}
                 decorate={decorateCode}

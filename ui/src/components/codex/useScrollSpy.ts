@@ -11,6 +11,7 @@ import {
   jumpTargetFor,
 } from "#/components/codex/scrollTriggers";
 
+const HEADING_ROOT_SELECTOR = "[data-folio-heading-root]";
 const HEADING_SELECTOR = "h1,h2,h3,h4,h5,h6";
 
 interface TriggerMap {
@@ -46,9 +47,9 @@ export function useScrollSpy(
       mapRef.current = EMPTY_MAP;
       return;
     }
-    const editor = el.querySelector<HTMLElement>("[data-slate-editor]");
+    const headingRoot = el.querySelector<HTMLElement>(HEADING_ROOT_SELECTOR);
     const hs = Array.from(
-      editor?.querySelectorAll<HTMLElement>(HEADING_SELECTOR) ?? [],
+      headingRoot?.querySelectorAll<HTMLElement>(HEADING_SELECTOR) ?? [],
     );
     const containerTop = el.getBoundingClientRect().top;
     const headingTops = hs.map(

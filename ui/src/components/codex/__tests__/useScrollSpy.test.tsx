@@ -78,7 +78,7 @@ function Harness() {
   return (
     <div ref={ref} data-scroll-container data-testid="container">
       <output data-testid="active">{api.activeIndex}</output>
-      <div data-slate-editor>
+      <div data-folio-heading-root>
         {HEADING_OFFSETS.map((offset, i) => (
           <h2 key={offset} data-offset={offset}>
             Heading {i}
@@ -105,7 +105,7 @@ function JournalFolioHarness() {
       <div ref={ref} data-scroll-container data-testid="journal-container">
         <output data-testid="journal-active">{api.activeIndex}</output>
         <h1 data-offset={100}>Tuesday, August 11</h1>
-        <div data-slate-editor>
+        <div data-folio-heading-root>
           <h2 data-offset={600}>09:07</h2>
           <h3 data-offset={1200}>Ordinary section</h3>
         </div>
@@ -122,6 +122,35 @@ function JournalFolioHarness() {
           onClick={() => api.scrollTo(1)}
         />
       </nav>
+    </>
+  );
+}
+
+function StructuredRecipeHarness() {
+  const ref = useRef<HTMLDivElement>(null);
+  api = useScrollSpy(ref, 0);
+  return (
+    <>
+      <nav aria-label="Recipe contents">
+        {["Ingredients", "Steps", "Notes"].map((heading, index) => (
+          <button
+            key={heading}
+            type="button"
+            onClick={() => api.scrollTo(index)}
+          >
+            {heading}
+          </button>
+        ))}
+      </nav>
+      <div ref={ref} data-scroll-container data-testid="recipe-container">
+        <output data-testid="recipe-active">{api.activeIndex}</output>
+        <h1 data-offset={100}>Weeknight pasta</h1>
+        <main data-folio-heading-root>
+          <h2 data-offset={500}>Ingredients</h2>
+          <h2 data-offset={900}>Steps</h2>
+          <h2 data-offset={1300}>Notes</h2>
+        </main>
+      </div>
     </>
   );
 }
@@ -180,5 +209,26 @@ describe("useScrollSpy", () => {
     );
     expect(container.scrollTop).toBe(1200 - 16);
     expect(screen.getByTestId("journal-active")).toHaveTextContent("1");
+  });
+
+  it("jumps structured presentation headings in marked-root order", () => {
+    render(<StructuredRecipeHarness />);
+    const container = screen.getByTestId("recipe-container");
+    const contents = screen.getByRole("navigation", {
+      name: "Recipe contents",
+    });
+    const jumps = [
+      ["Ingredients", 500],
+      ["Steps", 900],
+      ["Notes", 1300],
+    ] as const;
+
+    for (const [index, [heading, offset]] of jumps.entries()) {
+      fireEvent.click(within(contents).getByRole("button", { name: heading }));
+      expect(container.scrollTop).toBe(offset - 16);
+      expect(screen.getByTestId("recipe-active")).toHaveTextContent(
+        String(index),
+      );
+    }
   });
 });
