@@ -728,6 +728,31 @@ describe("TagInput", () => {
     await user.type(screen.getByRole("combobox", { name: "Add tags" }), "unknown{Enter}");
     expect(onChange).not.toHaveBeenCalled();
   });
+  it("commits the active matching suggestion on Enter when creation is disabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <TagInput
+        label="Tags"
+        values={[]}
+        suggestions={["research"]}
+        allowCreate={false}
+        onChange={onChange}
+      />,
+    );
+
+    const combobox = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(combobox, "res");
+    const activeOption = screen.getByRole("option", { selected: true });
+    expect(activeOption).toHaveTextContent("research");
+    expect(combobox).toHaveAttribute("aria-activedescendant", activeOption.id);
+
+    await user.keyboard("{Enter}");
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(["research"]);
+  });
+
   it("commits canonical vocabulary spelling when creation is disabled", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

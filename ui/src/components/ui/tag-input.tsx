@@ -155,7 +155,7 @@ export function TagInput({
         }
       } else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        addValue(navigated && open ? matches[selected] : query);
+        addValue(open && (!allowCreate || navigated) ? matches[selected] : query);
       } else if (e.key === ",") {
         e.preventDefault();
         addValue(query);
@@ -177,6 +177,7 @@ export function TagInput({
       matches,
       query,
       navigated,
+      allowCreate,
       inputValue,
       values,
       addValue,
