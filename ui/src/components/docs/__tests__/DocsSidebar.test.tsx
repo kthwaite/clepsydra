@@ -44,7 +44,7 @@ function renderSidebar(
 }
 
 describe("DocsSidebar", () => {
-  it("renders the nine-page hierarchy, active marker, and collapsible groups", async () => {
+  it("renders the ten-page hierarchy, active marker, and collapsible groups", async () => {
     const user = userEvent.setup();
     renderSidebar({ activeSlug: "getting-started" });
 
@@ -54,7 +54,7 @@ describe("DocsSidebar", () => {
     expect(
       within(navigation).getByRole("link", { name: "Getting Started" }),
     ).toHaveAttribute("aria-current", "page");
-    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
+    expect(within(navigation).getAllByRole("link")).toHaveLength(10);
     expect(
       within(navigation).getByRole("link", { name: "Troubleshooting" }),
     ).toHaveAttribute("href", "/docs/troubleshooting");
@@ -64,6 +64,9 @@ describe("DocsSidebar", () => {
     expect(
       within(navigation).getByRole("link", { name: "Books and Reading" }),
     ).toHaveAttribute("href", "/docs/books-and-reading");
+    expect(
+      within(navigation).getByRole("link", { name: "Recipes" }),
+    ).toHaveAttribute("href", "/docs/recipes");
     const startHere = within(navigation).getByRole("button", {
       name: "Start Here",
     });
