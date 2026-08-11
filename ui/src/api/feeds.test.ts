@@ -618,6 +618,59 @@ describe("usePatchFeedEntry", () => {
     unsubscribeList();
   });
 
+  it("rolls back page one without discarding a page fetched during the patch", async () => {
+    const entry = makeEntry({ read: false });
+    const nextPageEntry = makeEntry({
+      id: 202,
+      guid: "entry-202",
+      title: "Fetched while pending",
+    });
+    const client = freshClient();
+    const options = {
+      ...feedEntriesInfiniteOptions({ view: "all" }),
+      staleTime: Number.POSITIVE_INFINITY,
+    };
+    client.setQueryData(options.queryKey, makePages([entry]));
+    const listObserver = new InfiniteQueryObserver(client, options);
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    const patchResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({ entries: [nextPageEntry], next_cursor: null }),
+      );
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current
+      .mutateAsync({ id: entry.id, read: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await listObserver.fetchNextPage();
+    expect(
+      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
+    ).toBe(true);
+    expect(
+      listObserver.getCurrentResult().data?.pages[1].entries[0],
+    ).toEqual(nextPageEntry);
+    unsubscribeList();
+
+    patchResponse.resolve(
+      jsonResponse({ error: "patch failed after fetching page two" }, 500),
+    );
+    await expect(mutation).resolves.toEqual({
+      error: "patch failed after fetching page two",
+    });
+
+    const cached = client.getQueryData<EntryPages>(options.queryKey);
+    expect(cached?.pages[0].entries[0].read).toBe(false);
+    expect(cached?.pages[1].entries[0]).toEqual(nextPageEntry);
+  });
+
   it("promotes detail to successful idle state when patch wins the pending GET race", async () => {
     const entry = makeEntry({ read: false });
     const client = freshClient();

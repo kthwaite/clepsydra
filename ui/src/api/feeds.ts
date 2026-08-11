@@ -304,7 +304,13 @@ function beginEntryMutationLayer(
       ) {
         return;
       }
-      reconcileUpdatedEntryQuery(queryClient, event.query as EntryQuery);
+      reconcileUpdatedEntryQuery(
+        queryClient,
+        event.query as EntryQuery,
+        event.action.manual
+          ? undefined
+          : event.query.state.fetchMeta?.fetchMore?.direction,
+      );
     });
     optimisticEntryQuerySubscriptions.set(queryClient, unsubscribe);
   }
@@ -368,9 +374,25 @@ function hydrateEntryQueries(queryClient: QueryClient) {
   if (states.size === 0) optimisticEntryStates.delete(queryClient);
 }
 
+function mergeFetchedEntryPage(
+  baseline: FeedEntryPages,
+  incoming: FeedEntryPages,
+) {
+  const pages = incoming.pageParams.map((pageParam, incomingIndex) => {
+    const baselineIndex = baseline.pageParams.findIndex((candidate) =>
+      Object.is(candidate, pageParam),
+    );
+    return baselineIndex === -1
+      ? incoming.pages[incomingIndex]
+      : baseline.pages[baselineIndex];
+  });
+  return { pages, pageParams: incoming.pageParams };
+}
+
 function reconcileUpdatedEntryQuery(
   queryClient: QueryClient,
   query: EntryQuery,
+  fetchMoreDirection?: "forward" | "backward",
 ) {
   const layers = optimisticEntryMutationLayers.get(queryClient);
   const pages = query.state.data;
@@ -393,7 +415,10 @@ function reconcileUpdatedEntryQuery(
     states.set(query.queryHash, state);
   } else {
     state.query = query;
-    state.baseline = pages;
+    state.baseline =
+      fetchMoreDirection === undefined
+        ? pages
+        : mergeFetchedEntryPage(state.baseline, pages);
     for (const layer of layers) {
       if (
         layer.status === "pending" &&
