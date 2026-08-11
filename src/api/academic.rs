@@ -185,6 +185,8 @@ pub struct ImportResult {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ImportResponse {
     pub results: Vec<ImportResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -283,9 +285,16 @@ async fn cite_key_in_use(state: &AppState, cite_key: &str, exclude_page_id: Opti
 // Handlers
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
+struct WorkCreationExtras {
+    assets: Vec<String>,
+    extra: HashMap<String, toml::Value>,
+    pdf_url: Option<String>,
+}
+
 /// Internal work creation logic shared by the create_work endpoint and importers.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn create_work_internal(
+async fn create_work_internal(
     state: &AppState,
     title: String,
     work_type: WorkType,
@@ -301,6 +310,7 @@ pub(crate) async fn create_work_internal(
     tags: Vec<String>,
     aliases: Vec<String>,
     body: Option<String>,
+    creation: WorkCreationExtras,
 ) -> Result<WorkDetail, ApiError> {
     // 1. Validate rating
     if let Some(rating) = rating
@@ -348,6 +358,10 @@ pub(crate) async fn create_work_internal(
     meta.tags = tags.clone();
     meta.aliases = aliases;
 
+    let mut urls = urls;
+    if let Some(pdf_url) = creation.pdf_url {
+        urls.get_or_insert_default().pdf = Some(pdf_url);
+    }
     let work_meta = WorkMeta {
         work_type: work_type.clone(),
         authors: authors.clone(),
@@ -358,9 +372,9 @@ pub(crate) async fn create_work_internal(
         rating,
         external_ids: external_ids.clone(),
         urls: urls.clone(),
-        assets: Vec::new(),
+        assets: creation.assets,
         cite_key: cite_key.clone(),
-        extra: HashMap::new(),
+        extra: creation.extra,
     };
     meta.extra = work_meta_to_extra(&work_meta);
 
@@ -520,6 +534,7 @@ pub async fn import_bibtex(
             vec![], // tags
             vec![], // aliases
             None,   // body
+            WorkCreationExtras::default(),
         )
         .await
         {
@@ -544,7 +559,10 @@ pub async fn import_bibtex(
         }
     }
 
-    Ok(Json(ImportResponse { results }))
+    Ok(Json(ImportResponse {
+        results,
+        checkpoint_error: None,
+    }))
 }
 
 #[utoipa::path(
@@ -624,6 +642,7 @@ pub async fn import_doi(
         vec![],
         vec![],
         None,
+        WorkCreationExtras::default(),
     )
     .await?;
 
@@ -725,6 +744,7 @@ pub async fn import_isbn_handler(
         vec![], // tags
         vec![], // aliases
         None,   // body
+        WorkCreationExtras::default(),
     )
     .await?;
 
@@ -757,67 +777,50 @@ async fn apply_source_wins(
     Ok(())
 }
 
-/// Patch Zotero import provenance (import map, attachment refs) into the page
-/// at `page_path` and reindex it.
-async fn patch_zotero_provenance(
-    state: &AppState,
-    page_path: &str,
+fn zotero_creation_extras(
     item: &crate::vault::import_zotero::ZoteroItem,
     zotero_data_dir: &std::path::Path,
-) -> Result<(), ApiError> {
-    let path = crate::api::error::parse_internal_path(page_path, "Invalid vault path")?;
-    let mut assets = Vec::new();
-    let mut pdf_url = None;
+) -> WorkCreationExtras {
+    let mut creation = WorkCreationExtras::default();
     for attachment in &item.pdf_attachments {
         if let Some(resolved) =
             crate::vault::import_zotero::resolve_attachment_path(zotero_data_dir, attachment)
         {
             match attachment.link_mode {
-                0 | 2 => assets.push(resolved),
-                1 | 3 => pdf_url = Some(resolved),
+                0 | 2 => creation.assets.push(resolved),
+                1 | 3 => creation.pdf_url = Some(resolved),
                 _ => {}
             }
         }
     }
-    let zotero_key = item.zotero_key.clone();
-    let item_id = item.item_id;
-    let imported_at = Utc::now().to_rfc3339();
-    mutate_academic_page(state, path, move |meta, _body| {
-        let mut import_map = toml::Table::new();
-        import_map.insert(
-            "source".to_string(),
-            toml::Value::String("zotero".to_string()),
-        );
-        import_map.insert("zotero_key".to_string(), toml::Value::String(zotero_key));
-        import_map.insert("zotero_item_id".to_string(), toml::Value::Integer(item_id));
-        import_map.insert("imported_at".to_string(), toml::Value::String(imported_at));
-        meta.extra
-            .insert("import".to_string(), toml::Value::Table(import_map));
-        if !assets.is_empty() {
-            meta.extra.insert(
-                "assets".to_string(),
-                toml::Value::Array(assets.iter().cloned().map(toml::Value::String).collect()),
-            );
-        }
-        if let Some(url) = pdf_url {
-            let urls = meta
-                .extra
-                .entry("urls".to_string())
-                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-            if let toml::Value::Table(table) = urls {
-                table.insert("pdf".to_string(), toml::Value::String(url));
-            }
-        }
-        Ok(())
-    })
-    .await?;
-    Ok(())
+    let mut import_map = toml::Table::new();
+    import_map.insert(
+        "source".to_string(),
+        toml::Value::String("zotero".to_string()),
+    );
+    import_map.insert(
+        "zotero_key".to_string(),
+        toml::Value::String(item.zotero_key.clone()),
+    );
+    import_map.insert(
+        "zotero_item_id".to_string(),
+        toml::Value::Integer(item.item_id),
+    );
+    import_map.insert(
+        "imported_at".to_string(),
+        toml::Value::String(Utc::now().to_rfc3339()),
+    );
+    creation
+        .extra
+        .insert("import".to_string(), toml::Value::Table(import_map));
+    creation
 }
 
 /// Returns true if a Zotero checkpoint should be saved after this import run.
 fn should_save_zotero_checkpoint(results: &[ImportResult]) -> bool {
-    let created_count = results.iter().filter(|r| r.status == "created").count() as u64;
-    created_count > 0 || results.iter().any(|r| r.status == "skipped")
+    !results.iter().any(|result| result.status == "error")
+        && (results.iter().any(|result| result.status == "created")
+            || results.iter().any(|result| result.status == "skipped"))
 }
 
 /// Handle a dedup-hit on an existing work via the zotero_key path.
@@ -1137,6 +1140,7 @@ pub async fn import_zotero_handler(
             continue;
         }
 
+        let creation = zotero_creation_extras(item, &zotero_data_dir);
         // e. Create work
         match create_work_internal(
             &state,
@@ -1161,26 +1165,18 @@ pub async fn import_zotero_handler(
             vec![], // tags
             vec![], // aliases
             None,   // body
+            creation,
         )
         .await
         {
             Ok(detail) => {
-                match patch_zotero_provenance(&state, &detail.path, item, &zotero_data_dir).await {
-                    Ok(()) => results.push(ImportResult {
-                        cite_key: entry.cite_key.clone(),
-                        status: "created".to_string(),
-                        page_path: Some(detail.path),
-                        error: None,
-                        conflict_detail: None,
-                    }),
-                    Err(error) => results.push(ImportResult {
-                        cite_key: entry.cite_key.clone(),
-                        status: "error".to_string(),
-                        page_path: Some(detail.path),
-                        error: Some(error.error),
-                        conflict_detail: None,
-                    }),
-                }
+                results.push(ImportResult {
+                    cite_key: entry.cite_key.clone(),
+                    status: "created".to_string(),
+                    page_path: Some(detail.path),
+                    error: None,
+                    conflict_detail: None,
+                });
             }
             Err(e) => {
                 results.push(ImportResult {
@@ -1194,6 +1190,7 @@ pub async fn import_zotero_handler(
         }
     }
 
+    let mut checkpoint_error = None;
     // 6. Save checkpoint after successful import (not on dry_run)
     if req.auto_checkpoint && !req.dry_run && should_save_zotero_checkpoint(&results) {
         let created_count = results.iter().filter(|r| r.status == "created").count() as u64;
@@ -1202,12 +1199,16 @@ pub async fn import_zotero_handler(
             last_synced: now,
             items_imported: created_count,
         };
-        if let Err(e) = cp.save(state.vault.root(), "zotero") {
-            tracing::warn!("Failed to save Zotero checkpoint: {e}");
+        if let Err(error) = cp.save(state.vault.root(), "zotero") {
+            tracing::warn!("Failed to save Zotero checkpoint: {error}");
+            checkpoint_error = Some(error);
         }
     }
 
-    Ok(Json(ImportResponse { results }))
+    Ok(Json(ImportResponse {
+        results,
+        checkpoint_error,
+    }))
 }
 
 #[cfg(test)]
@@ -1290,6 +1291,7 @@ pub async fn create_work(
         req.tags,
         req.aliases,
         req.body,
+        WorkCreationExtras::default(),
     )
     .await?;
     Ok((StatusCode::CREATED, Json(detail)).into_response())

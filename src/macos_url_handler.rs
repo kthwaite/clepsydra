@@ -59,41 +59,152 @@ pub fn install(
     binary: &Path,
     include_obsidian: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let apps = dirs::home_dir()
-        .ok_or("cannot determine home directory")?
-        .join("Applications");
+    let home = dirs::home_dir().ok_or("cannot determine home directory")?;
+    install_with(
+        &home,
+        binary,
+        include_obsidian,
+        |script, app_path| {
+            let mut compile = Command::new("osacompile");
+            compile.arg("-o").arg(app_path).arg(script);
+            run_checked(compile, "osacompile")
+        },
+        |app_path, include_obsidian| {
+            let plist = app_path.join("Contents/Info.plist");
+            let _ = Command::new("/usr/libexec/PlistBuddy")
+                .arg("-c")
+                .arg("Delete :CFBundleIdentifier")
+                .arg(&plist)
+                .status();
+            for command in plistbuddy_commands(include_obsidian) {
+                let mut plistbuddy = Command::new("/usr/libexec/PlistBuddy");
+                plistbuddy.arg("-c").arg(&command).arg(&plist);
+                run_checked(plistbuddy, "PlistBuddy")?;
+            }
+            Ok(())
+        },
+        |app_path| {
+            let mut register = Command::new(LSREGISTER);
+            register.arg("-f").arg(app_path);
+            run_checked(register, "lsregister")
+        },
+    )
+}
+
+fn install_with(
+    home: &Path,
+    binary: &Path,
+    include_obsidian: bool,
+    mut compile: impl FnMut(&Path, &Path) -> Result<(), Box<dyn std::error::Error>>,
+    mut configure: impl FnMut(&Path, bool) -> Result<(), Box<dyn std::error::Error>>,
+    mut register: impl FnMut(&Path) -> Result<(), Box<dyn std::error::Error>>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let apps = home.join("Applications");
     std::fs::create_dir_all(&apps)?;
+    let workspace = tempfile::Builder::new()
+        .prefix(".clepsydra-url-handler-")
+        .tempdir_in(&apps)?;
+    let staged = workspace.path().join(APP_NAME);
+    let backup = workspace.path().join("previous.app");
     let app_path = apps.join(APP_NAME);
-    if app_path.exists() {
-        std::fs::remove_dir_all(&app_path)?;
-    }
 
     let mut script = tempfile::Builder::new().suffix(".applescript").tempfile()?;
     script.write_all(applescript_source(binary).as_bytes())?;
     script.flush()?;
+    compile(script.path(), &staged)?;
+    configure(&staged, include_obsidian)?;
 
-    let mut compile = Command::new("osacompile");
-    compile.arg("-o").arg(&app_path).arg(script.path());
-    run_checked(compile, "osacompile")?;
-
-    let plist = app_path.join("Contents/Info.plist");
-    // PlistBuddy has no upsert: delete any existing CFBundleIdentifier first
-    // (ignoring failure when the key is absent) so the Add below succeeds in
-    // both plist states.
-    let _ = Command::new("/usr/libexec/PlistBuddy")
-        .arg("-c")
-        .arg("Delete :CFBundleIdentifier")
-        .arg(&plist)
-        .status();
-    for cmd in plistbuddy_commands(include_obsidian) {
-        let mut pb = Command::new("/usr/libexec/PlistBuddy");
-        pb.arg("-c").arg(&cmd).arg(&plist);
-        run_checked(pb, "PlistBuddy")?;
+    let had_previous = app_path.exists();
+    if had_previous {
+        std::fs::rename(&app_path, &backup)?;
+    }
+    if let Err(error) = std::fs::rename(&staged, &app_path) {
+        if had_previous
+            && let Err(restore) = std::fs::rename(&backup, &app_path)
+        {
+            return Err(format!(
+                "publish URL handler failed: {error}; restoring previous bundle failed: {restore}"
+            )
+            .into());
+        }
+        return Err(error.into());
     }
 
-    let mut reg = Command::new(LSREGISTER);
-    reg.arg("-f").arg(&app_path);
-    run_checked(reg, "lsregister")?;
+    if let Err(primary) = register(&app_path) {
+        let mut compensation_failures = Vec::new();
+        if let Err(error) = std::fs::remove_dir_all(&app_path) {
+            compensation_failures.push(format!("remove replacement: {error}"));
+        }
+        if had_previous {
+            match std::fs::rename(&backup, &app_path) {
+                Ok(()) => {
+                    if let Err(error) = register(&app_path) {
+                        compensation_failures.push(format!("re-register previous bundle: {error}"));
+                    }
+                }
+                Err(error) => {
+                    compensation_failures.push(format!("restore previous bundle: {error}"));
+                }
+            }
+        }
+        if compensation_failures.is_empty() {
+            return Err(primary);
+        }
+        return Err(format!(
+            "{primary}; URL handler compensation failed: {}",
+            compensation_failures.join("; ")
+        )
+        .into());
+    }
 
     Ok(app_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn registration_failure_restores_previous_bundle() {
+        let home = tempfile::tempdir().unwrap();
+        let app = home.path().join("Applications").join(APP_NAME);
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("identity"), b"previous").unwrap();
+        let registration_attempts = Cell::new(0);
+
+        let error = install_with(
+            home.path(),
+            Path::new("/usr/local/bin/clepsydra"),
+            false,
+            |_, staging| {
+                std::fs::create_dir_all(staging.join("Contents"))?;
+                std::fs::write(staging.join("identity"), b"replacement")?;
+                std::fs::write(staging.join("Contents/Info.plist"), b"plist")?;
+                Ok(())
+            },
+            |_, _| Ok(()),
+            |candidate| {
+                registration_attempts.set(registration_attempts.get() + 1);
+                if std::fs::read(candidate.join("identity"))? == b"replacement" {
+                    Err("injected Launch Services registration failure".into())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("injected Launch Services registration failure")
+        );
+        assert_eq!(std::fs::read(app.join("identity")).unwrap(), b"previous");
+        assert_eq!(
+            registration_attempts.get(),
+            2,
+            "the restored previous bundle must be re-registered"
+        );
+    }
 }

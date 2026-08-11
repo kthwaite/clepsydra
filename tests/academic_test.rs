@@ -354,24 +354,39 @@ async fn zotero_item_two_update_failure_is_reported_without_rolling_back_item_on
 }
 
 #[tokio::test]
-async fn zotero_item_two_provenance_failure_is_reported_after_item_one_commits() {
+async fn zotero_item_two_create_failure_does_not_advance_checkpoint_and_retries() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let fixture = ApiFixture::builder().build();
     let database = fixture.temp_dir.path().join("zotero.sqlite");
     create_two_item_zotero_database(&database);
-    let vault_root_for_hook = fixture.temp_dir.path().join("vault");
-    let provenance_attempt = Arc::new(AtomicUsize::new(0));
+    let create_attempt = Arc::new(AtomicUsize::new(0));
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new({
+            let create_attempt = Arc::clone(&create_attempt);
+            move |path, content| {
+                if create_attempt.fetch_add(1, Ordering::SeqCst) == 0 {
+                    clepsydra::vault::atomic_file::atomic_create(path, content)
+                } else {
+                    Err(
+                        clepsydra::vault::atomic_file::AtomicPublicationError::NotPublished(
+                            std::io::Error::other("injected Zotero item-two create failure"),
+                        ),
+                    )
+                }
+            }
+        })));
+    let provenance_updates = Arc::new(AtomicUsize::new(0));
     fixture
         .state
         .mutation_coordinator
         .set_before_update_publish_hook(Some(Arc::new({
-            let provenance_attempt = Arc::clone(&provenance_attempt);
-            move |path| {
-                if provenance_attempt.fetch_add(1, Ordering::SeqCst) == 1 {
-                    fs::remove_file(vault_root_for_hook.join(path.as_str())).unwrap();
-                }
+            let provenance_updates = Arc::clone(&provenance_updates);
+            move |_| {
+                provenance_updates.fetch_add(1, Ordering::SeqCst);
             }
         })));
 
@@ -379,8 +394,7 @@ async fn zotero_item_two_provenance_failure_is_reported_after_item_one_commits()
         .server
         .post("/api/vault/academic/import/zotero")
         .json(&serde_json::json!({
-            "database_path": database.to_string_lossy(),
-            "auto_checkpoint": false
+            "database_path": database.to_string_lossy()
         }))
         .await;
 
@@ -390,28 +404,133 @@ async fn zotero_item_two_provenance_failure_is_reported_after_item_one_commits()
     assert_eq!(results.len(), 2, "every queried item needs one outcome");
     assert_eq!(results[0]["status"], "created");
     assert_eq!(results[1]["status"], "error");
-    assert_eq!(
-        results[1]["page_path"], "library/books/second-work.md",
-        "the failed item outcome must identify its independently committed path"
-    );
+    assert!(results[1]["page_path"].is_null());
     assert!(
         results[1]["error"]
             .as_str()
             .unwrap()
-            .contains("filesystem mutation failed"),
-        "the item result must retain the provenance failure: {}",
-        results[1]
+            .contains("injected Zotero item-two create failure")
+    );
+    assert_eq!(
+        provenance_updates.load(Ordering::SeqCst),
+        0,
+        "Zotero provenance must be part of the initial page commit"
     );
 
     let vault_root = fixture.temp_dir.path().join("vault");
     let first_content =
         fs::read_to_string(vault_root.join("library/papers/first-work.md")).unwrap();
+    assert!(first_content.contains("zotero_key = \"FIRST001\""));
+    assert!(!vault_root.join("library/books/second-work.md").exists());
     assert!(
-        first_content.contains("zotero_key = \"FIRST001\""),
-        "item one must remain fully committed"
+        clepsydra::vault::checkpoint::ImportCheckpoint::load(&vault_root, "zotero").is_none(),
+        "an item error must suppress the default checkpoint"
     );
+
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(None);
+    fixture
+        .state
+        .mutation_coordinator
+        .set_before_update_publish_hook(None);
+    let retry = fixture
+        .server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": database.to_string_lossy()
+        }))
+        .await;
+    retry.assert_status_ok();
+    let retry_body: serde_json::Value = retry.json();
+    let retry_results = retry_body["results"].as_array().unwrap();
+    assert_eq!(retry_results.len(), 2);
+    assert_eq!(retry_results[0]["status"], "skipped");
+    assert_eq!(retry_results[1]["status"], "created");
+    assert!(vault_root.join("library/books/second-work.md").exists());
+}
+
+#[tokio::test]
+async fn zotero_checkpoint_write_failure_is_reported_without_undoing_items() {
+    let fixture = ApiFixture::builder().build();
+    let database = fixture.temp_dir.path().join("zotero.sqlite");
+    create_two_item_zotero_database(&database);
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fs::write(
+        vault_root.join(".clepsydra/importers"),
+        b"blocks checkpoint directory creation",
+    )
+    .unwrap();
+
+    let response = fixture
+        .server
+        .post("/api/vault/academic/import/zotero")
+        .json(&serde_json::json!({
+            "database_path": database.to_string_lossy()
+        }))
+        .await;
+
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["results"][0]["status"], "created");
+    assert_eq!(body["results"][1]["status"], "created");
     assert!(
-        !vault_root.join("library/books/second-work.md").exists(),
-        "the handler must not recreate item two after the injected external removal"
+        body["checkpoint_error"]
+            .as_str()
+            .unwrap()
+            .contains("failed to create importers dir")
     );
+    assert!(vault_root.join("library/papers/first-work.md").exists());
+    assert!(vault_root.join("library/books/second-work.md").exists());
+}
+
+#[tokio::test]
+async fn bibtex_item_two_create_failure_is_reported_after_item_one_commits() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let fixture = ApiFixture::builder().build();
+    let create_attempt = Arc::new(AtomicUsize::new(0));
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new({
+            let create_attempt = Arc::clone(&create_attempt);
+            move |path, content| {
+                if create_attempt.fetch_add(1, Ordering::SeqCst) == 0 {
+                    clepsydra::vault::atomic_file::atomic_create(path, content)
+                } else {
+                    Err(
+                        clepsydra::vault::atomic_file::AtomicPublicationError::NotPublished(
+                            std::io::Error::other("injected BibTeX item-two create failure"),
+                        ),
+                    )
+                }
+            }
+        })));
+
+    let response = fixture
+        .server
+        .post("/api/vault/academic/import/bibtex")
+        .text(
+            "@article{alpha2024, title={Alpha Work}, author={Alpha, Ada}, year={2024}}\n\
+             @book{beta2023, title={Beta Work}, author={Beta, Ben}, year={2023}}",
+        )
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["results"][0]["status"], "created");
+    assert_eq!(body["results"][0]["cite_key"], "alpha2024");
+    assert_eq!(body["results"][1]["status"], "error");
+    assert_eq!(body["results"][1]["cite_key"], "beta2023");
+    assert!(
+        body["results"][1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("injected BibTeX item-two create failure")
+    );
+    let vault_root = fixture.temp_dir.path().join("vault");
+    assert!(vault_root.join("library/papers/alpha-work.md").exists());
+    assert!(!vault_root.join("library/books/beta-work.md").exists());
 }

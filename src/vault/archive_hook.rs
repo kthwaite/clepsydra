@@ -23,7 +23,7 @@ impl PostDeleteHook for ArchiveDeleteHook {
             _ => return Ok(()), // not an archive page, nothing to do
         };
 
-        let mut unique_hashes = std::collections::HashSet::new();
+        let mut unique_hashes = std::collections::BTreeSet::new();
 
         // Collect snapshot_hash
         if let Some(toml::Value::String(hash)) = archive.get("snapshot_hash") {
@@ -44,10 +44,20 @@ impl PostDeleteHook for ArchiveDeleteHook {
         }
 
         let cas = self.cas.lock();
+        let mut failures = Vec::new();
         for hash in unique_hashes {
-            let _ = cas.decrement_ref(&hash);
+            if let Err(error) = cas.decrement_ref(&hash) {
+                failures.push(format!("{hash}: {error}"));
+            }
         }
-
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "failed to decrement archive CAS references: {}",
+                failures.join("; ")
+            )
+            .into())
+        }
     }
 }

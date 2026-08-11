@@ -1421,6 +1421,21 @@ mod settings_tests {
         }
     }
 
+    #[test]
+    fn certificate_directory_failure_generates_no_partial_pair() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blocked = tmp.path().join("blocked");
+        std::fs::write(&blocked, b"not a directory").unwrap();
+        let cert = blocked.join("localhost.pem");
+        let key = blocked.join("localhost-key.pem");
+
+        let error = generate_certificates_if_missing(&blocked, &cert, &key).unwrap_err();
+
+        assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(!cert.exists());
+        assert!(!key.exists());
+    }
+
     #[serial_test::serial]
     #[test]
     fn load_from_resolves_tls_paths_against_config_dir() {

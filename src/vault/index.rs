@@ -2341,6 +2341,35 @@ mod kind_index_tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn build_repair_write_failure_preserves_page_and_reports_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let page = root.join("Loose.md");
+        let original = "# Loose\n\nbody\n";
+        fs::write(&page, original).unwrap();
+        fs::set_permissions(&page, fs::Permissions::from_mode(0o400)).unwrap();
+
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        let stats = index.build(&vault).unwrap();
+
+        fs::set_permissions(&page, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&page).unwrap(), original);
+        assert!(
+            stats
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("cannot rewrite frontmatter in Loose.md")),
+            "repair publication failure must remain actionable: {:?}",
+            stats.warnings
+        );
+    }
+
     /// The in-memory index is read-only: the same page is indexed with the
     /// repaired metadata, but the file on disk keeps its exact bytes.
     #[test]

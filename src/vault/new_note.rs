@@ -452,4 +452,35 @@ mod tests {
         let err = create_new_note(&cwd, "   ", None).unwrap_err();
         assert!(matches!(err, NewNoteError::EmptyTitle));
     }
+
+    #[test]
+    fn parent_creation_failure_writes_no_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("cwd");
+        let root = dir.path().join("vault");
+        fs::create_dir_all(&cwd).unwrap();
+        init_vault(&root).unwrap();
+        fs::write(
+            cwd.join("config.toml"),
+            format!("[vault]\nroot = \"{}\"\n", root.display()),
+        )
+        .unwrap();
+        fs::write(
+            root.join(".clepsydra/config.toml"),
+            "[vault]\ndefault_page_folder = \"blocked\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("blocked"), b"existing file").unwrap();
+
+        let error = create_new_note(&cwd, "Cannot Publish", None).unwrap_err();
+
+        assert!(matches!(error, NewNoteError::Io(_)));
+        assert_eq!(fs::read(root.join("blocked")).unwrap(), b"existing file");
+        assert!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| entry.path().extension().and_then(|value| value.to_str()) != Some("md"))
+        );
+    }
 }

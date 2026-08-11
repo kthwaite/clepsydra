@@ -170,6 +170,16 @@ fn create_with_env(
     xdg_config_home: Option<OsString>,
     home: Option<OsString>,
 ) -> Result<PathBuf, ConfigCommandError> {
+    create_with_env_and_write(xdg_config_home, home, |file| {
+        file.write_all(LITERATE_CONFIG_TEMPLATE.as_bytes())
+    })
+}
+
+fn create_with_env_and_write(
+    xdg_config_home: Option<OsString>,
+    home: Option<OsString>,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> Result<PathBuf, ConfigCommandError> {
     let path = match xdg_config_home {
         Some(root) => PathBuf::from(root).join("clepsydra/config.toml"),
         None => PathBuf::from(home.ok_or(ConfigCommandError::NoConfigHome)?)
@@ -184,7 +194,7 @@ fn create_with_env(
 
     match OpenOptions::new().write(true).create_new(true).open(&path) {
         Ok(mut file) => {
-            if let Err(source) = file.write_all(LITERATE_CONFIG_TEMPLATE.as_bytes()) {
+            if let Err(source) = write(&mut file) {
                 drop(file);
                 let _ = fs::remove_file(&path);
                 return Err(ConfigCommandError::Io {
@@ -510,5 +520,23 @@ mod tests {
     fn create_requires_xdg_or_home() {
         let error = create_with_env(None, None).unwrap_err();
         assert!(matches!(error, ConfigCommandError::NoConfigHome));
+    }
+
+    #[test]
+    fn incomplete_config_write_removes_created_file() {
+        let xdg = tempfile::tempdir().unwrap();
+        let path = xdg.path().join("clepsydra/config.toml");
+
+        let error = create_with_env_and_write(
+            Some(xdg.path().as_os_str().to_owned()),
+            None,
+            |_| Err(io::Error::other("injected config write failure")),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigCommandError::Io { operation: "write", .. })
+        );
+        assert!(!path.exists());
     }
 }

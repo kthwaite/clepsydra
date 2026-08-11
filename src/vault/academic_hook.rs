@@ -51,3 +51,44 @@ impl PostMoveHook for AcademicMoveHook {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn annotation_rewrite_failure_is_returned_after_preserving_failed_page() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let annotations = root.join("library/annotations");
+        fs::create_dir_all(&annotations).unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000601").unwrap();
+        let annotation = annotations.join("highlight.md");
+        fs::write(
+            &annotation,
+            format!(
+                "+++\nid = \"019fd000-0000-7000-8000-000000000602\"\nkind = \"annotation\"\nwork_id = \"{page_id}\"\n+++\nbody\n"
+            ),
+        )
+        .unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        index.build(&vault).unwrap();
+        let malformed = "+++\nwork_id = [\n+++\nbody\n";
+        fs::write(&annotation, malformed).unwrap();
+
+        let error = AcademicMoveHook
+            .on_page_moved(
+                &VaultPath::new("library/papers/old.md").unwrap(),
+                &VaultPath::new("library/papers/new.md").unwrap(),
+                &page_id,
+                &vault,
+                &index,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("TOML"));
+        assert_eq!(fs::read_to_string(annotation).unwrap(), malformed);
+    }
+}

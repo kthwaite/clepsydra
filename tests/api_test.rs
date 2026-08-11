@@ -195,6 +195,35 @@ async fn put_location_rejects_out_of_range_latitude() {
 }
 
 #[tokio::test]
+async fn put_location_write_failure_preserves_in_memory_location() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir(root.join(".clepsydra/location.toml")).unwrap();
+        })
+        .build();
+
+    let response = fixture
+        .server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 51.5074,
+            "longitude": -0.1278,
+            "label": "London"
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(body["error"].as_str().unwrap().contains("failed to write"));
+
+    let current = fixture.server.get("/api/vault/location").await;
+    current.assert_status_ok();
+    let current_body: serde_json::Value = current.json();
+    assert!(current_body["latitude"].is_null());
+    assert!(current_body["longitude"].is_null());
+    assert!(current_body["label"].is_null());
+}
+
+#[tokio::test]
 async fn geocode_rejects_blank_query() {
     let (server, _tmp) = setup_server();
     // Whitespace-only `q` trims to empty → 400, no network needed.
@@ -1275,6 +1304,25 @@ async fn create_and_list_folder() {
         folder_names.contains(&"notes"),
         "expected 'notes' in folders, got: {folder_names:?}"
     );
+}
+
+#[tokio::test]
+async fn folder_create_parent_file_failure_writes_no_directory() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(root.join("blocked"), b"existing file").unwrap();
+        })
+        .build();
+    let root = fixture.temp_dir.path().join("vault");
+
+    fixture
+        .server
+        .post("/api/vault/folders/blocked/child")
+        .await
+        .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+    assert_eq!(fs::read(root.join("blocked")).unwrap(), b"existing file");
+    assert!(!root.join("blocked/child").exists());
 }
 
 #[tokio::test]
