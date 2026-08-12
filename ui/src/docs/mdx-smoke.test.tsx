@@ -315,6 +315,12 @@ it("documents Bases as non-owning saved views with safe property mutation", () =
   expect(source).toContain(
     "It does not diagnose an ambiguous relation target as ambiguous",
   );
+  expect(source).toContain(
+    "The LSP warns when a relation target is missing; Reference Repairs projects both missing and ambiguous targets",
+  );
+  expect(source).not.toContain(
+    "A missing or ambiguous target produces an LSP warning",
+  );
 });
 
 it("keeps every documented knowledge route and command grounded in runtime registries", () => {

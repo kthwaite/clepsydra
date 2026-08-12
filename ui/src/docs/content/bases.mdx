@@ -265,7 +265,7 @@ See [LSP setup and troubleshooting](/docs/lsp) for client configuration and the 
 
 ### Relation repair
 
-Relation values participate in the same canonical-name resolution as page wikilinks. A missing or ambiguous target produces an LSP warning and an `invalid_relation_target` entry in Reference Repairs. When one or more replacement candidates are available, the repair workspace can preview and patch the property occurrence with the selected page; otherwise it offers source navigation only. It does not enforce `many = false`, because cardinality remains an advisory schema warning.
+Relation values participate in the same canonical-name resolution as page wikilinks. The LSP warns when a relation target is missing; Reference Repairs projects both missing and ambiguous targets as `invalid_relation_target`. When one or more replacement candidates are available, the repair workspace can preview and patch the property occurrence with the selected page; otherwise it offers source navigation only. It does not enforce `many = false`, because cardinality remains an advisory schema warning.
 
 See [relation repair](/docs/links-search-graph-and-repair#relation-repair) for the six issue classes, exact preview, stale-conflict, and one-at-a-time apply semantics.
 
