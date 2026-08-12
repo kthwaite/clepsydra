@@ -175,7 +175,9 @@ vi.mock("#/components/codex/FolioProperties", () => ({
       );
     }
     folioPropertiesMock(props);
-    return <section data-testid="folio-properties">Projected properties</section>;
+    return (
+      <section data-testid="folio-properties">Projected properties</section>
+    );
   },
 }));
 vi.mock("#/editor/SlateEditor", () => ({
@@ -1039,7 +1041,6 @@ describe("Folio property placement", () => {
     });
   });
 
-
   it("keeps the normal Folio usable when the property projection fails", () => {
     mobileLayoutState.matches = false;
     folioPropertiesState.failed = true;
@@ -1172,9 +1173,7 @@ describe("Folio mobile presentation", () => {
     });
     expect(detailsDialog).toBeVisible();
     expect(screen.getByText("notes/alpha.md")).toBeVisible();
-    expect(
-      within(detailsDialog).queryByTestId("folio-properties"),
-    ).toBeNull();
+    expect(within(detailsDialog).queryByTestId("folio-properties")).toBeNull();
     expect(folioPropertiesMock).toHaveBeenLastCalledWith({
       pageId: "page-alpha",
       path: "notes/alpha.md",

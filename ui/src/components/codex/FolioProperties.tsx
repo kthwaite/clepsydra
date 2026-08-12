@@ -9,11 +9,11 @@ import {
   usePropertyCommit,
 } from "#/api/bases";
 import { formatApiError, isApiConflict, isApiError } from "#/api/error";
-import { EditableCell } from "#/components/bases/EditableCell";
 import {
   type CellValue,
   formatCellValue,
 } from "#/components/bases/cells/types";
+import { EditableCell } from "#/components/bases/EditableCell";
 import { cn } from "#/lib/cn";
 
 interface FolioPropertiesProps {
@@ -43,11 +43,12 @@ function formatBaseNames(
 function describeDefinition(definition: PropertyDefinition): string {
   const options = definition.options ?? [];
   const optionDetail = options.length > 0 ? ` [${options.join(", ")}]` : "";
-  const relationDetail = definition.type === "relation" && definition.many != null
-    ? definition.many
-      ? " (many)"
-      : " (one)"
-    : "";
+  const relationDetail =
+    definition.type === "relation" && definition.many != null
+      ? definition.many
+        ? " (many)"
+        : " (one)"
+      : "";
   return `${definition.type}${optionDetail}${relationDetail}`;
 }
 
@@ -225,9 +226,8 @@ export function FolioProperties({
           {projection.data.properties.map((property, index) => {
             const provenanceId = `${id}-provenance-${index}`;
             const errorId = `${id}-error-${index}`;
-            const propertyFailure = failedSave?.key === property.key
-              ? failedSave
-              : null;
+            const propertyFailure =
+              failedSave?.key === property.key ? failedSave : null;
             const describedBy = propertyFailure
               ? `${provenanceId} ${errorId}`
               : provenanceId;
@@ -310,15 +310,17 @@ export function FolioProperties({
                     aria-label={`${property.key} declarations`}
                     className="mt-1 m-0 space-y-0.5 p-0"
                   >
-                    {property.declarations.map((declaration, declarationIndex) => (
-                      <li
-                        key={`${declaration.base.slug}-${declarationIndex}`}
-                        className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
-                      >
-                        {declaration.base.name} ({declaration.base.slug}) ·{" "}
-                        {describeDefinition(declaration.definition)}
-                      </li>
-                    ))}
+                    {property.declarations.map(
+                      (declaration, declarationIndex) => (
+                        <li
+                          key={`${declaration.base.slug}-${declarationIndex}`}
+                          className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
+                        >
+                          {declaration.base.name} ({declaration.base.slug}) ·{" "}
+                          {describeDefinition(declaration.definition)}
+                        </li>
+                      ),
+                    )}
                   </ul>
 
                   {savingKey === property.key ? (
@@ -332,7 +334,10 @@ export function FolioProperties({
 
                   {propertyFailure ? (
                     <div id={errorId} className="mt-1">
-                      <p role="alert" className="cl-marg m-0 text-[11px] text-hot">
+                      <p
+                        role="alert"
+                        className="cl-marg m-0 text-[11px] text-hot"
+                      >
                         {propertyFailure.message}
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1.5">

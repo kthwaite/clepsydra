@@ -964,80 +964,80 @@ export function Folio({ tabId, path }: FolioProps) {
 
   const details = (
     <>
-    <Block label="Document">
-      <KV k="ID" v={folioCode} />
-      <KV
-        k="Kind"
-        v={
-          folioReadOnly ? (
-            <span>{kindLabel(kind)}</span>
-          ) : (
-            <KindSelect
-              value={kind}
-              inferred={inferred}
-              onAssign={(k) =>
-                assign.mutate(
-                  { params: { path: { path } }, body: { kind: k } },
-                  { onSuccess: followMove },
-                )
-              }
-            />
-          )
-        }
-      />
-      <KV
-        k="Project"
-        v={
-          folioReadOnly ? (
-            <span>{project ?? "—"}</span>
-          ) : (
-            <ProjectCombo
-              key={project ?? ""}
-              value={project}
-              options={projects}
-              onAssign={(slug) =>
-                assign.mutate(
-                  { params: { path: { path } }, body: { project: slug } },
-                  { onSuccess: followMove },
-                )
-              }
-              onClear={() =>
-                assign.mutate(
-                  {
-                    params: { path: { path } },
-                    body: { clear_project: true },
-                  },
-                  { onSuccess: followMove },
-                )
-              }
-            />
-          )
-        }
-      />
-      <KV
-        k="Path"
-        v={<span className="break-all text-ink-mute">{path}</span>}
-      />
-      <KV
-        k="Protection"
-        v={
-          folioReadOnly ? (
-            <span>{encrypted ? "encrypted" : "plaintext"}</span>
-          ) : (
-            <button
-              type="button"
-              className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
-              disabled={!editor.pageId}
-              onClick={() =>
-                setProtectionDialog(encrypted ? "unprotect" : "protect")
-              }
-            >
-              {encrypted ? "encrypted · remove" : "plaintext · protect"}
-            </button>
-          )
-        }
-      />
-    </Block>
+      <Block label="Document">
+        <KV k="ID" v={folioCode} />
+        <KV
+          k="Kind"
+          v={
+            folioReadOnly ? (
+              <span>{kindLabel(kind)}</span>
+            ) : (
+              <KindSelect
+                value={kind}
+                inferred={inferred}
+                onAssign={(k) =>
+                  assign.mutate(
+                    { params: { path: { path } }, body: { kind: k } },
+                    { onSuccess: followMove },
+                  )
+                }
+              />
+            )
+          }
+        />
+        <KV
+          k="Project"
+          v={
+            folioReadOnly ? (
+              <span>{project ?? "—"}</span>
+            ) : (
+              <ProjectCombo
+                key={project ?? ""}
+                value={project}
+                options={projects}
+                onAssign={(slug) =>
+                  assign.mutate(
+                    { params: { path: { path } }, body: { project: slug } },
+                    { onSuccess: followMove },
+                  )
+                }
+                onClear={() =>
+                  assign.mutate(
+                    {
+                      params: { path: { path } },
+                      body: { clear_project: true },
+                    },
+                    { onSuccess: followMove },
+                  )
+                }
+              />
+            )
+          }
+        />
+        <KV
+          k="Path"
+          v={<span className="break-all text-ink-mute">{path}</span>}
+        />
+        <KV
+          k="Protection"
+          v={
+            folioReadOnly ? (
+              <span>{encrypted ? "encrypted" : "plaintext"}</span>
+            ) : (
+              <button
+                type="button"
+                className="cl-mono text-[10px] uppercase tracking-[0.1em] text-accent hover:underline"
+                disabled={!editor.pageId}
+                onClick={() =>
+                  setProtectionDialog(encrypted ? "unprotect" : "protect")
+                }
+              >
+                {encrypted ? "encrypted · remove" : "plaintext · protect"}
+              </button>
+            )
+          }
+        />
+      </Block>
     </>
   );
 
