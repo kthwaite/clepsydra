@@ -251,7 +251,7 @@ function FolioTab({
         style={{ background: kindColorVar(kind) }}
         aria-hidden
       />
-      <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px]">
+      <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
         {t.label || t.path || "(untitled)"}
       </span>
       <span
