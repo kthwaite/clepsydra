@@ -35,6 +35,7 @@ import {
 import {
   countWordsFromSlate,
   shortFolio,
+  visibleFolioOutlinks,
 } from "#/components/codex/folio-utils";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
@@ -225,6 +226,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
   const { data: outlinks } = useOutlinks(path);
+  const visibleOutlinks = useMemo(
+    () => visibleFolioOutlinks(outlinks),
+    [outlinks],
+  );
   const { data: similar } = useSimilar(path);
   const [tagSuggestionQuery, setTagSuggestionQuery] = useState("");
   const debouncedTagSuggestionQuery = useDebounce(tagSuggestionQuery, 200);
@@ -1041,7 +1046,7 @@ export function Folio({ tabId, path }: FolioProps) {
       <Block label="Vitals">
         <KV k="Words" v={wordCount > 0 ? wordCount : "—"} />
         <KV k="Backlinks" v={backlinks?.length ?? 0} />
-        <KV k="Links" v={outlinks?.length ?? 0} />
+        <KV k="Links" v={visibleOutlinks.length} />
       </Block>
 
       {(() => {
@@ -1198,7 +1203,7 @@ export function Folio({ tabId, path }: FolioProps) {
         />
         <RTabBtn
           label="Links"
-          n={outlinks?.length ?? 0}
+          n={visibleOutlinks.length}
           active={rTab === "links"}
           onClick={() => selectRTab("links")}
         />
@@ -1225,14 +1230,10 @@ export function Folio({ tabId, path }: FolioProps) {
           <>
             <LinkList
               empty="No outbound links yet."
-              items={(outlinks ?? [])
-                .filter((o): o is typeof o & { target_path: string } =>
-                  Boolean(o.target_path),
-                )
-                .map((o) => ({
-                  path: o.target_path,
-                  title: o.target_raw || o.target_path,
-                }))}
+              items={visibleOutlinks.map((o) => ({
+                path: o.target_path,
+                title: o.target_raw || o.target_path,
+              }))}
             />
             {(similar?.items.length ?? 0) > 0 && (
               <>

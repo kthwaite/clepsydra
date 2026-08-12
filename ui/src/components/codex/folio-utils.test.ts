@@ -1,10 +1,44 @@
 import { describe, expect, it } from "vitest";
+import type { OutlinkEntry } from "#/api/types";
 import {
   countWordsFromSlate,
   folioDisplayName,
   previewMarkdownSource,
   stripFrontmatter,
+  visibleFolioOutlinks,
 } from "./folio-utils";
+
+const outlink = (
+  kind: string,
+  target_path: string | null,
+): OutlinkEntry => ({
+  kind,
+  source_field: kind === "property_ref" ? "tags" : null,
+  target_id: target_path ? "019ff000-0000-7000-8000-000000000000" : null,
+  target_path,
+  target_raw: target_path ?? "missing",
+});
+
+describe("visibleFolioOutlinks", () => {
+  it("keeps only resolved page and block links visible in Folio", () => {
+    const visible = visibleFolioOutlinks([
+      outlink("property_ref", "notes/tag.md"),
+      outlink("property_ref", null),
+      outlink("wiki", "notes/page.md"),
+      outlink("wiki", null),
+      outlink("block_ref", "notes/page.md"),
+    ]);
+
+    expect(visible.map(({ kind, target_path }) => [kind, target_path])).toEqual([
+      ["wiki", "notes/page.md"],
+      ["block_ref", "notes/page.md"],
+    ]);
+  });
+
+  it("returns an empty array for absent data", () => {
+    expect(visibleFolioOutlinks(undefined)).toEqual([]);
+  });
+});
 
 describe("stripFrontmatter", () => {
   it("removes a leading YAML block", () => {
