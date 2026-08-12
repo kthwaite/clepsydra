@@ -220,9 +220,9 @@ export function FolioProperties({
   return (
     <section
       aria-labelledby={`${id}-heading`}
-      className="mt-3 border-y border-rule py-3"
+      className="border-b border-rule py-3"
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex items-center justify-between gap-2 border-b py-3">
         <h2
           id={`${id}-heading`}
           className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute"
