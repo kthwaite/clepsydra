@@ -4,7 +4,7 @@ Date: 2026-08-12
 
 ## Scope
 
-Corrected the four Important findings from `ReviewWave3Final`. Browser-smoke warnings were intentionally left out of scope. No formatter, linter, typecheck, build, broad Rust suite, or broad UI suite was run.
+Corrected the four Important findings from `ReviewWave3Final`. Browser-smoke warnings were intentionally left out of scope. No formatter, linter, build, broad Rust suite, or broad UI suite was run. Typecheck was initially excluded, then run only when the integration gate reported the focused TypeScript regressions documented below.
 
 ## 1. Canonical `body` validation
 
@@ -135,3 +135,22 @@ Verification:
 - `cargo test --test bases_api duplicate_property_entries_are_rejected_by_create_update_and_preview` — 1 passed.
 - `cargo test vault::base::tests::` — 30 passed.
 - `cargo test --test bases_api` — 58 passed.
+
+## Gate correction: React 19 refs and optional generated fields
+
+### RED
+
+- `bun run typecheck`
+  - Failed with 10 diagnostics in three files.
+  - React 19's `useRef` declaration requires an initial value; the drag refs had no argument, then rejected `undefined` clearing assignments.
+  - The workspace test fixture was annotated as the generated response type, widening its present `views` array to the wire schema's optional field and making four indexed fixture accesses unsafe to TypeScript.
+
+### GREEN
+
+- Initialized both drag refs explicitly as `useRef<string | undefined>(undefined)`, matching their controlled set/clear lifecycle without changing behavior.
+- Replaced the workspace fixture's widening annotation with `satisfies BaseDetailResponse`, preserving its known-present literal `views` array while still checking the generated response contract.
+
+Verification:
+
+- `bun run typecheck` — passed with zero diagnostics.
+- `bun run test src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx src/components/bases/__tests__/PropertiesEditor.test.tsx src/components/bases/__tests__/ViewsEditor.test.tsx` — 3 files, 97 tests passed.

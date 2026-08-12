@@ -113,7 +113,7 @@ export function PropertiesEditor({
   const newKeyInput = useRef<HTMLInputElement>(null);
   const [moveAnnouncement, setMoveAnnouncement] = useState("");
   const [focusPropertyId, setFocusPropertyId] = useState<string>();
-  const draggedPropertyId = useRef<string>();
+  const draggedPropertyId = useRef<string | undefined>(undefined);
   const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
 
   useEffect(() => {

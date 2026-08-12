@@ -78,7 +78,7 @@ export function ViewDefinitionEditor({
   const [columnToAdd, setColumnToAdd] = useState("");
   const [moveAnnouncement, setMoveAnnouncement] = useState("");
   const [focusColumnId, setFocusColumnId] = useState<string>();
-  const draggedColumnId = useRef<string>();
+  const draggedColumnId = useRef<string | undefined>(undefined);
   const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
   const nextColumnId = useRef(view.columns.length);
   const [columnRows, setColumnRows] = useState(() =>

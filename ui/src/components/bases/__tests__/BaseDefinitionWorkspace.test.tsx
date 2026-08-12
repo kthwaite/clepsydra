@@ -35,7 +35,7 @@ vi.mock("#/api/bases", () => ({
   useUpdateBase: () => ({ mutateAsync: updateMock, isPending: false }),
 }));
 
-const detail: BaseDetailResponse = {
+const detail = {
   slug: "reading-log",
   name: "Reading Log",
   description: "Books in progress",
@@ -53,7 +53,7 @@ const detail: BaseDetailResponse = {
   diagnostics: [],
   member_creation: [],
   revision: "revision-1",
-};
+} satisfies BaseDetailResponse;
 
 function mutationResponse(
   overrides: Partial<BaseMutationResponse> = {},
