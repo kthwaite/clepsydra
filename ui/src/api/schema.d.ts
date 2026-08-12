@@ -1312,7 +1312,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Project matching Base declarations and current custom values for one page. */
+        get: operations["get_page_base_properties"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1781,6 +1782,7 @@ export interface components {
         };
         BoardTask: {
             assignee?: string | null;
+            body_excerpt?: string | null;
             checks: number[];
             code: string;
             cycle?: string | null;
@@ -2270,6 +2272,34 @@ export interface components {
             target_path?: string | null;
             target_raw: string;
         };
+        /** @description Identity and display label for one matching Base. */
+        PageBaseIdentity: {
+            name: string;
+            slug: string;
+        };
+        /** @description Authoritative Base property projection for one current page. */
+        PageBasePropertiesResponse: {
+            encrypted: boolean;
+            id: string;
+            matching_bases: components["schemas"]["PageBaseIdentity"][];
+            path: string;
+            properties: components["schemas"]["PageBaseProperty"][];
+            revision: string;
+        };
+        /** @description One property key grouped across every matching Base declaration. */
+        PageBaseProperty: {
+            blockers: components["schemas"]["PagePropertyBlocker"][];
+            compatibility: components["schemas"]["PagePropertyCompatibility"];
+            declarations: components["schemas"]["PagePropertyDeclaration"][];
+            definition?: null | components["schemas"]["PropertyDefinition"];
+            key: string;
+            /** @description Backend capability only; Folio lock/read-only state is applied by clients. */
+            patchable: boolean;
+            /** @description Distinguishes an absent declared property from a present JSON `null`. */
+            present: boolean;
+            /** @description Current custom frontmatter value. Reserved and absent values are `null`. */
+            value?: unknown;
+        };
         /** @description OpenAPI schema for page detail responses. */
         PageDetailResponse: {
             body: string;
@@ -2293,6 +2323,21 @@ export interface components {
             tags?: string[] | null;
             title?: string | null;
             updated_at?: string | null;
+        };
+        /**
+         * @description Backend-authoritative reasons that a projected property cannot be patched.
+         * @enum {string}
+         */
+        PagePropertyBlocker: "schema_conflict" | "reserved_key";
+        /**
+         * @description Whether every declaration for a key has the same editor semantics.
+         * @enum {string}
+         */
+        PagePropertyCompatibility: "compatible" | "conflict";
+        /** @description One original property declaration and the Base that supplied it. */
+        PagePropertyDeclaration: {
+            base: components["schemas"]["PageBaseIdentity"];
+            definition: components["schemas"]["PropertyDefinition"];
         };
         PageSummary: {
             canonical_name: string;
@@ -6990,6 +7035,56 @@ export interface operations {
                 };
             };
             /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_page_base_properties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Page UUID */
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authoritative Base property projection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageBasePropertiesResponse"];
+                };
+            };
+            /** @description Malformed page UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unknown page */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page read or Base evaluation failed */
             500: {
                 headers: {
                     [name: string]: unknown;
