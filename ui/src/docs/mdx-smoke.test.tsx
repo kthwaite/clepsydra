@@ -339,8 +339,8 @@ it("documents SHEAF close and ordering behavior", () => {
   expect(source).toContain(
     "The SHEAF follows workspace order, while each quire keeps its member order",
   );
-  expect(source).toContain(
-    "Recent Folios are ordered by activation, newest first",
+  expect(source).toMatch(
+    /Recent Folios\s+are ordered by activation, newest first/,
   );
 });
 
