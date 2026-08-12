@@ -127,6 +127,15 @@ export function TaskCard({
         {t.title}
       </div>
 
+      {t.body_excerpt && (
+        <p
+          className="line-clamp-3 mb-[8px] -mt-[4px] text-[var(--fs-sm)] leading-[1.35] text-[var(--ink-2)]"
+          data-testid={`task-excerpt-${t.id}`}
+        >
+          {t.body_excerpt}
+        </p>
+      )}
+
       {/* Hold reason line */}
       {t.hold && (
         <div

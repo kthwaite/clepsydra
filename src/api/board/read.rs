@@ -15,6 +15,7 @@ use crate::api::error::ApiError;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::kind::Kind;
 use crate::vault::path::VaultPath;
+use crate::vault::query::body_excerpt;
 
 use super::{
     BoardColumn, BoardCycle, BoardOperation, BoardResponse, BoardTask, COLUMNS, extra_str,
@@ -205,7 +206,7 @@ pub(crate) async fn get_board(
 // ---------------------------------------------------------------------------
 
 /// Row tuple for a single-task DTO query:
-/// `(id, title, meta_json, project, updated_at, tags_raw)`.
+/// `(id, title, meta_json, project, updated_at, tags_raw, body)`.
 type TaskDtoRow = (
     String,
     Option<String>,
@@ -213,10 +214,11 @@ type TaskDtoRow = (
     Option<String>,
     Option<String>,
     String,
+    Option<String>,
 );
 
 /// Row tuple for the task-list query:
-/// `(id, path, title, meta_json, project, updated_at, tags_raw)`.
+/// `(id, path, title, meta_json, project, updated_at, tags_raw, body)`.
 type TaskListRow = (
     String,
     String,
@@ -225,6 +227,7 @@ type TaskListRow = (
     Option<String>,
     Option<String>,
     String,
+    Option<String>,
 );
 
 /// Build a `BoardTask` DTO from the index for a given vault path + code.
@@ -244,8 +247,10 @@ pub(super) async fn build_board_task_dto(
                 .query_row(
                     "SELECT p.id, p.title, p.meta_json, p.project, p.updated_at, \
                              COALESCE((SELECT group_concat(t.tag, char(31)) \
-                                         FROM tags t WHERE t.page_id = p.id), '') \
+                                         FROM tags t WHERE t.page_id = p.id), ''), \
+                             CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END \
                         FROM pages p \
+                        LEFT JOIN page_bodies body_index ON body_index.page_id = p.id \
                        WHERE p.path = ?1",
                     params![vp_str],
                     |row| {
@@ -256,12 +261,13 @@ pub(super) async fn build_board_task_dto(
                             row.get::<_, Option<String>>(3)?,
                             row.get::<_, Option<String>>(4)?,
                             row.get::<_, String>(5)?,
+                            row.get::<_, Option<String>>(6)?,
                         ))
                     },
                 )
                 .ok();
 
-            let (id_str, title, meta_json, project, updated_at, tags_raw) =
+            let (id_str, title, meta_json, project, updated_at, tags_raw, body) =
                 row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
 
             let id = Uuid::parse_str(&id_str).map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
@@ -299,6 +305,7 @@ pub(super) async fn build_board_task_dto(
                 path: vp_str,
                 code: code_str,
                 title: task_title,
+                body_excerpt: body.as_deref().map(body_excerpt),
                 project,
                 status,
                 priority,
@@ -382,8 +389,10 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
     let mut task_stmt = conn.prepare(
         "SELECT p.id, p.path, p.title, p.meta_json, p.project, p.updated_at, \
                 COALESCE((SELECT group_concat(t.tag, char(31)) \
-                            FROM tags t WHERE t.page_id = p.id), '') \
+                            FROM tags t WHERE t.page_id = p.id), ''), \
+                CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END \
            FROM pages p \
+           LEFT JOIN page_bodies body_index ON body_index.page_id = p.id \
           WHERE p.kind = ?1 \
           ORDER BY p.path",
     )?;
@@ -398,6 +407,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -405,7 +415,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
     let checks_by_page = count_checks_by_page(conn)?;
 
     let mut tasks: Vec<BoardTask> = Vec::new();
-    for (id_str, path, title, meta_json, project, updated_at, tags_raw) in task_rows {
+    for (id_str, path, title, meta_json, project, updated_at, tags_raw, body) in task_rows {
         let id = match Uuid::parse_str(&id_str) {
             Ok(u) => u,
             Err(_) => continue,
@@ -446,6 +456,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
             path,
             code,
             title: task_title,
+            body_excerpt: body.as_deref().map(body_excerpt),
             project,
             status,
             priority,

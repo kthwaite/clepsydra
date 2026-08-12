@@ -248,6 +248,71 @@ async fn board_aggregates_operations_cycles_tasks() {
 }
 
 #[tokio::test]
+async fn board_projects_bounded_body_excerpts_in_bulk_and_mutation_read_back() {
+    const RICH_ID: &str = "01951234-0000-7000-8000-000000000111";
+    const EMPTY_ID: &str = "01951234-0000-7000-8000-000000000112";
+    const LONG_ID: &str = "01951234-0000-7000-8000-000000000113";
+
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0111.md"),
+            format!(
+                "---\nid: {RICH_ID}\ntitle: Rich body\ntype: TASK\n---\n\
+                 # Heading\n\nA [link label](https://example.com) with `code` and <span>inside</span>.\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0112.md"),
+            format!("---\nid: {EMPTY_ID}\ntitle: Empty body\ntype: TASK\n---\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/TSK-0113.md"),
+            format!(
+                "---\nid: {LONG_ID}\ntitle: Long body\ntype: TASK\n---\n{}",
+                "界".repeat(241)
+            ),
+        )
+        .unwrap();
+    });
+
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    let task = |id: &str| {
+        tasks
+            .iter()
+            .find(|task| task["id"] == id)
+            .unwrap_or_else(|| panic!("missing task {id}"))
+    };
+
+    let rich_excerpt = task(RICH_ID)["body_excerpt"].as_str().unwrap();
+    assert_eq!(
+        rich_excerpt,
+        "Heading A link label with code and inside."
+    );
+    assert!(!rich_excerpt.contains("https://example.com"));
+    assert!(
+        ["#", "`", "<", ">"]
+            .into_iter()
+            .all(|syntax| !rich_excerpt.contains(syntax))
+    );
+    assert_eq!(task(EMPTY_ID)["body_excerpt"], "");
+
+    let long_excerpt = task(LONG_ID)["body_excerpt"].as_str().unwrap();
+    assert_eq!(long_excerpt, format!("{}…", "界".repeat(239)));
+    assert_eq!(long_excerpt.chars().count(), 240);
+
+    let mutation: serde_json::Value = server
+        .patch(&format!("/api/vault/board/tasks/{RICH_ID}"))
+        .json(&serde_json::json!({ "title": "Rich body renamed" }))
+        .await
+        .json();
+    assert_eq!(mutation["body_excerpt"], rich_excerpt);
+}
+
+#[tokio::test]
 async fn checklist_counts_preserve_checkbox_semantics_across_tasks() {
     let (server, _tmp) = setup_server_with(|root| {
         std::fs::create_dir_all(root.join("tasks")).unwrap();

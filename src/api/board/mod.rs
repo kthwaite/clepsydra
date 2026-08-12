@@ -111,6 +111,7 @@ pub struct BoardTask {
     pub path: String,
     pub code: String,
     pub title: String,
+    pub body_excerpt: Option<String>,
     pub project: Option<String>,
     pub status: String,
     pub priority: String,

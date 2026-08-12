@@ -616,6 +616,7 @@ mod tests {
             "expected /api/vault/board/cycles/{{id}} in paths"
         );
         // Board schemas
+        let json = serde_json::to_value(&spec).unwrap();
         let schemas = spec.components.unwrap();
         assert!(
             schemas.schemas.contains_key("BoardTask"),
@@ -652,6 +653,13 @@ mod tests {
         assert!(
             schemas.schemas.contains_key("PatchCycleRequest"),
             "expected PatchCycleRequest in components"
+        );
+
+        let board_task = &json["components"]["schemas"]["BoardTask"];
+        assert_eq!(
+            board_task["properties"]["body_excerpt"]["type"],
+            serde_json::json!(["string", "null"]),
+            "body_excerpt must distinguish protected null from available text"
         );
     }
     #[test]
