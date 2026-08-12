@@ -89,7 +89,9 @@ vi.mock("#/store/workspace", () => {
     (selector: (state: unknown) => unknown) => selector(workspaceStateMock),
     { getState: () => workspaceStateMock },
   );
-  return { useWorkspaceStore };
+  const selectActiveTab = (state: typeof workspaceStateMock) =>
+    state.tabs.find((t) => t.id === state.activeTabId);
+  return { useWorkspaceStore, selectActiveTab };
 });
 
 import { CommandPalette } from "#/components/codex/CommandPalette";

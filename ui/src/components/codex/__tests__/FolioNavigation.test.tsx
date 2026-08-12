@@ -300,6 +300,7 @@ function renderNavigation(initialEntry: string, strictMode = false) {
   const workspaceRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/workspace",
+    staticData: { codexView: "workspace" },
     component: Workspace,
   });
   const router = createRouter({
