@@ -6,7 +6,7 @@ import {
   ReadingContinuesPanel,
 } from "#/components/codex/ReadingContinues";
 
-const commit = vi.fn();
+const commit = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("#/api/bases", () => ({
   useBaseView: () => ({

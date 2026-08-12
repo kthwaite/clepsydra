@@ -10,6 +10,8 @@ interface EditableCellCommonProps {
   ariaLabel?: string;
   ariaDescribedBy?: string;
   commitOnBlur?: boolean;
+  /** Focus the display affordance when an external async action closes edit mode. */
+  focusOnDisplay?: boolean;
   onCommit: (value: CellValue, hint?: PropertyType) => void;
 }
 
@@ -44,6 +46,7 @@ export function EditableCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  focusOnDisplay = false,
   commitOnBlur = false,
   onCommit,
   onCommitNext,
@@ -56,11 +59,11 @@ export function EditableCell({
   const Editor = CELL_EDITORS[definition.type];
 
   useEffect(() => {
-    if (!editing && restoreFocusRef.current) {
+    if (!editing && (restoreFocusRef.current || focusOnDisplay)) {
       restoreFocusRef.current = false;
       displayButtonRef.current?.focus();
     }
-  }, [editing]);
+  }, [editing, focusOnDisplay]);
 
   if (editing) {
     const editor = (

@@ -41,6 +41,18 @@ export type BaseListResponse = components["schemas"]["BaseListResponse"];
 export type BaseSummary = components["schemas"]["BaseSummary"];
 export type BaseMutationResponse =
   components["schemas"]["BaseMutationResponse"];
+export type PageBaseIdentity = components["schemas"]["PageBaseIdentity"];
+export type PageBasePropertiesResponse =
+  components["schemas"]["PageBasePropertiesResponse"];
+export type PageBaseProperty = components["schemas"]["PageBaseProperty"];
+export type PagePropertyBlocker =
+  components["schemas"]["PagePropertyBlocker"];
+export type PagePropertyCompatibility =
+  components["schemas"]["PagePropertyCompatibility"];
+export type PagePropertyDeclaration =
+  components["schemas"]["PagePropertyDeclaration"];
+export type PropertyPatchResponse =
+  components["schemas"]["PropertyPatchResponse"];
 export type CreateBaseRequest = components["schemas"]["CreateBaseRequest"];
 export type BasePreviewResponse = components["schemas"]["BasePreviewResponse"];
 export type BaseFilter = components["schemas"]["Filter"];
@@ -162,6 +174,19 @@ export function useBase(slug: string) {
   );
 }
 
+export function usePageBaseProperties(uuid: string) {
+  return $api.useQuery(
+    "get",
+    "/api/vault/pages/by-id/{uuid}/properties",
+    { params: { path: { uuid } } },
+    {
+      enabled: !!uuid,
+      retry: 2,
+      throwOnError: false,
+    },
+  );
+}
+
 export interface ViewOverrides {
   sort?: string;
   dir?: "asc" | "desc";
@@ -240,9 +265,10 @@ function usePatchProperties() {
 }
 
 /**
- * Revision-guarded single-key commit: fetch the page's current revision,
- * PATCH only the changed key (with an optional type hint), and on conflict
- * or failure toast and refetch so the caller shows the winning state.
+ * Revision-guarded single-key commit. Folio projections supply their
+ * authoritative revision; legacy row consumers fall back to the page detail
+ * revision. Failures still toast and refresh shared caches, but now reject so
+ * controlled editors can retain their draft.
  */
 export function usePropertyCommit() {
   const qc = useQueryClient();
@@ -254,17 +280,21 @@ export function usePropertyCommit() {
       key: string,
       value: unknown,
       hint?: PropertyType,
+      expectedRevision?: string,
     ) => {
       try {
-        // The generated client's path-parameter encoding matches the page
-        // routes exactly (a raw template literal would break on # or %).
-        const pageRes = await fetchClient.GET("/api/vault/pages/{path}", {
-          params: { path: { path: page.path } },
-        });
-        const revision = pageRes.data?.revision;
+        let revision = expectedRevision;
+        if (!revision) {
+          // The generated client's path-parameter encoding matches the page
+          // routes exactly (a raw template literal would break on # or %).
+          const pageRes = await fetchClient.GET("/api/vault/pages/{path}", {
+            params: { path: { path: page.path } },
+          });
+          revision = pageRes.data?.revision;
+        }
         if (!revision) throw new Error("page revision fetch failed");
 
-        await patch.mutateAsync({
+        return await patch.mutateAsync({
           params: { path: { uuid: page.id } },
           body: {
             set: value === null ? {} : { [key]: value },
@@ -273,9 +303,10 @@ export function usePropertyCommit() {
             expected_revision: revision,
           },
         });
-      } catch {
+      } catch (error) {
         toast.error(`Could not update ${key} — refreshed to current state`);
         invalidateBaseMutationQueries(qc);
+        throw error;
       }
     },
     [patch, qc],

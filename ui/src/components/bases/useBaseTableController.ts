@@ -637,7 +637,7 @@ export function useBaseTableController(
   );
   const handleCommitCell = useCallback(
     (row: QueryRow, key: string, value: CellValue, hint?: PropertyType) => {
-      void commit(row, key, value, hint);
+      void commit(row, key, value, hint).catch(() => undefined);
     },
     [commit],
   );

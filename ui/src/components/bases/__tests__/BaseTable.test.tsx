@@ -24,7 +24,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 const mocks = vi.hoisted(() => ({
   createMember: vi.fn(),
-  commit: vi.fn(),
+  commit: vi.fn().mockResolvedValue(undefined),
   refetchBase: vi.fn(),
   refetchView: vi.fn(),
   useBase: vi.fn(),
@@ -202,7 +202,7 @@ describe("BaseTable standalone regression", () => {
     mocks.viewState.isFetching = false;
     mocks.useBase.mockReset();
     mocks.useBaseView.mockReset();
-    mocks.commit.mockReset();
+    mocks.commit.mockReset().mockResolvedValue(undefined);
 
     render(<BaseTable slug="reading" />);
 
