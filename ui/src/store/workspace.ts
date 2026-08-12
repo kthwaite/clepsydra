@@ -12,6 +12,39 @@ import {
 export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
 
+type WorkspaceTransitionGuard = (proceed: () => void) => boolean;
+
+let workspaceTransitionGuard: WorkspaceTransitionGuard | null = null;
+let workspaceTransitionDepth = 0;
+
+export function registerWorkspaceTransitionGuard(
+  guard: WorkspaceTransitionGuard,
+): () => void {
+  workspaceTransitionGuard = guard;
+  return () => {
+    if (workspaceTransitionGuard === guard) workspaceTransitionGuard = null;
+  };
+}
+
+export function runWorkspaceTransition(transition: () => void): boolean {
+  if (workspaceTransitionDepth > 0) {
+    transition();
+    return true;
+  }
+
+  const proceed = () => {
+    workspaceTransitionDepth += 1;
+    try {
+      transition();
+    } finally {
+      workspaceTransitionDepth -= 1;
+    }
+  };
+  if (workspaceTransitionGuard?.(proceed)) return false;
+  proceed();
+  return true;
+}
+
 export interface OpenHistoryEntry {
   path: string;
   openedAt: number;
@@ -120,6 +153,13 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
         // Check for existing tab with same content
         const existing = state.tabs.find((t) => tabKey(t.type, t.path) === key);
+        if (
+          workspaceTransitionDepth === 0 &&
+          existing?.id !== state.activeTabId
+        ) {
+          runWorkspaceTransition(() => get().openTab(type, path, label));
+          return;
+        }
 
         if (existing) {
           // Always focus existing tab regardless of mode; an explicit open of
@@ -203,6 +243,13 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       addTab(tab) {
+        if (
+          workspaceTransitionDepth === 0 &&
+          tab.id !== get().activeTabId
+        ) {
+          runWorkspaceTransition(() => get().addTab(tab));
+          return;
+        }
         // Caller contract: do not pass a quireId belonging to a collapsed
         // quire — addTab activates the tab and would break the
         // active-tab-is-never-hidden invariant.
@@ -217,6 +264,13 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const state = get();
         const idx = state.tabs.findIndex((t) => t.id === tabId);
         if (idx === -1) return;
+        if (
+          workspaceTransitionDepth === 0 &&
+          state.activeTabId === tabId
+        ) {
+          runWorkspaceTransition(() => get().closeTab(tabId));
+          return;
+        }
 
         clearFolioRestoration(tabId);
 
@@ -238,6 +292,13 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       closeOtherTabs(tabId) {
+        if (
+          workspaceTransitionDepth === 0 &&
+          get().activeTabId !== tabId
+        ) {
+          runWorkspaceTransition(() => get().closeOtherTabs(tabId));
+          return;
+        }
         set((state) =>
           normalized(
             state.tabs.filter((t) => t.id === tabId || t.pinned),
@@ -248,6 +309,13 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       activateTab(tabId) {
+        if (
+          workspaceTransitionDepth === 0 &&
+          get().activeTabId !== tabId
+        ) {
+          runWorkspaceTransition(() => get().activateTab(tabId));
+          return;
+        }
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
           // Activation must never land on a hidden tab — expand its quire.
@@ -269,6 +337,13 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       clearActiveTab() {
+        if (
+          workspaceTransitionDepth === 0 &&
+          get().activeTabId !== null
+        ) {
+          runWorkspaceTransition(() => get().clearActiveTab());
+          return;
+        }
         set({ activeTabId: null });
       },
 
@@ -297,6 +372,14 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
       updateTabPath(tabId, path, label) {
         const currentTab = get().tabs.find((tab) => tab.id === tabId);
+        if (
+          workspaceTransitionDepth === 0 &&
+          currentTab?.id === get().activeTabId &&
+          currentTab.path !== path
+        ) {
+          runWorkspaceTransition(() => get().updateTabPath(tabId, path, label));
+          return;
+        }
         if (currentTab && currentTab.path !== path) {
           clearFolioRestoration(tabId);
         }
@@ -411,6 +494,18 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       toggleQuireCollapse(quireId) {
+        const current = get();
+        const active = current.tabs.find(
+          (tab) => tab.id === current.activeTabId,
+        );
+        if (
+          workspaceTransitionDepth === 0 &&
+          current.quires[quireId]?.collapsed === false &&
+          active?.quireId === quireId
+        ) {
+          runWorkspaceTransition(() => get().toggleQuireCollapse(quireId));
+          return;
+        }
         set((state) => {
           const quire = state.quires[quireId];
           if (!quire) return state;
@@ -432,6 +527,18 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       closeQuireTabs(quireId) {
+        const current = get();
+        const active = current.tabs.find(
+          (tab) => tab.id === current.activeTabId,
+        );
+        if (
+          workspaceTransitionDepth === 0 &&
+          active?.quireId === quireId &&
+          !active.pinned
+        ) {
+          runWorkspaceTransition(() => get().closeQuireTabs(quireId));
+          return;
+        }
         set((state) => {
           const firstIdx = state.tabs.findIndex((t) => t.quireId === quireId);
           const nextTabs = state.tabs.filter(

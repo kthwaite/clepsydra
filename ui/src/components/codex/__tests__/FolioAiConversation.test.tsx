@@ -396,6 +396,23 @@ describe("Folio AI conversation presentation", () => {
     ).toBeVisible();
   });
 
+  it("does not expose an edit-to-Read transition while raw mode is active", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    renderFolio(editor);
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: `${canonicalConversationMarkdown}\n` },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+  });
+
   it("enables transcript role and action controls only in Edit", async () => {
     const user = userEvent.setup();
     renderFolio(pageEditor());

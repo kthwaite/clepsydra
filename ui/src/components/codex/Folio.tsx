@@ -71,7 +71,12 @@ import {
   snapshotTextPoint,
   validateTextPointSnapshot,
 } from "#/store/folioRestoration";
-import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
+import {
+  registerWorkspaceTransitionGuard,
+  runWorkspaceTransition,
+  type TabDescriptor,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 type FolioProps = {
   tabId: string;
@@ -99,38 +104,61 @@ function RawMarkdownNavigationGuard({
   dirty: boolean;
   onLeave: () => void;
 }) {
+  const leaveApprovedRef = useRef(false);
   const blocker = useBlocker({
-    shouldBlockFn: () => dirty,
+    shouldBlockFn: () => dirty && !leaveApprovedRef.current,
     enableBeforeUnload: dirty,
     withResolver: true,
   });
+  const pendingTransitionRef = useRef<{ proceed: () => void } | null>(null);
+  const [pendingTransition, setPendingTransition] = useState<{
+    proceed: () => void;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!dirty) return;
+    return registerWorkspaceTransitionGuard((proceed) => {
+      const pending = { proceed };
+      pendingTransitionRef.current = pending;
+      setPendingTransition(pending);
+      leaveApprovedRef.current = false;
+      return true;
+    });
+  }, [dirty]);
+
+  const stay = () => {
+    pendingTransitionRef.current = null;
+    leaveApprovedRef.current = false;
+    setPendingTransition(null);
+    if (blocker.status === "blocked") blocker.reset?.();
+  };
+  const leave = () => {
+    const pending = pendingTransitionRef.current;
+    if (!pending && blocker.status !== "blocked") return;
+    pendingTransitionRef.current = null;
+    leaveApprovedRef.current = true;
+    setPendingTransition(null);
+    onLeave();
+    if (pending) pending.proceed();
+    else blocker.proceed?.();
+  };
 
   return (
     <Dialog
-      isOpen={blocker.status === "blocked"}
+      isOpen={
+        blocker.status === "blocked" || pendingTransition !== null
+      }
       onOpenChange={(open) => {
-        if (!open && blocker.status === "blocked") blocker.reset?.();
+        if (!open) stay();
       }}
       title="Unsaved raw Markdown"
       description="Leaving now will discard the raw Markdown draft."
       footer={
         <>
-          <Button
-            variant="secondary"
-            onPress={() => {
-              if (blocker.status === "blocked") blocker.reset?.();
-            }}
-          >
+          <Button variant="secondary" onPress={stay}>
             Stay
           </Button>
-          <Button
-            variant="danger"
-            onPress={() => {
-              if (blocker.status !== "blocked") return;
-              onLeave();
-              blocker.proceed?.();
-            }}
-          >
+          <Button variant="danger" onPress={leave}>
             Leave
           </Button>
         </>
@@ -204,18 +232,22 @@ export function Folio({ tabId, path }: FolioProps) {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
-      void navigate({ to: "/" });
+      runWorkspaceTransition(() => {
+        void navigate({ to: "/" });
+      });
       return;
     }
 
-    const originTabId = router.history.location.state.folioOriginTabId;
-    if (originTabId) {
-      const workspace = useWorkspaceStore.getState();
-      if (workspace.tabs.some((tab) => tab.id === originTabId)) {
-        workspace.activateTab(originTabId);
+    runWorkspaceTransition(() => {
+      const originTabId = router.history.location.state.folioOriginTabId;
+      if (originTabId) {
+        const workspace = useWorkspaceStore.getState();
+        if (workspace.tabs.some((tab) => tab.id === originTabId)) {
+          workspace.activateTab(originTabId);
+        }
       }
-    }
-    router.history.back();
+      router.history.back();
+    });
   };
   useEffect(() => {
     if (isTodayDraftPath && journalToday?.path && journalToday.path !== path) {
@@ -375,6 +407,18 @@ export function Folio({ tabId, path }: FolioProps) {
   };
   const applyRawMarkdown = () => {
     if (!rawMarkdownSession) return;
+    if (!rawMarkdownAvailable) {
+      setRawMarkdownSession((current) =>
+        current
+          ? {
+              ...current,
+              diagnostic:
+                "This Folio is no longer editable. Keep or copy this raw Markdown draft, then return to Edit before applying.",
+            }
+          : current,
+      );
+      return;
+    }
     if (
       rawMarkdownSession.path !== path ||
       editor.getRevision() !== rawMarkdownSession.entryRevision
@@ -391,7 +435,22 @@ export function Folio({ tabId, path }: FolioProps) {
       return;
     }
     try {
-      editor.setBodyMarkdown(rawMarkdownSession.value);
+      const authoredRaw = rawMarkdownSession.value;
+      const projectedRecipe = isRecipe
+        ? parseRecipeMarkdown(authoredRaw, editor.title)
+        : null;
+      editor.setBodyMarkdown(authoredRaw);
+      if (isRecipe) {
+        setRecipeDraft(
+          projectedRecipe?.ok === true
+            ? {
+                path,
+                editorRevision: editor.editorRevision,
+                document: projectedRecipe.value,
+              }
+            : null,
+        );
+      }
       setRawMarkdownSession(null);
     } catch (error) {
       setRawMarkdownSession((current) =>
@@ -679,11 +738,13 @@ export function Folio({ tabId, path }: FolioProps) {
       )}
       {isAiConversation ? (
         <>
-          <AiConversationControls
-            mode={conversationMode}
-            onModeChange={setConversationMode}
-            onAddTurn={addConversationTurn}
-          />
+          {rawMarkdownSession ? null : (
+            <AiConversationControls
+              mode={conversationMode}
+              onModeChange={setConversationMode}
+              onAddTurn={addConversationTurn}
+            />
+          )}
           {conversationDiagnostics &&
           (conversationDiagnostics.malformedMarkerLines.length > 0 ||
             conversationDiagnostics.validMarkers === 0) ? (

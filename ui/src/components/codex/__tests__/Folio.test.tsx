@@ -169,6 +169,7 @@ import {
   saveFolioRestoration,
 } from "#/store/folioRestoration";
 import { useWorkspaceStore } from "#/store/workspace";
+import { TabContent } from "#/components/TabContent";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
@@ -618,41 +619,108 @@ describe("Folio raw Markdown mode", () => {
     expect(editor.saveNow).not.toHaveBeenCalled();
   });
 
-  it("drops an unchanged stale session when the Folio path changes", async () => {
+  it("blocks active-tab remounts before workspace mutation and resolves the pending activation once", async () => {
     const user = userEvent.setup();
-    usePageEditorMock.mockReturnValue(editableEditor());
-    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
-    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
-
-    usePageEditorMock.mockReturnValue(editableEditor());
-    view.rerender(<Folio tabId="t1" path="notes/beta.md" />);
-
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("textbox", { name: "Raw Markdown" }),
-      ).not.toBeInTheDocument(),
+    const alphaEditor = editableEditor();
+    const betaEditor = editableEditor();
+    betaEditor.title = "Beta";
+    betaEditor.initialValue = [
+      { type: "paragraph", children: [{ text: "Beta body" }] },
+    ];
+    usePageEditorMock.mockImplementation((path: string) =>
+      path === "notes/alpha.md" ? alphaEditor : betaEditor,
     );
-  });
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "t1",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+          lastActiveAt: 2,
+        },
+        {
+          id: "t2",
+          type: "page",
+          path: "notes/beta.md",
+          label: "Beta",
+          lastActiveAt: 1,
+        },
+      ],
+      activeTabId: "t1",
+    });
+    render(<TabContent />);
 
-  it("preserves a dirty stale session until blocked navigation resolves", async () => {
-    const user = userEvent.setup();
-    usePageEditorMock.mockReturnValue(editableEditor());
-    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
     await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
-      target: { value: "Do not lose this draft  \n" },
+      target: { value: "Do not lose this exact draft  \n" },
+    });
+    await user.click(screen.getByRole("button", { name: "Beta" }));
+
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t1");
+    expect(
+      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Stay" }));
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t1");
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Do not lose this exact draft  \n",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Beta" }));
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeTabId).toBe("t2"),
+    );
+    expect(screen.getByRole("textbox", { name: "Page title" })).toHaveValue(
+      "Beta",
+    );
+    expect(alphaEditor.setBodyMarkdown).not.toHaveBeenCalled();
+  });
+
+  it("blocks an active path retarget before TabContent remounts", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    render(<TabContent />);
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Pending across move\n" },
+    });
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .updateTabPath("t1", "archive/alpha.md", "Alpha");
     });
 
-    usePageEditorMock.mockReturnValue(editableEditor());
-    view.rerender(<Folio tabId="t1" path="notes/beta.md" />);
-
+    expect(useWorkspaceStore.getState().tabs[0]?.path).toBe("notes/alpha.md");
+    expect(
+      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Stay" }));
     expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
-      "Do not lose this draft  \n",
+      "Pending across move\n",
     );
-    const options = useBlockerMock.mock.calls.at(-1)?.[0] as {
-      shouldBlockFn: () => boolean;
-    };
-    expect(options.shouldBlockFn()).toBe(true);
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .updateTabPath("t1", "archive/alpha.md", "Alpha");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().tabs[0]?.path).toBe(
+        "archive/alpha.md",
+      ),
+    );
+    expect(usePageEditorMock).toHaveBeenLastCalledWith(
+      "archive/alpha.md",
+      undefined,
+    );
   });
 });
 
@@ -739,6 +807,54 @@ describe("Folio mobile presentation", () => {
     );
     expect(screen.getByRole("button", { name: "Apply" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
+  });
+
+  it("blocks mobile back before restoring the origin tab and goes back once on Leave", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    routerHistory.canGoBack.mockReturnValue(true);
+    routerHistory.location.state = {
+      __TSR_index: 1,
+      folioOriginTabId: "origin",
+    };
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "origin",
+          type: "page",
+          path: "notes/origin.md",
+          label: "Origin",
+        },
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+    render(<TabContent />);
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Exact mobile draft  \n" },
+    });
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t1");
+    expect(routerHistory.back).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Stay" }));
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Exact mobile draft  \n",
+    );
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeTabId).toBe("origin"),
+    );
+    expect(routerHistory.back).toHaveBeenCalledOnce();
   });
 
   it("passes breakpoint changes as the scroll-spy reattach discriminator", () => {
