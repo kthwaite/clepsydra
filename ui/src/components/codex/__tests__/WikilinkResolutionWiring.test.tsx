@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "./FolioProperties.mock";
 
 // FOLIO — the sole SlateEditor host since the Diurnal view was retired — must
 // mount WikilinkResolutionProvider around the editor with the page's vault
