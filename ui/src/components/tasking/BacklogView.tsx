@@ -85,11 +85,22 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
   return (
     <div className="h-full overflow-auto text-[var(--fs-s)]">
       {/* ── QuickAddRow ──────────────────────────────────────────────────── */}
+      {/*
+        The three sticky rows below stack on `top: 0 / var(--row-h) /
+        calc(2 * var(--row-h))`, so this bar's rendered height (border-box,
+        including its border-b) must equal var(--row-h) exactly at every
+        density — no vertical padding here, and the input inside is slimmed
+        to fill the remaining height instead of adding its own py.
+      */}
       <div
-        className="sticky top-0 z-[4] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[5px]"
-        style={{ minHeight: "var(--row-h)" }}
+        className="sticky top-0 z-[4] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)]"
+        style={{ height: "var(--row-h)" }}
       >
-        <QuickAddRow preset={{}} testId="qa-backlog" />
+        <QuickAddRow
+          preset={{}}
+          testId="qa-backlog"
+          className="h-full box-border py-0"
+        />
       </div>
 
       {/* ── Header row ──────────────────────────────────────────────────── */}
@@ -209,6 +220,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                     task={t}
                     field="priority"
                     testIdPrefix="bk"
+                    colLabel={colLabel}
                   >
                     <PriChip pri={t.priority} />
                   </InlineEditPopover>

@@ -24,19 +24,20 @@ function makeCreateStub() {
     if (opts?.method === "POST") {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({
-          id: "new-task-id",
-          code: "TSK-9999",
-          title: "New Task",
-          status: "INTAKE",
-          priority: null,
-          project: null,
-          cycle: null,
-          tags: [],
-          checks: [],
-          path: "tasks/new-task.md",
-          updated_at: new Date().toISOString(),
-        }),
+        json: () =>
+          Promise.resolve({
+            id: "new-task-id",
+            code: "TSK-9999",
+            title: "New Task",
+            status: "INTAKE",
+            priority: null,
+            project: null,
+            cycle: null,
+            tags: [],
+            checks: [],
+            path: "tasks/new-task.md",
+            updated_at: new Date().toISOString(),
+          }),
       } as Response);
     }
     return Promise.resolve({
@@ -70,6 +71,25 @@ describe("QuickAddRow", () => {
     const input = screen.getByTestId("qa-test") as HTMLInputElement;
     await userEvent.type(input, "My task");
     expect(input.value).toBe("My task");
+  });
+
+  it("merges a className override onto the input, overriding conflicting utilities", () => {
+    wrap(
+      <QuickAddRow
+        preset={{}}
+        testId="qa-test"
+        className="h-full box-border py-0"
+      />,
+    );
+    const input = screen.getByTestId("qa-test");
+    // Override utilities present...
+    expect(input.className).toContain("h-full");
+    expect(input.className).toContain("box-border");
+    expect(input.className).toContain("py-0");
+    // ...and the conflicting default (py-[6px]) resolved away, not doubled up.
+    expect(input.className).not.toContain("py-[6px]");
+    // Base styling (e.g. the dashed border) is preserved.
+    expect(input.className).toContain("border-dashed");
   });
 
   it("POSTs a task with title, preset status/project, and priority: null on Enter", async () => {
@@ -114,10 +134,7 @@ describe("QuickAddRow", () => {
 
   it("clears the input and keeps focus on successful POST", async () => {
     const stub = makeCreateStub();
-    wrap(
-      <QuickAddRow preset={{ status: "INTAKE" }} testId="qa-test" />,
-      stub,
-    );
+    wrap(<QuickAddRow preset={{ status: "INTAKE" }} testId="qa-test" />, stub);
 
     const input = screen.getByTestId("qa-test") as HTMLInputElement;
     await userEvent.type(input, "Task one");
