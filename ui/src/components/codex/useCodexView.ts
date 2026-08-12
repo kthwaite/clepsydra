@@ -1,6 +1,6 @@
 import { useRouterState } from "@tanstack/react-router";
-import { selectWorkspaceMode, useWorkspaceStore } from "#/store/workspace";
 import type { TabDescriptor } from "#/store/workspace";
+import { selectWorkspaceMode, useWorkspaceStore } from "#/store/workspace";
 
 export type CodexView =
   | "atrium"

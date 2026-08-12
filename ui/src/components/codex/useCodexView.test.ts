@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  type RouteView,
   resolveCodexView,
   routeViewFromMatches,
-  type RouteView,
 } from "#/components/codex/useCodexView";
 import type { TabDescriptor } from "#/store/workspace";
 
@@ -51,7 +51,9 @@ describe("resolveCodexView", () => {
   });
 });
 
-const m = (codexView?: RouteView) => ({ staticData: codexView ? { codexView } : {} });
+const m = (codexView?: RouteView) => ({
+  staticData: codexView ? { codexView } : {},
+});
 
 describe("routeViewFromMatches", () => {
   it("returns the deepest declared view", () => {
