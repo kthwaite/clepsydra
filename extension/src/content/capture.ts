@@ -75,7 +75,7 @@ async function capture(): Promise<void> {
 	const article = new Readability(clonedDoc).parse();
 	const articleTextLength = article?.textContent?.length || 0;
 
-	const rejection = snapshotRejection(snapshotHtml, articleTextLength);
+	const rejection = snapshotRejection(snapshotHtml, article?.textContent ?? "");
 	if (rejection) {
 		await send({ type: "capture_error", error: rejection });
 		return;
