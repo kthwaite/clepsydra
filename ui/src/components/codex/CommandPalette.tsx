@@ -8,6 +8,10 @@ import {
 } from "react";
 import { useSearch, useTags } from "#/api/index";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
+import {
+  STATIC_COMMANDS,
+  type StaticCommandAction,
+} from "#/components/codex/commandRegistry";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
@@ -77,106 +81,69 @@ function CommandPaletteContent() {
   }, [open]);
 
   const verbCommands = useMemo<Command[]>(
-    () => [
-      {
+    () =>
+      STATIC_COMMANDS.map((command) => ({
         kind: "cmd",
-        id: formatChord(SHORTCUTS["nav.atrium"].chord),
-        title: "Open Atrium",
-        action: () => navigate({ to: "/" }),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["journal.today"].chord),
-        title: "Today's journal",
-        action: () => openTodayJournal(),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["journal.capture"].chord),
-        title: "Capture aside",
-        action: () => openCaptureAside(),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["nav.constellation"].chord),
-        title: "Open Constellation (graph)",
+        id: command.shortcut
+          ? formatChord(SHORTCUTS[command.shortcut].chord)
+          : command.id,
+        title: command.title,
         action: () => {
-          openTab("graph");
+          const action: StaticCommandAction = command.action;
+          switch (action) {
+            case "navigate-atrium":
+              navigate({ to: "/" });
+              return;
+            case "open-today-journal":
+              openTodayJournal();
+              return;
+            case "open-capture-aside":
+              openCaptureAside();
+              return;
+            case "open-constellation":
+              openTab("graph");
+              return;
+            case "navigate-gazetteer":
+              navigate({ to: "/gazetteer" });
+              return;
+            case "navigate-bases":
+              navigate({ to: "/bases" });
+              return;
+            case "navigate-academic":
+              navigate({ to: "/academic" });
+              return;
+            case "navigate-repairs":
+              navigate({ to: "/repairs" });
+              return;
+            case "create-base":
+              navigate({ to: "/bases", search: { create: true } });
+              return;
+            case "add-book":
+              openBookImport();
+              return;
+            case "inscribe-folio":
+              openInscribe();
+              return;
+            case "open-settings":
+              openSettings("appearance");
+              return;
+            case "toggle-theme":
+              toggleTheme();
+              return;
+            case "open-shortcut-help":
+              openShortcutHelp();
+              return;
+            case "toggle-diegetic-chrome":
+              setDiegetic(!diegetic);
+              return;
+            case "run-boot-sequence":
+              runBoot();
+              return;
+            default:
+              action satisfies never;
+          }
         },
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["nav.gazetteer"].chord),
-        title: "Open Gazetteer (index)",
-        action: () => navigate({ to: "/gazetteer" }),
-      },
-      {
-        kind: "cmd",
-        id: "nav.bases",
-        title: "Open Bases",
-        action: () => navigate({ to: "/bases" }),
-      },
-      {
-        kind: "cmd",
-        id: "nav.academic",
-        title: "Open Academic Library",
-        action: () => navigate({ to: "/academic" }),
-      },
-      {
-        kind: "cmd",
-        id: "nav.repairs",
-        title: "Open Reference Repairs",
-        action: () => navigate({ to: "/repairs" }),
-      },
-      {
-        kind: "cmd",
-        id: "bases.create",
-        title: "Create Base",
-        action: () => navigate({ to: "/bases", search: { create: true } }),
-      },
-      {
-        kind: "cmd",
-        id: "library.add-book",
-        title: "Add book by ISBN",
-        action: () => openBookImport(),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["app.inscribe"].chord),
-        title: "Inscribe new folio",
-        action: () => openInscribe(),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["app.settings"].chord),
-        title: "Open Status / preferences",
-        action: () => openSettings("appearance"),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["app.themeToggle"].chord),
-        title: "Toggle dark mode",
-        action: () => toggleTheme(),
-      },
-      {
-        kind: "cmd",
-        id: formatChord(SHORTCUTS["app.shortcutHelp"].chord),
-        title: "Keyboard shortcuts",
-        action: () => openShortcutHelp(),
-      },
-      {
-        kind: "cmd",
-        id: "sys.chrome",
-        title: "Toggle diegetic chrome",
-        action: () => setDiegetic(!diegetic),
-      },
-      {
-        kind: "cmd",
-        id: "sys.boot",
-        title: "Re-run boot sequence",
-        action: () => runBoot(),
-      },
-    ],
+      })),
     [
       navigate,
       openTab,

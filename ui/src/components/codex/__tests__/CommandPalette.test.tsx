@@ -39,6 +39,7 @@ vi.mock("#/store/workspace", () => ({
 }));
 
 import { CommandPalette } from "#/components/codex/CommandPalette";
+import { STATIC_COMMANDS } from "#/components/codex/commandRegistry";
 import { todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
 
@@ -190,5 +191,15 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
     expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  it("exposes every static command descriptor through the palette", () => {
+    render(<CommandPalette />);
+    const query = screen.getByRole("textbox", { name: "Command query" });
+
+    for (const command of STATIC_COMMANDS) {
+      fireEvent.change(query, { target: { value: command.title } });
+      expect(screen.getByText(command.title)).toBeInTheDocument();
+    }
   });
 });
