@@ -31,10 +31,7 @@ const riverMocks = vi.hoisted(() => {
   vi.stubGlobal("Request", BrowserLikeRequest);
   vi.stubGlobal("fetch", fetchMock);
 
-  type Page = {
-    entries: FeedEntry[];
-    next_cursor?: string | null;
-  };
+  type Page = components["schemas"]["FeedEntryPageResponse"];
 
   const entriesQuery: {
     data: { pages: Page[]; pageParams: Array<string | undefined> } | undefined;

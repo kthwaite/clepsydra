@@ -262,7 +262,6 @@ export function PropertyDefinitionEditor({
   property,
   index,
   count,
-  persisted,
   renaming,
   renameError,
   onChange,
@@ -331,11 +330,6 @@ export function PropertyDefinitionEditor({
           className="break-words px-2 py-2 text-left font-mono text-xs font-semibold text-foreground sm:px-3"
         >
           {property.key}
-          {persisted && (
-            <span className="mt-1 block font-sans text-[10px] font-normal leading-4 text-muted-foreground">
-              Saved key
-            </span>
-          )}
         </th>
         <td className="break-words px-2 py-2 text-xs leading-5 text-muted-foreground sm:px-3">
           {propertySummary(property.definition)}

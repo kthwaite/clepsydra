@@ -7,7 +7,13 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo } from "react";
-import { createEditor, type Descendant, type Editor, Node } from "slate";
+import {
+  createEditor,
+  type Descendant,
+  type Editor,
+  Element,
+  Text,
+} from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
@@ -144,11 +150,16 @@ vi.mock("#/editor/SlateEditor", () => ({
       };
     }, [editor, editorRef]);
 
+    const first = initialValue[0];
+    const firstChild =
+      Element.isElement(first) && first.children.length > 0
+        ? first.children[0]
+        : null;
     return (
       <textarea
         aria-label="Page body"
         data-testid="slate-editor"
-        defaultValue={initialValue[0] ? Node.string(initialValue[0]) : ""}
+        defaultValue={firstChild && Text.isText(firstChild) ? firstChild.text : ""}
         onChange={(event) =>
           onChange([
             {

@@ -97,21 +97,25 @@ describe("InscribeModal", () => {
     expect(vars.body.title).toBe("Redesign Retro");
   });
 
-  it("declares the chosen kind after create, then opens the new folio", async () => {
+  it("persists the chosen recipe kind in the create mutation", async () => {
     const user = userEvent.setup();
-    createMutate.mockImplementation((_vars, opts) => opts?.onSuccess?.({}));
-    assignMutate.mockImplementation((vars, opts) =>
+    createMutate.mockImplementation((vars, opts) =>
       opts?.onSuccess?.({ path: vars.params.path.path }),
     );
     render(<InscribeModal />);
-    await user.type(screen.getByRole("textbox", { name: "Title" }), "Hello");
+    await user.click(screen.getByRole("button", { name: "Kind" }));
+    await user.click(screen.getByRole("option", { name: "RECIPE" }));
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Soup");
     await user.click(screen.getByRole("button", { name: /commit to archive/ }));
-    const [assignVars] = assignMutate.mock.calls[0];
-    expect(assignVars.body.kind).toBe("NOTE");
+
+    const [createVars] = createMutate.mock.calls[0];
+    expect(createVars.body.kind).toBe("RECIPE");
+    expect(createVars.params.path.path).toMatch(/^recipes\//);
+    expect(assignMutate).not.toHaveBeenCalled();
     expect(openTabMock).toHaveBeenCalledWith(
       "page",
-      expect.stringMatching(/^notes\//),
-      "Hello",
+      expect.stringMatching(/^recipes\//),
+      "Soup",
     );
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
   });

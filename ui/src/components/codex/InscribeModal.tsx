@@ -1,6 +1,6 @@
 import { type FormEvent, useRef, useState } from "react";
 import { useTags } from "#/api/index";
-import { useAssignPage, useCreatePage } from "#/api/pages";
+import { useCreatePage } from "#/api/pages";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
@@ -29,7 +29,6 @@ export function InscribeModal() {
   const [shortId, setShortId] = useState(generateShortId);
   const [error, setError] = useState<string | null>(null);
   const create = useCreatePage();
-  const assign = useAssignPage();
   const openTab = useOpenTab();
   const projects = useProjects();
   const { data: tagIndex } = useTags();
@@ -76,25 +75,12 @@ export function InscribeModal() {
         body: {
           title: trimmedTitle,
           tags: finalTags.length ? finalTags : undefined,
+          kind,
+          ...(project ? { project } : {}),
         },
       },
       {
-        onSuccess: () => {
-          // Declare kind/project explicitly so the folio META rail shows them
-          // as assigned rather than folder-inferred. The page already sits at
-          // its projected path, so no move follows; if the declaration fails
-          // the page still exists — open it rather than stranding the modal.
-          assign.mutate(
-            {
-              params: { path: { path } },
-              body: { kind, ...(project ? { project } : {}) },
-            },
-            {
-              onSuccess: (data) => finish(data.path ?? path, trimmedTitle),
-              onError: () => finish(path, trimmedTitle),
-            },
-          );
-        },
+        onSuccess: (data) => finish(data.path ?? path, trimmedTitle),
         onError: (err) =>
           setError(String((err as { error?: unknown }).error ?? err)),
       },
@@ -194,11 +180,9 @@ export function InscribeModal() {
             <button
               type="submit"
               className="cl-btn cl-btn-hot"
-              disabled={create.isPending || assign.isPending}
+              disabled={create.isPending}
             >
-              {create.isPending || assign.isPending
-                ? "committing…"
-                : "▣ commit to archive"}
+              {create.isPending ? "committing…" : "▣ commit to archive"}
             </button>
           </div>
         </div>
