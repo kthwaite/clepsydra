@@ -52,6 +52,7 @@ tower-lsp = "0.20"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 unicode-normalization = "0.1"
+url = "2"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1", features = ["v7", "serde"] }
