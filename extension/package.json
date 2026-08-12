@@ -5,16 +5,18 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite build --watch",
-		"build": "vite build",
-		"build:firefox": "TARGET=firefox vite build",
+		"build": "vite build && bun run verify:bundle",
+		"build:firefox": "TARGET=firefox vite build && bun run verify:bundle dist-firefox",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit",
-		"lint": "biome check src/"
+		"lint": "biome check src/",
+		"verify:bundle": "node scripts/verify-bundle.mjs"
 	},
 	"dependencies": {
 		"@mozilla/readability": "^0.5.0",
-		"turndown": "^7.2.0"
+		"turndown": "^7.2.0",
+		"turndown-plugin-gfm": "^1.0.2"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.0",

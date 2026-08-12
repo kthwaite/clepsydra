@@ -27,6 +27,7 @@ pub enum Kind {
     Task,
     Cycle,
     Recipe,
+    Archive,
     #[schema(rename = "AI_CONVERSATION")]
     AiConversation,
 }
@@ -48,6 +49,9 @@ impl Kind {
             Kind::Task => "tasks",
             Kind::Cycle => "cycles",
             Kind::Recipe => "recipes",
+            // Must stay in step with `ArchiveConfig::default_path_prefix`;
+            // a mismatch would relocate every existing archived page.
+            Kind::Archive => "archive",
             Kind::AiConversation => "conversations",
         }
     }
@@ -67,6 +71,7 @@ impl Kind {
             Kind::Task => "task",
             Kind::Cycle => "cycle",
             Kind::Recipe => "recipe",
+            Kind::Archive => "archive",
             Kind::AiConversation => "ai_conversation",
         }
     }
@@ -86,6 +91,7 @@ impl Kind {
             Kind::Task => "TASK",
             Kind::Cycle => "CYCLE",
             Kind::Recipe => "RECIPE",
+            Kind::Archive => "ARCHIVE",
             Kind::AiConversation => "AI_CONVERSATION",
         }
     }
@@ -105,6 +111,7 @@ impl Kind {
             "TASK" => Some(Kind::Task),
             "CYCLE" => Some(Kind::Cycle),
             "RECIPE" => Some(Kind::Recipe),
+            "ARCHIVE" => Some(Kind::Archive),
             "AI_CONVERSATION" => Some(Kind::AiConversation),
             _ => None,
         }
@@ -126,6 +133,7 @@ impl Kind {
             "tasks" | "task" => Some(Kind::Task),
             "cycles" | "cycle" | "sprints" | "sprint" => Some(Kind::Cycle),
             "recipes" | "recipe" => Some(Kind::Recipe),
+            "archive" | "archives" | "archived" => Some(Kind::Archive),
             "conversations" | "conversation" | "chats" => Some(Kind::AiConversation),
             _ => None,
         }

@@ -371,11 +371,28 @@ async fn archive_page_is_readable_via_pages_api() {
         page_body["body"]
     );
 
-    // Verify tags include "archive"
+    // The page declares Kind::Archive, whose computed tag is "archive". The
+    // extension still sends that tag, but it is now the canonical classification
+    // rather than a user-editable one, so it is reported under computed_tags and
+    // deduplicated out of the editable list instead of appearing twice.
+    assert_eq!(page_body["kind"], "ARCHIVE");
+    assert_eq!(
+        page_body["inferred"], false,
+        "the archive endpoint declares the kind rather than leaving it to folder inference"
+    );
+    let computed = page_body["computed_tags"].as_array().unwrap();
+    assert!(
+        computed.iter().any(|t| t == "archive"),
+        "expected 'archive' among computed tags, got: {computed:?}"
+    );
     let tags = page_body["meta"]["tags"].as_array().unwrap();
     assert!(
-        tags.iter().any(|t| t == "archive"),
-        "expected 'archive' tag, got: {tags:?}"
+        !tags.iter().any(|t| t == "archive"),
+        "'archive' must not be duplicated into editable tags, got: {tags:?}"
+    );
+    assert!(
+        tags.iter().any(|t| t == "example.com"),
+        "domain tag should remain editable, got: {tags:?}"
     );
 }
 
@@ -587,4 +604,116 @@ async fn delete_folder_recursive_runs_delete_hooks() {
             "blob should be gone from CAS after recursive folder delete + GC"
         );
     }
+}
+
+/// Ingest a single blob of the given content type and return its CAS URL.
+async fn ingest_blob(server: &TestServer, url: &str, content_type: &str, data: &[u8]) -> String {
+    let hash = sha256_hash(data);
+    let body = "# Snapshot\n\nbody";
+    let payload = serde_json::json!({
+        "url": url,
+        "domain": "evil.example",
+        "title": "Snapshot",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(body),
+        "snapshot_hash": hash,
+        "markdown_body": body,
+        "tags": ["archive"],
+        "blobs": [{
+            "hash": hash,
+            "content_type": content_type,
+            "data": BASE64.encode(data),
+        }],
+    });
+    server
+        .post("/api/vault/archive")
+        .json(&payload)
+        .await
+        .assert_status(StatusCode::CREATED);
+    format!("/api/vault/cas/{hash}")
+}
+
+#[tokio::test]
+async fn serve_blob_sets_sandbox_csp_and_nosniff() {
+    let (server, _tmp, _state) = setup_server();
+    let url = ingest_blob(
+        &server,
+        "https://evil.example/a",
+        "image/png",
+        b"\x89PNG fake bytes",
+    )
+    .await;
+
+    let res = server.get(&url).await;
+    res.assert_status(StatusCode::OK);
+
+    let csp = res
+        .headers()
+        .get("content-security-policy")
+        .expect("blobs must carry a CSP")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(csp.contains("sandbox"), "CSP was {csp:?}");
+    assert!(csp.contains("default-src 'none'"), "CSP was {csp:?}");
+
+    assert_eq!(
+        res.headers()
+            .get("x-content-type-options")
+            .map(|v| v.to_str().unwrap()),
+        Some("nosniff")
+    );
+}
+
+#[tokio::test]
+async fn serve_blob_forces_download_for_active_content_types() {
+    let (server, _tmp, _state) = setup_server();
+
+    for (index, content_type) in [
+        "text/html",
+        "text/html; charset=utf-8",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "application/xml",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let url = ingest_blob(
+            &server,
+            &format!("https://evil.example/active-{index}"),
+            content_type,
+            format!("<script>alert({index})</script>").as_bytes(),
+        )
+        .await;
+
+        let res = server.get(&url).await;
+        res.assert_status(StatusCode::OK);
+        assert_eq!(
+            res.headers()
+                .get("content-disposition")
+                .map(|v| v.to_str().unwrap()),
+            Some("attachment"),
+            "{content_type} must not render inline from the vault origin"
+        );
+    }
+}
+
+#[tokio::test]
+async fn serve_blob_keeps_images_inline() {
+    let (server, _tmp, _state) = setup_server();
+    let url = ingest_blob(
+        &server,
+        "https://evil.example/inline",
+        "image/png",
+        b"\x89PNG other bytes",
+    )
+    .await;
+
+    let res = server.get(&url).await;
+    res.assert_status(StatusCode::OK);
+    assert!(
+        res.headers().get("content-disposition").is_none(),
+        "images must stay inline so archived markdown still renders"
+    );
 }

@@ -474,6 +474,7 @@ mod tests {
                 "TASK",
                 "CYCLE",
                 "RECIPE",
+                "ARCHIVE",
                 "AI_CONVERSATION",
             ]
         );

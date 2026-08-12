@@ -30,6 +30,7 @@ export const KINDS = [
   "TASK",
   "CYCLE",
   "RECIPE",
+  "ARCHIVE",
   "AI_CONVERSATION",
 ] as const satisfies readonly Kind[];
 
@@ -62,6 +63,9 @@ export const KIND_META: Record<Kind, KindMeta> = {
   TASK: { label: "TASK", color: "var(--hot)" },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
   RECIPE: { label: "RECIPE", color: "var(--accent-deep)" },
+  // Archived pages are inert captures of someone else's writing; a muted ink
+  // pip keeps them legible without competing with authored material.
+  ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)" },
   AI_CONVERSATION: { label: "AI CONVERSATION", color: "var(--cool)" },
 };
 
@@ -109,6 +113,9 @@ const FOLDER_KIND: Record<string, Kind> = {
   conversations: "AI_CONVERSATION",
   conversation: "AI_CONVERSATION",
   chats: "AI_CONVERSATION",
+  archive: "ARCHIVE",
+  archives: "ARCHIVE",
+  archived: "ARCHIVE",
 };
 
 export function resolveKindFromPath(path: string): Kind {

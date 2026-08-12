@@ -10,6 +10,12 @@ export interface ArchiveManifest {
 	markdown_body: string;
 	tags: string[];
 	blobs: BlobUpload[];
+	/** Provenance parsed from the page by Readability; all optional. */
+	byline?: string;
+	site_name?: string;
+	published_time?: string;
+	lang?: string;
+	excerpt?: string;
 }
 
 export interface BlobUpload {
@@ -32,21 +38,33 @@ export interface ArchiveStatusResponse {
 	total_size_bytes: number;
 }
 
+/** Shape of the `detail` object the server attaches to a 409. */
+export interface ArchiveConflictDetail {
+	existing_hash?: string;
+	new_hash?: string;
+	page_id?: string;
+	vault_path?: string;
+}
+
 export interface ExtensionSettings {
 	server_url: string;
-	api_key?: string;
 	default_tags: string[];
-	archive_path_prefix: string;
 	notify_on_success: boolean;
 	notify_on_duplicate: boolean;
-	on_content_changed: "update" | "new_version" | "ask";
+	/**
+	 * Mirrors the server's `archive.max_blob_size_mb` / `max_request_size_mb`
+	 * (src/vault/config.rs). Checked client-side so one oversized image is
+	 * skipped rather than failing the whole capture with a 400.
+	 */
+	max_blob_size_mb: number;
+	max_request_size_mb: number;
 }
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
 	server_url: "http://localhost:3000",
 	default_tags: [],
-	archive_path_prefix: "archive",
 	notify_on_success: true,
 	notify_on_duplicate: true,
-	on_content_changed: "ask",
+	max_blob_size_mb: 50,
+	max_request_size_mb: 100,
 };
