@@ -31,6 +31,7 @@ vi.mock("#/api/journal", () => ({
 
 import { useGlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { todayJournalPath } from "#/lib/journal";
+import { useBoardStore } from "#/store/board";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -55,6 +56,28 @@ function press(
   return e;
 }
 
+/** Like press(), but dispatches on a specific element so e.target reflects
+ *  where focus actually is (needed to exercise the editable-target guard). */
+function pressOn(
+  target: Element,
+  key: string,
+  mods: Partial<{
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+    altKey: boolean;
+  }> = {},
+) {
+  const e = new KeyboardEvent("keydown", {
+    key,
+    cancelable: true,
+    bubbles: true,
+    ...mods,
+  });
+  target.dispatchEvent(e);
+  return e;
+}
+
 describe("useGlobalShortcuts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -66,6 +89,11 @@ describe("useGlobalShortcuts", () => {
       isSettingsOpen: false,
     });
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
+    useBoardStore.setState({
+      mode: "card",
+      railOpen: true,
+      taskModal: null,
+    });
     window.history.pushState({}, "", "/");
   });
 
@@ -160,5 +188,101 @@ describe("useGlobalShortcuts", () => {
     unmount();
     press("k", { metaKey: true });
     expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+
+  describe("tasking shortcuts", () => {
+    it("N on /tasking opens the task modal", () => {
+      window.history.pushState({}, "", "/tasking");
+      renderHook(() => useGlobalShortcuts());
+      press("n");
+      expect(useBoardStore.getState().taskModal).toEqual({});
+    });
+
+    it("N does nothing outside /tasking", () => {
+      renderHook(() => useGlobalShortcuts());
+      press("n");
+      expect(useBoardStore.getState().taskModal).toBeNull();
+    });
+
+    it("2 switches to backlog mode", () => {
+      window.history.pushState({}, "", "/tasking");
+      renderHook(() => useGlobalShortcuts());
+      press("2");
+      expect(useBoardStore.getState().mode).toBe("backlog");
+    });
+
+    it("1, 3, 4 switch to card, cycle, and timeline modes", () => {
+      window.history.pushState({}, "", "/tasking");
+      renderHook(() => useGlobalShortcuts());
+      press("3");
+      expect(useBoardStore.getState().mode).toBe("cycle");
+      press("4");
+      expect(useBoardStore.getState().mode).toBe("timeline");
+      press("1");
+      expect(useBoardStore.getState().mode).toBe("card");
+    });
+
+    it("[ toggles the rail", () => {
+      window.history.pushState({}, "", "/tasking");
+      renderHook(() => useGlobalShortcuts());
+      expect(useBoardStore.getState().railOpen).toBe(true);
+      press("[");
+      expect(useBoardStore.getState().railOpen).toBe(false);
+      press("[");
+      expect(useBoardStore.getState().railOpen).toBe(true);
+    });
+
+    it("/ focuses the tasking filter input", () => {
+      window.history.pushState({}, "", "/tasking");
+      const input = document.createElement("input");
+      input.id = "tasking-filter";
+      document.body.appendChild(input);
+      try {
+        renderHook(() => useGlobalShortcuts());
+        press("/");
+        expect(document.activeElement).toBe(input);
+      } finally {
+        document.body.removeChild(input);
+      }
+    });
+
+    it("bare keys do nothing when typing in an input", () => {
+      window.history.pushState({}, "", "/tasking");
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      try {
+        renderHook(() => useGlobalShortcuts());
+        pressOn(input, "2");
+        expect(useBoardStore.getState().mode).toBe("card");
+      } finally {
+        document.body.removeChild(input);
+      }
+    });
+
+    it("bare-key shortcuts still fire when focus is on a non-editable button", () => {
+      window.history.pushState({}, "", "/tasking");
+      const button = document.createElement("button");
+      document.body.appendChild(button);
+      try {
+        renderHook(() => useGlobalShortcuts());
+        pressOn(button, "2");
+        expect(useBoardStore.getState().mode).toBe("backlog");
+      } finally {
+        document.body.removeChild(button);
+      }
+    });
+
+    it("no global shortcut fires while a dialog is open", () => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      document.body.appendChild(dialog);
+      try {
+        renderHook(() => useGlobalShortcuts());
+        press("n", { metaKey: true });
+        expect(useUiStore.getState().isInscribeOpen).toBe(false);
+      } finally {
+        document.body.removeChild(dialog);
+      }
+    });
   });
 });
