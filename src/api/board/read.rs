@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
+use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
+use crate::vault::kind::Kind;
 use crate::vault::path::VaultPath;
 
 use super::{
@@ -57,12 +59,12 @@ pub(crate) async fn get_board(
             let mut op_stmt = conn.prepare(
                 "SELECT id, path, title, meta_json, project \
                    FROM pages \
-                  WHERE kind = 'PROJECT' \
+                  WHERE kind = ?1 \
                   ORDER BY path",
             )?;
 
             let op_rows: Vec<(String, String, Option<String>, String, Option<String>)> = op_stmt
-                .query_map([], |row| {
+                .query_map(params![Kind::Project.as_str()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -129,12 +131,12 @@ pub(crate) async fn get_board(
             let mut cy_stmt = conn.prepare(
                 "SELECT id, path, title, meta_json \
                    FROM pages \
-                  WHERE kind = 'CYCLE' \
+                  WHERE kind = ?1 \
                   ORDER BY path",
             )?;
 
             let cy_rows: Vec<(String, String, Option<String>, String)> = cy_stmt
-                .query_map([], |row| {
+                .query_map(params![Kind::Cycle.as_str()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -268,8 +270,9 @@ pub(super) async fn build_board_task_dto(
                 serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
             let task_title = title.unwrap_or_else(|| code_str.clone());
-            let status = extra_str(&meta, "status").unwrap_or_else(|| "INTAKE".to_string());
-            let priority = extra_str(&meta, "priority").unwrap_or_else(|| "P2".to_string());
+            let status = extra_str(&meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string());
+            let priority =
+                extra_str(&meta, "priority").unwrap_or_else(|| DEFAULT_PRIORITY.to_string());
             let cycle = extra_str(&meta, "cycle");
             let assignee = extra_str(&meta, "assignee");
             let estimate = extra_str(&meta, "estimate");
@@ -381,12 +384,12 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 COALESCE((SELECT group_concat(t.tag, char(31)) \
                             FROM tags t WHERE t.page_id = p.id), '') \
            FROM pages p \
-          WHERE p.kind = 'TASK' \
+          WHERE p.kind = ?1 \
           ORDER BY p.path",
     )?;
 
     let task_rows: Vec<TaskListRow> = task_stmt
-        .query_map([], |row| {
+        .query_map(params![Kind::Task.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -415,8 +418,8 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         let code = stem.to_ascii_uppercase();
         let task_title = title.unwrap_or_else(|| code.clone());
 
-        let status = extra_str(&meta, "status").unwrap_or_else(|| "INTAKE".to_string());
-        let priority = extra_str(&meta, "priority").unwrap_or_else(|| "P2".to_string());
+        let status = extra_str(&meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string());
+        let priority = extra_str(&meta, "priority").unwrap_or_else(|| DEFAULT_PRIORITY.to_string());
         let cycle = extra_str(&meta, "cycle");
         let assignee = extra_str(&meta, "assignee");
         let estimate = extra_str(&meta, "estimate");
@@ -491,11 +494,11 @@ fn count_checks_by_page(
     let mut stmt = conn.prepare(
         "SELECT bp.page_id, COUNT(*), COALESCE(SUM(bp.value = 'done'), 0) \
            FROM block_properties bp \
-           JOIN pages p ON p.id = bp.page_id AND p.kind = 'TASK' \
+           JOIN pages p ON p.id = bp.page_id AND p.kind = ?1 \
           WHERE bp.key = 'status' \
           GROUP BY bp.page_id",
     )?;
-    stmt.query_map([], |row| {
+    stmt.query_map(params![Kind::Task.as_str()], |row| {
         let page_id = row.get::<_, String>(0)?;
         let total = row.get::<_, u32>(1)?;
         let done = row.get::<_, u32>(2)?;

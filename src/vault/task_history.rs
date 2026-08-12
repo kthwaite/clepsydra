@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::vault::board_vocab::DEFAULT_STATUS;
 use crate::vault::page::PageMeta;
 use crate::vault::path::VaultPath;
 use crate::vault::toml_json::toml_value_to_json;
@@ -50,7 +51,7 @@ fn extra_string(meta: &PageMeta, key: &str) -> Option<String> {
 fn snapshot(meta: &PageMeta, at: DateTime<Utc>) -> TaskHistoryEvent {
     TaskHistoryEvent {
         at: at.to_rfc3339(),
-        status: extra_string(meta, "status").unwrap_or_else(|| "INTAKE".to_string()),
+        status: extra_string(meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string()),
         cycle: extra_string(meta, "cycle"),
         project: meta.project.clone(),
     }
@@ -68,7 +69,7 @@ fn legacy_history(
     if current.status == "SEALED" && updated_at.is_some_and(|updated| updated > first_at) {
         let mut before_seal = current.clone();
         before_seal.at = first_at.to_rfc3339();
-        before_seal.status = "INTAKE".to_string();
+        before_seal.status = DEFAULT_STATUS.to_string();
         vec![before_seal, current]
     } else {
         let mut initial = current;
@@ -129,7 +130,7 @@ pub(crate) fn effective_indexed_history(meta: &serde_json::Value) -> Vec<TaskHis
         status: meta
             .get("status")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("INTAKE")
+            .unwrap_or(DEFAULT_STATUS)
             .to_string(),
         cycle: meta
             .get("cycle")

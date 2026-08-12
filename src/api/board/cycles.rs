@@ -83,7 +83,7 @@ pub(crate) async fn create_cycle(
     };
 
     // 3. Build vault path: cycles/<CODE>.md
-    let vault_path_str = format!("cycles/{code}.md");
+    let vault_path_str = format!("{}/{code}.md", Kind::Cycle.canonical_folder());
     let vault_path = crate::api::error::parse_internal_path(&vault_path_str, "invalid path")?;
 
     // 4. Build PageMeta
@@ -183,8 +183,8 @@ pub(crate) async fn patch_cycle(
         .with_index(move |index, _vault| {
             let conn = index.connection();
             conn.query_row(
-                "SELECT path FROM pages WHERE id = ?1 AND kind = 'CYCLE'",
-                params![id_clone],
+                "SELECT path FROM pages WHERE id = ?1 AND kind = ?2",
+                params![id_clone, Kind::Cycle.as_str()],
                 |row| row.get::<_, String>(0),
             )
             .ok()
@@ -285,11 +285,12 @@ pub(crate) async fn patch_cycle(
             .index
             .with_index(move |index, _vault| {
                 let conn = index.connection();
-                let mut stmt = conn.prepare(
-                    "SELECT path, meta_json FROM pages WHERE kind = 'TASK' ORDER BY path",
-                )?;
+                let mut stmt = conn
+                    .prepare("SELECT path, meta_json FROM pages WHERE kind = ?1 ORDER BY path")?;
                 let rows: Vec<(String, String)> = stmt
-                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .query_map(params![Kind::Task.as_str()], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })?
                     .collect::<Result<_, _>>()?;
 
                 let matched = rows

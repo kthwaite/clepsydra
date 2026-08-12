@@ -13,6 +13,7 @@ use rusqlite::params;
 use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::api::events::SyncNotification;
+use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
@@ -48,10 +49,10 @@ pub(crate) async fn create_task(
     Json(body): Json<CreateTaskRequest>,
 ) -> Result<Response, ApiError> {
     // 1. Validate inputs
-    let status = body.status.as_deref().unwrap_or("INTAKE");
+    let status = body.status.as_deref().unwrap_or(DEFAULT_STATUS);
     validate_status(status)?;
 
-    let priority = body.priority.as_deref().unwrap_or("P2");
+    let priority = body.priority.as_deref().unwrap_or(DEFAULT_PRIORITY);
     validate_priority(priority)?;
 
     // Normalize cycle: "BACKLOG" is treated the same as absent (no stored value)
@@ -71,8 +72,8 @@ pub(crate) async fn create_task(
 
     // 4. Determine vault path
     let vault_path_str = match &body.project {
-        Some(p) => format!("tasks/{p}/{code}.md"),
-        None => format!("tasks/{code}.md"),
+        Some(p) => format!("{}/{p}/{code}.md", Kind::Task.canonical_folder()),
+        None => format!("{}/{code}.md", Kind::Task.canonical_folder()),
     };
 
     let vault_path = VaultPath::new(&vault_path_str)
@@ -203,8 +204,8 @@ pub(crate) async fn patch_task(
             let conn = index.connection();
             // Must be a TASK page
             conn.query_row(
-                "SELECT path FROM pages WHERE id = ?1 AND kind = 'TASK'",
-                params![id_clone],
+                "SELECT path FROM pages WHERE id = ?1 AND kind = ?2",
+                params![id_clone, Kind::Task.as_str()],
                 |row| row.get::<_, String>(0),
             )
             .ok()

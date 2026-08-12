@@ -23,7 +23,9 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
+use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::index::reserve_code_number;
+use crate::vault::kind::Kind;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -31,7 +33,7 @@ use crate::vault::index::reserve_code_number;
 
 /// The five board columns in order.
 const COLUMNS: &[(&str, &str, &str, u32)] = &[
-    ("INTAKE", "INTAKE", "unfiled", 0),
+    (DEFAULT_STATUS, DEFAULT_STATUS, "unfiled", 0),
     ("TRIAGE", "TRIAGE", "staged", 6),
     ("FIELD", "IN-FIELD", "active", 4),
     ("REVIEW", "REVIEW", "qa / seal", 4),
@@ -39,7 +41,7 @@ const COLUMNS: &[(&str, &str, &str, u32)] = &[
 ];
 
 /// Valid priority tokens.
-const PRIORITIES: &[&str] = &["P0", "P1", "P2", "P3"];
+const PRIORITIES: &[&str] = &["P0", "P1", DEFAULT_PRIORITY, "P3"];
 
 // ---------------------------------------------------------------------------
 // Tri-state deserialization helper
@@ -314,9 +316,9 @@ fn validate_priority(priority: &str) -> Result<(), ApiError> {
 /// (case-sensitive, e.g. "S-13"). Single source of truth for every
 /// cycle-existence check.
 fn cycle_stems(conn: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT path FROM pages WHERE kind = 'CYCLE'")?;
+    let mut stmt = conn.prepare("SELECT path FROM pages WHERE kind = ?1")?;
     let stems = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
+        .query_map(params![Kind::Cycle.as_str()], |row| row.get::<_, String>(0))?
         .filter_map(|r| r.ok())
         .map(|p| path_stem(&p).to_string())
         .collect();
