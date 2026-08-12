@@ -949,7 +949,10 @@ fn body_excerpt(markdown: &str) -> String {
     let mut pending_space = false;
     for event in Parser::new_ext(markdown, Options::all()) {
         let full = match event {
-            Event::Text(text) | Event::Code(text) => append_excerpt_text(
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text) => append_excerpt_text(
                 &mut excerpt,
                 &mut scalar_count,
                 &mut pending_space,
@@ -965,10 +968,29 @@ fn body_excerpt(markdown: &str) -> String {
                 pending_space |= !excerpt.is_empty();
                 false
             }
-            Event::End(TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::CodeBlock) => {
+            Event::End(
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::BlockQuote(_)
+                | TagEnd::CodeBlock
+                | TagEnd::HtmlBlock
+                | TagEnd::List(_)
+                | TagEnd::Item
+                | TagEnd::FootnoteDefinition
+                | TagEnd::DefinitionList
+                | TagEnd::DefinitionListTitle
+                | TagEnd::DefinitionListDefinition
+                | TagEnd::Table
+                | TagEnd::TableHead
+                | TagEnd::TableRow
+                | TagEnd::TableCell,
+            ) => {
                 pending_space |= !excerpt.is_empty();
                 false
             }
+            // Raw HTML syntax is omitted. Inline element contents still arrive
+            // as Text events; opaque HTML blocks are intentionally omitted.
+            Event::Html(_) | Event::InlineHtml(_) => false,
             _ => false,
         };
         if full {
@@ -2110,6 +2132,35 @@ moment  = { type = "datetime" }
     }
 
     #[test]
+    fn body_excerpt_separates_tight_lists_tables_and_definition_lists() {
+        assert_eq!(body_excerpt("- alpha\n- beta\n"), "alpha beta");
+        assert_eq!(
+            body_excerpt("| first | second |\n| --- | --- |\n| third | fourth |\n"),
+            "first second third fourth"
+        );
+        assert_eq!(
+            body_excerpt("Term\n: Definition\n\nOther\n: Meaning\n"),
+            "Term Definition Other Meaning"
+        );
+    }
+
+    #[test]
+    fn body_excerpt_preserves_math_but_omits_raw_html_events() {
+        assert_eq!(
+            body_excerpt("before $x + y$ and $$z$$ after"),
+            "before x + y and z after"
+        );
+        assert_eq!(
+            body_excerpt("before <span>inside</span> after"),
+            "before inside after"
+        );
+        assert_eq!(
+            body_excerpt("<div>\nraw block content\n</div>\n\nkept"),
+            "kept"
+        );
+    }
+
+    #[test]
     fn protected_body_column_is_null_and_never_serializes_armored_content() {
         let (_tmp, index, base) = encryption_fixture();
         let output = evaluate(
@@ -2146,41 +2197,53 @@ moment  = { type = "datetime" }
         let (_tmp, index, base) = fixture();
         let context = QueryContext::for_base(&base);
         for field in ["body", "sys.body", "prop.body"] {
-            assert!(
-                resolve_field(field, &context).is_err(),
-                "{field} unexpectedly resolved as a query field"
-            );
+            assert!(matches!(
+                resolve_field(field, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let filter = Filter::Cmp {
+                field: field.into(),
+                op: Op::Contains,
+                value: serde_json::json!("body"),
+            };
+            assert!(matches!(
+                compile_filter(&filter, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let sort = QuerySpec {
+                sort: vec![SortKey {
+                    field: field.into(),
+                    dir: SortDir::Asc,
+                }],
+                ..Default::default()
+            };
+            assert!(matches!(
+                evaluate(index.connection(), &sort, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let group = QuerySpec {
+                group_by: Some(field.into()),
+                ..Default::default()
+            };
+            assert!(matches!(
+                evaluate(index.connection(), &group, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let aggregate = QuerySpec {
+                aggregates: vec![Aggregate {
+                    function: AggregateFn::Count,
+                    field: Some(field.into()),
+                }],
+                ..Default::default()
+            };
+            assert!(matches!(
+                evaluate(index.connection(), &aggregate, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
         }
-
-        let filter = Filter::Cmp {
-            field: "body".into(),
-            op: Op::Contains,
-            value: serde_json::json!("body"),
-        };
-        assert!(compile_filter(&filter, &context).is_err());
-
-        let sort = QuerySpec {
-            sort: vec![SortKey {
-                field: "body".into(),
-                dir: SortDir::Asc,
-            }],
-            ..Default::default()
-        };
-        assert!(evaluate(index.connection(), &sort, &context).is_err());
-
-        let group = QuerySpec {
-            group_by: Some("body".into()),
-            ..Default::default()
-        };
-        assert!(evaluate(index.connection(), &group, &context).is_err());
-
-        let aggregate = QuerySpec {
-            aggregates: vec![Aggregate {
-                function: AggregateFn::Count,
-                field: Some("body".into()),
-            }],
-            ..Default::default()
-        };
-        assert!(evaluate(index.connection(), &aggregate, &context).is_err());
     }
 }
