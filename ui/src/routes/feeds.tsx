@@ -82,6 +82,7 @@ function FeedsPage() {
   };
 
   useEffect(() => {
+    let restoreFrame: number | undefined;
     const previous = previousEntryId.current;
     previousEntryId.current = search.entry;
     if (search.entry !== undefined && previous !== search.entry) {
@@ -96,8 +97,15 @@ function FeedsPage() {
         if (main) {
           const scrollTop = mobileListScrollTop.current;
           main.scrollTop = scrollTop;
-          requestAnimationFrame(() => {
-            if (previousEntryId.current === undefined) main.scrollTop = scrollTop;
+          restoreFrame = requestAnimationFrame(() => {
+            const currentList = listRegionRef.current;
+            if (
+              previousEntryId.current === undefined &&
+              currentList?.isConnected &&
+              currentList.closest("main") === main
+            ) {
+              main.scrollTop = scrollTop;
+            }
           });
         }
       }
@@ -106,6 +114,9 @@ function FeedsPage() {
       );
       (selectedRow ?? listRegionRef.current)?.focus();
     }
+    return () => {
+      if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame);
+    };
   }, [isMobile, search.entry]);
 
   return (

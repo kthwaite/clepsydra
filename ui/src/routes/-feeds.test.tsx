@@ -372,6 +372,61 @@ describe("feeds route controls", () => {
     expect(main.scrollTop).toBe(700);
   });
 
+  it("cancels stale mobile scroll restoration when the feed route unmounts", async () => {
+    routeMocks.mobile = true;
+    let scheduledFrame: FrameRequestCallback | undefined;
+    const requestFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        scheduledFrame = callback;
+        return 42;
+      });
+    const cancelFrame = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+    const page = render(
+      <main>
+        <FeedsPage />
+      </main>,
+    );
+    const main = screen.getByRole("main");
+    main.scrollTop = 700;
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /select direct entry/i }),
+    );
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+    page.rerender(
+      <main>
+        <FeedsPage />
+      </main>,
+    );
+    main.scrollTop = 0;
+    routeMocks.search.entry = undefined;
+    page.rerender(
+      <main>
+        <FeedsPage />
+      </main>,
+    );
+    expect(main.scrollTop).toBe(700);
+    expect(scheduledFrame).toBeTypeOf("function");
+
+    page.rerender(
+      <main>
+        <div>Next route</div>
+      </main>,
+    );
+    main.scrollTop = 0;
+    scheduledFrame?.(performance.now());
+
+    expect(cancelFrame).toHaveBeenCalledWith(42);
+    expect(screen.getByRole("main")).toBe(main);
+    expect(main.scrollTop).toBe(0);
+    requestFrame.mockRestore();
+    cancelFrame.mockRestore();
+  });
+
   it("hands browser-history focus to the list region when the selected row is unavailable", () => {
     routeMocks.mobile = true;
     routeMocks.search.entry = 501;
