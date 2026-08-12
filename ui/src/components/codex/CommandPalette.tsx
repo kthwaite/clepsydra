@@ -124,6 +124,12 @@ function CommandPaletteContent() {
       },
       {
         kind: "cmd",
+        id: "nav.repairs",
+        title: "Open Reference Repairs",
+        action: () => navigate({ to: "/repairs" }),
+      },
+      {
+        kind: "cmd",
         id: "bases.create",
         title: "Create Base",
         action: () => navigate({ to: "/bases", search: { create: true } }),

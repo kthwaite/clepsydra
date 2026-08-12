@@ -9,8 +9,10 @@ const {
   mobileLayoutState,
   navigateMock,
   openInscribeMock,
+  openLocationMock,
   openSearchMock,
   openSettingsMock,
+  referenceIssuesState,
   toggleThemeMock,
   workspaceState,
 } = vi.hoisted(() => ({
@@ -19,12 +21,15 @@ const {
   mobileLayoutState: { matches: false },
   navigateMock: vi.fn(),
   openInscribeMock: vi.fn(),
+  openLocationMock: vi.fn(),
   openSearchMock: vi.fn(),
   openSettingsMock: vi.fn(),
+  referenceIssuesState: { total: 7 },
   toggleThemeMock: vi.fn(),
   workspaceState: {
     tabs: [] as Array<{ id: string; type: string; path?: string }>,
     activeTabId: null as string | null,
+    openHistory: [] as Array<{ path: string; openedAt: number }>,
     openTab: vi.fn(),
     activateTab: vi.fn(),
     clearActiveTab: vi.fn(),
@@ -42,10 +47,54 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
 }));
 vi.mock("#/api/index", () => ({
+  useContentIndex: () => ({ data: { items: [] } }),
+  useReferenceIssues: () => ({
+    data: { items: [], limit: 1, offset: 0, total: referenceIssuesState.total },
+  }),
   useStats: () => ({
-    data: { pages: 12, links_total: 34, last_indexed_at: null },
+    data: {
+      pages: 12,
+      links_total: 34,
+      links_unresolved: 2,
+      tags: 3,
+      orphan_pages: 1,
+      isolated_pages: 1,
+      attachments: 4,
+      last_indexed_at: null,
+    },
     isError: false,
   }),
+  useTags: () => ({ data: [] }),
+}));
+vi.mock("#/api/bcl", () => ({
+  useBcl: () => ({ data: undefined }),
+}));
+vi.mock("#/api/journal", () => ({
+  useJournalToday: () => ({ data: undefined }),
+}));
+vi.mock("#/api/location", () => ({
+  useLocation: () => ({ data: undefined }),
+}));
+vi.mock("#/components/codex/ActivityHeatmap", () => ({
+  ActivityHeatmap: () => null,
+}));
+vi.mock("#/components/codex/FeedRiverPanel", () => ({
+  FeedRiverPanel: () => null,
+}));
+vi.mock("#/components/codex/ReadingContinues", () => ({
+  ReadingContinuesPanel: () => null,
+}));
+vi.mock("#/components/codex/SkyCard", () => ({
+  SkyCard: () => null,
+}));
+vi.mock("#/hooks/useClock", () => ({
+  useClock: () => new Date("2026-08-12T12:00:00Z"),
+}));
+vi.mock("#/hooks/useOpenTab", () => ({
+  useOpenTab: () => workspaceState.openTab,
+}));
+vi.mock("#/hooks/useOpenTodayJournal", () => ({
+  useOpenTodayJournal: () => vi.fn(),
 }));
 vi.mock("#/components/codex/ReadingProgressContext", () => ({
   useReadingProgress: () => ({ progress: 0.42 }),
@@ -73,6 +122,7 @@ vi.mock("#/store/ui", () => ({
   useUiStore: (
     selector: (state: {
       openInscribe: () => void;
+      openLocation: () => void;
       openSearch: () => void;
       openSettings: () => void;
       isSettingsOpen: boolean;
@@ -80,17 +130,21 @@ vi.mock("#/store/ui", () => ({
   ) =>
     selector({
       openInscribe: openInscribeMock,
+      openLocation: openLocationMock,
       openSearch: openSearchMock,
       openSettings: openSettingsMock,
       isSettingsOpen: false,
     }),
 }));
 vi.mock("#/store/workspace", () => {
-  const useWorkspaceStore = () => workspaceState;
+  const useWorkspaceStore = (
+    selector?: (state: typeof workspaceState) => unknown,
+  ) => (selector ? selector(workspaceState) : workspaceState);
   useWorkspaceStore.getState = () => workspaceState;
   return { useWorkspaceStore };
 });
 
+import { Atrium } from "#/components/codex/Atrium";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { DEFAULT_DOC_SLUG } from "#/docs/registry";
 
@@ -142,6 +196,22 @@ function StatefulRouteProbe({
     </>
   );
 }
+
+describe("Atrium repair entry point", () => {
+  it("exposes the reference issue count and opens repairs", async () => {
+    const user = userEvent.setup();
+    render(<Atrium />);
+
+    const repairs = screen.getByRole("button", {
+      name: "Open Reference Repairs, 7 issues",
+    });
+    expect(repairs).toHaveTextContent("7 issues");
+
+    await user.click(repairs);
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/repairs" });
+  });
+});
 
 describe("CodexFrame destination integration", () => {
   beforeEach(() => {

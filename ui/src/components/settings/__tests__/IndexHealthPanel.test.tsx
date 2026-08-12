@@ -5,21 +5,8 @@ import { SettingsModal } from "#/components/SettingsModal";
 import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 
 const mocks = vi.hoisted(() => ({
-  ambiguousState: {
-    data: [
-      {
-        canonical_name: "project-alpha",
-        page_ids: ["page-1", "page-2"],
-      },
-    ] as unknown[] | undefined,
-    error: null as unknown,
-    isPending: false,
-  },
   closeSettings: vi.fn(),
-  createFromLink: vi.fn(),
-  rebuildIndex: vi.fn(),
-  setActiveSettingsSection: vi.fn(),
-  unresolvedState: {
+  legacyUnresolvedState: {
     data: [
       {
         source_id: "source-1",
@@ -31,10 +18,13 @@ const mocks = vi.hoisted(() => ({
         reason: "no_match",
         candidates: [],
       },
-    ] as unknown[] | undefined,
-    error: null as unknown,
+    ],
+    error: null,
     isPending: false,
   },
+  navigate: vi.fn(),
+  rebuildIndex: vi.fn(),
+  setActiveSettingsSection: vi.fn(),
   warningsState: {
     data: ["Failed to parse broken.md"] as string[] | undefined,
     error: null as unknown,
@@ -42,19 +32,18 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => mocks.navigate,
+}));
+
 vi.mock("#/api/index", () => ({
-  useAmbiguousNames: () => mocks.ambiguousState,
-  useCreateFromLink: () => ({
-    mutateAsync: mocks.createFromLink,
-    isPending: false,
-  }),
   useIndexWarnings: () => mocks.warningsState,
   useRebuildIndex: () => ({
     mutateAsync: mocks.rebuildIndex,
     isPending: false,
   }),
   useStats: () => ({ data: undefined }),
-  useUnresolvedLinks: () => mocks.unresolvedState,
+  useUnresolvedLinks: () => mocks.legacyUnresolvedState,
 }));
 
 vi.mock("#/api/encryption", () => ({
@@ -81,12 +70,7 @@ vi.mock("#/store/ui", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.ambiguousState.data = [
-    { canonical_name: "project-alpha", page_ids: ["page-1", "page-2"] },
-  ];
-  mocks.ambiguousState.error = null;
-  mocks.ambiguousState.isPending = false;
-  mocks.unresolvedState.data = [
+  mocks.legacyUnresolvedState.data = [
     {
       source_id: "source-1",
       source_path: "notes/source.md",
@@ -98,16 +82,10 @@ beforeEach(() => {
       candidates: [],
     },
   ];
-  mocks.unresolvedState.error = null;
-  mocks.unresolvedState.isPending = false;
   mocks.warningsState.data = ["Failed to parse broken.md"];
   mocks.warningsState.error = null;
   mocks.warningsState.isPending = false;
-  mocks.createFromLink.mockResolvedValue({
-    id: "ghost-id",
-    path: "inbox/ghost.md",
-    title: "Ghost",
-  });
+
   mocks.rebuildIndex.mockResolvedValue({
     pages_indexed: 12,
     pages_skipped: 1,
@@ -117,63 +95,34 @@ beforeEach(() => {
 });
 
 describe("IndexHealthPanel", () => {
-  it("renders unresolved links, ambiguous names, and warnings as evidence", () => {
+  it("opens the reference repair workspace and closes settings", async () => {
+    const user = userEvent.setup();
+    render(<IndexHealthPanel />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Open Reference Repairs" }),
+    );
+
+    expect(mocks.closeSettings).toHaveBeenCalledOnce();
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/repairs" });
+  });
+
+  it("keeps warnings and rebuild while retiring duplicate repair controls", () => {
     render(<IndexHealthPanel />);
 
     expect(
       screen.getByRole("heading", { name: "Index diagnostics" }),
     ).toBeVisible();
-    expect(screen.getByText("notes/source.md")).toBeVisible();
-    expect(screen.getByText("Ghost")).toBeVisible();
-    expect(screen.getByText("project-alpha")).toBeVisible();
-    expect(screen.getByText("page-1, page-2")).toBeVisible();
-    expect(screen.getByText("Failed to parse broken.md")).toBeVisible();
-  });
-
-  it("keeps healthy evidence visible when one diagnostic query fails", () => {
-    mocks.ambiguousState.data = undefined;
-    mocks.ambiguousState.error = new Error("index unavailable");
-    render(<IndexHealthPanel />);
-
-    expect(screen.getByText("notes/source.md")).toBeVisible();
     expect(screen.getByText("Failed to parse broken.md")).toBeVisible();
     expect(
-      screen.getByRole("alert", {
-        name: "Ambiguous names could not be loaded.",
-      }),
+      screen.getByRole("button", { name: "Rebuild index" }),
     ).toBeVisible();
-  });
-
-  it("creates a missing page through the atomic link endpoint", async () => {
-    const user = userEvent.setup();
-    render(<IndexHealthPanel />);
-
-    await user.click(
-      screen.getByRole("button", { name: "Create page for Ghost" }),
-    );
-    const dialog = screen.getByRole("dialog", {
-      name: "Create page from unresolved link",
-    });
-    await user.type(
-      within(dialog).getByRole("textbox", { name: "Folder" }),
-      "inbox",
-    );
-    await user.type(
-      within(dialog).getByRole("textbox", { name: "Initial body" }),
-      "Created from diagnostics.",
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create page" }),
-    );
-
-    expect(mocks.createFromLink).toHaveBeenCalledWith({
-      body: {
-        target_raw: "Ghost",
-        folder: "inbox",
-        body: "Created from diagnostics.",
-      },
-    });
-    expect(await screen.findByText("Created inbox/ghost.md.")).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Unresolved links" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Create page/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("requires typed confirmation before rebuilding and reports the result", async () => {

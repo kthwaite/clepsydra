@@ -96,8 +96,8 @@ pub async fn resolve_url(
 }
 
 /// Root-level redirect target for the OS URL handler. Misses and parse errors
-/// both land on the UI's not-found page — an OS click must never dead-end on
-/// a JSON error body.
+/// both land on the reference repair workspace — an OS click must never
+/// dead-end on a JSON error body.
 pub async fn deeplink_redirect(
     State(state): State<Arc<AppState>>,
     Query(params): Query<DeepLinkParams>,
@@ -108,7 +108,7 @@ pub async fn deeplink_redirect(
             utf8_percent_encode(&path, PATH_KEEP_SLASH)
         )),
         _ => Redirect::temporary(&format!(
-            "/link-miss?target={}",
+            "/repairs?target={}",
             utf8_percent_encode(&params.url, QUERY_VALUE)
         )),
     }
