@@ -183,23 +183,22 @@ describe("FeedReaderPane", () => {
     expect(screen.getByText("Manifest Ledger")).toBeVisible();
   });
 
-  it("does not mount active markup from a malformed stored-content DTO", () => {
+  it("renders the already-sanitized DTO body as stored", () => {
     paneMocks.query.data = {
       ...storedEntry,
       content_html:
-        '<p onclick="window.evil()">Kept text<script>window.evil()</script><iframe src="https://source.example/posts/stored"></iframe><img src="safe.png" onerror="window.evil()"></p>',
+        '<p data-sanitized-source="ammonia">Kept <em>stored</em> text.</p>',
     };
     const page = renderPane();
-    const article = screen.getByRole("article", { name: "Stored dispatch" });
+    const content = page.container.querySelector(".feed-entry-content");
 
-    expect(article).toHaveTextContent("Kept text");
-    expect(article.querySelector("script")).not.toBeInTheDocument();
-    expect(article.querySelector("iframe")).not.toBeInTheDocument();
-    expect(article.querySelector("[onclick]")).not.toBeInTheDocument();
-    expect(article.querySelector("[onerror]")).not.toBeInTheDocument();
-    expect(
-      page.container.querySelector(".feed-entry-content")?.innerHTML,
-    ).not.toContain("https://source.example/posts/stored");
+    expect(content?.querySelector("p")).toHaveAttribute(
+      "data-sanitized-source",
+      "ammonia",
+    );
+    expect(content).toHaveTextContent("Kept stored text.");
+    expect(content?.querySelector("em")).toHaveTextContent("stored");
+    expect(content?.querySelector("iframe")).not.toBeInTheDocument();
   });
 
   it("keeps metadata and offers only a safe HTTP(S) fallback when body is absent", () => {

@@ -254,7 +254,7 @@ function FeedsPage() {
             <div
               ref={readerRegionRef}
               hidden={isMobile && search.entry === undefined}
-              className="min-h-0"
+              className="min-h-0 md:h-full"
             >
               <FeedReaderPane
                 selectedEntryId={search.entry}

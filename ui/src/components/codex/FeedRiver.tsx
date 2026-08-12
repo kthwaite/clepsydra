@@ -6,6 +6,7 @@ import {
   type FeedEntry,
   feedEntriesInfiniteOptions,
   useFeeds,
+  useFeedEntry,
   useMarkFeedEntriesRead,
   usePatchFeedEntry,
 } from "#/api/feeds";
@@ -35,6 +36,9 @@ export function FeedRiver({
 }) {
   const entriesQuery = useInfiniteQuery(feedEntriesInfiniteOptions(filters));
   const feedsQuery = useFeeds();
+  const selectedEntryQuery = useFeedEntry(
+    compact ? undefined : selectedEntryId,
+  );
   const patchEntry = usePatchFeedEntry();
   const markEntriesRead = useMarkFeedEntriesRead();
   const [expandedEntry, setExpandedEntry] = useState<FeedEntry | null>(null);
@@ -113,11 +117,16 @@ export function FeedRiver({
     }
     if (loadedSelectedEntry) setSelectedEntrySnapshot(loadedSelectedEntry);
   }, [loadedSelectedEntry, selectedEntryId]);
+  const authoritativeSelectedEntry =
+    selectedEntryQuery.data?.id === selectedEntryId
+      ? selectedEntryQuery.data
+      : undefined;
   const activeSelectedEntry =
     selectedEntryId !== undefined
-      ? selectedEntrySnapshot?.id === selectedEntryId
-        ? selectedEntrySnapshot
-        : loadedSelectedEntry
+      ? authoritativeSelectedEntry ??
+        (selectedEntrySnapshot?.id === selectedEntryId
+          ? selectedEntrySnapshot
+          : loadedSelectedEntry)
       : undefined;
   const selectedEntries = useMemo(() => {
     if (!activeSelectedEntry) return entries;

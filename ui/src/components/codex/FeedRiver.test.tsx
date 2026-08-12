@@ -61,6 +61,9 @@ const riverMocks = vi.hoisted(() => {
     fetchMock,
     useRealHooks: false,
     entriesQuery,
+    detailQuery: {
+      data: undefined as FeedEntry | undefined,
+    },
     feedsQuery: {
       data: undefined as FeedList | undefined,
       isPending: false,
@@ -105,6 +108,8 @@ vi.mock("#/api/feeds", async (importOriginal) => {
         ? actual.feedEntriesInfiniteOptions(filters)
         : riverMocks.feedEntriesInfiniteOptions(filters),
     useFeeds: () => riverMocks.feedsQuery,
+    useFeedEntry: (id?: number) =>
+      riverMocks.useRealHooks ? actual.useFeedEntry(id) : riverMocks.detailQuery,
     usePatchFeedEntry: () =>
       riverMocks.useRealHooks
         ? actual.usePatchFeedEntry()
@@ -204,6 +209,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   riverMocks.fetchMock.mockReset();
   riverMocks.useRealHooks = false;
+  riverMocks.detailQuery.data = undefined;
   riverMocks.patchState.isPending = false;
   riverMocks.patchState.error = null;
   riverMocks.markState.isPending = false;
@@ -338,6 +344,90 @@ describe("FeedRiver", () => {
     ).toHaveTextContent("Unread entry");
     expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
     expect(river.scrollTop).toBe(211);
+  });
+
+  it("reconciles a pinned saved row from authoritative detail success and rollback", () => {
+    const saved = entry({ bookmarked: true });
+    setEntries([saved]);
+    riverMocks.detailQuery.data = saved;
+    const page = renderRiver({ view: "saved" }, false, 101);
+    const river = screen.getByRole("region", { name: "Feed river" });
+
+    setEntries([]);
+    riverMocks.detailQuery.data = entry({ bookmarked: false });
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "saved" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).not.toHaveTextContent("Saved");
+    expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
+
+    riverMocks.detailQuery.data = saved;
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "saved" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("Saved");
+  });
+
+  it("reconciles a pinned tag-filtered row from authoritative detail success and rollback", () => {
+    const tagged = entry({ tags: ["rust", "reading"] });
+    setEntries([tagged]);
+    riverMocks.detailQuery.data = tagged;
+    const page = renderRiver(
+      { view: "all", tag: "rust" },
+      false,
+      101,
+    );
+
+    setEntries([]);
+    riverMocks.detailQuery.data = entry({ tags: ["reading"] });
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all", tag: "rust" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).not.toHaveTextContent("#rust");
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("#reading");
+
+    riverMocks.detailQuery.data = tagged;
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all", tag: "rust" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("#rust");
+
+    setEntries([]);
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all", tag: "rust" }}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("appends a fetched page without replacing the first loaded page", async () => {

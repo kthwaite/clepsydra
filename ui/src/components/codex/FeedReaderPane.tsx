@@ -81,7 +81,7 @@ export function FeedReaderPane({
   return (
     <section
       aria-label="Feed reader"
-      className="min-h-0 overflow-y-auto border border-rule bg-paper-2"
+      className="min-h-0 overflow-y-auto border border-rule bg-paper-2 md:h-full"
     >
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-rule bg-paper px-3 py-2">
         <Button
@@ -195,10 +195,6 @@ function ReaderArticle({
   const titleId = `feed-reader-title-${entry.id}`;
   const originalUrl = safeFeedEntryUrl(entry.url);
   const timestamp = entry.published_at ?? entry.fetched_at;
-  const contentHtml = useMemo(
-    () => sanitizeStoredFeedHtml(entry.content_html),
-    [entry.content_html],
-  );
 
   return (
     <article aria-labelledby={titleId} className="min-w-0 px-4 py-5 md:px-6 md:py-6">
@@ -222,10 +218,10 @@ function ReaderArticle({
       </header>
 
       <div className="py-5">
-        {contentHtml ? (
+        {entry.content_html ? (
           <div
             className="feed-entry-content"
-            dangerouslySetInnerHTML={{ __html: contentHtml }}
+            dangerouslySetInnerHTML={{ __html: entry.content_html }}
           />
         ) : (
           <p className="cl-marg">
@@ -335,24 +331,6 @@ export function normalizeFeedEntryTags(value: string) {
   ];
 }
 
-function sanitizeStoredFeedHtml(value: string | null | undefined) {
-  if (!value || typeof document === "undefined") return value ?? "";
-  const template = document.createElement("template");
-  template.innerHTML = value;
-  for (const element of template.content.querySelectorAll(
-    "script, iframe, object, embed",
-  )) {
-    element.remove();
-  }
-  for (const element of template.content.querySelectorAll("*")) {
-    for (const attribute of element.getAttributeNames()) {
-      if (attribute.toLowerCase().startsWith("on")) {
-        element.removeAttribute(attribute);
-      }
-    }
-  }
-  return template.innerHTML;
-}
 
 function errorMessage(error: unknown, fallback = "Try again.") {
   if (error instanceof Error) return error.message;

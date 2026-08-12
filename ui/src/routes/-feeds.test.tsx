@@ -371,9 +371,12 @@ describe("feeds route controls", () => {
     },
   );
 
-  it("fills the real CodexFrame parent instead of creating a nested viewport", () => {
+  it("bounds long reader content inside the real CodexFrame track", () => {
     routeMocks.search.entry = 501;
-    routeMocks.detailQuery.data = directEntry;
+    routeMocks.detailQuery.data = {
+      ...directEntry,
+      content_html: `<p>${"Long stored dispatch. ".repeat(600)}</p>`,
+    };
     render(
       <CodexFrame forceView="feeds">
         <FeedsPage />
@@ -382,12 +385,12 @@ describe("feeds route controls", () => {
 
     const main = screen.getByRole("main");
     const routePage = main.querySelector(".mx-auto");
+    const reader = screen.getByRole("region", { name: "Feed reader" });
     expect(routePage).toHaveClass("md:h-full");
     expect(routePage).not.toHaveClass("md:h-dvh");
+    expect(reader.parentElement).toHaveClass("md:h-full");
+    expect(reader).toHaveClass("md:h-full", "overflow-y-auto");
     expect(screen.getByRole("region", { name: "Entry list" })).toHaveClass(
-      "overflow-y-auto",
-    );
-    expect(screen.getByRole("region", { name: "Feed reader" })).toHaveClass(
       "overflow-y-auto",
     );
   });
