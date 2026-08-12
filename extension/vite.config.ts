@@ -11,7 +11,11 @@ export default defineConfig({
 		webExtension({
 			manifest: isFirefox ? "../manifest.v2.json" : "../manifest.json",
 			browser: target,
-			additionalInputs: ["content/capture.ts", "public/icons/icon-128.png"],
+			additionalInputs: [
+				"content/capture.ts",
+				"content/frames.ts",
+				"public/icons/icon-128.png",
+			],
 		}),
 	],
 	resolve: {

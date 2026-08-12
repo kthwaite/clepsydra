@@ -13,3 +13,5 @@ declare module "single-file-core/single-file.js" {
 		win?: Window,
 	): Promise<PageData>;
 }
+
+declare module "single-file-core/single-file-frames.js";
