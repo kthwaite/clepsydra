@@ -77,11 +77,7 @@ fn archive_delete_hook_reports_cas_decrement_failure() {
 
     assert!(error.to_string().contains("hash must start with 'sha256:'"));
     assert_eq!(
-        state
-            .cas
-            .lock()
-            .gc(std::time::Duration::ZERO)
-            .unwrap(),
+        state.cas.lock().gc(std::time::Duration::ZERO).unwrap(),
         1,
         "a failing decrement must not prevent later references from being compensated"
     );
@@ -662,7 +658,12 @@ async fn ingest_simple(server: &TestServer, url: &str, body: &str) -> String {
 #[tokio::test]
 async fn archived_page_reports_itself_read_only() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-1", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-1",
+        "# Article\n\nOriginal.",
+    )
+    .await;
 
     let page = server.get(&format!("/api/vault/pages/{path}")).await;
     page.assert_status(StatusCode::OK);
@@ -674,7 +675,12 @@ async fn archived_page_reports_itself_read_only() {
 #[tokio::test]
 async fn editing_an_archived_body_is_refused() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-2", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-2",
+        "# Article\n\nOriginal.",
+    )
+    .await;
 
     let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
     let res = server
@@ -699,7 +705,12 @@ async fn editing_an_archived_body_is_refused() {
 #[tokio::test]
 async fn metadata_edits_to_an_archived_page_still_work() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-3", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-3",
+        "# Article\n\nOriginal.",
+    )
+    .await;
 
     let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
     // Filing and tagging an archive is the whole point of having it in a vault,
@@ -723,7 +734,12 @@ async fn metadata_edits_to_an_archived_page_still_work() {
 #[tokio::test]
 async fn clearing_readonly_unlocks_the_body() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-4", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-4",
+        "# Article\n\nOriginal.",
+    )
+    .await;
     let url = format!("/api/vault/pages/{path}");
 
     // Unlock. This is a metadata-only write, so the guard lets it through even
@@ -762,7 +778,12 @@ async fn clearing_readonly_unlocks_the_body() {
     );
 
     let after: serde_json::Value = server.get(&url).await.json();
-    assert!(after["body"].as_str().unwrap().contains("Annotated by hand."));
+    assert!(
+        after["body"]
+            .as_str()
+            .unwrap()
+            .contains("Annotated by hand.")
+    );
 }
 
 #[tokio::test]
