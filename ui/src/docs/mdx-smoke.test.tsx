@@ -270,6 +270,12 @@ it("documents the shipped link, search, graph, and repair contracts", () => {
   expect(source).toContain("no bulk apply");
   expect(source).toContain("remains in the list");
   expect(source).toContain("409");
+  expect(source).toContain(
+    "Protected outbound body topology is unavailable",
+  );
+  expect(source).toContain(
+    "an inbound-free protected page is reported as an orphan",
+  );
 });
 
 it("documents single-block non-recursive transclusion and its privacy boundary", () => {
@@ -282,6 +288,12 @@ it("documents single-block non-recursive transclusion and its privacy boundary",
   expect(source).toContain("Referenced block unavailable");
   expect(source).toContain("protected and missing targets are indistinguishable");
   expect(source).toContain("assigns the ID to the source block");
+  expect(source).toContain(
+    "current detail endpoint returns the first matching row",
+  );
+  expect(source).toContain(
+    "displayed transclusion can therefore disagree with graph and Reference Repairs",
+  );
 });
 
 it("documents Bases as non-owning saved views with safe property mutation", () => {
@@ -294,6 +306,15 @@ it("documents Bases as non-owning saved views with safe property mutation", () =
   expect(source).toContain("many = false");
   expect(source).toContain("warning");
   expect(source).toContain("A Base embed is a live, non-owning view");
+  expect(source).toContain(
+    "id, path, title, kind, project, tags, aliases, created_at, updated_at, encryption, journal_date, word_count",
+  );
+  expect(source).toContain(
+    "Bare and `sys.`-prefixed scalar names are materialized under the exact requested column key",
+  );
+  expect(source).toContain(
+    "It does not diagnose an ambiguous relation target as ambiguous",
+  );
 });
 
 it("keeps every documented knowledge route and command grounded in runtime registries", () => {

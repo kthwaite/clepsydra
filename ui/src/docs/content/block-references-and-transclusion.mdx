@@ -22,7 +22,7 @@ A reference uses the same ID inside double parentheses:
 The source says ((0VvF4aB7cD9)).
 ```
 
-The marker belongs to the source block. Moving the source block while retaining its marker preserves the reference; changing or removing the marker breaks it. IDs are expected to identify one indexed block. Clepsydra does not silently choose when an ID is duplicated.
+The marker belongs to the source block. Moving the source block while retaining its marker preserves the reference; changing or removing the marker breaks it. IDs are expected to identify one indexed block, but the current detail endpoint returns the first matching row when an ID is duplicated. Until the duplicate is repaired, a displayed transclusion can therefore disagree with graph and Reference Repairs projections, which require a unique target. Assign distinct IDs before relying on either display.
 
 Paragraphs, headings, list items, blockquotes, and fenced code blocks can carry block IDs in the editor's document model. The normal search picker returns indexed paragraphs, headings, and list items; a manually authored valid reference can still resolve any indexed block that has that ID.
 

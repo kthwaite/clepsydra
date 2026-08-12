@@ -61,7 +61,7 @@ Open `/repairs` or run **Open Reference Repairs**. Reference Repairs projects si
 | `broken_block_ref` | A `((block-id))` reference does not resolve uniquely. | Replace when a unique candidate block exists; otherwise open the source. |
 | `invalid_relation_target` | A Base relation property contains a target that does not resolve uniquely. | Replace when one or more candidates exist; otherwise open the source. |
 | `orphan_page` | The page has no inbound resolved links. | Navigation only. |
-| `isolated_page` | The page has no inbound or outbound resolved links. | Navigation only. |
+| `isolated_page` | An unprotected page has neither inbound nor outbound resolved links. Protected outbound body topology is unavailable, so an inbound-free protected page is reported as an orphan instead. | Navigation only. |
 
 Filters can narrow by issue class, project, page kind, and whether an automatic action is available. The workspace displays one issue at a time. It offers no bulk apply: repair decisions need the source evidence and the selected target for that specific occurrence.
 
