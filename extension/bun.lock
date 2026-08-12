@@ -6,6 +6,7 @@
       "name": "clepsydra-web-archive",
       "dependencies": {
         "@mozilla/readability": "^0.5.0",
+        "single-file-core": "1.5.84",
         "turndown": "^7.2.0",
         "turndown-plugin-gfm": "^1.0.2",
       },
@@ -496,6 +497,8 @@
     "shellwords": ["shellwords@0.1.1", "", {}, "sha512-vFwSUfQvqybiICwZY5+DAWIPLKsWO31Q91JSKl3UYv+K5c2QRPzn0qzec6QPu1Qc9eHYItiP3NdJqNVqetYAww=="],
 
     "siginfo": ["siginfo@2.0.0", "", {}, "sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g=="],
+
+    "single-file-core": ["single-file-core@1.5.84", "", {}, "sha512-P6rhA92eZNGZfc35Uudki4Z+H5Ged3gee9qSNcnfHnKZ2/R+V30USgLCooQf+ydraqYZYFe1NawKr0A4zz6Iog=="],
 
     "sonic-boom": ["sonic-boom@4.2.1", "", { "dependencies": { "atomic-sleep": "^1.0.0" } }, "sha512-w6AxtubXa2wTXAUsZMMWERrsIRAdrK0Sc+FUytWvYAhBJLyuI4llrMIC1DtlNSdI99EI86KZum2MMq3EAZlF9Q=="],
 

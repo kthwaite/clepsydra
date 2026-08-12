@@ -38,6 +38,11 @@ export default defineConfig({
 				__dirname,
 				"node_modules/@mixmark-io/domino/lib/index.js",
 			),
+			// Bundled into the content script, which is where SingleFile is
+			// designed to run: it needs a real DOM, DOMParser, Blob and
+			// FileReader. ~800 KB minified, injected on demand rather than on
+			// every page load.
+			"single-file-core": resolve(__dirname, "node_modules/single-file-core"),
 		},
 	},
 	build: {
