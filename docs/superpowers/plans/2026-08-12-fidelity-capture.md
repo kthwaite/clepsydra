@@ -2786,6 +2786,31 @@ if (emittedChunks.length > 0) {
 			"— a content script injected by file cannot load them",
 	);
 }
+
+// Task 11's frame responder. Its injection failure is swallowed on purpose — a
+// frame we may not script is not a reason to abandon the page — which means a
+// BUILD regression that drops this bundle would be completely invisible at
+// runtime: captures would silently revert to burning a 5s timeout per iframe
+// and archiving nothing from it. This is the only place that can notice.
+const framesPath = resolve(distDir, "content/frames.js");
+const framesSource = await readFile(framesPath, "utf8").catch(() => null);
+if (framesSource === null) {
+	failures.push(
+		"content/frames.js is missing — iframes will silently fail to capture " +
+			"and each will cost a 5s timeout",
+	);
+} else {
+	const framesKb = framesSource.length / 1024;
+	// It carries the frame-tree processor only. Measured at ~24 KB against
+	// capture.js's ~840 KB; an order of magnitude either way means the import
+	// graph changed.
+	if (framesKb < 5 || framesKb > 200) {
+		failures.push(
+			`content/frames.js is ${framesKb.toFixed(0)} KB, outside the expected ` +
+				"5–200 KB — the frame-tree import graph changed",
+		);
+	}
+}
 ```
 
 Add `readdir` to the `node:fs/promises` import at the top of the file.
