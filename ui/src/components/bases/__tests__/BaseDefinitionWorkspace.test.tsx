@@ -268,6 +268,7 @@ describe("BaseDefinitionWorkspace", () => {
     const user = await renameBase("Submitted name");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     await user.selectOptions(screen.getByLabelText("Type for status"), "url");
     await act(async () => {
       pending.resolve(
@@ -618,6 +619,7 @@ describe("BaseDefinitionWorkspace", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     await user.selectOptions(
       screen.getByLabelText("Type for status"),
       "relation",

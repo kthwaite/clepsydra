@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { ArrowDown, ArrowUp, GripVertical, Pencil, Trash2 } from "lucide-react";
+import { Fragment, type KeyboardEvent, useState } from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
@@ -53,6 +53,10 @@ interface PropertyDefinitionEditorProps {
   renameError?: string;
   onChange(property: DraftProperty): void;
   onMove(from: number, to: number): void;
+  onDragStart(propertyId: string): void;
+  onDragEnd(): void;
+  onDrop(propertyId: string): void;
+  onHandleRef(propertyId: string, element: HTMLButtonElement | null): void;
   onRemove(property: DraftProperty): void;
   onRename(property: DraftProperty, key: string): void;
   onStartRename(property: DraftProperty): void;
@@ -235,6 +239,25 @@ function OptionEditor({
   );
 }
 
+function propertySummary(definition: PropertyDefinition) {
+  const label = PROPERTY_TYPE_LABELS[definition.type];
+  if (
+    definition.type === "select" ||
+    definition.type === "multi_select"
+  ) {
+    const optionCount = definition.options?.length ?? 0;
+    return `${label} · ${
+      optionCount === 0
+        ? "Open vocabulary"
+        : `${optionCount} ${optionCount === 1 ? "option" : "options"}`
+    }`;
+  }
+  if (definition.type === "relation") {
+    return `${label} · ${definition.many === false ? "One page" : "Many pages"}`;
+  }
+  return label;
+}
+
 export function PropertyDefinitionEditor({
   property,
   index,
@@ -244,6 +267,10 @@ export function PropertyDefinitionEditor({
   renameError,
   onChange,
   onMove,
+  onDragStart,
+  onDrop,
+  onDragEnd,
+  onHandleRef,
   onRemove,
   onRename,
   onStartRename,
@@ -251,9 +278,9 @@ export function PropertyDefinitionEditor({
   registerFocus,
 }: PropertyDefinitionEditorProps) {
   const [renameKey, setRenameKey] = useState("");
+  const [editing, setEditing] = useState(false);
 
-  function handleKeyboardMove(event: KeyboardEvent<HTMLElement>) {
-    if (event.target !== event.currentTarget) return;
+  function handleKeyboardMove(event: KeyboardEvent<HTMLButtonElement>) {
     if (!event.altKey) return;
     if (event.key === "ArrowUp" && index > 0) {
       event.preventDefault();
@@ -270,170 +297,209 @@ export function PropertyDefinitionEditor({
   }
 
   return (
-    <li
-      ref={(element) => {
-        if (!renaming) registerFocus(`properties.${property.key}`, element);
-      }}
-      tabIndex={0}
-      aria-label={`Property ${property.key}`}
-      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-      onKeyDown={handleKeyboardMove}
-      className="border border-border bg-card p-4 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-    >
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="break-words font-mono text-sm font-semibold text-foreground">
-            {property.key}
-          </p>
-          {persisted && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Saved declaration key. Renaming is a remove-plus-add schema
-              change.
-            </p>
-          )}
-        </div>
-        <div
-          className="flex flex-wrap gap-2"
-          aria-label={`Order controls for ${property.key}`}
+    <Fragment>
+      <tr
+        ref={(element) => {
+          if (!renaming) registerFocus(`properties.${property.key}`, element);
+        }}
+        tabIndex={-1}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          onDrop(property.id);
+        }}
+        className="border-b border-border align-top outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+      >
+        <td className="w-10 px-1 py-2 align-top sm:px-2">
+          <button
+            ref={(element) => onHandleRef(property.id, element)}
+            type="button"
+            aria-label={`Reorder ${property.key}`}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            title={`Drag to reorder ${property.key}. Alt + Up or Down also reorders.`}
+            draggable
+            onDragStart={() => onDragStart(property.id)}
+            onDragEnd={onDragEnd}
+            onKeyDown={handleKeyboardMove}
+            className="inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4"
+          >
+            <GripVertical aria-hidden="true" />
+          </button>
+        </td>
+        <th
+          scope="row"
+          className="break-words px-2 py-2 text-left font-mono text-xs font-semibold text-foreground sm:px-3"
         >
-          <IconButton
-            aria-label={`Move ${property.key} up`}
-            variant="ghost"
-            isDisabled={index === 0}
-            onPress={() => onMove(index, index - 1)}
-          >
-            <ArrowUp />
-          </IconButton>
-          <IconButton
-            aria-label={`Move ${property.key} down`}
-            variant="ghost"
-            isDisabled={index === count - 1}
-            onPress={() => onMove(index, index + 1)}
-          >
-            <ArrowDown />
-          </IconButton>
-          <IconButton
-            aria-label={`Rename ${property.key}`}
-            variant="ghost"
-            onPress={() => {
-              setRenameKey("");
-              onStartRename(property);
-            }}
-          >
-            <Pencil />
-          </IconButton>
-          <IconButton
-            aria-label={`Remove ${property.key}`}
-            variant="ghost"
-            onPress={() => onRemove(property)}
-          >
-            <Trash2 />
-          </IconButton>
-        </div>
-      </div>
-
-      {renaming && (
-        <div className="mt-3 border-l-2 border-warn pl-3">
-          <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            New key for {property.key}
-            <input
-              ref={(element) =>
-                registerFocus(`properties.${property.key}`, element)
-              }
-              value={renameKey}
-              aria-invalid={renameError ? true : undefined}
-              aria-describedby={
-                renameError ? `${property.id}-rename-error` : undefined
-              }
-              onChange={(event) => setRenameKey(event.target.value)}
-              className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-            />
-          </label>
-          {renameError && (
-            <p
-              id={`${property.id}-rename-error`}
-              role="alert"
-              className="mt-2 text-xs normal-case tracking-normal text-destructive"
-            >
-              {renameError}
-            </p>
+          {property.key}
+          {persisted && (
+            <span className="mt-1 block font-sans text-[10px] font-normal leading-4 text-muted-foreground">
+              Saved key
+            </span>
           )}
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              onPress={() => onRename(property, renameKey)}
+        </th>
+        <td className="break-words px-2 py-2 text-xs leading-5 text-muted-foreground sm:px-3">
+          {propertySummary(property.definition)}
+        </td>
+        <td className="w-28 px-1 py-2 sm:w-48 sm:px-2">
+          <div
+            className="flex flex-wrap justify-end gap-1"
+            aria-label={`Actions for ${property.key}`}
+          >
+            <IconButton
+              aria-label={`Move ${property.key} up`}
+              variant="ghost"
+              isDisabled={index === 0}
+              onPress={() => onMove(index, index - 1)}
             >
-              Review rename {property.key}
-            </Button>
+              <ArrowUp />
+            </IconButton>
+            <IconButton
+              aria-label={`Move ${property.key} down`}
+              variant="ghost"
+              isDisabled={index === count - 1}
+              onPress={() => onMove(index, index + 1)}
+            >
+              <ArrowDown />
+            </IconButton>
             <Button
               size="sm"
               variant="ghost"
-              onPress={() => onCancelRename(property)}
+              onPress={() => setEditing((current) => !current)}
             >
-              Cancel rename
+              {editing ? `Close editor ${property.key}` : `Edit ${property.key}`}
             </Button>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-          Type for {property.key}
-          <select
-            value={property.definition.type}
-            onChange={(event) =>
-              onChange(
-                changePropertyType(
-                  property,
-                  event.target.value as PropertyType,
-                ),
-              )
-            }
-            className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-          >
-            {PROPERTY_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {PROPERTY_TYPE_LABELS[type]}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {property.definition.type === "relation" && (
-          <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            <label htmlFor={`${property.id}-cardinality`}>
-              Cardinality for {property.key}
-            </label>
-            <select
-              id={`${property.id}-cardinality`}
-              value={property.definition.many === false ? "one" : "many"}
-              onChange={(event) =>
-                updateDefinition({
-                  type: "relation",
-                  many: event.target.value === "many",
-                })
-              }
-              className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+            <IconButton
+              aria-label={`Rename ${property.key}`}
+              variant="ghost"
+              onPress={() => {
+                setRenameKey("");
+                onStartRename(property);
+              }}
             >
-              <option value="one">One page</option>
-              <option value="many">Many pages</option>
-            </select>
-            <p className="mt-1 font-normal normal-case tracking-normal leading-5">
-              Cardinality is advisory: existing page values are diagnosed, not
-              rewritten.
-            </p>
+              <Pencil />
+            </IconButton>
+            <IconButton
+              aria-label={`Remove ${property.key}`}
+              variant="ghost"
+              onPress={() => onRemove(property)}
+            >
+              <Trash2 />
+            </IconButton>
           </div>
-        )}
-      </div>
+        </td>
+      </tr>
 
-      {(property.definition.type === "select" ||
-        property.definition.type === "multi_select") && (
-        <OptionEditor property={property} onChange={onChange} />
+      {(editing || renaming) && (
+        <tr className="border-b border-border bg-card">
+          <td colSpan={4} className="p-3 sm:p-4">
+            {renaming && (
+              <div className="border-l-2 border-warn pl-3">
+                <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  New key for {property.key}
+                  <input
+                    ref={(element) =>
+                      registerFocus(`properties.${property.key}`, element)
+                    }
+                    value={renameKey}
+                    aria-invalid={renameError ? true : undefined}
+                    aria-describedby={
+                      renameError ? `${property.id}-rename-error` : undefined
+                    }
+                    onChange={(event) => setRenameKey(event.target.value)}
+                    className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                  />
+                </label>
+                {renameError && (
+                  <p
+                    id={`${property.id}-rename-error`}
+                    role="alert"
+                    className="mt-2 text-xs normal-case tracking-normal text-destructive"
+                  >
+                    {renameError}
+                  </p>
+                )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onPress={() => onRename(property, renameKey)}
+                  >
+                    Review rename {property.key}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onPress={() => onCancelRename(property)}
+                  >
+                    Cancel rename
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {editing && (
+              <div className={renaming ? "mt-4 border-t border-border pt-4" : ""}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    Type for {property.key}
+                    <select
+                      value={property.definition.type}
+                      onChange={(event) =>
+                        onChange(
+                          changePropertyType(
+                            property,
+                            event.target.value as PropertyType,
+                          ),
+                        )
+                      }
+                      className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                    >
+                      {PROPERTY_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {PROPERTY_TYPE_LABELS[type]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {property.definition.type === "relation" && (
+                    <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      <label htmlFor={`${property.id}-cardinality`}>
+                        Cardinality for {property.key}
+                      </label>
+                      <select
+                        id={`${property.id}-cardinality`}
+                        value={
+                          property.definition.many === false ? "one" : "many"
+                        }
+                        onChange={(event) =>
+                          updateDefinition({
+                            type: "relation",
+                            many: event.target.value === "many",
+                          })
+                        }
+                        className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                      >
+                        <option value="one">One page</option>
+                        <option value="many">Many pages</option>
+                      </select>
+                      <p className="mt-1 font-normal normal-case tracking-normal leading-5">
+                        Cardinality is advisory: existing page values are
+                        diagnosed, not rewritten.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {(property.definition.type === "select" ||
+                  property.definition.type === "multi_select") && (
+                  <OptionEditor property={property} onChange={onChange} />
+                )}
+              </div>
+            )}
+          </td>
+        </tr>
       )}
-      <p className="mt-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-        Keyboard: Alt + ↑ / ↓ reorders this declaration.
-      </p>
-    </li>
+    </Fragment>
   );
 }

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type {
@@ -59,6 +59,22 @@ function renderProperties(overrides: Partial<PropertiesEditorProps> = {}) {
 
 function latest(onChange: Mock) {
   return onChange.mock.calls.at(-1)?.[0] as DraftProperty[];
+}
+
+function declarationOrder() {
+  const table = screen.getByRole("table", {
+    name: "Ordered property declarations",
+  });
+  return within(table)
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) => within(row).getByRole("rowheader").firstChild?.textContent);
+}
+
+async function editProperty(key: string) {
+  await userEvent.setup().click(
+    screen.getByRole("button", { name: `Edit ${key}` }),
+  );
 }
 
 async function addProperty(key: string, type: PropertyType) {
@@ -129,11 +145,165 @@ describe("PropertiesEditor", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("presents declarations as a semantic table with stable keys, summaries, and row actions", async () => {
+    const user = userEvent.setup();
+    renderProperties({
+      properties: [
+        property("alpha", "text"),
+        {
+          ...property("status", "select"),
+          definition: { type: "select", options: ["queued", "done"] },
+        },
+        {
+          ...property("parent", "relation"),
+          definition: { type: "relation", many: false },
+        },
+      ],
+    });
+
+    const table = screen.getByRole("table", {
+      name: "Ordered property declarations",
+    });
+    expect(
+      within(table).getAllByRole("columnheader").map((cell) => cell.textContent),
+    ).toEqual(["Order", "Key", "Type and configuration", "Actions"]);
+    expect(declarationOrder()).toEqual(["alpha", "status", "parent"]);
+    expect(within(table).getByText("Text")).toBeInTheDocument();
+    expect(within(table).getByText("Select · 2 options")).toBeInTheDocument();
+    expect(within(table).getByText("Relation · One page")).toBeInTheDocument();
+    expect(
+      within(table).getByRole("button", { name: "Edit status" }),
+    ).toBeInTheDocument();
+    expect(
+      within(table).getByRole("button", { name: "Rename status" }),
+    ).toBeInTheDocument();
+    expect(
+      within(table).getByRole("button", { name: "Remove status" }),
+    ).toBeInTheDocument();
+
+    await user.click(within(table).getByRole("button", { name: "Edit status" }));
+    expect(screen.getByLabelText("Type for status")).toHaveValue("select");
+    expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
+  });
+
+  it("reorders from a pointer drag on the named handle without persisting", () => {
+    const properties = [
+      property("alpha", "text"),
+      property("beta", "number"),
+      property("gamma", "bool"),
+    ];
+    const { onChange } = renderProperties({ properties });
+
+    fireEvent.dragStart(
+      screen.getByRole("button", { name: "Reorder beta" }),
+    );
+    fireEvent.dragOver(screen.getByRole("row", { name: /gamma/i }));
+    fireEvent.drop(screen.getByRole("row", { name: /gamma/i }));
+
+    expect(latest(onChange).map(({ id }) => id)).toEqual([
+      "id-alpha",
+      "id-gamma",
+      "id-beta",
+    ]);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("clears a cancelled pointer drag before a later drop", () => {
+    const properties = [
+      property("alpha", "text"),
+      property("beta", "number"),
+      property("gamma", "bool"),
+    ];
+    const { onChange } = renderProperties({ properties });
+    const handle = screen.getByRole("button", { name: "Reorder beta" });
+
+    fireEvent.dragStart(handle);
+    fireEvent.dragEnd(handle);
+    fireEvent.drop(screen.getByRole("row", { name: /gamma/i }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the keyboard handle focused and politely announces its new position", async () => {
+    const properties = [
+      property("alpha", "text"),
+      property("beta", "text"),
+      property("gamma", "text"),
+    ];
+    const { onChange, rerender, props } = renderProperties({ properties });
+    const handle = screen.getByRole("button", { name: "Reorder beta" });
+    expect(handle).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowUp Alt+ArrowDown",
+    );
+    handle.focus();
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    const reordered = latest(onChange);
+    expect(reordered.map(({ key }) => key)).toEqual([
+      "beta",
+      "alpha",
+      "gamma",
+    ]);
+
+    rerender(<PropertiesEditor {...props} properties={reordered} />);
+    expect(screen.getByRole("button", { name: "Reorder beta" })).toHaveFocus();
+    const announcement = screen.getByRole("status");
+    expect(announcement).toHaveAttribute("aria-live", "polite");
+    expect(announcement).toHaveTextContent("Moved beta to position 1 of 3.");
+  });
+
+  it("does not move a keyboard handle beyond a boundary", async () => {
+    const properties = [
+      property("alpha", "text"),
+      property("beta", "text"),
+    ];
+    const { onChange } = renderProperties({ properties });
+    const handle = screen.getByRole("button", { name: "Reorder alpha" });
+    handle.focus();
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(handle).toHaveFocus();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("keeps deterministic row actions available in a narrow layout", () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 360,
+    });
+    window.dispatchEvent(new Event("resize"));
+    renderProperties({
+      properties: [property("alpha", "text"), property("beta", "number")],
+    });
+
+    const beta = screen.getByRole("row", { name: /beta/i });
+    expect(
+      within(beta).getByRole("button", { name: "Move beta up" }),
+    ).toBeVisible();
+    expect(
+      within(beta).getByRole("button", { name: "Move beta down" }),
+    ).toBeVisible();
+    expect(
+      within(beta).getByRole("button", { name: "Edit beta" }),
+    ).toBeVisible();
+    expect(
+      within(beta).getByRole("button", { name: "Remove beta" }),
+    ).toBeVisible();
+    expect(beta.closest(".overflow-x-auto")).toBeNull();
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: previousWidth,
+    });
+  });
+
   it("keeps declaration ids stable while changing type and order", async () => {
     const user = userEvent.setup();
     const properties = [property("alpha", "text"), property("beta", "number")];
     const { onChange, rerender, props } = renderProperties({ properties });
 
+    await editProperty("alpha");
     await user.selectOptions(
       screen.getByLabelText("Type for alpha"),
       "relation",
@@ -146,60 +316,10 @@ describe("PropertiesEditor", () => {
     });
     rerender(<PropertiesEditor {...props} properties={typed} />);
     const moveBetaUp = screen.getByRole("button", { name: "Move beta up" });
-    expect(moveBetaUp).not.toHaveTextContent("Move beta up");
-    expect(moveBetaUp.querySelector("svg")).not.toBeNull();
     await user.click(moveBetaUp);
     expect(latest(onChange).map(({ id }) => id)).toEqual([
       "id-beta",
       "id-alpha",
-    ]);
-  });
-
-  it("supports keyboard reordering and deterministic boundary controls", async () => {
-    const properties = [
-      property("alpha", "text"),
-      property("beta", "text"),
-      property("gamma", "text"),
-    ];
-    const { onChange } = renderProperties({ properties });
-    expect(
-      screen.getByRole("button", { name: "Move alpha up" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Move gamma down" }),
-    ).toBeDisabled();
-
-    screen.getByLabelText("Property beta").focus();
-    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
-    expect(latest(onChange).map(({ key }) => key)).toEqual([
-      "beta",
-      "alpha",
-      "gamma",
-    ]);
-  });
-  it("does not reorder when Alt+Arrow bubbles from a nested control", async () => {
-    const properties = [
-      property("alpha", "text"),
-      property("beta", "text"),
-      property("gamma", "text"),
-    ];
-    const { onChange } = renderProperties({ properties });
-    const row = screen.getByLabelText("Property beta");
-    expect(row).toHaveAttribute(
-      "aria-keyshortcuts",
-      "Alt+ArrowUp Alt+ArrowDown",
-    );
-
-    screen.getByLabelText("Type for beta").focus();
-    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
-    expect(onChange).not.toHaveBeenCalled();
-
-    row.focus();
-    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
-    expect(latest(onChange).map(({ key }) => key)).toEqual([
-      "beta",
-      "alpha",
-      "gamma",
     ]);
   });
 
@@ -215,6 +335,7 @@ describe("PropertiesEditor", () => {
     const { onChange, rerender, props } = renderProperties({
       properties: [initial],
     });
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     expect(screen.getByText("Open vocabulary")).toBeInTheDocument();
     await user.type(screen.getByLabelText("New option for status"), "queued");
     await user.click(
@@ -259,6 +380,7 @@ describe("PropertiesEditor", () => {
     const { onChange } = renderProperties({
       properties: [select, property("title_note", "text")],
     });
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
     expect(screen.queryByLabelText("New option for title_note")).toBeNull();
     await user.selectOptions(
@@ -278,6 +400,7 @@ describe("PropertiesEditor", () => {
         },
       ],
     });
+    await user.click(screen.getByRole("button", { name: "Edit parent" }));
     expect(screen.getByText(/cardinality is advisory/i)).toBeInTheDocument();
     await user.selectOptions(
       screen.getByLabelText("Cardinality for parent"),
@@ -483,6 +606,98 @@ describe("properties workspace integration", () => {
     });
   });
 
+  it("saves the reordered complete property definition only at Save", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...emptyDetail,
+      properties: {
+        status: { type: "select", options: ["queued", "done"] },
+        rating: { type: "number" },
+        parent: { type: "relation", many: false },
+      },
+    };
+    updateMock.mockResolvedValue({
+      ...baseState.data,
+      properties: {
+        rating: { type: "number" },
+        status: { type: "select", options: ["queued", "done"] },
+        parent: { type: "relation", many: false },
+      },
+      revision: "revision-2",
+    });
+    render(<BaseDefinitionWorkspace slug="reading-log" />);
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+
+    const ratingHandle = screen.getByRole("button", {
+      name: "Reorder rating",
+    });
+    ratingHandle.focus();
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(declarationOrder()).toEqual(["rating", "status", "parent"]);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const body = updateMock.mock.calls[0]?.[0].body;
+    expect(Object.keys(body.definition.properties)).toEqual([
+      "rating",
+      "status",
+      "parent",
+    ]);
+    expect(body.definition.properties).toEqual({
+      rating: { type: "number" },
+      status: { type: "select", options: ["queued", "done"] },
+      parent: { type: "relation", many: false },
+    });
+    expect(body).not.toHaveProperty("pages");
+    expect(body).not.toHaveProperty("frontmatter");
+  });
+
+  it("restores the loaded property order on Discard", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...emptyDetail,
+      properties: {
+        status: { type: "text" },
+        rating: { type: "number" },
+      },
+    };
+    render(<BaseDefinitionWorkspace slug="reading-log" />);
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Move rating up" }));
+    expect(declarationOrder()).toEqual(["rating", "status"]);
+
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(declarationOrder()).toEqual(["status", "rating"]);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("retains the unsaved property order after a revision conflict", async () => {
+    const user = userEvent.setup();
+    baseState.data = {
+      ...emptyDetail,
+      properties: {
+        status: { type: "text" },
+        rating: { type: "number" },
+      },
+    };
+    updateMock.mockRejectedValue({
+      status: 409,
+      error: "base definition changed since expected_revision",
+      detail: { revision: "server-new" },
+    });
+    render(<BaseDefinitionWorkspace slug="reading-log" />);
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Move rating up" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /changed outside clepsydra/i,
+    );
+    expect(declarationOrder()).toEqual(["rating", "status"]);
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(baseState.refetch).not.toHaveBeenCalled();
+  });
+
   it("disables Save while a local property diagnostic is unresolved", async () => {
     const user = userEvent.setup();
     render(<BaseDefinitionWorkspace slug="reading-log" />);
@@ -503,6 +718,7 @@ describe("properties workspace integration", () => {
     };
     render(<BaseDefinitionWorkspace slug="reading-log" />);
     await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     await user.selectOptions(
       screen.getByLabelText("Type for status"),
       "number",
