@@ -25,6 +25,7 @@ const TASK: BoardTask = {
   id: "t-inline",
   code: "TSK-0100",
   title: "Inline Task",
+  body_excerpt: null,
   status: "TRIAGE",
   priority: "P2",
   tags: [],

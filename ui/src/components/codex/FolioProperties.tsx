@@ -283,6 +283,7 @@ export function FolioProperties({
                     definition={property.definition}
                     isEditing={editingKey === property.key}
                     focusOnDisplay={focusReturnKey === property.key}
+                    preserveEditingOnBlur={propertyFailure !== null}
                     ariaLabel={`${property.key} property`}
                     ariaDescribedBy={describedBy}
                     onEdit={() => {

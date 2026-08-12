@@ -40,6 +40,7 @@ function task(due: string | null, start?: string | null): BoardTask {
     id: "t-test",
     code: "TSK-0001",
     title: "Test Task",
+    body_excerpt: null,
     status: "FIELD",
     priority: "P1",
     project: "alpha",

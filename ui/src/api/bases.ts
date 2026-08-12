@@ -130,6 +130,21 @@ export function invalidateBaseMutationQueries(
   invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
 }
 
+function invalidatePropertyCommitFailureQueries(queryClient: QueryClient): void {
+  invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
+  invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+  queryClient.invalidateQueries({
+    predicate: (query) => {
+      const path = query.queryKey[1];
+      return (
+        typeof path === "string" &&
+        path.startsWith(queryKeys.pages.pathPrefix) &&
+        path !== queryKeys.pages.propertyProjectionPath
+      );
+    },
+  });
+}
+
 function useInvalidateBaseQueries() {
   const queryClient = useQueryClient();
   return useCallback(
@@ -305,7 +320,7 @@ export function usePropertyCommit() {
         });
       } catch (error) {
         toast.error(`Could not update ${key} — refreshed to current state`);
-        invalidateBaseMutationQueries(qc);
+        invalidatePropertyCommitFailureQueries(qc);
         throw error;
       }
     },

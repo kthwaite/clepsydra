@@ -489,6 +489,111 @@ describe("Base member API", () => {
     );
   });
 
+  it("keeps an active property projection when a failed PATCH drops Base membership", async () => {
+    const queryClient = freshQueryClient();
+    const status = {
+      key: "status",
+      present: true,
+      value: "reading",
+      compatibility: "compatible",
+      definition: { type: "select", options: ["reading", "finished"] },
+      declarations: [
+        {
+          base: { slug: "reading", name: "Reading" },
+          definition: { type: "select", options: ["reading", "finished"] },
+        },
+      ],
+      patchable: true,
+      blockers: [],
+    } satisfies PageBaseProperty;
+    const retainedProjection = {
+      id: "page-alpha",
+      path: "books/dune.md",
+      revision: "page-rev-7",
+      encrypted: false,
+      matching_bases: [{ slug: "reading", name: "Reading" }],
+      properties: [status],
+    } satisfies PageBasePropertiesResponse;
+    const droppedProjection = {
+      ...retainedProjection,
+      revision: "page-rev-8",
+      matching_bases: [],
+      properties: [],
+    } satisfies PageBasePropertiesResponse;
+    const get = vi
+      .spyOn(fetchClient, "GET")
+      .mockResolvedValueOnce({
+        data: retainedProjection,
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      } as never)
+      .mockResolvedValueOnce({
+        data: droppedProjection,
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      } as never);
+    const conflict = {
+      status: 409,
+      error: "page revision conflict",
+      hint: "reload the page property projection",
+      detail: { revision: droppedProjection.revision },
+    };
+    vi.spyOn(fetchClient, "PATCH").mockRejectedValueOnce(conflict);
+    const { result } = renderHook(
+      () => ({
+        projection: usePageBaseProperties("page-alpha"),
+        commit: usePropertyCommit(),
+      }),
+      { wrapper: wrapper(queryClient) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.projection.data).toEqual(retainedProjection);
+    });
+    for (const scope of [
+      "baseList",
+      "baseDetail",
+      "baseView",
+      "baseEvaluation",
+      "query",
+      "pageList",
+      "pageDetail",
+    ] as const) {
+      queryClient.setQueryData(cachedQueryKeys[scope], { cached: true });
+    }
+
+    await expect(
+      result.current.commit(
+        { id: retainedProjection.id, path: retainedProjection.path },
+        "status",
+        "finished",
+        undefined,
+        retainedProjection.revision,
+      ),
+    ).rejects.toBe(conflict);
+
+    expect(get).toHaveBeenCalledOnce();
+    expect(result.current.projection.data).toEqual(retainedProjection);
+    expect(
+      queryClient.getQueryState(cachedQueryKeys.pagePropertyProjection)
+        ?.isInvalidated,
+    ).toBe(false);
+    for (const scope of [
+      "baseList",
+      "baseDetail",
+      "baseView",
+      "baseEvaluation",
+      "query",
+      "pageList",
+      "pageDetail",
+    ] as const) {
+      expect(
+        queryClient.getQueryState(cachedQueryKeys[scope])?.isInvalidated,
+        scope,
+      ).toBe(true);
+    }
+  });
+
 
   it("invalidates Base, query, and page caches without invalidating other scopes", () => {
     const queryClient = new QueryClient();

@@ -351,11 +351,21 @@ describe("FolioProperties", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("revision conflict");
     expect(screen.getByRole("textbox", { name: "status property" })).toHaveValue("finished");
-    await user.click(screen.getByRole("button", { name: "Reload current properties" }));
+    await user.tab();
+    const reload = screen.getByRole("button", {
+      name: "Reload current properties",
+    });
+    expect(reload).toHaveFocus();
+    await user.keyboard("{Enter}");
     expect(projectionState.refetch).toHaveBeenCalledOnce();
     expect(screen.getByRole("textbox", { name: "status property" })).toHaveValue("finished");
 
-    await user.click(screen.getByRole("button", { name: "Discard status draft" }));
+    await user.tab();
+    const discard = screen.getByRole("button", {
+      name: "Discard status draft",
+    });
+    expect(discard).toHaveFocus();
+    await user.keyboard("{Enter}");
     expect(screen.queryByRole("textbox", { name: "status property" })).toBeNull();
     expect(screen.getByRole("button", { name: "Edit status property" })).toHaveFocus();
   });
@@ -382,7 +392,12 @@ describe("FolioProperties", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("network unavailable");
     expect(screen.getByRole("textbox", { name: "status property" })).toHaveValue("finished");
-    await user.click(screen.getByRole("button", { name: "Retry saving status" }));
+    await user.tab();
+    const retry = screen.getByRole("button", {
+      name: "Retry saving status",
+    });
+    expect(retry).toHaveFocus();
+    await user.keyboard("{Enter}");
 
     await waitFor(() => expect(commitMock).toHaveBeenCalledTimes(2));
     expect(commitMock.mock.calls[1]).toEqual([

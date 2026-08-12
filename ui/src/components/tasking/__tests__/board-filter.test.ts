@@ -11,6 +11,7 @@ const mockTask = (overrides?: Partial<BoardTask>): BoardTask => ({
   id: "task-1",
   path: "tasks/task-1",
   title: "Fix auth bug",
+  body_excerpt: null,
   code: "T-42",
   status: "in_progress",
   priority: "P1",

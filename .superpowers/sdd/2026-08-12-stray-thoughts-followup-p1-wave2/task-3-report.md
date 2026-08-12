@@ -2,11 +2,11 @@
 
 ## Status
 
-DONE_WITH_CONCERNS
+DONE
 
 ## Commit
 
-This focused implementation commit — `feat(codex): add Folio property panel`
+This review-fix commit — `fix(codex): close Wave 2 property review findings`
 
 ## Files changed
 
@@ -33,9 +33,9 @@ A panel save sends `set` or `clear`, shared date/datetime hints, and the project
 
 The projection hook opts out of render-time throwing and limits automatic retry to two retries. Its inline error/retry state cannot replace or disable Folio body/title rendering. Successful mutation invalidation already covers the GET because it is under the existing page path prefix; the explicit active-query refetch then reconciles Base membership entry/exit before the controlled editor closes.
 
-## Tests written but not run
+## Focused contracts
 
-Per the assignment's explicit instruction, no test, formatter, linter, build, typecheck, schema generation, or other validation command was run.
+The slice covers these focused contracts:
 
 Focused contracts added or extended:
 
@@ -56,10 +56,10 @@ Focused contracts added or extended:
 - desktop metadata-rail, mobile details-sheet, and locked-Folio placement;
 - normal Folio body/title usability alongside a failed property projection.
 
-## Concerns
+## Resolved review concerns
 
-- Validation commands were explicitly prohibited, so the test-first contracts were not observed failing or passing, and the changed frontend surface was not typechecked, linted, built, or browser-driven in this slice.
-- `ui/src/api/schema.d.ts` was deliberately not regenerated or edited; Task 2's committed generated contract through `7eacc10a` is consumed as-is.
+- The required generated `BoardTask.body_excerpt` contract is preserved and every direct typed UI fixture now supplies it.
+- The final Wave 2 cache, SSE refresh, and keyboard-recovery findings are covered by focused red/green integration tests and the UI typecheck.
 
 ## Focused debugging correction — 2026-08-12
 
@@ -76,3 +76,23 @@ Root causes and corrections:
 - **Keyboard-cancel focus assertion failed — test assertion changed.** `EditableCell` correctly focused the newly rendered display button after Escape, but the test asserted against the old button node that edit mode had unmounted. The assertion now re-queries the live display button, matching the existing `BaseTableView` focus contract. Production `EditableCell` was unchanged.
 
 Fresh verification of the exact command passed: **5 test files passed, 80 tests passed, 0 failed**. Vitest completed in 10.71 seconds (11.29 seconds wall time). It emitted only the existing Vite native-config migration warning.
+
+## Final Wave 2 review corrections — 2026-08-12
+
+The final review's four Important findings were reproduced and corrected:
+
+- **Required task excerpts:** the initial UI typecheck reported 27 diagnostics in 11 files. Every direct `BoardTask` fixture now supplies `body_excerpt` without weakening the generated required field.
+- **Failed property commits:** a real `QueryClient` integration test reproduced a 409 followed by a winning projection with no matching Base. Failed PATCHes now invalidate Base, generic-query, and non-projection page caches while leaving the active property projection and retained draft intact. Successful PATCHes still invalidate/refetch the projection.
+- **Base-registry SSE:** an active `QueryObserver` test reproduced the stale projection. `base_registry_changed` now invalidates the exact page-property projection path and causes an active projection to refetch.
+- **Keyboard recovery:** conflict and network tests now move from the retained text editor with `user.tab()`, activate reload/retry/discard with Enter, and verify focus and retained draft behavior without pointer events. `EditableCell` suppresses its editor's cancel/commit-on-Tab handlers only while sibling failure actions are present.
+
+TDD evidence:
+
+- The three-file red run observed four expected failures: membership-drop projection refetched, registry SSE did not refetch, and both failure action groups disappeared on Tab.
+- After the source changes, the same three files passed: **3 files, 28 tests, 0 failures**.
+
+Fresh focused verification:
+
+- `npm run typecheck` — passed with zero diagnostics.
+- Focused Vitest command covering every changed test file plus both vault-event files — **15 files, 390 tests, 0 failures**.
+- Formatter, linter, build, and broad suites were intentionally skipped per the focused-fix assignment.
