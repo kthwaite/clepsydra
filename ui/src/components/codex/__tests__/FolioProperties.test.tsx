@@ -261,7 +261,15 @@ describe("FolioProperties", () => {
     ], [{ slug: "reading", name: "Reading" }]);
     projectionState.refetch.mockImplementation(async () => {
       projectionState.data = projection([
-        property("archived", "bool", { value: false }),
+        property("archived", "bool", {
+          value: false,
+          declarations: [
+            {
+              base: { slug: "archive", name: "Archive" },
+              definition: definition("bool"),
+            },
+          ],
+        }),
       ], [{ slug: "archive", name: "Archive" }]);
       return { data: projectionState.data };
     });
@@ -449,6 +457,8 @@ describe("FolioProperties", () => {
     const input = screen.getByRole("textbox", { name: "status property" });
     expect(input).toHaveAttribute("aria-describedby", descriptionId);
     await user.keyboard("{Escape}");
-    expect(edit).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Edit status property" }),
+    ).toHaveFocus();
   });
 });

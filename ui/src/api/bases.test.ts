@@ -368,6 +368,8 @@ describe("Base member API", () => {
     } satisfies PageBasePropertiesResponse;
     const get = vi.spyOn(fetchClient, "GET").mockResolvedValueOnce({
       data: response,
+      error: undefined,
+      response: new Response(null, { status: 200 }),
     } as never);
 
     const { result } = renderHook(

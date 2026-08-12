@@ -60,3 +60,19 @@ Focused contracts added or extended:
 
 - Validation commands were explicitly prohibited, so the test-first contracts were not observed failing or passing, and the changed frontend surface was not typechecked, linted, built, or browser-driven in this slice.
 - `ui/src/api/schema.d.ts` was deliberately not regenerated or edited; Task 2's committed generated contract through `7eacc10a` is consumed as-is.
+
+## Focused debugging correction — 2026-08-12
+
+The exact five-file command initially reproduced five failures:
+
+`bun run --cwd ui test -- components/codex/__tests__/FolioProperties.test.tsx api/bases.test.ts components/codex/__tests__/Folio.test.tsx components/bases/__tests__/useBaseTableController.test.tsx components/codex/__tests__/ReadingContinues.test.tsx`
+
+Root causes and corrections:
+
+- **Projection hook data remained undefined — test fixture changed.** The success mock returned `{ data }` without the `response` required by `openapi-react-query`; its query function dereferenced `response.status`, rejected, and exhausted the hook's retries. The fixture now returns a complete successful generated-client response. Production `usePageBaseProperties` was already correct.
+- **Post-save Archive provenance was missing — test fixture changed.** The refreshed property used the helper's default `Library (library)` declaration while the assertion expected `Archive (archive)`. The fixture now supplies the Archive declaration represented by the expected provenance. The external projection mutation already rerendered through the save's state transition, so production reconciliation was unchanged.
+- **Conflict reload did not refetch — production changed.** Pointer focus transfer blurred the retained `TextCell`; its intentional cancel-on-blur behavior discarded the draft and unmounted the reload button before the click event. Failure action buttons now prevent the mouse-down focus transfer so their clicks run while the retained editor remains mounted.
+- **Network retry did not issue a second commit — production changed.** It had the same blur-before-click event ordering as conflict reload. The same blur-safe action treatment preserves the exact failed value until retry invokes the second commit.
+- **Keyboard-cancel focus assertion failed — test assertion changed.** `EditableCell` correctly focused the newly rendered display button after Escape, but the test asserted against the old button node that edit mode had unmounted. The assertion now re-queries the live display button, matching the existing `BaseTableView` focus contract. Production `EditableCell` was unchanged.
+
+Fresh verification of the exact command passed: **5 test files passed, 80 tests passed, 0 failed**. Vitest completed in 10.71 seconds (11.29 seconds wall time). It emitted only the existing Vite native-config migration warning.

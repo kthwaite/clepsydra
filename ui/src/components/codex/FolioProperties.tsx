@@ -342,6 +342,7 @@ export function FolioProperties({
                         <button
                           type="button"
                           className={ACTION_CLASS}
+                          onMouseDown={(event) => event.preventDefault()}
                           onClick={retryProjection}
                         >
                           Reload current properties
@@ -350,6 +351,7 @@ export function FolioProperties({
                         <button
                           type="button"
                           className={ACTION_CLASS}
+                          onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
                             void saveProperty(
                               property,
@@ -364,6 +366,7 @@ export function FolioProperties({
                       <button
                         type="button"
                         className={ACTION_CLASS}
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => discardDraft(property.key)}
                       >
                         Discard {property.key} draft
