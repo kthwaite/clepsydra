@@ -64,10 +64,10 @@ session. Neither bundle is a signed/store-installed release.
 | Permission | Why it is requested |
 | --- | --- |
 | `activeTab` | Work with the page selected for capture after the user invokes the extension. |
-| `scripting` (Chromium MV3) | Inject `content/capture.js` into that active tab. Firefox MV2 uses `tabs.executeScript` instead. |
+| `scripting` (Chromium MV3) | Inject `content/frames.js` into every frame, then `content/capture.js` into the active tab. Firefox MV2 uses `tabs.executeScript` instead. |
 | `storage` | Store the server URL, default tags, notification preferences, and the currently unused content-change preference in `browser.storage.sync`. |
 | `notifications` | Report created, duplicate, changed-content, extraction, and server failures. |
-| `http://*/*`, `https://*/*` | Call the configured Clepsydra server and fetch reader-mode image resources from captured sites. Chromium declares these as `host_permissions`; Firefox includes them in `permissions`. |
+| `http://*/*`, `https://*/*` | Call the configured Clepsydra server, and relay a cross-origin resource fetch that SingleFile could not make from the content script (the content script's `fetch` is bound by the *page's* CORS policy, not these host permissions). Chromium declares these as `host_permissions`; Firefox includes them in `permissions`. |
 
 The broad HTTP/HTTPS host access is real. Load the extension only in a browser
 profile where Clepsydra and every installed extension are trusted with the
@@ -102,29 +102,56 @@ but does not add user authentication.
 Open a normal `http://` or `https://` page and choose **Capture This Page**, or
 use `Ctrl+Shift+S` (Windows/Linux) or `Command+Shift+S` (macOS).
 
-The injected script records URL, canonical URL when present, title,
-description, and `document.documentElement.outerHTML`; it runs Readability on a
-cloned document. The background worker:
+The injected content script runs [SingleFile](https://github.com/gildas-lormeau/single-file-core)
+over the live DOM, inlining every resource it can reach as a `data:` URI, then
+runs Readability over the same page visit to extract the article body.
+SingleFile runs first: loading deferred images scrolls the page, so the
+Readability clone taken afterwards sees images that were not there before.
+Scripts are stripped from the capture, so the snapshot preserves markup and
+inlined resources, not live page behavior.
 
-1. extracts every distinct base64 `data:` URI found in the full serialized DOM
-   into a separate CAS blob. The extension imposes no count cap on these inline
-   resources; the archive API’s request/blob limits still apply;
-2. considers at most the first 50 raw `src` strings from reader-mode `<img>`
-   elements, resolves them against the page URL, fetches them with the page’s
-   browser credentials, and omits failed requests;
-3. hashes every resource and deduplicates blobs by hash. It also hashes and
-   includes the full HTML snapshot as its own `text/html` blob;
-4. converts a readable article of at least 200 text characters to Markdown, or
-   emits fallback Markdown linking the snapshot;
-5. adds `archive`, domain, current-month, and configured default tags; and
-6. posts one archive manifest containing `url`, optional `canonical_url`,
-   `domain`, `title`, optional `description`, `captured_at`, `content_hash`,
-   `snapshot_hash`, `markdown_body`, `tags`, and `blobs`. Every blob carries
-   exactly `hash`, `content_type`, and base64 `data`.
+A second content script is injected into every frame on the page before
+capture starts, purely to answer SingleFile’s frame-tree handshake — without a
+responder present, each iframe burns a five-second timeout and archives
+nothing. A frame the extension cannot script (sandboxed, or restricted by the
+page) is simply not archived; that alone does not abort the rest of the
+capture.
 
-The HTML snapshot is the current serialized DOM, not a complete SingleFile
-bundle: live JavaScript state and unfetched external assets are not preserved.
-Choose the archived Folio and CAS snapshot with that limit in mind.
+A resource fetch that fails under the content script’s `fetch` — which, unlike
+the extension’s own host permissions, is bound by the *page’s* CORS policy —
+relays through the background worker instead. The page’s own fetch is tried
+first, because it carries the session cookies that make paywalled and
+authenticated captures work; only a failed or non-OK fetch falls back to the
+worker fetch, which sends browser credentials for the target origin.
+
+The background worker then:
+
+1. converts the extracted article HTML to Markdown when Readability found at
+   least 200 characters of text, or emits fallback Markdown that links the
+   snapshot when it did not — image URLs in that Markdown are left exactly as
+   Readability resolved them;
+2. adds `archive`, domain, current-month, and configured default tags; and
+3. posts one archive manifest containing `url`, optional `canonical_url`,
+   `domain`, `title`, optional `description`, `captured_at`, `content_hash`
+   (a hash of `markdown_body` exactly as sent), `snapshot_html` (the SingleFile
+   capture, resources still inlined), `markdown_body`, `tags`, and the
+   Readability provenance fields `byline`, `site_name`, `published_time`,
+   `lang`, and `excerpt`, all optional.
+
+The extension does not hash, split, or deduplicate resources itself. The
+server alone deconstructs `snapshot_html`: it walks the inlined resources,
+stores each one in the CAS, and rewrites both the snapshot and the Markdown to
+`cas:` references from a single resource map built from that one snapshot, so
+the two artifacts can never disagree about what they reference. It verifies
+the posted `content_hash` against `markdown_body` as sent and stores that
+verified value as `archive.source_hash`; because rewriting image URLs changes
+the Markdown body, it separately hashes the rewritten body and stores that as
+`archive.content_hash` — the two archive fields describe the Markdown before
+and after rewriting, not the same hash under two names.
+
+SingleFile drives the page, forces lazy-loaded images to load, and waits for
+network activity to settle before returning, so a capture can take seconds to
+tens of seconds on a heavy page — that is expected, not a hang.
 
 ## Failures and conflicts
 
@@ -139,8 +166,10 @@ Choose the archived Folio and CAS snapshot with that limit in mind.
   extraction or server error. Fix the page/server condition and invoke capture
   again; the extension has no background retry queue.
 - **Readability cannot extract an article** — capture can still succeed with
-  fallback Markdown and the HTML snapshot. Failed remote images are omitted
-  rather than failing the whole capture.
+  fallback Markdown and the SingleFile snapshot. A resource that cannot be
+  fetched, or that exceeds `max_blob_size_mb`, is left out of the snapshot
+  rather than failing the whole capture; the server still rejects a capture
+  whose total size exceeds `max_request_size_mb`.
 - **Already Archived** — the server returned the existing archive unchanged.
   The duplicate notification appears only when that preference is enabled.
 
@@ -156,11 +185,13 @@ read it, so changing that option has no effect.
 
 ## Privacy
 
-Captured URL, canonical URL, title, description, full serialized DOM, readable
-article content, tags, HTML snapshot, and fetched resource bytes are sent to the
-configured server as plaintext before storage. Reader-image fetches use
+Captured URL, canonical URL, title, description, tags, the SingleFile snapshot
+(every reachable resource inlined as a `data:` URI), and the Markdown article
+body are sent to the configured server as plaintext before storage. A resource
+fetch relayed through the background worker uses
 `credentials: \"include\"`; a captured page can therefore cause requests carrying
-that site’s browser credentials. Review sensitive/private pages before capture.
+that site’s browser credentials, for any resource the page references, not
+only images. Review sensitive/private pages before capture.
 
 Archive Folios and CAS blobs are plaintext. CAS hashing and deduplication do not
 encrypt content. Protected-Folio encryption does not retroactively protect an

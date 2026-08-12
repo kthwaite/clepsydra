@@ -47,13 +47,20 @@ export interface ExtensionSettings {
 	notify_on_success: boolean;
 	notify_on_duplicate: boolean;
 	/**
-	 * Mirrors the server's `archive.max_blob_size_mb` / `max_request_size_mb`
-	 * (src/vault/config.rs). The per-resource limit is handed to SingleFile so it
-	 * declines an oversized resource at capture time; exceeding the total fails
-	 * the whole capture, because a snapshot missing arbitrary resources is not a
-	 * snapshot.
+	 * Mirrors the server's `archive.max_blob_size_mb` (src/vault/config.rs). Handed
+	 * to SingleFile as `maxResourceSize` so it declines an oversized resource at
+	 * capture time, rather than sending a payload the server will reject.
 	 */
 	max_blob_size_mb: number;
+	/**
+	 * Mirrors the server's `archive.max_request_size_mb`, but is inert on the
+	 * client: its only consumer was `buildResourceMap`'s total-capture budget,
+	 * deleted along with client-side resource fetching. The server alone now
+	 * enforces this limit. Kept on the type and in `DEFAULT_SETTINGS` only so a
+	 * stored settings object keeps round-tripping through
+	 * `{ ...DEFAULT_SETTINGS, ...stored.settings }`; the options page no longer
+	 * reads or writes it.
+	 */
 	max_request_size_mb: number;
 }
 
