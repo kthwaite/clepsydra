@@ -88,7 +88,13 @@ vi.mock("#/store/ui", () => ({
 vi.mock("#/store/workspace", () => {
   const useWorkspaceStore = () => workspaceState;
   useWorkspaceStore.getState = () => workspaceState;
-  return { useWorkspaceStore };
+  return {
+    runWorkspaceTransition: (transition: () => void) => {
+      transition();
+      return true;
+    },
+    useWorkspaceStore,
+  };
 });
 
 import { CodexFrame } from "#/components/codex/CodexFrame";

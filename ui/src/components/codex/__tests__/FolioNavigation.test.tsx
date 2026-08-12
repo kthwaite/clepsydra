@@ -6,11 +6,12 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Folio } from "#/components/codex/Folio";
 import { Constellation } from "#/components/codex/Constellation";
+import { CodexFrame } from "#/components/codex/CodexFrame";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useConstellationStore } from "#/store/constellation";
 import { useGazetteerStore } from "#/store/gazetteer";
@@ -58,6 +59,23 @@ vi.mock("#/api/journal", () => ({
 vi.mock("#/crypto/EncryptionProvider", () => ({
   useOptionalEncryptionActions: () => ({ lock: vi.fn() }),
 }));
+vi.mock("#/components/ThemeProvider", () => ({
+  useTheme: () => ({
+    toggle: vi.fn(),
+    resolvedTheme: "light",
+    diegetic: false,
+  }),
+}));
+vi.mock("#/components/page-tree/PageActionsMenu", () => ({
+  PageActionsMenu: ({ onDeleted }: { onDeleted: () => void }) => (
+    <button type="button" onClick={onDeleted}>
+      Complete page deletion
+    </button>
+  ),
+}));
+vi.mock("#/components/page-tree/FolderActionsMenu", () => ({
+  FolderActionsMenu: () => null,
+}));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/ForceGraph", () => ({
   ForceGraph: () => <div role="img" aria-label="Constellation graph" />,
@@ -100,8 +118,9 @@ vi.mock("#/editor/usePageEditor", () => ({
     updatedAt: "2026-08-08T00:00:00Z",
     encrypted: false,
     pageId: "page-alpha",
-    getPlaintext: vi.fn(),
-    getRevision: vi.fn(),
+    getPlaintext: vi.fn(() => "Editable body"),
+    getRevision: vi.fn(() => "revision-1"),
+    setBodyMarkdown: vi.fn(),
   }),
 }));
 
@@ -145,12 +164,16 @@ function Workspace() {
   const tabs = useWorkspaceStore((state) => state.tabs);
   const activeTabId = useWorkspaceStore((state) => state.activeTabId);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const content =
+    activeTab?.type === "graph" ? (
+      <Constellation />
+    ) : activeTab?.type === "page" && activeTab.path ? (
+      <Folio tabId={activeTab.id} path={activeTab.path} />
+    ) : (
+      <p>No active workspace tab</p>
+    );
 
-  if (activeTab?.type === "graph") return <Constellation />;
-  if (activeTab?.type === "page" && activeTab.path) {
-    return <Folio tabId={activeTab.id} path={activeTab.path} />;
-  }
-  return <p>No active workspace tab</p>;
+  return <CodexFrame>{content}</CodexFrame>;
 }
 
 function renderNavigation(initialEntry: string) {
@@ -316,5 +339,119 @@ describe("mobile Folio Back", () => {
       screen.getByRole("heading", { name: "Atrium origin" }),
     ).toBeVisible();
     expect(pageTabStillExists()).toBe(true);
+  });
+
+  it("keeps frame graph activation and router navigation in one raw-draft confirmation", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "page",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "page",
+    });
+    const router = renderNavigation("/workspace");
+    await screen.findByRole("button", { name: "Raw Markdown" });
+    const navigateSpy = vi.spyOn(router, "navigate");
+    navigateSpy.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Frame graph draft stays local  \n" },
+    });
+    await user.click(screen.getByRole("button", { name: "Constellation" }));
+
+    expect(useWorkspaceStore.getState().activeTabId).toBe("page");
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Stay" }));
+    expect(useWorkspaceStore.getState().activeTabId).toBe("page");
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Frame graph draft stays local  \n",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Constellation" }));
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => {
+      const state = useWorkspaceStore.getState();
+      expect(state.tabs.filter((tab) => tab.type === "graph")).toHaveLength(1);
+      expect(state.activeTabId).not.toBe("page");
+      expect(router.state.status).toBe("idle");
+    });
+    expect(navigateSpy).toHaveBeenCalledOnce();
+    expect(navigateSpy).toHaveBeenCalledWith({ to: "/workspace" });
+  });
+
+  it("keeps mobile deletion and router navigation in one raw-draft confirmation", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "page",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "page",
+    });
+    const router = renderNavigation("/workspace");
+    await screen.findByRole("button", { name: "Raw Markdown" });
+    const navigateSpy = vi.spyOn(router, "navigate");
+    navigateSpy.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Deletion must not discard this draft  \n" },
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Document details" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Manage paths" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Complete page deletion" }),
+    );
+
+    expect(pageTabStillExists()).toBe(true);
+    expect(router.state.location.pathname).toBe("/workspace");
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Stay" }));
+    expect(pageTabStillExists()).toBe(true);
+    expect(navigateSpy).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", { name: "Close document details" }),
+    );
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Deletion must not discard this draft  \n",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Document details" }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Complete page deletion" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => {
+      expect(pageTabStillExists()).toBe(false);
+      expect(router.state.location.pathname).toBe("/");
+      expect(router.state.status).toBe("idle");
+    });
+    expect(navigateSpy).toHaveBeenCalledOnce();
+    expect(navigateSpy).toHaveBeenCalledWith({ to: "/" });
   });
 });

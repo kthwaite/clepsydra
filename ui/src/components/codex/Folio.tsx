@@ -61,7 +61,7 @@ import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import {
   parseRecipeMarkdown,
-  type RecipeDocument,
+  type RecipeParseResult,
   serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
 import {
@@ -283,17 +283,17 @@ export function Folio({ tabId, path }: FolioProps) {
     getRevision: () => string;
   } | null>(null);
   const [recipeMode, setRecipeMode] = useState<"read" | "edit">("read");
-  const [recipeDraft, setRecipeDraft] = useState<{
+  const [recipeProjection, setRecipeProjection] = useState<{
     path: string;
     editorRevision: number;
-    document: RecipeDocument;
+    result: RecipeParseResult;
   } | null>(null);
   const [rawMarkdownSession, setRawMarkdownSession] =
     useState<RawMarkdownSession | null>(null);
   useEffect(() => {
     setConversationMode("read");
     setRecipeMode("read");
-    setRecipeDraft(null);
+    setRecipeProjection(null);
   }, [path]);
   useEffect(() => {
     setRawMarkdownSession((current) => {
@@ -377,20 +377,31 @@ export function Folio({ tabId, path }: FolioProps) {
       isRecipe ? parseRecipeMarkdown(editor.bodyMarkdown, editor.title) : null,
     [editor.bodyMarkdown, editor.title, isRecipe],
   );
+  const activeRecipeParse =
+    recipeProjection?.path === path &&
+    recipeProjection.editorRevision === editor.editorRevision
+      ? recipeProjection.result
+      : recipeParse;
   const recipeDocument =
-    recipeParse?.ok === true
-      ? recipeDraft?.path === path &&
-        recipeDraft.editorRevision === editor.editorRevision
-        ? recipeDraft.document
-        : recipeParse.value
-      : null;
-  const recipeStructured = recipeParse?.ok === true;
+    activeRecipeParse?.ok === true ? activeRecipeParse.value : null;
+  const recipeStructured = activeRecipeParse?.ok === true;
   const recipeReadOnly = recipeStructured && recipeMode === "read";
   const folioReadOnly = conversationReadOnly || recipeReadOnly;
-  const rawMarkdownAvailable =
+  const encrypted = editor.encrypted === true;
+  const encryptionState = editor.encryptionState ?? {
+    status: "plain" as const,
+    body: editor.bodyMarkdown,
+  };
+  const rawMarkdownPresentationAvailable =
     presentation.bodyPresentation === "editor" ||
     (isAiConversation && conversationMode === "edit") ||
     (isRecipe && recipeStructured && recipeMode === "edit");
+  const rawMarkdownAvailable =
+    rawMarkdownPresentationAvailable &&
+    !editor.isLoading &&
+    !(editor.error && !editor.isDraft) &&
+    (!encrypted || encryptionState.status === "plain") &&
+    !(isTodayDraftPath && (isJournalTodayLoading || journalToday));
   const rawMarkdownDirty =
     rawMarkdownSession !== null &&
     rawMarkdownSession.value !== rawMarkdownSession.snapshot;
@@ -440,16 +451,12 @@ export function Folio({ tabId, path }: FolioProps) {
         ? parseRecipeMarkdown(authoredRaw, editor.title)
         : null;
       editor.setBodyMarkdown(authoredRaw);
-      if (isRecipe) {
-        setRecipeDraft(
-          projectedRecipe?.ok === true
-            ? {
-                path,
-                editorRevision: editor.editorRevision,
-                document: projectedRecipe.value,
-              }
-            : null,
-        );
+      if (projectedRecipe) {
+        setRecipeProjection({
+          path,
+          editorRevision: editor.editorRevision,
+          result: projectedRecipe,
+        });
       }
       setRawMarkdownSession(null);
     } catch (error) {
@@ -488,11 +495,6 @@ export function Folio({ tabId, path }: FolioProps) {
     });
   };
 
-  const encrypted = editor.encrypted === true;
-  const encryptionState = editor.encryptionState ?? {
-    status: "plain" as const,
-    body: editor.bodyMarkdown,
-  };
   const restorationAvailable =
     !editor.isLoading &&
     !(editor.error && !editor.isDraft) &&
@@ -642,16 +644,24 @@ export function Folio({ tabId, path }: FolioProps) {
     mobile,
   );
 
-  if (isTodayDraftPath && (isJournalTodayLoading || journalToday)) {
+  if (
+    !rawMarkdownSession &&
+    isTodayDraftPath &&
+    (isJournalTodayLoading || journalToday)
+  ) {
     return <div className="cl-marg p-6">… fetching today’s journal …</div>;
   }
-  if (editor.isLoading) {
+  if (!rawMarkdownSession && editor.isLoading) {
     return <div className="cl-marg p-6">… fetching folio {path} …</div>;
   }
-  if (editor.error && !editor.isDraft) {
+  if (!rawMarkdownSession && editor.error && !editor.isDraft) {
     return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
   }
-  if (encrypted && encryptionState.status !== "plain") {
+  if (
+    !rawMarkdownSession &&
+    encrypted &&
+    encryptionState.status !== "plain"
+  ) {
     return (
       <LockedFolio
         path={path}
@@ -732,7 +742,9 @@ export function Folio({ tabId, path }: FolioProps) {
             onAliasesChange={editor.setAliases}
             onSaveNow={editor.saveNow}
             encrypted={encrypted}
-            onRequestLock={encryptionActions?.lock}
+            onRequestLock={
+              rawMarkdownSession ? undefined : encryptionActions?.lock
+            }
           />
         </div>
       )}
@@ -818,10 +830,14 @@ export function Folio({ tabId, path }: FolioProps) {
                 mode={recipeMode}
                 onModeChange={setRecipeMode}
                 onDocumentChange={(nextDocument) => {
-                  setRecipeDraft({
+                  setRecipeProjection({
                     path,
                     editorRevision: editor.editorRevision,
-                    document: nextDocument,
+                    result: {
+                      ok: true,
+                      sourceFormat: "example",
+                      value: nextDocument,
+                    },
                   });
                   editor.setBodyMarkdown(
                     serializeRecipeMarkdown(nextDocument),
@@ -1025,8 +1041,10 @@ export function Folio({ tabId, path }: FolioProps) {
                       beforeMutation={editor.saveNow}
                       onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
                       onDeleted={() => {
-                        closeTab(tabId);
-                        if (mobile) void navigate({ to: "/" });
+                        runWorkspaceTransition(() => {
+                          closeTab(tabId);
+                          if (mobile) void navigate({ to: "/" });
+                        });
                       }}
                     />
                   )}
@@ -1042,8 +1060,10 @@ export function Folio({ tabId, path }: FolioProps) {
                     }}
                     onDeleted={(source) => {
                       if (path === source || path.startsWith(`${source}/`)) {
-                        closeTab(tabId);
-                        if (mobile) void navigate({ to: "/" });
+                        runWorkspaceTransition(() => {
+                          closeTab(tabId);
+                          if (mobile) void navigate({ to: "/" });
+                        });
                       }
                     }}
                   />

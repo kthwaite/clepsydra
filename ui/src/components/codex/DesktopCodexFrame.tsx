@@ -18,7 +18,10 @@ import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
 import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
-import { useWorkspaceStore } from "#/store/workspace";
+import {
+  runWorkspaceTransition,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 /** Nav order + diegetic index numbers. */
 const NAV: ReadonlyArray<readonly [CodexView, string]> = [
@@ -65,17 +68,21 @@ export function DesktopCodexFrame({
         params: { slug: DEFAULT_DOC_SLUG },
       });
     } else if (target === "constellation") {
-      openTab("graph");
-      navigate({ to: "/workspace" });
+      runWorkspaceTransition(() => {
+        openTab("graph");
+        void navigate({ to: "/workspace" });
+      });
     } else if (target === "tasking") navigate({ to: "/tasking" });
     else if (target === "folio") {
-      const store = useWorkspaceStore.getState();
-      const firstPage = workspaceTabs.find((t) => t.type === "page");
-      // With no folio open, drop focus off any lingering graph tab so the
-      // workspace shows the FolioLauncher empty state rather than the graph.
-      if (firstPage) store.activateTab(firstPage.id);
-      else store.clearActiveTab();
-      navigate({ to: "/workspace" });
+      runWorkspaceTransition(() => {
+        const store = useWorkspaceStore.getState();
+        const firstPage = workspaceTabs.find((t) => t.type === "page");
+        // With no folio open, drop focus off any lingering graph tab so the
+        // workspace shows the FolioLauncher empty state rather than the graph.
+        if (firstPage) store.activateTab(firstPage.id);
+        else store.clearActiveTab();
+        void navigate({ to: "/workspace" });
+      });
     }
   };
 

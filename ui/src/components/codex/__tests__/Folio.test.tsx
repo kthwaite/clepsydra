@@ -18,6 +18,7 @@ import type { CustomEditor } from "#/editor/types";
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
 const {
   blockerState,
+  journalTodayState,
   mobileLayoutState,
   mountedSlateEditors,
   navigateMock,
@@ -36,6 +37,13 @@ const {
       reset?: () => void;
       proceed?: () => void;
     },
+  },
+  journalTodayState: {
+    data: null as null | {
+      path: string;
+      meta: { title: string | null };
+    },
+    isLoading: false,
   },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
@@ -154,7 +162,7 @@ vi.mock("#/editor/SlateEditor", () => ({
   },
 }));
 vi.mock("#/api/journal", () => ({
-  useJournalToday: () => ({ data: null, isLoading: false }),
+  useJournalToday: () => journalTodayState,
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
 }));
@@ -169,12 +177,15 @@ import {
   saveFolioRestoration,
 } from "#/store/folioRestoration";
 import { useWorkspaceStore } from "#/store/workspace";
+import { todayJournalPath } from "#/lib/journal";
 import { TabContent } from "#/components/TabContent";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
   blockerState.current = { status: "idle" };
   useBlockerMock.mockClear();
+  journalTodayState.data = null;
+  journalTodayState.isLoading = false;
   clearFolioRestoration("t1");
   mountedSlateEditors.length = 0;
   restorationFrames.length = 0;
@@ -520,6 +531,99 @@ describe("Folio raw Markdown mode", () => {
     expect(screen.getByRole("textbox", { name: "Page body" })).toBeVisible();
     expect(editor.onSlateChange).not.toHaveBeenCalled();
     expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("keeps an exact dirty raw draft recoverable when an encrypted Folio locks", async () => {
+    const user = userEvent.setup();
+    const plainEditor = {
+      ...editableEditor(),
+      encrypted: true,
+      encryptionState: { status: "plain" as const, body: "Editable body" },
+    };
+    usePageEditorMock.mockReturnValue(plainEditor);
+    const view = render(<Folio tabId="t1" path="notes/private.md" />);
+
+    expect(
+      screen.getByRole("button", { name: "Lock encrypted notes" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    const exactRaw = "Private raw draft stays recoverable  \n";
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: exactRaw },
+    });
+
+    usePageEditorMock.mockReturnValue({
+      ...plainEditor,
+      encryptionState: { status: "locked" as const },
+    });
+    view.rerender(<Folio tabId="t1" path="notes/private.md" />);
+
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      exactRaw,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Lock encrypted notes" }),
+    ).toBeNull();
+    const options = useBlockerMock.mock.calls.at(-1)?.[0] as {
+      shouldBlockFn: () => boolean;
+      enableBeforeUnload: boolean;
+    };
+    expect(options.shouldBlockFn()).toBe(true);
+    expect(options.enableBeforeUnload).toBe(true);
+  });
+
+  it("guards a today-draft retarget through Stay and consumes it once on Leave", async () => {
+    const user = userEvent.setup();
+    const draftPath = todayJournalPath();
+    const canonicalPath = "journals/archive/today.md";
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: draftPath, label: "Today" },
+      ],
+      activeTabId: "t1",
+    });
+    const view = render(<TabContent />);
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    const exactRaw = "Today draft before canonical retarget  \n";
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: exactRaw },
+    });
+
+    journalTodayState.data = {
+      path: canonicalPath,
+      meta: { title: "Today" },
+    };
+    view.rerender(<TabContent />);
+
+    expect(useWorkspaceStore.getState().tabs[0]?.path).toBe(draftPath);
+    expect(
+      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Stay" }));
+    expect(useWorkspaceStore.getState().tabs[0]?.path).toBe(draftPath);
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      exactRaw,
+    );
+
+    journalTodayState.data = {
+      path: canonicalPath,
+      meta: { title: "Today" },
+    };
+    view.rerender(<TabContent />);
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().tabs[0]?.path).toBe(canonicalPath),
+    );
+    expect(usePageEditorMock).toHaveBeenLastCalledWith(
+      canonicalPath,
+      undefined,
+    );
+    expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
   });
 
   it("retains exact raw text and reports a conversion diagnostic when Apply throws", async () => {

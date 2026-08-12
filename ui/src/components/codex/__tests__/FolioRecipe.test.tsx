@@ -261,6 +261,35 @@ describe("Folio recipe presentation", () => {
     );
   });
 
+  it("projects a failed raw Apply before stale structured recipe state can overwrite it", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    renderFolio(editor);
+
+    await user.click(screen.getByRole("radio", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Stale structured fields." },
+    });
+    editor.setBodyMarkdown.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    const authoredRaw = "Exact authored raw body without recipe sections.\n";
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: authoredRaw },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+    expect(editor.setBodyMarkdown).toHaveBeenCalledWith(authoredRaw);
+    expect(screen.queryByRole("textbox", { name: "Description" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Ingredient 1" })).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "recipe structure could not be read",
+    );
+    expect(editor.setBodyMarkdown).toHaveBeenCalledTimes(1);
+    expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(authoredRaw);
+  });
+
   it("rejects raw Apply if the recipe presentation is no longer editable", async () => {
     const user = userEvent.setup();
     const editor = pageEditor();
