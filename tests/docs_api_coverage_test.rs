@@ -57,10 +57,10 @@ fn documented_operations_by_tag(docs: &str) -> BTreeMap<&str, BTreeSet<&str>> {
     for line in docs.lines() {
         if let Some(tag) = line.strip_prefix("## ") {
             current_tag = Some(tag);
-        } else if line.starts_with("### `") {
-            if let Some(tag) = current_tag {
-                sections.entry(tag).or_default().insert(line);
-            }
+        } else if line.starts_with("### `")
+            && let Some(tag) = current_tag
+        {
+            sections.entry(tag).or_default().insert(line);
         }
     }
 
