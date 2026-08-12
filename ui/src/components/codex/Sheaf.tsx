@@ -18,7 +18,11 @@ import {
   sheafSegments,
 } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
-import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
+import {
+  runWorkspaceTransition,
+  type TabDescriptor,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 type SheafProps = {
   activeTabId: string | null;
@@ -86,10 +90,12 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   };
 
   const onActivate = (id: string) => {
-    clearOpenTimer();
-    setHovered(null);
-    activateTab(id);
-    navigate({ to: "/workspace" });
+    runWorkspaceTransition(() => {
+      clearOpenTimer();
+      setHovered(null);
+      activateTab(id);
+      void navigate({ to: "/workspace" });
+    });
   };
 
   const hoveredPath = hovered

@@ -1,6 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { useWorkspaceStore } from "#/store/workspace";
+import {
+  runWorkspaceTransition,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 export const Route = createFileRoute("/pages/$")({
   component: PageRedirect,
@@ -13,8 +16,10 @@ function PageRedirect() {
 
   useEffect(() => {
     if (path) {
-      openTab("page", path);
-      navigate({ to: "/workspace", replace: true });
+      runWorkspaceTransition(() => {
+        openTab("page", path);
+        void navigate({ to: "/workspace", replace: true });
+      });
     }
   }, [path, openTab, navigate]);
 

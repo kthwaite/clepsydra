@@ -8,7 +8,10 @@ import {
 import { useTheme } from "#/components/ThemeProvider";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
-import { useWorkspaceStore } from "#/store/workspace";
+import {
+  runWorkspaceTransition,
+  useWorkspaceStore,
+} from "#/store/workspace";
 
 type MobileRoot = Extract<
   CodexView,
@@ -52,8 +55,10 @@ export function MobileCodexFrame({
     } else if (root === "feeds") {
       navigate({ to: "/feeds" } as never);
     } else {
-      openTab("graph");
-      navigate({ to: "/workspace" });
+      runWorkspaceTransition(() => {
+        openTab("graph");
+        void navigate({ to: "/workspace" });
+      });
     }
   };
 

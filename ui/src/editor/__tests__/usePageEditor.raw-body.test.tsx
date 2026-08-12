@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { Descendant, Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ConvertModule from "../convert";
 import { usePageEditor } from "../usePageEditor";
 
 const {
@@ -9,6 +10,7 @@ const {
   encryptionActions,
   encryptionState,
   getIdentityMock,
+  markdownToSlateMock,
   mutateAsyncMock,
   recipientForIdentityMock,
   refetchPageMock,
@@ -34,6 +36,7 @@ const {
       },
     },
     getIdentityMock,
+    markdownToSlateMock: vi.fn(),
     mutateAsyncMock: vi.fn(),
     recipientForIdentityMock: vi.fn(),
     refetchPageMock: vi.fn(),
@@ -58,6 +61,15 @@ vi.mock("#/crypto/age", () => ({
   encryptMarkdown: encryptMarkdownMock,
   recipientForIdentity: recipientForIdentityMock,
 }));
+
+vi.mock("../convert", async (importOriginal) => {
+  const actual = await importOriginal<typeof ConvertModule>();
+  markdownToSlateMock.mockImplementation(actual.markdownToSlate);
+  return {
+    ...actual,
+    markdownToSlate: markdownToSlateMock,
+  };
+});
 
 interface MockPage {
   path: string;
@@ -198,6 +210,33 @@ describe("usePageEditor raw Markdown body", () => {
       save.resolve(makePage(RAW_BODY, "rev-b"));
       await savePromise;
     });
+  });
+
+  it("keeps the previously authored body as the save source when conversion fails", async () => {
+    const authoredBody = "previously authored body\n";
+    const failedRawBody = "failed raw body must not persist";
+    mutateAsyncMock.mockImplementation(async (request: UpdateRequest) =>
+      makePage(request.body.body as string, "rev-b"),
+    );
+    const { result } = renderHook(() => usePageEditor("notes/page.md"));
+
+    act(() => result.current.setBodyMarkdown(authoredBody));
+    markdownToSlateMock.mockImplementationOnce(() => {
+      throw new Error("Markdown conversion failed");
+    });
+
+    expect(() => {
+      act(() => result.current.setBodyMarkdown(failedRawBody));
+    }).toThrow("Markdown conversion failed");
+    expect(result.current.getPlaintext()).toBe(authoredBody);
+
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledOnce();
+    expect(mutateAsyncMock.mock.calls[0]?.[0].body.body).toBe(authoredBody);
+    expect(mutateAsyncMock.mock.calls[0]?.[0].body.body).not.toBe(failedRawBody);
   });
 
   it("queues a newer exact body written during an in-flight save", async () => {

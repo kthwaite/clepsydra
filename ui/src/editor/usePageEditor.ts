@@ -658,8 +658,9 @@ export function usePageEditor(
 
   const setBodyMarkdown = useCallback(
     (markdown: string) => {
+      const nextValue = markdownToSlate(markdown);
       bodyOverrideRef.current = markdown;
-      editorValueRef.current = markdownToSlate(markdown);
+      editorValueRef.current = nextValue;
       bodyEditGenRef.current += 1;
       scheduleSave();
     },

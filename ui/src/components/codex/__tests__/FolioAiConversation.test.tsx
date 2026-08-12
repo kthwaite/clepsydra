@@ -40,6 +40,7 @@ const {
 }));
 
 vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
@@ -297,8 +298,9 @@ function pageEditor(overrides: Record<string, unknown> = {}): EditorHarness {
     encrypted: false,
     encryptionState: { status: "plain", body },
     pageId: "conversation-1",
-    getPlaintext: vi.fn(),
+    getPlaintext: vi.fn(() => body),
     getRevision: vi.fn(() => "rev-1"),
+    setBodyMarkdown: vi.fn(),
     savedMarkdown: () => saved,
     ...overrides,
   };
@@ -368,6 +370,9 @@ describe("Folio AI conversation presentation", () => {
       screen.queryByRole("button", { name: "Manage attachments" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Manage paths" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
     expect(editor.setTitle).not.toHaveBeenCalled();
     expect(editor.setTags).not.toHaveBeenCalled();
     expect(editor.setAliases).not.toHaveBeenCalled();
@@ -386,6 +391,26 @@ describe("Folio AI conversation presentation", () => {
       screen.getByRole("button", { name: "Manage attachments" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Manage paths" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Raw Markdown" }),
+    ).toBeVisible();
+  });
+
+  it("does not expose an edit-to-Read transition while raw mode is active", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    renderFolio(editor);
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: `${canonicalConversationMarkdown}\n` },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
   });
 
   it("enables transcript role and action controls only in Edit", async () => {

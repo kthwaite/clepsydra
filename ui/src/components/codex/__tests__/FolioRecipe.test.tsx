@@ -32,6 +32,7 @@ const {
 }));
 
 vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
@@ -193,6 +194,9 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("radio", { name: "Read" })).toBeChecked();
     expect(screen.getByRole("region", { name: "Ingredients" })).toBeVisible();
     expect(screen.queryByTestId("slate-editor")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
   });
 
   it("switches to structured fields and writes exact canonical Markdown", async () => {
@@ -201,6 +205,9 @@ describe("Folio recipe presentation", () => {
     renderFolio(editor);
 
     await user.click(screen.getByRole("radio", { name: "Edit" }));
+    expect(
+      screen.getByRole("button", { name: "Raw Markdown" }),
+    ).toBeVisible();
     const description = screen.getByRole("textbox", { name: "Description" });
     fireEvent.change(description, { target: { value: "A deeper dish." } });
 
@@ -215,6 +222,97 @@ describe("Folio recipe presentation", () => {
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
       "A deeper dish.\n\nINGREDIENTS\n• one lemon\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nFinish with **pepper**.\n",
     );
+  });
+
+  it("projects a successful raw Apply into structured editing without a second body mutation", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    renderFolio(editor);
+
+    await user.click(screen.getByRole("radio", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Stale structured draft." },
+    });
+    editor.setBodyMarkdown.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    expect(screen.queryByRole("radio", { name: "Read" })).toBeNull();
+    const authoredRaw =
+      "Authored in raw mode.\n\nINGREDIENTS\n• two lemons\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nKeep this exact note.\n";
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: authoredRaw },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+    expect(editor.setBodyMarkdown).toHaveBeenCalledWith(authoredRaw);
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+      "Authored in raw mode.",
+    );
+    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
+      "two lemons",
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Structured after raw." },
+    });
+    expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
+      "Structured after raw.\n\nINGREDIENTS\n• two lemons\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nKeep this exact note.\n",
+    );
+  });
+
+  it("projects a failed raw Apply before stale structured recipe state can overwrite it", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    renderFolio(editor);
+
+    await user.click(screen.getByRole("radio", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "Stale structured fields." },
+    });
+    editor.setBodyMarkdown.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    const authoredRaw = "Exact authored raw body without recipe sections.\n";
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: authoredRaw },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+    expect(editor.setBodyMarkdown).toHaveBeenCalledWith(authoredRaw);
+    expect(screen.queryByRole("textbox", { name: "Description" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Ingredient 1" })).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "recipe structure could not be read",
+    );
+    expect(editor.setBodyMarkdown).toHaveBeenCalledTimes(1);
+    expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(authoredRaw);
+  });
+
+  it("rejects raw Apply if the recipe presentation is no longer editable", async () => {
+    const user = userEvent.setup();
+    const editor = pageEditor();
+    const rendered = renderFolio(editor);
+
+    await user.click(screen.getByRole("radio", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Keep this raw draft exactly.\n" },
+    });
+
+    const noLongerStructured = pageEditor({
+      bodyMarkdown: "No recipe sections remain.",
+    });
+    usePageEditorMock.mockReturnValue(noLongerStructured);
+    rendered.rerender(<Folio tabId="t1" path="recipes/lemon-pasta.md" />);
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(noLongerStructured.setBodyMarkdown).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Keep this raw draft exactly.\n",
+    );
+    expect(screen.getByText(/no longer editable/i)).toBeVisible();
   });
 
   it("keeps a new empty row available for input while omitting it from Markdown", async () => {
