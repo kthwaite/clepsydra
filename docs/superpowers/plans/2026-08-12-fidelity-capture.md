@@ -2948,3 +2948,241 @@ git commit -m "docs: describe the SingleFile capture pipeline"
 **Capture is slow and heavy.** SingleFile drives the page, forces lazy images, and waits. Captures will take seconds to tens of seconds. The queue, keepalive, per-request timeouts and badge phases were built for this and become load-bearing rather than precautionary.
 
 **Follow-on.** The viewer spec (`2026-08-12-archived-page-viewer-design.md`) is unblocked by this work and is a short plan once it lands. It must implement the `cas:` → `/api/vault/cas/` rewrite at serve time (deviation #5), and it must resolve the SVG question recorded in Task 9 Step 4.
+
+---
+
+## Task 11: Capture inside iframes
+
+**Sequencing: execute this after Task 8 and before Task 9.** Task 9 verifies the built bundles and does the manual capture, and it must see both content scripts.
+
+Task 7 set `removeFrames: false`, which tells SingleFile to walk the frame tree. The top frame's capture asks each child frame to identify itself over `postMessage`, and `content-frame-tree.js` answers — but only if it is running *in that frame*. We inject into the top frame only, so nothing answers: each child frame burns a 5000 ms `TIMEOUT_INIT_REQUEST_MESSAGE` and then serialises empty. Roughly five seconds added to any page carrying an embed, comment widget or consent frame, in exchange for nothing.
+
+This task makes `removeFrames: false` mean what it says.
+
+**Files:**
+- Create: `extension/src/content/frames.ts`
+- Modify: `extension/src/types/single-file-core.d.ts`
+- Modify: `extension/vite.config.ts`
+- Modify: `extension/src/lib/inject-capture.ts`
+- Test: `extension/src/lib/__tests__/inject-capture.test.ts` (new)
+
+**Interfaces:**
+- Consumes: `executeCaptureScript(tabId)`, unchanged in signature.
+- Produces: a second content-script bundle at `content/frames.js`, injected into every frame before the capture script runs in the top frame.
+
+**Verified mechanics** (checked against `single-file-core@1.5.84`, so the implementer does not have to):
+- `single-file-core/single-file-frames.js` re-exports `processors/frame-tree/content/content-frame-tree.js`, which calls `init()` at module scope. Importing it *is* the whole job — `init()` registers the `message` listener that answers the handshake.
+- Injecting into all frames also injects into the top frame, where Task 7's capture bundle already contains its own copy of the frame-tree code. **This is harmless.** The two bundles hold separate module state: the `frames.js` copy has no session registered, so its `INIT_RESPONSE_MESSAGE` branch is gated behind `sessions.get(message.sessionId)` and no-ops, and its `ACK` branch clears timeouts from its own empty maps. `event.stopPropagation()` does not suppress the sibling listener (that would need `stopImmediatePropagation`).
+- Child frames call `globalThis.stop()` on receiving the init request. That is intended: it freezes the frame for capture.
+
+- [ ] **Step 1: Write the failing tests**
+
+`inject-capture.ts` has no test today. It gains ordering and failure-tolerance behaviour worth pinning.
+
+```ts
+// extension/src/lib/__tests__/inject-capture.test.ts
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { executeCaptureScript } from "#/lib/inject-capture";
+
+interface Injection {
+	target: { tabId: number; allFrames?: boolean };
+	files: string[];
+}
+
+function stubScripting(impl?: (injection: Injection) => Promise<unknown>) {
+	const calls: Injection[] = [];
+	const executeScript = vi.fn(async (injection: Injection) => {
+		calls.push(injection);
+		return impl ? impl(injection) : [];
+	});
+	vi.stubGlobal("chrome", { scripting: { executeScript }, runtime: {}, tabs: {} });
+	return calls;
+}
+
+describe("executeCaptureScript", () => {
+	beforeEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("injects the frame responder into every frame", async () => {
+		const calls = stubScripting();
+
+		await executeCaptureScript(7);
+
+		expect(calls[0]).toEqual({
+			target: { tabId: 7, allFrames: true },
+			files: ["content/frames.js"],
+		});
+	});
+
+	it("injects the capture script into the top frame only", async () => {
+		const calls = stubScripting();
+
+		await executeCaptureScript(7);
+
+		expect(calls[1]).toEqual({ target: { tabId: 7 }, files: ["content/capture.js"] });
+		expect(calls[1].target.allFrames).toBeUndefined();
+	});
+
+	it("runs the responder before the capture", async () => {
+		// The responders must be listening before the top frame starts the
+		// handshake, or they miss the init request and we are back to paying the
+		// 5s timeout this task exists to remove.
+		const calls = stubScripting();
+
+		await executeCaptureScript(7);
+
+		expect(calls.map((c) => c.files[0])).toEqual([
+			"content/frames.js",
+			"content/capture.js",
+		]);
+	});
+
+	it("captures anyway when a frame cannot be scripted", async () => {
+		// A sandboxed or restricted frame is not a reason to abandon the page.
+		const calls = stubScripting(async (injection) => {
+			if (injection.files[0] === "content/frames.js") {
+				throw new Error("Cannot access contents of the frame");
+			}
+			return [];
+		});
+
+		await expect(executeCaptureScript(7)).resolves.toBeUndefined();
+		expect(calls.map((c) => c.files[0])).toContain("content/capture.js");
+	});
+
+	it("still rejects when the capture script itself cannot be injected", async () => {
+		// This one must propagate — the caller reports it to the user.
+		stubScripting(async (injection) => {
+			if (injection.files[0] === "content/capture.js") {
+				throw new Error("Cannot access a chrome:// URL");
+			}
+			return [];
+		});
+
+		await expect(executeCaptureScript(7)).rejects.toThrow(/chrome:\/\//);
+	});
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `bun run test inject-capture`
+Expected: FAIL — only one injection is recorded, so `calls[0]` is the capture script rather than the frame responder.
+
+- [ ] **Step 3: Create the frames content script**
+
+```ts
+// extension/src/content/frames.ts
+/**
+ * Injected into every frame, so SingleFile's frame-tree handshake has someone
+ * to answer.
+ *
+ * The top frame's capture asks each child frame to identify itself over
+ * postMessage. Without this responder present no frame replies, each one burns
+ * a 5s TIMEOUT_INIT_REQUEST_MESSAGE, and the iframe serialises empty anyway —
+ * five seconds per iframe-bearing page in exchange for nothing.
+ *
+ * Importing the module is the entire job: `content-frame-tree.js` calls `init()`
+ * at module scope, which registers the `message` listener.
+ *
+ * This also lands in the top frame, where the capture bundle already carries its
+ * own copy of the same code. That is harmless: the two bundles hold separate
+ * module state, so this copy has no session registered and its message branches
+ * no-op.
+ */
+import "single-file-core/single-file-frames.js";
+```
+
+Add to `extension/src/types/single-file-core.d.ts`:
+
+```ts
+declare module "single-file-core/single-file-frames.js";
+```
+
+Add `content/frames.ts` to `additionalInputs` in `extension/vite.config.ts`:
+
+```ts
+			additionalInputs: [
+				"content/capture.ts",
+				"content/frames.ts",
+				"public/icons/icon-128.png",
+			],
+```
+
+- [ ] **Step 4: Inject it**
+
+Rewrite `executeCaptureScript` in `extension/src/lib/inject-capture.ts`:
+
+```ts
+const FRAMES_SCRIPT = "content/frames.js";
+const CAPTURE_SCRIPT = "content/capture.js";
+
+/**
+ * Inject the frame responder everywhere, then the capture into the top frame.
+ *
+ * Order matters: the responders must be listening before the top frame starts
+ * SingleFile's handshake, or they miss the init request and each frame falls
+ * back to the 5s timeout.
+ */
+export async function executeCaptureScript(tabId: number): Promise<void> {
+	if (chrome.scripting?.executeScript) {
+		try {
+			await chrome.scripting.executeScript({
+				target: { tabId, allFrames: true },
+				files: [FRAMES_SCRIPT],
+			});
+		} catch {
+			// A frame we cannot script — sandboxed, or restricted by the page — is
+			// not a reason to abandon the capture. That frame simply will not be
+			// archived, exactly as before this task.
+		}
+		await chrome.scripting.executeScript({
+			target: { tabId },
+			files: [CAPTURE_SCRIPT],
+		});
+		return;
+	}
+
+	const legacyTabs = chrome.tabs as typeof chrome.tabs & LegacyTabsApi;
+	if (!legacyTabs.executeScript) {
+		throw new Error("scripting API unavailable");
+	}
+	await new Promise<void>((resolve) => {
+		legacyTabs.executeScript?.(tabId, { file: FRAMES_SCRIPT, allFrames: true }, () => {
+			// Read and discard lastError; a frame we cannot script is tolerable.
+			void lastError();
+			resolve();
+		});
+	});
+	await new Promise<void>((resolve, reject) => {
+		legacyTabs.executeScript?.(tabId, { file: CAPTURE_SCRIPT }, () => {
+			const message = lastError();
+			if (message) reject(new Error(message));
+			else resolve();
+		});
+	});
+}
+```
+
+Widen `LegacyTabsApi`'s `executeScript` details type to `{ file: string; allFrames?: boolean }`.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `bun run test inject-capture`, then `bun run test`, `bun run typecheck`, `bun run lint`.
+Expected: 5 new tests pass, whole suite green, typecheck and lint clean.
+
+- [ ] **Step 6: Verify the bundle**
+
+Run: `bun run build`
+Expected: `dist/content/frames.js` exists and is roughly 30–80 KB — it carries only the frame-tree processor, not the whole of SingleFile. If it is ~800 KB, the import pulled in the full library; report that rather than working around it.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add extension/src/content/frames.ts extension/src/lib/inject-capture.ts \
+        extension/src/lib/__tests__/inject-capture.test.ts \
+        extension/src/types/single-file-core.d.ts extension/vite.config.ts
+git commit -m "feat(extension): inject the frame responder so iframes are captured"
+```
