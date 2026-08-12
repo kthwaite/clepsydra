@@ -46,7 +46,7 @@ export function Select<T, M extends "single" | "multiple" = "single">({
           {label}
         </Label>
       )}
-      <Button className="w-full min-w-0 justify-between text-start">
+      <Button className="w-full min-w-0 justify-between text-start group-data-[invalid]:border-destructive data-[pressed]:bg-accent data-[pressed]:text-accent-foreground">
         <SelectValue className="min-w-0 flex-1 truncate text-sm normal-case tracking-normal data-[placeholder]:text-muted-foreground" />
         <ChevronDown
           aria-hidden

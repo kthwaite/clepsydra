@@ -22,7 +22,7 @@ describe("Checkbox", () => {
     expect(onChange).toHaveBeenCalledWith(true);
   });
 
-  it("renders selected, indeterminate, invalid, and disabled states", () => {
+  it("renders selected and indeterminate states", () => {
     const { rerender } = render(<Checkbox isSelected>Selected</Checkbox>);
     expect(screen.getByRole("checkbox", { name: "Selected" })).toBeChecked();
     rerender(<Checkbox isIndeterminate>Mixed</Checkbox>);
@@ -30,13 +30,38 @@ describe("Checkbox", () => {
       "aria-checked",
       "mixed",
     );
-    rerender(
+  });
+
+  it("associates an invalid error with the checkbox", () => {
+    render(
       <Checkbox isInvalid errorMessage="Required">
         Consent
       </Checkbox>,
     );
-    expect(screen.getByText("Required")).toBeVisible();
-    rerender(<Checkbox isDisabled>Locked</Checkbox>);
-    expect(screen.getByRole("checkbox", { name: "Locked" })).toBeDisabled();
+
+    const checkbox = screen.getByRole("checkbox", { name: "Consent" });
+    expect(checkbox).toHaveAttribute("aria-invalid", "true");
+    expect(checkbox).toHaveAccessibleDescription("Required");
+  });
+
+  it("does not call onChange for disabled pointer or keyboard interaction", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Checkbox isDisabled onChange={onChange}>
+        Locked
+      </Checkbox>,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Locked" });
+    expect(checkbox).toBeDisabled();
+
+    await user.click(checkbox);
+    expect(onChange).not.toHaveBeenCalled();
+
+    await user.tab();
+    expect(checkbox).not.toHaveFocus();
+    await user.keyboard(" ");
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

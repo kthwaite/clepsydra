@@ -90,17 +90,19 @@ export const Invalid: Story = {
 
 export const LongOptions: Story = {
   render: () => (
-    <Select label="Workspace" placeholder="Choose a workspace">
-      <SelectItem id="personal">
-        Personal notes and reference material
-      </SelectItem>
-      <SelectItem id="research">
-        Research archive with a deliberately long descriptive name
-      </SelectItem>
-      <SelectItem id="shared">
-        Shared team knowledge base for active projects
-      </SelectItem>
-    </Select>
+    <div className="w-64">
+      <Select label="Workspace" placeholder="Choose a workspace">
+        <SelectItem id="personal">
+          Personal notes and reference material
+        </SelectItem>
+        <SelectItem id="research">
+          Research archive with a deliberately long descriptive name
+        </SelectItem>
+        <SelectItem id="shared">
+          Shared team knowledge base for active projects
+        </SelectItem>
+      </Select>
+    </div>
   ),
 };
 

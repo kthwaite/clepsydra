@@ -64,6 +64,24 @@ describe("Select", () => {
     expect(trigger).toHaveTextContent("Done");
   });
 
+  it("initializes and updates an uncontrolled default selection", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select label="Status" defaultValue="done">
+        <SelectItem id="unread">Unread</SelectItem>
+        <SelectItem id="done">Done</SelectItem>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole("button", { name: /Status/ });
+    expect(trigger).toHaveTextContent("Done");
+
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Unread" }));
+
+    expect(trigger).toHaveTextContent("Unread");
+  });
+
   it("selects the first option with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onSelectionChange = vi.fn();
@@ -75,7 +93,8 @@ describe("Select", () => {
     );
 
     const trigger = screen.getByRole("button", { name: /Status/ });
-    trigger.focus();
+    await user.tab();
+    expect(trigger).toHaveFocus();
     await user.keyboard("{ArrowDown}{Enter}");
 
     expect(onSelectionChange).toHaveBeenCalledWith("unread");
@@ -112,6 +131,27 @@ describe("Select", () => {
 
     expect(onSelectionChange).toHaveBeenCalledWith("b");
     expect(trigger).toHaveTextContent("Beta");
+  });
+
+  it("exposes invalid and pressed trigger presentation states", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select label="Status" isInvalid errorMessage="Required">
+        <SelectItem id="done">Done</SelectItem>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole("button", { name: /Status/ });
+    expect(trigger.closest(".group")).toHaveAttribute("data-invalid", "true");
+    expect(trigger).toHaveClass(
+      "group-data-[invalid]:border-destructive",
+      "data-[pressed]:bg-accent",
+      "data-[pressed]:text-accent-foreground",
+    );
+
+    await user.pointer({ target: trigger, keys: "[MouseLeft>]" });
+    expect(trigger).toHaveAttribute("data-pressed", "true");
+    await user.pointer({ target: trigger, keys: "[/MouseLeft]" });
   });
 
   it("does not open when disabled", async () => {
