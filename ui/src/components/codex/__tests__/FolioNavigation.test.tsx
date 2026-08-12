@@ -15,7 +15,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  type MutableRefObject,
+  type RefObject,
   StrictMode,
   useEffect,
   useMemo,
@@ -194,7 +194,7 @@ vi.mock("#/editor/SlateEditor", () => ({
     initialValue: Descendant[];
     onChange: (value: Descendant[], editor: Editor) => void;
     readOnly?: boolean;
-    editorRef?: MutableRefObject<CustomEditor | null>;
+    editorRef?: RefObject<CustomEditor | null>;
   }) => {
     const editor = useMemo(() => {
       editorMountCount.current += 1;

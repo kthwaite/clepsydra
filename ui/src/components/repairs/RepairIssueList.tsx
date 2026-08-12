@@ -1,4 +1,4 @@
-import type { MutableRefObject, RefObject } from "react";
+import type { RefObject } from "react";
 import type { ReferenceIssue } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
@@ -25,7 +25,7 @@ export interface RepairIssueListProps {
   issues: ReferenceIssue[];
   selectedFingerprint: string | null;
   onSelect: (fingerprint: string) => void;
-  rowRefs: MutableRefObject<Map<string, HTMLButtonElement>>;
+  rowRefs: RefObject<Map<string, HTMLButtonElement>>;
   detailRef: RefObject<HTMLElement | null>;
 }
 
@@ -61,11 +61,7 @@ export function RepairIssueList({
   }
 
   return (
-    <ul
-      aria-label="Reference issues"
-      className="divide-y divide-rule"
-      role="list"
-    >
+    <ul aria-label="Reference issues" className="divide-y divide-rule">
       {issues.map((issue, index) => {
         const isSelected = selectedFingerprint === issue.fingerprint;
         const actionable = issue.actions.some(

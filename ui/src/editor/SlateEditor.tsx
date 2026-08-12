@@ -1,5 +1,5 @@
 import {
-  type MutableRefObject,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -138,7 +138,7 @@ export interface SlateEditorProps {
   insertionRequest?: { id: number; markdown: string } | null;
   onInsertionHandled?: (id: number) => void;
   readOnly?: boolean;
-  editorRef?: MutableRefObject<CustomEditor | null>;
+  editorRef?: RefObject<CustomEditor | null>;
 }
 
 interface ComboboxTrigger {
