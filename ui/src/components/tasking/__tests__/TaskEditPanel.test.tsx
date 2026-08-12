@@ -784,6 +784,49 @@ describe("TaskEditPanel — scrim and escape close", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Focus containment
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TaskEditPanel — focus containment", () => {
+  it("keeps Tab focus contained within the panel even past its focusable count", async () => {
+    // HELD_TASK renders the hold-reason input too, maximizing focusable count.
+    wrap({ task: HELD_TASK });
+    const panel = screen.getByTestId("edit-panel");
+
+    // Tab far more times than the panel has focusable elements — containment
+    // must wrap focus back inside rather than letting it escape to <body>.
+    for (let i = 0; i < 40; i++) {
+      await userEvent.tab();
+      expect(panel.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it("restores focus to the opener element when the panel unmounts", async () => {
+    const opener = document.createElement("button");
+    opener.textContent = "open panel";
+    document.body.appendChild(opener);
+    opener.focus();
+    expect(document.activeElement).toBe(opener);
+
+    const { unmount } = wrap();
+    // Opening the panel must move focus into it, off the opener.
+    expect(document.activeElement).not.toBe(opener);
+
+    await act(async () => {
+      unmount();
+    });
+
+    // FocusScope's restoreFocus schedules the actual .focus() call inside a
+    // requestAnimationFrame (only fires once focus has fallen through to
+    // <body>), so the assertion must poll rather than check synchronously.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+    opener.remove();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // Dossier link
 // ══════════════════════════════════════════════════════════════════════════════
 

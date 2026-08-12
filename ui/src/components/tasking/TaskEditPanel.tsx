@@ -8,10 +8,11 @@
  *
  * A11y deviation from the house react-aria Dialog: the right-dock layout is
  * absolutely positioned inside the board body (not a centered portal overlay),
- * so the RAC ModalOverlay/Modal primitives don't fit. We hand-roll the basics
- * instead: role=dialog + aria-modal, Escape-to-close, focus moved onto the
- * panel container (tabIndex={-1}) on open, and focus restored to the
- * previously-focused element on close.
+ * so the RAC ModalOverlay/Modal primitives don't fit. We hand-roll role=dialog
+ * + aria-modal and an Escape-to-close listener, but focus containment and
+ * restore are delegated to react-aria's `FocusScope` (contain + restoreFocus
+ * + autoFocus) wrapping the panel — it traps Tab inside the panel while open
+ * and restores focus to the previously-focused element on close.
  *
  * All edits are sent as optimistic PATCHes:
  *   - Immediate: disposition (status), priority, operation select, cycle select,
@@ -33,6 +34,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FocusScope } from "react-aria";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useDeleteTask, usePatchTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
@@ -230,17 +232,10 @@ export function TaskEditPanel({
     }
   }, [needsFocus]);
 
-  // Hand-rolled focus handling (see header comment): move focus onto the
-  // panel on open, restore it to the previously-focused element on close.
+  // Focus containment and restore are handled by the FocusScope wrapping the
+  // panel below (see header comment); panelRef remains for its tabIndex={-1}
+  // fallback focus target.
   const panelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    panelRef.current?.focus();
-    return () => previouslyFocused?.focus();
-  }, []);
 
   // Immediate patch helper
   const patchNow = useCallback(
@@ -392,305 +387,307 @@ export function TaskEditPanel({
       />
 
       {/* Panel */}
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="absolute bottom-0 right-0 top-0 z-50 flex w-[340px] max-w-[92%] flex-col bg-[var(--bg-2)] border-l border-[var(--ink-3)] outline-none"
-        style={{ boxShadow: "-16px 0 40px rgba(0,0,0,0.45)" }}
-        onClick={(e) => e.stopPropagation()}
-        data-testid="edit-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Edit Tasking"
-      >
-        {/* Panel header */}
-        <div className="relative flex items-center gap-[8px] bg-[var(--bg)] px-[12px] py-[10px] pl-[16px] border-b border-[var(--rule)]">
-          {/* Priority bar */}
-          <span
-            className="absolute bottom-0 left-0 top-0 w-[3px]"
-            style={{ background: barColor }}
-            aria-hidden
-          />
-          <span
-            className="cl-mono text-[var(--fs-s)] tracking-[0.06em] text-[var(--ink)] font-variant-numeric"
-            data-testid="edit-panel-code"
-          >
-            {task.code}
-          </span>
-          <span
-            className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
-            style={{ color: priTextColor, borderColor: priTextColor }}
-            data-testid="edit-panel-priority"
-          >
-            {task.priority}
-          </span>
-          <span
-            className="cl-mono ml-auto border border-[var(--rule)] px-[5px] py-0 text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-3)]"
-            data-testid="edit-panel-op"
-          >
-            {opCode}
-          </span>
-          <button
-            type="button"
-            className="cl-mono inline-flex h-[22px] w-[22px] items-center justify-center border border-[var(--rule)] text-[13px] text-[var(--ink-3)] cursor-pointer hover:border-[var(--hot)] hover:text-[var(--hot)]"
-            onClick={onClose}
-            data-testid="edit-panel-close"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Panel body */}
-        <div className="flex flex-1 flex-col gap-[13px] overflow-y-auto p-[14px_12px]">
-          {/* TITLE */}
-          <EdField label="TASKING / TITLE">
-            <textarea
-              className="cl-mono w-full resize-none border border-[var(--rule)] bg-transparent px-[9px] py-[7px] text-[var(--fs-s)] font-semibold uppercase tracking-[0.02em] text-[var(--ink)] leading-[1.3] outline-none focus:border-[var(--hot)]"
-              rows={2}
-              value={titleVal}
-              onChange={(e) => setTitleVal(e.target.value)}
-              data-testid="edit-panel-title"
+      <FocusScope contain restoreFocus autoFocus>
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="absolute bottom-0 right-0 top-0 z-50 flex w-[340px] max-w-[92%] flex-col bg-[var(--bg-2)] border-l border-[var(--ink-3)] outline-none"
+          style={{ boxShadow: "-16px 0 40px rgba(0,0,0,0.45)" }}
+          onClick={(e) => e.stopPropagation()}
+          data-testid="edit-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit Tasking"
+        >
+          {/* Panel header */}
+          <div className="relative flex items-center gap-[8px] bg-[var(--bg)] px-[12px] py-[10px] pl-[16px] border-b border-[var(--rule)]">
+            {/* Priority bar */}
+            <span
+              className="absolute bottom-0 left-0 top-0 w-[3px]"
+              style={{ background: barColor }}
+              aria-hidden
             />
-          </EdField>
-
-          {/* DISPOSITION */}
-          <EdField label="DISPOSITION">
-            <DispositionRow
-              value={task.status}
-              onChange={(colId) => patchNow({ status: colId })}
-              testIdPrefix="edit-panel"
-            />
-          </EdField>
-
-          {/* PRIORITY */}
-          <EdField label="PRIORITY">
-            <PriorityRow
-              value={task.priority}
-              onChange={(p) => patchNow({ priority: p })}
-              testIdPrefix="edit-panel"
-            />
-          </EdField>
-
-          {/* OPERATION + CYCLE */}
-          <div className="grid grid-cols-2 gap-[12px]">
-            <EdField label="OPERATION">
-              <select
-                className={SELECT_CLS}
-                value={task.project ?? ""}
-                onChange={(e) =>
-                  /* empty string is the sentinel for clear → UNFILED */
-                  patchNow({ project: e.target.value })
-                }
-                data-testid="edit-panel-operation"
-              >
-                <option value="">UNFILED</option>
-                {assignableOps.map((op) => (
-                  <option key={op.id} value={opKey(op)}>
-                    {op.code}
-                  </option>
-                ))}
-              </select>
-            </EdField>
-            <EdField label="CYCLE">
-              <select
-                className={SELECT_CLS}
-                value={task.cycle ?? "BACKLOG"}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  /* BACKLOG → send null to clear cycle */
-                  patchNow({ cycle: v === "BACKLOG" ? null : v });
-                }}
-                data-testid="edit-panel-cycle"
-              >
-                <option value="BACKLOG">BACKLOG</option>
-                {selectableCycles.map((c) => (
-                  <option key={c.id} value={c.code}>
-                    {c.code} ({c.state})
-                  </option>
-                ))}
-              </select>
-            </EdField>
+            <span
+              className="cl-mono text-[var(--fs-s)] tracking-[0.06em] text-[var(--ink)] font-variant-numeric"
+              data-testid="edit-panel-code"
+            >
+              {task.code}
+            </span>
+            <span
+              className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
+              style={{ color: priTextColor, borderColor: priTextColor }}
+              data-testid="edit-panel-priority"
+            >
+              {task.priority}
+            </span>
+            <span
+              className="cl-mono ml-auto border border-[var(--rule)] px-[5px] py-0 text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-3)]"
+              data-testid="edit-panel-op"
+            >
+              {opCode}
+            </span>
+            <button
+              type="button"
+              className="cl-mono inline-flex h-[22px] w-[22px] items-center justify-center border border-[var(--rule)] text-[13px] text-[var(--ink-3)] cursor-pointer hover:border-[var(--hot)] hover:text-[var(--hot)]"
+              onClick={onClose}
+              data-testid="edit-panel-close"
+              aria-label="Close"
+            >
+              ✕
+            </button>
           </div>
 
-          {/* OPERATOR / EST */}
-          <div className="grid grid-cols-2 gap-[12px]">
-            <EdField label="OPERATOR">
-              <input
-                type="text"
-                className={INPUT_CLS}
-                value={assigneeVal}
-                onChange={(e) => setAssigneeVal(e.target.value)}
-                data-testid="edit-panel-assignee"
+          {/* Panel body */}
+          <div className="flex flex-1 flex-col gap-[13px] overflow-y-auto p-[14px_12px]">
+            {/* TITLE */}
+            <EdField label="TASKING / TITLE">
+              <textarea
+                className="cl-mono w-full resize-none border border-[var(--rule)] bg-transparent px-[9px] py-[7px] text-[var(--fs-s)] font-semibold uppercase tracking-[0.02em] text-[var(--ink)] leading-[1.3] outline-none focus:border-[var(--hot)]"
+                rows={2}
+                value={titleVal}
+                onChange={(e) => setTitleVal(e.target.value)}
+                data-testid="edit-panel-title"
               />
             </EdField>
-            <EdField label="EST">
-              <input
-                type="text"
-                className={INPUT_CLS}
-                value={estimateVal}
-                onChange={(e) => setEstimateVal(e.target.value)}
-                data-testid="edit-panel-estimate"
-              />
-            </EdField>
-          </div>
 
-          {/* START / DUE */}
-          <div className="grid grid-cols-2 gap-[12px]">
-            <EdField label="START" hint="YYYY-MM-DD">
-              <input
-                type="date"
-                className={INPUT_CLS}
-                value={startVal}
-                onChange={(e) => setStartVal(e.target.value)}
-                data-testid="edit-panel-start"
+            {/* DISPOSITION */}
+            <EdField label="DISPOSITION">
+              <DispositionRow
+                value={task.status}
+                onChange={(colId) => patchNow({ status: colId })}
+                testIdPrefix="edit-panel"
               />
             </EdField>
-            <EdField label="DUE" hint="YYYY-MM-DD">
-              <input
-                type="date"
-                className={INPUT_CLS}
-                value={dueVal}
-                onChange={(e) => setDueVal(e.target.value)}
-                data-testid="edit-panel-due"
-              />
-            </EdField>
-          </div>
 
-          {/* CHECKLIST — read-only (plan decision 7).
-              The markdown body is the source of truth for checklist items.
-              We show progress + an "OPEN PAGE →" affordance. */}
-          <EdField
-            label="CHECKLIST"
-            hint={total ? `${done} / ${total} done` : "none"}
-          >
-            <div className="flex flex-col gap-[8px]">
-              {/* Progress bar */}
-              <ChecklistBar
-                percent={pct}
-                isComplete={isComplete}
-                className="h-[6px] w-full"
-                indicatorTestId="edit-panel-checklist-bar"
+            {/* PRIORITY */}
+            <EdField label="PRIORITY">
+              <PriorityRow
+                value={task.priority}
+                onChange={(p) => patchNow({ priority: p })}
+                testIdPrefix="edit-panel"
               />
-              {/* Open page link */}
-              <button
-                type="button"
-                className="cl-btn self-start text-[var(--fs-xs)]"
-                onClick={() => onOpenPage?.(task.path)}
-                data-testid="edit-panel-open-page"
-              >
-                OPEN PAGE →
-              </button>
+            </EdField>
+
+            {/* OPERATION + CYCLE */}
+            <div className="grid grid-cols-2 gap-[12px]">
+              <EdField label="OPERATION">
+                <select
+                  className={SELECT_CLS}
+                  value={task.project ?? ""}
+                  onChange={(e) =>
+                    /* empty string is the sentinel for clear → UNFILED */
+                    patchNow({ project: e.target.value })
+                  }
+                  data-testid="edit-panel-operation"
+                >
+                  <option value="">UNFILED</option>
+                  {assignableOps.map((op) => (
+                    <option key={op.id} value={opKey(op)}>
+                      {op.code}
+                    </option>
+                  ))}
+                </select>
+              </EdField>
+              <EdField label="CYCLE">
+                <select
+                  className={SELECT_CLS}
+                  value={task.cycle ?? "BACKLOG"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    /* BACKLOG → send null to clear cycle */
+                    patchNow({ cycle: v === "BACKLOG" ? null : v });
+                  }}
+                  data-testid="edit-panel-cycle"
+                >
+                  <option value="BACKLOG">BACKLOG</option>
+                  {selectableCycles.map((c) => (
+                    <option key={c.id} value={c.code}>
+                      {c.code} ({c.state})
+                    </option>
+                  ))}
+                </select>
+              </EdField>
             </div>
-          </EdField>
 
-          {/* TAGS */}
-          <EdField label="TAGS" hint="comma-sep">
-            <input
-              type="text"
-              className={INPUT_CLS}
-              value={tagsVal}
-              onChange={(e) => setTagsVal(e.target.value)}
-              data-testid="edit-panel-tags"
-            />
-          </EdField>
-
-          {/* HOLD / BLOCKER */}
-          <EdField label="HOLD / BLOCKER">
-            <div className="flex flex-col gap-[7px]">
-              <button
-                type="button"
-                className={`${RADIO_CLS_BASE} w-full`}
-                style={
-                  task.hold
-                    ? {
-                        background: "var(--hot)",
-                        borderColor: "var(--hot)",
-                        color: "#000",
-                      }
-                    : undefined
-                }
-                onClick={() => {
-                  if (!task.hold) focusReasonOnHold.current = true;
-                  patchNow({
-                    hold: task.hold ? null : "BLOCKED",
-                  });
-                }}
-                data-testid="edit-panel-hold-toggle"
-              >
-                {task.hold ? "▲ ON HOLD" : "ACTIVE"}
-              </button>
-              {task.hold && (
+            {/* OPERATOR / EST */}
+            <div className="grid grid-cols-2 gap-[12px]">
+              <EdField label="OPERATOR">
                 <input
-                  ref={holdReasonRef}
                   type="text"
                   className={INPUT_CLS}
-                  value={holdReason}
-                  onChange={(e) => setHoldReason(e.target.value)}
-                  data-testid="edit-panel-hold-reason"
+                  value={assigneeVal}
+                  onChange={(e) => setAssigneeVal(e.target.value)}
+                  data-testid="edit-panel-assignee"
                 />
-              )}
+              </EdField>
+              <EdField label="EST">
+                <input
+                  type="text"
+                  className={INPUT_CLS}
+                  value={estimateVal}
+                  onChange={(e) => setEstimateVal(e.target.value)}
+                  data-testid="edit-panel-estimate"
+                />
+              </EdField>
             </div>
-          </EdField>
 
-          {/* DOSSIER LINK */}
-          <EdField label="DOSSIER LINK" hint="optional">
-            <div className="flex gap-[8px]">
-              <input
-                type="text"
-                className={`${INPUT_CLS} flex-1`}
-                placeholder="[[dossier]]"
-                value={linkVal}
-                onChange={(e) => setLinkVal(e.target.value)}
-                data-testid="edit-panel-link"
-              />
-              {task.link && (
+            {/* START / DUE */}
+            <div className="grid grid-cols-2 gap-[12px]">
+              <EdField label="START" hint="YYYY-MM-DD">
+                <input
+                  type="date"
+                  className={INPUT_CLS}
+                  value={startVal}
+                  onChange={(e) => setStartVal(e.target.value)}
+                  data-testid="edit-panel-start"
+                />
+              </EdField>
+              <EdField label="DUE" hint="YYYY-MM-DD">
+                <input
+                  type="date"
+                  className={INPUT_CLS}
+                  value={dueVal}
+                  onChange={(e) => setDueVal(e.target.value)}
+                  data-testid="edit-panel-due"
+                />
+              </EdField>
+            </div>
+
+            {/* CHECKLIST — read-only (plan decision 7).
+              The markdown body is the source of truth for checklist items.
+              We show progress + an "OPEN PAGE →" affordance. */}
+            <EdField
+              label="CHECKLIST"
+              hint={total ? `${done} / ${total} done` : "none"}
+            >
+              <div className="flex flex-col gap-[8px]">
+                {/* Progress bar */}
+                <ChecklistBar
+                  percent={pct}
+                  isComplete={isComplete}
+                  className="h-[6px] w-full"
+                  indicatorTestId="edit-panel-checklist-bar"
+                />
+                {/* Open page link */}
                 <button
                   type="button"
-                  className="cl-btn whitespace-nowrap"
-                  onClick={() => onOpenDossier?.(task.link!)}
-                  data-testid="edit-panel-open-dossier"
+                  className="cl-btn self-start text-[var(--fs-xs)]"
+                  onClick={() => onOpenPage?.(task.path)}
+                  data-testid="edit-panel-open-page"
                 >
-                  OPEN →
+                  OPEN PAGE →
                 </button>
-              )}
-            </div>
-          </EdField>
-        </div>
+              </div>
+            </EdField>
 
-        {/* Footer — leaving it disarms a pending destroy */}
-        <div
-          className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg)] px-[12px] py-[10px]"
-          onPointerLeave={() => {
-            if (destroying) disarmDestroy();
-          }}
-          data-testid="edit-panel-foot"
-        >
-          {/* Two-step destroy */}
-          {destroying ? (
-            <button
-              type="button"
-              className="cl-mono cursor-pointer border border-[var(--hot)] bg-[var(--hot)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[#000]"
-              onClick={confirmDestroy}
-              data-testid="edit-panel-destroy-confirm"
-            >
-              CONFIRM DESTROY?
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="cl-mono cursor-pointer border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-[background,color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:bg-[var(--hot)] hover:text-[#000]"
-              onClick={armDestroy}
-              data-testid="edit-panel-destroy"
-            >
-              ✕ DESTROY
-            </button>
-          )}
-          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-4)]">
-            EDITS AUTO-SEALED
-          </span>
+            {/* TAGS */}
+            <EdField label="TAGS" hint="comma-sep">
+              <input
+                type="text"
+                className={INPUT_CLS}
+                value={tagsVal}
+                onChange={(e) => setTagsVal(e.target.value)}
+                data-testid="edit-panel-tags"
+              />
+            </EdField>
+
+            {/* HOLD / BLOCKER */}
+            <EdField label="HOLD / BLOCKER">
+              <div className="flex flex-col gap-[7px]">
+                <button
+                  type="button"
+                  className={`${RADIO_CLS_BASE} w-full`}
+                  style={
+                    task.hold
+                      ? {
+                          background: "var(--hot)",
+                          borderColor: "var(--hot)",
+                          color: "#000",
+                        }
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (!task.hold) focusReasonOnHold.current = true;
+                    patchNow({
+                      hold: task.hold ? null : "BLOCKED",
+                    });
+                  }}
+                  data-testid="edit-panel-hold-toggle"
+                >
+                  {task.hold ? "▲ ON HOLD" : "ACTIVE"}
+                </button>
+                {task.hold && (
+                  <input
+                    ref={holdReasonRef}
+                    type="text"
+                    className={INPUT_CLS}
+                    value={holdReason}
+                    onChange={(e) => setHoldReason(e.target.value)}
+                    data-testid="edit-panel-hold-reason"
+                  />
+                )}
+              </div>
+            </EdField>
+
+            {/* DOSSIER LINK */}
+            <EdField label="DOSSIER LINK" hint="optional">
+              <div className="flex gap-[8px]">
+                <input
+                  type="text"
+                  className={`${INPUT_CLS} flex-1`}
+                  placeholder="[[dossier]]"
+                  value={linkVal}
+                  onChange={(e) => setLinkVal(e.target.value)}
+                  data-testid="edit-panel-link"
+                />
+                {task.link && (
+                  <button
+                    type="button"
+                    className="cl-btn whitespace-nowrap"
+                    onClick={() => onOpenDossier?.(task.link!)}
+                    data-testid="edit-panel-open-dossier"
+                  >
+                    OPEN →
+                  </button>
+                )}
+              </div>
+            </EdField>
+          </div>
+
+          {/* Footer — leaving it disarms a pending destroy */}
+          <div
+            className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg)] px-[12px] py-[10px]"
+            onPointerLeave={() => {
+              if (destroying) disarmDestroy();
+            }}
+            data-testid="edit-panel-foot"
+          >
+            {/* Two-step destroy */}
+            {destroying ? (
+              <button
+                type="button"
+                className="cl-mono cursor-pointer border border-[var(--hot)] bg-[var(--hot)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[#000]"
+                onClick={confirmDestroy}
+                data-testid="edit-panel-destroy-confirm"
+              >
+                CONFIRM DESTROY?
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="cl-mono cursor-pointer border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-[background,color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:bg-[var(--hot)] hover:text-[#000]"
+                onClick={armDestroy}
+                data-testid="edit-panel-destroy"
+              >
+                ✕ DESTROY
+              </button>
+            )}
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-4)]">
+              EDITS AUTO-SEALED
+            </span>
+          </div>
         </div>
-      </div>
+      </FocusScope>
     </>
   );
 }
