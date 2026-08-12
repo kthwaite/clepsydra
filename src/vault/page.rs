@@ -44,6 +44,11 @@ pub struct PageMeta {
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
     pub encryption: Option<EncryptionMeta>,
+    /// Explicit write-protection for the page body. `None` defers to the
+    /// kind's default (see `Kind::readonly_by_default`), so archived pages are
+    /// protected without every one of them carrying the flag, and any page can
+    /// opt in or out by declaring it.
+    pub readonly: Option<bool>,
     pub extra: ExtraMap,
 }
 
@@ -58,6 +63,7 @@ impl PageMeta {
             aliases: Vec::new(),
             kind: None,
             project: None,
+            readonly: None,
             created_at: Some(now),
             updated_at: Some(now),
             encryption: None,
@@ -102,6 +108,9 @@ impl Serialize for PageMeta {
         }
         if let Some(encryption) = &self.encryption {
             map.serialize_entry("encryption", encryption)?;
+        }
+        if let Some(readonly) = &self.readonly {
+            map.serialize_entry("readonly", readonly)?;
         }
         for (key, value) in &self.extra {
             map.serialize_entry(key, &toml_value_to_json(value))?;
@@ -207,6 +216,16 @@ pub fn body_offset(content: &str) -> usize {
 // ---------------------------------------------------------------------------
 // TOML field extraction
 // ---------------------------------------------------------------------------
+
+fn take_bool(table: &mut toml::Table, key: &str) -> Result<Option<bool>, FrontmatterError> {
+    match table.remove(key) {
+        None => Ok(None),
+        Some(toml::Value::Boolean(value)) => Ok(Some(value)),
+        Some(_) => Err(FrontmatterError::InvalidField(format!(
+            "{key} must be a boolean"
+        ))),
+    }
+}
 
 fn take_string(
     table: &mut toml::Table,
@@ -337,6 +356,7 @@ fn meta_from_table(mut table: toml::Table) -> Result<(PageMeta, bool), Frontmatt
     let created_at = take_timestamp(&mut table, "created_at")?;
     let updated_at = take_timestamp(&mut table, "updated_at")?;
     let encryption = take_encryption(&mut table)?;
+    let readonly = take_bool(&mut table, "readonly")?;
 
     Ok((
         PageMeta {
@@ -349,6 +369,7 @@ fn meta_from_table(mut table: toml::Table) -> Result<(PageMeta, bool), Frontmatt
             created_at,
             updated_at,
             encryption,
+            readonly,
             extra: table,
         },
         id_generated,
@@ -513,6 +534,9 @@ pub fn write_page_content(meta: &PageMeta, body: &str) -> String {
     }
     if let Some(updated_at) = &meta.updated_at {
         system.insert("updated_at".into(), chrono_to_toml_datetime(updated_at));
+    }
+    if let Some(readonly) = meta.readonly {
+        system.insert("readonly".into(), toml::Value::Boolean(readonly));
     }
 
     let mut toml = toml::to_string(&system).expect("PageMeta system fields should serialize");
@@ -866,4 +890,22 @@ mod kind_field_tests {
         assert_eq!(meta.kind, None); // not consumed as a page Kind
         assert!(meta.extra.contains_key("kind")); // stays in the extras bucket
     }
+}
+
+/// Whether this page's body is write-protected.
+///
+/// An explicit `readonly =` in the frontmatter always wins; otherwise the
+/// page's resolved kind decides. Declared *or* inferred kinds count, so a page
+/// sitting in `archive/` is protected even before its kind is written out.
+pub fn body_is_protected(path: &str, meta: &PageMeta) -> bool {
+    if let Some(readonly) = meta.readonly {
+        return readonly;
+    }
+    let (kind, _) = crate::vault::kind::resolve(path, meta.kind);
+    kind.readonly_by_default()
+}
+
+/// The body portion of a stored page, i.e. everything after the frontmatter.
+pub fn body_of(content: &str) -> &str {
+    &content[body_offset(content)..]
 }

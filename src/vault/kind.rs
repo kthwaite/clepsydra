@@ -140,6 +140,19 @@ impl Kind {
     }
 }
 
+impl Kind {
+    /// Whether pages of this kind protect their body from edits unless the
+    /// page says otherwise.
+    ///
+    /// Only archives do. Their body is generated from a captured snapshot and
+    /// `archive.content_hash` in the frontmatter claims to describe it; editing
+    /// the body silently makes that claim false. Metadata stays editable — an
+    /// archive still needs tagging and filing like any other page.
+    pub const fn readonly_by_default(self) -> bool {
+        matches!(self, Kind::Archive)
+    }
+}
+
 /// Whether `tag` is the computed classification for `kind`.
 pub fn is_computed_tag(kind: Kind, tag: &str) -> bool {
     tag.trim().eq_ignore_ascii_case(kind.computed_tag())

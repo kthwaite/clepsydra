@@ -2293,6 +2293,12 @@ export interface components {
             meta: components["schemas"]["PageMetaResponse"];
             path: string;
             project?: string | null;
+            /**
+             * @description Effective body write-protection: the page's `readonly` if declared,
+             *     otherwise its kind's default. Clients should render a protected body
+             *     non-editable; the server rejects the write regardless.
+             */
+            readonly: boolean;
             revision: string;
         };
         /** @description OpenAPI schema for page metadata exposed in `PageDetail`. */
@@ -2713,6 +2719,12 @@ export interface components {
             aliases?: string[] | null;
             body?: string | null;
             expected_revision: string;
+            /**
+             * @description Declare or clear body write-protection. Sending `false` for a page whose
+             *     kind protects bodies by default is how a reader unlocks it; the change is
+             *     metadata-only, so it is permitted even while the page is still protected.
+             */
+            readonly?: boolean | null;
             tags?: string[] | null;
             title?: string | null;
         };

@@ -717,3 +717,169 @@ async fn serve_blob_keeps_images_inline() {
         "images must stay inline so archived markdown still renders"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Read-only archive bodies
+// ---------------------------------------------------------------------------
+
+/// Ingest an archive and return its vault path.
+async fn ingest_simple(server: &TestServer, url: &str, body: &str) -> String {
+    let payload = serde_json::json!({
+        "url": url,
+        "domain": "example.com",
+        "title": "Protected Article",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(body),
+        "snapshot_hash": "sha256:00000000000000000000000000000000000000000000000000000000000000ff",
+        "markdown_body": body,
+        "tags": ["archive"],
+        "blobs": [],
+    });
+    let res = server.post("/api/vault/archive").json(&payload).await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    body["vault_path"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn archived_page_reports_itself_read_only() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-1", "# Article\n\nOriginal.").await;
+
+    let page = server.get(&format!("/api/vault/pages/{path}")).await;
+    page.assert_status(StatusCode::OK);
+    let body: serde_json::Value = page.json();
+    assert_eq!(body["readonly"], true);
+    assert_eq!(body["kind"], "ARCHIVE");
+}
+
+#[tokio::test]
+async fn editing_an_archived_body_is_refused() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-2", "# Article\n\nOriginal.").await;
+
+    let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    let res = server
+        .put(&format!("/api/vault/pages/{path}"))
+        .json(&serde_json::json!({
+            "body": "# Article\n\nTampered.",
+            "expected_revision": page["revision"],
+        }))
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+
+    // And the stored body is untouched.
+    let after: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    assert!(
+        after["body"].as_str().unwrap().contains("Original."),
+        "body should be unchanged, got: {}",
+        after["body"]
+    );
+}
+
+#[tokio::test]
+async fn metadata_edits_to_an_archived_page_still_work() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-3", "# Article\n\nOriginal.").await;
+
+    let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    // Filing and tagging an archive is the whole point of having it in a vault,
+    // so protection must not extend to metadata.
+    let res = server
+        .put(&format!("/api/vault/pages/{path}"))
+        .json(&serde_json::json!({
+            "expected_revision": page["revision"],
+            "tags": ["archive", "example.com", "to-read"],
+        }))
+        .await;
+
+    assert!(
+        res.status_code().is_success(),
+        "metadata-only update should succeed, got {}: {}",
+        res.status_code(),
+        res.text()
+    );
+}
+
+#[tokio::test]
+async fn clearing_readonly_unlocks_the_body() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-4", "# Article\n\nOriginal.").await;
+    let url = format!("/api/vault/pages/{path}");
+
+    // Unlock. This is a metadata-only write, so the guard lets it through even
+    // though the page is protected at the moment it is made.
+    let page: serde_json::Value = server.get(&url).await.json();
+    let unlock = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": page["revision"],
+            "readonly": false,
+        }))
+        .await;
+    assert!(
+        unlock.status_code().is_success(),
+        "unlocking should succeed, got {}: {}",
+        unlock.status_code(),
+        unlock.text()
+    );
+
+    let unlocked: serde_json::Value = server.get(&url).await.json();
+    assert_eq!(unlocked["readonly"], false);
+
+    // Now the body may be edited.
+    let edit = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": unlocked["revision"],
+            "body": "# Article\n\nAnnotated by hand.",
+        }))
+        .await;
+    assert!(
+        edit.status_code().is_success(),
+        "editing an unlocked archive should succeed, got {}: {}",
+        edit.status_code(),
+        edit.text()
+    );
+
+    let after: serde_json::Value = server.get(&url).await.json();
+    assert!(after["body"].as_str().unwrap().contains("Annotated by hand."));
+}
+
+#[tokio::test]
+async fn readonly_can_be_declared_on_any_page() {
+    let (server, _tmp, _state) = setup_server();
+    let create = server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({
+            "title": "Locked Note",
+            "body": "Do not edit.",
+        }))
+        .await;
+    assert!(create.status_code().is_success(), "{}", create.text());
+    let created: serde_json::Value = create.json();
+    let url = format!("/api/vault/pages/{}", created["path"].as_str().unwrap());
+
+    let page: serde_json::Value = server.get(&url).await.json();
+    assert_eq!(page["readonly"], false, "notes are editable by default");
+
+    let lock = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": page["revision"],
+            "readonly": true,
+        }))
+        .await;
+    assert!(lock.status_code().is_success(), "{}", lock.text());
+
+    let locked: serde_json::Value = server.get(&url).await.json();
+    let res = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": locked["revision"],
+            "body": "Edited anyway.",
+        }))
+        .await;
+    res.assert_status(StatusCode::FORBIDDEN);
+}

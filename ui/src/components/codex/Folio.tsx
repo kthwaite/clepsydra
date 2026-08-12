@@ -417,7 +417,12 @@ export function Folio({ tabId, path }: FolioProps) {
   const recipePresentationStructured = recipeStructured && !recipeHasBlockIds;
   const recipeReadOnly =
     recipePresentationStructured && recipeMode === "read";
-  const folioReadOnly = conversationReadOnly || recipeReadOnly;
+  // Archived bodies are generated from a captured snapshot, and the page's
+  // frontmatter hash claims to describe them; the server refuses body writes
+  // until the reader explicitly unlocks the page.
+  const bodyProtected = editor.readonly;
+  const folioReadOnly =
+    conversationReadOnly || recipeReadOnly || bodyProtected;
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
@@ -903,6 +908,9 @@ export function Folio({ tabId, path }: FolioProps) {
             isAiConversation && `ai-conversation--${conversationMode}`,
           )}
         >
+          {bodyProtected ? (
+            <ProtectedBodyNotice onUnlock={() => editor.setReadonly(false)} />
+          ) : null}
           <WikilinkResolutionProvider path={path}>
             {recipePresentationStructured && recipeDocument ? (
               <RecipeFolioBody
@@ -940,7 +948,7 @@ export function Folio({ tabId, path }: FolioProps) {
                   onSaveNow={editor.saveNow}
                   insertionRequest={attachmentInsertion}
                   onInsertionHandled={finishAttachmentInsertion}
-                  readOnly={conversationReadOnly}
+                  readOnly={conversationReadOnly || bodyProtected}
                   editorRef={folioEditorRef}
                 />
               </ConversationPresentationProvider>
@@ -1555,6 +1563,35 @@ function ReadingTicks({
         );
       })}
     </nav>
+  );
+}
+
+function ProtectedBodyNotice({ onUnlock }: { onUnlock: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div
+      role="status"
+      className="mb-4 flex items-center justify-between gap-3 border border-rule px-3 py-2 text-[13px] text-ink-2"
+    >
+      <span>
+        This page is a captured archive. Its body is kept as captured so the
+        recorded content hash stays true.
+      </span>
+      <Button
+        className="shrink-0 border border-rule px-2 py-1 text-[12px] hover:bg-highlight disabled:opacity-50"
+        isDisabled={busy}
+        onPress={async () => {
+          setBusy(true);
+          try {
+            await onUnlock();
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Unlocking\u2026" : "Edit anyway"}
+      </Button>
+    </div>
   );
 }
 

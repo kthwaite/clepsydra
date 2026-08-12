@@ -103,6 +103,11 @@ interface PageEditorState {
   kind: string | null;
   conversationProvider: string | null;
   inferred: boolean;
+  /** Effective body write-protection, resolved by the server from the page's
+   *  `readonly` or, absent that, its kind's default. */
+  readonly: boolean;
+  /** Declare or clear that protection. */
+  setReadonly: (readonly: boolean) => Promise<void>;
   project: string | null;
   encryptionState: DecryptedBodyState;
   pageId: string | null;
@@ -720,6 +725,20 @@ export function usePageEditor(
         plainBody !== null &&
         !editorRemountPending));
 
+  // Sent on its own: a metadata-only write is permitted even while the body is
+  // still protected, which is what lets a reader unlock an archived page.
+  const setReadonly = useCallback(
+    async (readonly: boolean) => {
+      const expectedRevision = getRevision();
+      if (!expectedRevision) return;
+      await updatePageMutateAsync({
+        params: { path: { path } },
+        body: { expected_revision: expectedRevision, readonly },
+      });
+    },
+    [getRevision, path, updatePageMutateAsync],
+  );
+
   return {
     isLoading,
     error: pageNotFound && canDraft ? null : error,
@@ -751,6 +770,8 @@ export function usePageEditor(
     kind: page?.kind ?? null,
     conversationProvider: page?.conversation?.provider ?? null,
     inferred: page?.inferred ?? true,
+    readonly: page?.readonly ?? false,
+    setReadonly,
     project: page?.project ?? null,
     encryptionState,
     pageId: page?.meta.id ?? null,

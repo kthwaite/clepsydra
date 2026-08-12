@@ -139,6 +139,10 @@ pub(crate) fn mutation_error(
         MutationError::Stale(path) => {
             error::ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
         }
+        MutationError::ReadOnly(path) => error::ApiError::forbidden(format!(
+            "page body is read-only: {}. Set `readonly = false` in its frontmatter to edit it.",
+            path.as_str()
+        )),
         MutationError::Filesystem { .. }
         | MutationError::FilesystemRollback { .. }
         | MutationError::Index { .. }

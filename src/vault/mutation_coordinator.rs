@@ -90,6 +90,28 @@ pub struct UpdatePageCommand {
     pub reconcile: bool,
 }
 
+/// Reject a body change to a write-protected page.
+///
+/// `expected_content` is the caller's view of the stored file; if it does not
+/// match what is on disk the mutation is rejected as stale anyway, so it is a
+/// safe basis for deciding whether the body actually changed. Metadata-only
+/// updates pass through untouched — including the one that clears `readonly`,
+/// which is what makes the flag its own escape hatch.
+fn guard_protected_body(
+    path: &VaultPath,
+    meta: &PageMeta,
+    expected_content: &str,
+    new_body: &str,
+) -> Result<(), MutationError> {
+    if !super::page::body_is_protected(path.as_str(), meta) {
+        return Ok(());
+    }
+    if super::page::body_of(expected_content) == new_body {
+        return Ok(());
+    }
+    Err(MutationError::ReadOnly(path.clone()))
+}
+
 fn strip_redundant_computed_tag(path: &VaultPath, meta: &mut PageMeta) {
     let (kind, _) = super::kind::resolve(path.as_str(), meta.kind);
     meta.tags
@@ -146,6 +168,8 @@ pub enum MutationError {
     Conflict(String),
     #[error("stale page content: {0}")]
     Stale(VaultPath),
+    #[error("page body is read-only: {0}")]
+    ReadOnly(VaultPath),
     #[error(
         "filesystem mutation failed after filesystem_applied={filesystem_applied} for {path}: {source}"
     )]
@@ -246,6 +270,8 @@ impl MutationError {
             | Self::IndexRollback { .. }
             | Self::BatchRollback { .. }
             | Self::BatchRecovery { .. } => true,
+            // Rejected before anything is written.
+            Self::ReadOnly(_) => false,
             Self::IndexCompensation { .. }
             | Self::BatchPrepare { .. }
             | Self::BatchPublish { .. }
@@ -941,6 +967,19 @@ impl MutationCoordinator {
         command.content =
             heal_task_replacement(&command.path, &command.expected_content, &command.content)
                 .map_err(MutationError::InvalidInput)?;
+        {
+            // The incoming content carries its own frontmatter; protection is
+            // decided from that, so clearing `readonly` in the same write is
+            // still permitted.
+            let (meta, _) = super::page::parse_frontmatter(&command.content)
+                .map_err(|error| MutationError::InvalidInput(error.to_string()))?;
+            guard_protected_body(
+                &command.path,
+                &meta,
+                &command.expected_content,
+                super::page::body_of(&command.content),
+            )?;
+        }
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
         let absolute = vault.resolve(&command.path);
         let index = index.clone();
@@ -1126,6 +1165,12 @@ impl MutationCoordinator {
     ) -> Result<Page, MutationError> {
         heal_task_update(&command.path, &command.expected_content, &mut command.meta)
             .map_err(MutationError::InvalidInput)?;
+        guard_protected_body(
+            &command.path,
+            &command.meta,
+            &command.expected_content,
+            &command.body,
+        )?;
         match &command.project {
             ProjectAssignment::Set(project)
                 if command.meta.project.as_deref() != Some(project.as_str()) =>
