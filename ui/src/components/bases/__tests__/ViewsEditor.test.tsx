@@ -713,10 +713,16 @@ describe("BasePreview", () => {
           name: "Newest",
           description: undefined,
           filter: undefined,
-          properties: {
-            rating: { type: "number", options: undefined },
-            status: { type: "select", options: undefined },
-          },
+          properties: [
+            {
+              key: "rating",
+              definition: { type: "number", options: undefined },
+            },
+            {
+              key: "status",
+              definition: { type: "select", options: undefined },
+            },
+          ],
           views: [
             {
               name: "All",

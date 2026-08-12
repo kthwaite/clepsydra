@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use super::base::{
     Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
-    SortKey,
+    SortKey, is_body_field_reference,
 };
 use super::canonical::CanonicalName;
 use super::link::normalize_links_to_target;
@@ -175,10 +175,7 @@ pub enum QueryError {
 /// Resolve a field reference. Bare names bind system-first; `sys.<name>` /
 /// `prop.<name>` disambiguate.
 pub fn resolve_field(field: &str, ctx: &QueryContext) -> Result<ResolvedField, QueryError> {
-    if field == BODY_COLUMN
-        || field.strip_prefix("sys.") == Some(BODY_COLUMN)
-        || field.strip_prefix("prop.") == Some(BODY_COLUMN)
-    {
+    if is_body_field_reference(field) {
         return Err(QueryError::ProjectionOnlyBody);
     }
     if let Some(name) = field.strip_prefix("sys.") {
@@ -914,6 +911,10 @@ fn sql_value_to_json(v: rusqlite::types::Value) -> serde_json::Value {
 }
 
 const BODY_EXCERPT_MAX_CHARS: usize = 240;
+const BODY_PROJECTION_JOIN: &str =
+    " LEFT JOIN page_bodies body_index ON body_index.page_id = p.id";
+const BODY_PROJECTION_SELECT: &str =
+    "CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END";
 
 fn append_excerpt_text(
     excerpt: &mut String,
@@ -926,17 +927,17 @@ fn append_excerpt_text(
             *pending_space |= !excerpt.is_empty();
             continue;
         }
-        if *pending_space && *scalar_count + 1 < BODY_EXCERPT_MAX_CHARS {
+        if *pending_space {
             excerpt.push(' ');
             *scalar_count += 1;
-        }
-        *pending_space = false;
-        if *scalar_count == BODY_EXCERPT_MAX_CHARS {
-            return true;
+            *pending_space = false;
+            if *scalar_count > BODY_EXCERPT_MAX_CHARS {
+                return true;
+            }
         }
         excerpt.push(ch);
         *scalar_count += 1;
-        if *scalar_count == BODY_EXCERPT_MAX_CHARS {
+        if *scalar_count > BODY_EXCERPT_MAX_CHARS {
             return true;
         }
     }
@@ -997,6 +998,14 @@ fn body_excerpt(markdown: &str) -> String {
             break;
         }
     }
+    if scalar_count > BODY_EXCERPT_MAX_CHARS {
+        let truncate_at = excerpt
+            .char_indices()
+            .nth(BODY_EXCERPT_MAX_CHARS - 1)
+            .map_or(excerpt.len(), |(byte_index, _)| byte_index);
+        excerpt.truncate(truncate_at);
+        excerpt.push('…');
+    }
     excerpt
 }
 
@@ -1016,8 +1025,8 @@ fn fetch_rows(
     limit: Option<u32>,
     offset: u32,
 ) -> Result<Vec<QueryRow>, QueryError> {
-    // Requested property columns and the body projection are joined into this
-    // one set-based query. No page files or detail endpoints are read.
+    // Requested property columns and the body projection use equality-indexed
+    // joins in this set-based query. No page files or detail endpoints are read.
     let mut select_cols =
         "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.encrypted, p.journal_date, p.word_count"
             .to_string();
@@ -1030,13 +1039,11 @@ fn fetch_rows(
     for (i, name) in spec.columns.iter().enumerate() {
         if name == BODY_COLUMN {
             if !body_joined {
-                column_joins
-                    .push_str(" LEFT JOIN pages_fts body_fts ON body_fts.page_id = p.id");
+                column_joins.push_str(BODY_PROJECTION_JOIN);
                 body_joined = true;
             }
-            select_cols.push_str(
-                ", CASE WHEN p.encrypted = 1 THEN NULL ELSE body_fts.body END",
-            );
+            select_cols.push_str(", ");
+            select_cols.push_str(BODY_PROJECTION_SELECT);
             appended_columns.push(AppendedColumn::Body);
             continue;
         }
@@ -2089,6 +2096,80 @@ moment  = { type = "datetime" }
             serde_json::Value::Bool(false)
         );
     }
+
+    #[test]
+    fn body_excerpt_obeys_exact_scalar_boundary() {
+        let chars_239 = "a".repeat(239);
+        let chars_240 = "b".repeat(240);
+        let chars_241 = "c".repeat(241);
+
+        assert_eq!(body_excerpt(&chars_239), chars_239);
+        assert_eq!(body_excerpt(&chars_240), chars_240);
+        assert_eq!(body_excerpt(&chars_241), format!("{}…", "c".repeat(239)));
+    }
+
+    #[test]
+    fn body_excerpt_truncates_multibyte_unicode_by_scalar() {
+        let excerpt = body_excerpt(&"界".repeat(241));
+
+        assert_eq!(excerpt, format!("{}…", "界".repeat(239)));
+        assert_eq!(excerpt.chars().count(), 240);
+    }
+
+    #[test]
+    fn body_excerpt_marks_truncation_at_a_normalized_word_boundary() {
+        let markdown = format!("{}\n\nnext", "a".repeat(239));
+
+        assert_eq!(body_excerpt(&markdown), format!("{}…", "a".repeat(239)));
+    }
+
+    #[test]
+    fn body_projection_plan_uses_a_page_id_index_lookup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+        let table_count: i64 = index
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'page_bodies'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            table_count, 1,
+            "body projection requires an equality-indexed source"
+        );
+
+        let query = format!(
+            "EXPLAIN QUERY PLAN
+             SELECT {BODY_PROJECTION_SELECT}
+             FROM pages p{BODY_PROJECTION_JOIN}
+             ORDER BY p.path
+             LIMIT 25"
+        );
+        let mut statement = index.connection().prepare(&query).unwrap();
+        let details = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(
+            details.iter().any(|detail| {
+                detail.contains("SEARCH body_index")
+                    && detail.contains("page_id=?")
+                    && detail.contains("LEFT-JOIN")
+            }),
+            "expected a keyed body lookup, got {details:?}"
+        );
+        assert!(
+            details
+                .iter()
+                .all(|detail| !detail.contains("SCAN body_index")),
+            "body projection must not scan the body source: {details:?}"
+        );
+    }
     #[test]
     fn body_column_projects_bounded_normalized_plain_text() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2126,6 +2207,7 @@ moment  = { type = "datetime" }
 
         assert!(excerpt.starts_with("Heading A link label with code. 界"));
         assert_eq!(excerpt.chars().count(), 240);
+        assert!(excerpt.ends_with('…'));
         assert!(!excerpt.contains("https://example.com"));
         assert!(!excerpt.contains('\n'));
         assert!(!excerpt.contains('`'));

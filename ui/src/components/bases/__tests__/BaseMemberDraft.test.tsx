@@ -120,11 +120,11 @@ describe("BaseMemberDraft", () => {
       name: "Notes",
       diagnostics: [],
       member_creation: [],
-      properties: {
-        kind: { type: "text" },
-        word_count: { type: "number" },
-        journal_date: { type: "date" },
-      },
+      properties: [
+        { key: "kind", definition: { type: "text" } },
+        { key: "word_count", definition: { type: "number" } },
+        { key: "journal_date", definition: { type: "date" } },
+      ],
       views: [
         {
           name: "All",

@@ -35,7 +35,8 @@ export type BaseViewEvaluateRequest =
   components["schemas"]["BaseViewEvaluateRequest"];
 export type BaseViewEvaluateResponse =
   components["schemas"]["BaseViewEvaluateResponse"];
-export type BaseFile = components["schemas"]["BaseFile"];
+export type BaseFile = components["schemas"]["BaseFilePayload"];
+export type BasePropertyEntry = components["schemas"]["BasePropertyEntry"];
 export type BaseListResponse = components["schemas"]["BaseListResponse"];
 export type BaseSummary = components["schemas"]["BaseSummary"];
 export type BaseMutationResponse =

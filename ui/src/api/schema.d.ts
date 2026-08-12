@@ -1538,12 +1538,11 @@ export interface components {
             source_title?: string | null;
             target_raw: string;
         };
-        /** @description A parsed, validated base. */
-        BaseDefinition: components["schemas"]["BaseFile"] & {
-            /** @description Filename stem; the API identity. */
+        /** @description Parsed Base definition represented through the ordered API payload. */
+        BaseDefinitionPayload: components["schemas"]["BaseFilePayload"] & {
             slug: string;
         };
-        BaseDetailResponse: components["schemas"]["BaseDefinition"] & {
+        BaseDetailResponse: components["schemas"]["BaseDefinitionPayload"] & {
             diagnostics: components["schemas"]["BaseDiagnostic"][];
             member_creation: components["schemas"]["BaseMemberCapability"][];
             revision: string;
@@ -1561,15 +1560,12 @@ export interface components {
          * @enum {string}
          */
         BaseDiagnosticSeverity: "error" | "warning";
-        /** @description The parsed model of a `.base.toml` file. */
-        BaseFile: {
+        /** @description API representation of a Base file. Property order is explicit on the wire. */
+        BaseFilePayload: {
             description?: string | null;
             filter?: null | components["schemas"]["Filter"];
             name: string;
-            /** @description Declared properties in file order (serialized as a key → definition map). */
-            properties?: {
-                [key: string]: components["schemas"]["PropertyDefinition"];
-            };
+            properties?: components["schemas"]["BasePropertyEntry"][];
             views?: components["schemas"]["ViewDefinition"][];
         };
         BaseListResponse: {
@@ -1618,12 +1614,12 @@ export interface components {
         BaseMemberValidationDetail: {
             diagnostics: components["schemas"]["BaseMemberDiagnostic"][];
         };
-        BaseMutationResponse: components["schemas"]["BaseDefinition"] & {
+        BaseMutationResponse: components["schemas"]["BaseDefinitionPayload"] & {
             diagnostics: components["schemas"]["BaseDiagnostic"][];
             revision: string;
         };
         BasePreviewRequest: {
-            definition: components["schemas"]["BaseFile"];
+            definition: components["schemas"]["BaseFilePayload"];
             /** Format: int32 */
             limit?: number | null;
             /** Format: int32 */
@@ -1634,6 +1630,11 @@ export interface components {
             diagnostics: components["schemas"]["BaseDiagnostic"][];
             evaluation_error?: string | null;
             output?: null | components["schemas"]["QueryOutput"];
+        };
+        /** @description One declared Base property in canonical file order. */
+        BasePropertyEntry: {
+            definition: components["schemas"]["PropertyDefinition"];
+            key: string;
         };
         /** @description One entry in the registry listing. */
         BaseSummary: {
@@ -1846,7 +1847,7 @@ export interface components {
             work_id: string;
         };
         CreateBaseRequest: {
-            definition: components["schemas"]["BaseFile"];
+            definition: components["schemas"]["BaseFilePayload"];
             slug: string;
         };
         /** @description POST /board/cycles request body. */
@@ -2535,7 +2536,7 @@ export interface components {
             target_raw: string;
         };
         UpdateBaseRequest: {
-            definition: components["schemas"]["BaseFile"];
+            definition: components["schemas"]["BaseFilePayload"];
             expected_revision: string;
             view_origins: components["schemas"]["ViewOrigin"][];
         };

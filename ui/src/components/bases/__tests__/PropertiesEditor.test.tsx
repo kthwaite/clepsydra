@@ -92,7 +92,7 @@ const emptyDetail: BaseDetailResponse = {
   name: "Reading Log",
   description: undefined,
   filter: undefined,
-  properties: {},
+  properties: [],
   views: [
     {
       name: "All",
@@ -570,7 +570,12 @@ describe("properties workspace integration", () => {
     const user = userEvent.setup();
     const response: BaseMutationResponse = {
       ...emptyDetail,
-      properties: { priority: { type: "select", options: [] } },
+      properties: [
+        {
+          key: "priority",
+          definition: { type: "select", options: [] },
+        },
+      ],
       revision: "revision-2",
     };
     updateMock.mockResolvedValue(response);
@@ -588,7 +593,12 @@ describe("properties workspace integration", () => {
           name: "Reading Log",
           description: undefined,
           filter: undefined,
-          properties: { priority: { type: "select", options: [] } },
+          properties: [
+            {
+              key: "priority",
+              definition: { type: "select", options: [] },
+            },
+          ],
           views: [
             {
               name: "All",
@@ -610,19 +620,31 @@ describe("properties workspace integration", () => {
     const user = userEvent.setup();
     baseState.data = {
       ...emptyDetail,
-      properties: {
-        status: { type: "select", options: ["queued", "done"] },
-        rating: { type: "number" },
-        parent: { type: "relation", many: false },
-      },
+      properties: [
+        {
+          key: "status",
+          definition: { type: "select", options: ["queued", "done"] },
+        },
+        { key: "rating", definition: { type: "number" } },
+        {
+          key: "parent",
+          definition: { type: "relation", many: false },
+        },
+      ],
     };
     updateMock.mockResolvedValue({
       ...baseState.data,
-      properties: {
-        rating: { type: "number" },
-        status: { type: "select", options: ["queued", "done"] },
-        parent: { type: "relation", many: false },
-      },
+      properties: [
+        { key: "rating", definition: { type: "number" } },
+        {
+          key: "status",
+          definition: { type: "select", options: ["queued", "done"] },
+        },
+        {
+          key: "parent",
+          definition: { type: "relation", many: false },
+        },
+      ],
       revision: "revision-2",
     });
     render(<BaseDefinitionWorkspace slug="reading-log" />);
@@ -638,16 +660,22 @@ describe("properties workspace integration", () => {
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     const body = updateMock.mock.calls[0]?.[0].body;
-    expect(Object.keys(body.definition.properties)).toEqual([
-      "rating",
-      "status",
-      "parent",
+    expect(
+      body.definition.properties.map(
+        (property: { key: string }) => property.key,
+      ),
+    ).toEqual(["rating", "status", "parent"]);
+    expect(body.definition.properties).toEqual([
+      { key: "rating", definition: { type: "number" } },
+      {
+        key: "status",
+        definition: { type: "select", options: ["queued", "done"] },
+      },
+      {
+        key: "parent",
+        definition: { type: "relation", many: false },
+      },
     ]);
-    expect(body.definition.properties).toEqual({
-      rating: { type: "number" },
-      status: { type: "select", options: ["queued", "done"] },
-      parent: { type: "relation", many: false },
-    });
     expect(body).not.toHaveProperty("pages");
     expect(body).not.toHaveProperty("frontmatter");
   });
@@ -656,10 +684,10 @@ describe("properties workspace integration", () => {
     const user = userEvent.setup();
     baseState.data = {
       ...emptyDetail,
-      properties: {
-        status: { type: "text" },
-        rating: { type: "number" },
-      },
+      properties: [
+        { key: "status", definition: { type: "text" } },
+        { key: "rating", definition: { type: "number" } },
+      ],
     };
     render(<BaseDefinitionWorkspace slug="reading-log" />);
     await user.click(screen.getByRole("button", { name: "Properties" }));
@@ -675,10 +703,10 @@ describe("properties workspace integration", () => {
     const user = userEvent.setup();
     baseState.data = {
       ...emptyDetail,
-      properties: {
-        status: { type: "text" },
-        rating: { type: "number" },
-      },
+      properties: [
+        { key: "status", definition: { type: "text" } },
+        { key: "rating", definition: { type: "number" } },
+      ],
     };
     updateMock.mockRejectedValue({
       status: 409,
@@ -714,7 +742,7 @@ describe("properties workspace integration", () => {
     const user = userEvent.setup();
     baseState.data = {
       ...emptyDetail,
-      properties: { status: { type: "text" } },
+      properties: [{ key: "status", definition: { type: "text" } }],
     };
     render(<BaseDefinitionWorkspace slug="reading-log" />);
     await user.click(screen.getByRole("button", { name: "Properties" }));

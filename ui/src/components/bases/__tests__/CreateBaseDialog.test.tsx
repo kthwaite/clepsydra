@@ -57,7 +57,7 @@ describe("CreateBaseDialog", () => {
         name: "Books",
         description: undefined,
         filter: undefined,
-        properties: {},
+        properties: [],
         views: [
           {
             name: "All",

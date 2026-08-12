@@ -150,7 +150,6 @@ function BodyExcerptCell({
   );
 }
 
-const EMPTY_PROPERTIES: NonNullable<BaseDetailResponse["properties"]> = {};
 
 function aggregateLabel(
   definition: BaseDetailResponse,
@@ -209,7 +208,16 @@ export const BaseTableView = forwardRef<
   );
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
-  const properties = definition.properties ?? EMPTY_PROPERTIES;
+  const properties = useMemo(
+    () =>
+      new Map(
+        (definition.properties ?? []).map(({ key, definition }) => [
+          key,
+          definition,
+        ]),
+      ),
+    [definition.properties],
+  );
   const evaluationIdentity = useMemo(
     () =>
       JSON.stringify({
@@ -242,7 +250,7 @@ export const BaseTableView = forwardRef<
   >(undefined);
   const editableColumns = columns.filter(
     (column) =>
-      SYSTEM_COLUMNS[column] === undefined && properties[column] !== undefined,
+      SYSTEM_COLUMNS[column] === undefined && properties.has(column),
   );
   const nextEditableColumn = (column: string): string | undefined => {
     const index = editableColumns.indexOf(column);
@@ -566,8 +574,8 @@ export const BaseTableView = forwardRef<
             !readOnly &&
             (SYSTEM_COLUMNS[column] !== undefined
               ? SYSTEM_COLUMNS[column]
-              : properties[column] != null &&
-                canSort(properties[column].type));
+              : properties.get(column) != null &&
+                canSort(properties.get(column)!.type));
           return (
             <Column
               key={column}
@@ -646,12 +654,12 @@ export const BaseTableView = forwardRef<
                 ) : !readOnly &&
                   !memberDraftOpen &&
                   SYSTEM_COLUMNS[column] === undefined &&
-                  properties[column] ? (
+                  properties.has(column) ? (
                   <EditableCell
                     value={
                       (row.columns as Record<string, CellValue>)[column] ?? null
                     }
-                    definition={properties[column]}
+                    definition={properties.get(column)!}
                     isEditing={
                       activeCell?.rowId === String(row.id) &&
                       activeCell.column === column &&

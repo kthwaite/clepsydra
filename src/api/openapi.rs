@@ -216,8 +216,9 @@ impl Modify for FilterSchema {
             crate::vault::base::Aggregate,
             crate::vault::base::AggregateFn,
             crate::vault::base::ViewDefinition,
-            crate::vault::base::BaseFile,
-            crate::vault::base::BaseDefinition,
+            crate::api::bases::BasePropertyEntry,
+            crate::api::bases::BaseFilePayload,
+            crate::api::bases::BaseDefinitionPayload,
             crate::vault::base::BaseDiagnostic,
             crate::vault::base_document::ViewOrigin,
             crate::vault::base_member::BaseMemberScope,
@@ -647,6 +648,18 @@ mod tests {
             json["components"]["schemas"].get("ViewOrigin").is_some(),
             "ViewOrigin should be a named schema"
         );
+
+        let base_file = &json["components"]["schemas"]["BaseFilePayload"];
+        assert_eq!(base_file["properties"]["properties"]["type"], "array");
+        assert_eq!(
+            base_file["properties"]["properties"]["items"]["$ref"],
+            "#/components/schemas/BasePropertyEntry"
+        );
+        let entry_required = json["components"]["schemas"]["BasePropertyEntry"]["required"]
+            .as_array()
+            .expect("BasePropertyEntry.required should be an array");
+        assert!(entry_required.iter().any(|field| field == "key"));
+        assert!(entry_required.iter().any(|field| field == "definition"));
 
         let detail_schema = &json["components"]["schemas"]["BaseDetailResponse"];
         let detail_fields = detail_schema["allOf"]

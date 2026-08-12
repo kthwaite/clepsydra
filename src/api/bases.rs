@@ -23,7 +23,7 @@ use super::query::redact_conversation_columns;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
-    SortDir, SortKey, ViewDefinition, validate_definition,
+    PropertyDefinition, SortDir, SortKey, ViewDefinition, validate_definition,
 };
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
@@ -56,10 +56,80 @@ pub struct BaseListResponse {
     pub diagnostics: Vec<BaseDiagnostic>,
 }
 
+/// One declared Base property in canonical file order.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BasePropertyEntry {
+    pub key: String,
+    pub definition: PropertyDefinition,
+}
+
+/// API representation of a Base file. Property order is explicit on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BaseFilePayload {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Filter>,
+    #[serde(default)]
+    pub properties: Vec<BasePropertyEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<ViewDefinition>,
+}
+
+impl From<BaseFile> for BaseFilePayload {
+    fn from(file: BaseFile) -> Self {
+        Self {
+            name: file.name,
+            description: file.description,
+            filter: file.filter,
+            properties: file
+                .properties
+                .into_iter()
+                .map(|(key, definition)| BasePropertyEntry { key, definition })
+                .collect(),
+            views: file.views,
+        }
+    }
+}
+
+impl From<BaseFilePayload> for BaseFile {
+    fn from(payload: BaseFilePayload) -> Self {
+        Self {
+            name: payload.name,
+            description: payload.description,
+            filter: payload.filter,
+            properties: payload
+                .properties
+                .into_iter()
+                .map(|entry| (entry.key, entry.definition))
+                .collect(),
+            views: payload.views,
+        }
+    }
+}
+
+/// Parsed Base definition represented through the ordered API payload.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BaseDefinitionPayload {
+    pub slug: String,
+    #[serde(flatten)]
+    pub file: BaseFilePayload,
+}
+
+impl From<BaseDefinition> for BaseDefinitionPayload {
+    fn from(definition: BaseDefinition) -> Self {
+        Self {
+            slug: definition.slug,
+            file: definition.file.into(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BaseDetailResponse {
     #[serde(flatten)]
-    pub definition: BaseDefinition,
+    pub definition: BaseDefinitionPayload,
     pub diagnostics: Vec<BaseDiagnostic>,
     pub revision: String,
     pub member_creation: Vec<BaseMemberCapability>,
@@ -68,13 +138,13 @@ pub struct BaseDetailResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateBaseRequest {
     pub slug: String,
-    pub definition: BaseFile,
+    pub definition: BaseFilePayload,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateBaseRequest {
     pub expected_revision: String,
-    pub definition: BaseFile,
+    pub definition: BaseFilePayload,
     pub view_origins: Vec<ViewOrigin>,
 }
 
@@ -86,7 +156,7 @@ pub struct DeleteBaseRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BaseMutationResponse {
     #[serde(flatten)]
-    pub definition: BaseDefinition,
+    pub definition: BaseDefinitionPayload,
     pub diagnostics: Vec<BaseDiagnostic>,
     pub revision: String,
 }
@@ -94,7 +164,7 @@ pub struct BaseMutationResponse {
 impl From<StoredBase> for BaseMutationResponse {
     fn from(stored: StoredBase) -> Self {
         Self {
-            definition: stored.definition,
+            definition: stored.definition.into(),
             diagnostics: stored.diagnostics,
             revision: stored.revision,
         }
@@ -114,7 +184,7 @@ pub struct ViewParams {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BasePreviewRequest {
-    pub definition: BaseFile,
+    pub definition: BaseFilePayload,
     pub view: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
@@ -378,7 +448,7 @@ pub async fn get_base(
     let stored = base_document::load(state.vault.root(), &slug).map_err(document_error)?;
     let member_creation = creation_capabilities(&stored.definition);
     Ok(Json(BaseDetailResponse {
-        definition: stored.definition,
+        definition: stored.definition.into(),
         diagnostics: stored.diagnostics,
         revision: stored.revision,
         member_creation,
@@ -402,7 +472,8 @@ pub async fn create_base(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateBaseRequest>,
 ) -> Result<Json<BaseMutationResponse>, ApiError> {
-    let stored = base_document::create(state.vault.root(), &request.slug, &request.definition)
+    let definition = request.definition.into();
+    let stored = base_document::create(state.vault.root(), &request.slug, &definition)
         .map_err(document_error)?;
     let _ = state.change_tx.send(SyncNotification::BaseRegistryChanged);
     Ok(Json(stored.into()))
@@ -428,11 +499,12 @@ pub async fn update_base(
     Path(slug): Path<String>,
     Json(request): Json<UpdateBaseRequest>,
 ) -> Result<Json<BaseMutationResponse>, ApiError> {
+    let definition = request.definition.into();
     let stored = base_document::update(
         state.vault.root(),
         &slug,
         &request.expected_revision,
-        &request.definition,
+        &definition,
         &request.view_origins,
     )
     .map_err(document_error)?;
@@ -500,7 +572,7 @@ pub async fn preview_base(
     State(state): State<Arc<AppState>>,
     Json(request): Json<BasePreviewRequest>,
 ) -> Json<BasePreviewResponse> {
-    let validation = validate_definition("__preview__", request.definition);
+    let validation = validate_definition("__preview__", request.definition.into());
     let diagnostics = validation.diagnostics;
     if diagnostics
         .iter()

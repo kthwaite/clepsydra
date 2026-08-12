@@ -40,7 +40,7 @@ const detail: BaseDetailResponse = {
   name: "Reading Log",
   description: "Books in progress",
   filter: undefined,
-  properties: {},
+  properties: [],
   views: [
     {
       name: "All",
@@ -276,7 +276,9 @@ describe("BaseDefinitionWorkspace", () => {
 
   it("keeps persisted property identity after edits made during a save", async () => {
     const pending = deferred<BaseMutationResponse>();
-    const properties = { status: { type: "text" as const } };
+    const properties = [
+      { key: "status", definition: { type: "text" as const } },
+    ];
     baseState.data = { ...detail, properties };
     updateMock.mockReturnValue(pending.promise);
     renderWorkspace();
@@ -729,7 +731,7 @@ describe("BaseDefinitionWorkspace", () => {
   it("blocks a stale sort after a scalar property becomes a relation and focuses its field", async () => {
     baseState.data = {
       ...detail,
-      properties: { status: { type: "text" } },
+      properties: [{ key: "status", definition: { type: "text" } }],
       views: [
         {
           name: "All",

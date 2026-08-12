@@ -61,11 +61,11 @@ interface ResolvedDraftField {
 
 function resolveDraftField(
   rawField: string,
-  properties: NonNullable<BaseDetailResponse["properties"]>,
+  properties: ReadonlyMap<string, PropertyDefinition>,
 ): ResolvedDraftField | undefined {
   if (rawField.startsWith("prop.")) {
     const bare = rawField.slice(5);
-    if (!Object.hasOwn(properties, bare)) return undefined;
+    if (!properties.has(bare)) return undefined;
     return {
       identity: `property:${bare}`,
       key: Object.hasOwn(SYSTEM_FIELDS, bare) ? `prop.${bare}` : bare,
@@ -83,7 +83,7 @@ function resolveDraftField(
       source: "system",
     };
   }
-  if (!Object.hasOwn(properties, bare)) return undefined;
+  if (!properties.has(bare)) return undefined;
   return {
     identity: `property:${bare}`,
     key: bare,
@@ -106,7 +106,12 @@ export function composeMemberDraftFields(
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === asciiCaseFold(viewName),
   );
-  const properties = definition.properties ?? {};
+  const properties = new Map(
+    (definition.properties ?? []).map(({ key, definition }) => [
+      key,
+      definition,
+    ]),
+  );
   const ordered = [
     "title",
     ...(view?.columns ?? []),
@@ -152,7 +157,7 @@ export function composeMemberDraftFields(
     fields.push({
       key: resolved.key,
       kind: "property",
-      definition: properties[resolved.bare],
+      definition: properties.get(resolved.bare),
       ...labels,
     });
   }

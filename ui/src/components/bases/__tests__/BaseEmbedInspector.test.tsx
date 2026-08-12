@@ -57,7 +57,7 @@ function detail(
   slug: string,
   name: string,
   views: string[],
-  properties: BaseDetailResponse["properties"] = {},
+  properties: BaseDetailResponse["properties"] = [],
 ): BaseDetailResponse {
   return {
     slug,
@@ -75,13 +75,16 @@ function detail(
   };
 }
 
-const reading = detail("reading", "Reading Log", ["All", "Unread"], {
-  rating: { type: "number" },
-  shelf: { type: "select", options: ["Now", "Later"] },
-});
-const tasks = detail("tasks", "Tasks", ["Open", "Closed"], {
-  priority: { type: "number" },
-});
+const reading = detail("reading", "Reading Log", ["All", "Unread"], [
+  { key: "rating", definition: { type: "number" } },
+  {
+    key: "shelf",
+    definition: { type: "select", options: ["Now", "Later"] },
+  },
+]);
+const tasks = detail("tasks", "Tasks", ["Open", "Closed"], [
+  { key: "priority", definition: { type: "number" } },
+]);
 
 function configured(
   overrides: Partial<ConfiguredBaseEmbedElement> = {},
@@ -743,7 +746,9 @@ describe("pure Base embed validation bounds", () => {
     if (_name === "field bytes") {
       const field = "é".repeat(128);
       const properties = apiState.details.reading.data?.properties;
-      if (properties) properties[field] = { type: "text" };
+      if (properties) {
+        properties.push({ key: field, definition: { type: "text" } });
+      }
     }
     const slug = String(value.base);
     if (!apiState.details[slug]) {
@@ -958,9 +963,9 @@ describe("BaseEmbedInspector source repair", () => {
     expect(screen.queryByText(/unknown field.*priority/i)).toBeNull();
 
     apiState.details.tasks = {
-      data: detail("tasks", "Tasks", ["All"], {
-        priority: { type: "number" },
-      }),
+      data: detail("tasks", "Tasks", ["All"], [
+        { key: "priority", definition: { type: "number" } },
+      ]),
       isPending: false,
       isFetching: false,
       error: null,

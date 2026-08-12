@@ -36,11 +36,14 @@ const definition: BaseDetailResponse = {
   slug: "reading",
   revision: "revision-1",
   name: "Reading Log",
-  properties: {
-    author: { type: "text" },
-    rating: { type: "number" },
-    status: { type: "select", options: ["queued", "reading"] },
-  },
+  properties: [
+    { key: "author", definition: { type: "text" } },
+    { key: "rating", definition: { type: "number" } },
+    {
+      key: "status",
+      definition: { type: "select", options: ["queued", "reading"] },
+    },
+  ],
   views: [
     { name: "Continues", layout: "table", columns: ["title", "author"] },
     {
@@ -548,10 +551,10 @@ describe("BaseTableView", () => {
     const props = renderView({
       definition: {
         ...definition,
-        properties: {
-          ...definition.properties,
-          body: { type: "text" },
-        },
+        properties: [
+          ...(definition.properties ?? []),
+          { key: "body", definition: { type: "text" } },
+        ],
         views: [
           {
             name: "Continues",
@@ -645,10 +648,10 @@ describe("BaseTableView", () => {
     renderView({
       definition: {
         ...definition,
-        properties: {
-          ...definition.properties,
-          body: { type: "text" },
-        },
+        properties: [
+          ...(definition.properties ?? []),
+          { key: "body", definition: { type: "text" } },
+        ],
         views: [
           {
             name: "Continues",
@@ -713,11 +716,11 @@ describe("BaseTableView", () => {
     const props = renderView({
       definition: {
         ...definition,
-        properties: {
-          ...definition.properties,
-          topics: { type: "multi_select" },
-          related: { type: "relation" },
-        },
+        properties: [
+          ...(definition.properties ?? []),
+          { key: "topics", definition: { type: "multi_select" } },
+          { key: "related", definition: { type: "relation" } },
+        ],
         views: [
           {
             name: "Continues",

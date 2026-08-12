@@ -32,6 +32,12 @@ pub const SYSTEM_FIELDS: &[&str] = &[
 /// View-only system column projected from the indexed Markdown body.
 pub const BODY_COLUMN: &str = "body";
 
+pub(crate) fn is_body_field_reference(field: &str) -> bool {
+    field == BODY_COLUMN
+        || field.strip_prefix("sys.") == Some(BODY_COLUMN)
+        || field.strip_prefix("prop.") == Some(BODY_COLUMN)
+}
+
 /// Closed set of declarable property types (v1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -207,7 +213,7 @@ fn default_layout() -> String {
 }
 
 /// The parsed model of a `.base.toml` file.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseFile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -216,7 +222,6 @@ pub struct BaseFile {
     pub filter: Option<Filter>,
     /// Declared properties in file order (serialized as a key → definition map).
     #[serde(default, with = "property_map")]
-    #[schema(value_type = std::collections::HashMap<String, PropertyDefinition>)]
     pub properties: Vec<(String, PropertyDefinition)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<ViewDefinition>,
@@ -283,7 +288,7 @@ mod property_map {
 }
 
 /// A parsed, validated base.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BaseDefinition {
     /// Filename stem; the API identity.
     pub slug: String,
@@ -1036,10 +1041,21 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         }
         let mut body_seen = false;
         for (column_index, column) in view.columns.iter().enumerate() {
-            if column == BODY_COLUMN && std::mem::replace(&mut body_seen, true) {
+            if !is_body_field_reference(column) {
+                continue;
+            }
+            let path = Some(format!("views[{view_index}].columns[{column_index}]"));
+            if column != BODY_COLUMN {
                 push(
                     BaseDiagnosticSeverity::Error,
-                    Some(format!("views[{view_index}].columns[{column_index}]")),
+                    path.clone(),
+                    format!("noncanonical body column `{column}`; use `{BODY_COLUMN}`"),
+                );
+            }
+            if std::mem::replace(&mut body_seen, true) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    path,
                     format!("duplicate `{BODY_COLUMN}` column in view `{}`", view.name),
                 );
             }
@@ -1915,6 +1931,51 @@ columns = ["body", "title", "body"]
                 && diagnostic.path.as_deref() == Some("views[0].columns[2]")
                 && diagnostic.message == "duplicate `body` column in view `All`"
         }));
+    }
+
+    #[test]
+    fn noncanonical_body_column_aliases_are_blocking_diagnostics() {
+        for alias in ["sys.body", "prop.body"] {
+            let content = format!(
+                r#"
+name = "X"
+
+[[views]]
+name = "All"
+columns = ["{alias}"]
+"#
+            );
+            let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), &content);
+
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Error
+                    && diagnostic.path.as_deref() == Some("views[0].columns[0]")
+                    && diagnostic.message
+                        == format!("noncanonical body column `{alias}`; use `body`")
+            }));
+        }
+    }
+
+    #[test]
+    fn body_aliases_participate_in_duplicate_detection() {
+        let content = r#"
+name = "X"
+
+[[views]]
+name = "All"
+columns = ["body", "sys.body", "prop.body"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let duplicate_paths = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message == "duplicate `body` column in view `All`")
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            duplicate_paths,
+            vec!["views[0].columns[1]", "views[0].columns[2]"]
+        );
     }
 
     #[test]

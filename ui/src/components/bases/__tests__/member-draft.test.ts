@@ -25,11 +25,11 @@ function makeDefinition(
     revision: "base-revision",
     diagnostics: [],
     member_creation: [],
-    properties: {
-      author: authorDefinition,
-      rating: ratingDefinition,
-      status: statusDefinition,
-    },
+    properties: [
+      { key: "author", definition: authorDefinition },
+      { key: "rating", definition: ratingDefinition },
+      { key: "status", definition: statusDefinition },
+    ],
     views: [
       {
         name: "Continues",
@@ -149,11 +149,11 @@ describe("composeMemberDraftFields", () => {
     const customJournalDate: PropertyDefinition = { type: "date" };
     const fields = composeMemberDraftFields(
       makeDefinition({
-        properties: {
-          kind: customKind,
-          word_count: customWordCount,
-          journal_date: customJournalDate,
-        },
+        properties: [
+          { key: "kind", definition: customKind },
+          { key: "word_count", definition: customWordCount },
+          { key: "journal_date", definition: customJournalDate },
+        ],
         views: [
           {
             name: "Continues",
@@ -208,7 +208,7 @@ describe("composeMemberDraftFields", () => {
     ]);
   });
 
-  it("uses own-property checks for names that collide with Object.prototype", () => {
+  it("resolves only declared names that collide with Object.prototype", () => {
     const inheritedOnly = composeMemberDraftFields(
       makeDefinition({
         properties: undefined,
@@ -231,7 +231,9 @@ describe("composeMemberDraftFields", () => {
     const constructorDefinition: PropertyDefinition = { type: "text" };
     const declared = composeMemberDraftFields(
       makeDefinition({
-        properties: { constructor: constructorDefinition },
+        properties: [
+          { key: "constructor", definition: constructorDefinition },
+        ],
         views: [{ name: "Continues", columns: ["prop.constructor"] }],
       }),
       "Continues",

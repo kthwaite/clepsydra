@@ -90,9 +90,10 @@ function propertyField(
   name: string,
   detail: BaseDetailResponse,
 ): ResolvedField | undefined {
-  const properties = detail.properties;
-  if (!properties || !Object.hasOwn(properties, name)) return undefined;
-  const definition = properties[name];
+  const definition = detail.properties?.find(
+    (property) => property.key === name,
+  )?.definition;
+  if (!definition) return undefined;
   return {
     identity: `prop:${name}`,
     name,

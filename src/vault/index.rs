@@ -251,6 +251,11 @@ CREATE INDEX IF NOT EXISTS idx_page_props_key_text ON page_properties(key, value
 CREATE INDEX IF NOT EXISTS idx_page_props_key_num  ON page_properties(key, value_num);
 CREATE INDEX IF NOT EXISTS idx_page_props_key_date ON page_properties(key, value_date);
 
+CREATE TABLE IF NOT EXISTS page_bodies (
+    page_id     TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     page_id UNINDEXED,
     path UNINDEXED,
@@ -325,6 +330,7 @@ impl VaultIndex {
         migrate_links_add_target_block_id(conn)?;
         migrate_pages_add_projection_columns(conn)?;
         migrate_tags_add_computed(conn)?;
+        migrate_page_bodies_projection(conn)?;
 
         // 3. Execute schema
         conn.execute_batch(SCHEMA)?;
@@ -777,6 +783,12 @@ impl VaultIndex {
                 &page.body,
             ],
         )?;
+        tx.execute(
+            "INSERT INTO page_bodies (page_id, body) VALUES (?1, ?2)
+             ON CONFLICT(page_id) DO UPDATE SET body = excluded.body",
+            params![page_id, &page.body],
+        )?;
+
 
         // Clear old derived data
         // block_properties must be deleted before blocks due to FK constraint
@@ -1586,6 +1598,48 @@ fn resolve_incoming_block_refs(
     Ok(())
 }
 
+/// Add the equality-indexed body projection to an existing FTS-backed index.
+///
+/// Legacy indexes are backfilled once from FTS so unchanged pages do not need
+/// to be re-indexed after upgrading.
+fn migrate_page_bodies_projection(conn: &Connection) -> Result<(), IndexError> {
+    let body_table_exists = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'page_bodies'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+    if body_table_exists {
+        return Ok(());
+    }
+
+    let legacy_source_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master
+         WHERE type = 'table' AND name IN ('pages', 'pages_fts')",
+        [],
+        |row| row.get(0),
+    )?;
+    if legacy_source_count != 2 {
+        return Ok(());
+    }
+
+    let transaction = conn.unchecked_transaction()?;
+    transaction.execute_batch(
+        "CREATE TABLE page_bodies (
+            page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+            body TEXT NOT NULL
+        );",
+    )?;
+    transaction.execute(
+        "INSERT OR REPLACE INTO page_bodies (page_id, body)
+         SELECT body_fts.page_id, body_fts.body
+         FROM pages_fts body_fts
+         JOIN pages p ON p.id = body_fts.page_id",
+        [],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
 /// Count the number of common path segments between two directory paths.
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.split('/')
@@ -2100,6 +2154,12 @@ fn upsert_indexed_page(
             &pf.body,
         ],
     )?;
+    tx.execute(
+        "INSERT INTO page_bodies (page_id, body) VALUES (?1, ?2)
+         ON CONFLICT(page_id) DO UPDATE SET body = excluded.body",
+        params![page_id, &pf.body],
+    )?;
+
 
     // Clear old derived data for this page
     // block_properties must be deleted before blocks due to FK constraint
@@ -2223,6 +2283,42 @@ mod schema_tests {
         assert!(cols.contains(&"kind".to_string()));
         assert!(cols.contains(&"kind_inferred".to_string()));
         assert!(cols.contains(&"project".to_string()));
+    }
+
+    #[test]
+    fn migrates_existing_fts_bodies_into_the_keyed_projection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("old.db");
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute_batch("DROP TABLE page_bodies;").unwrap();
+            conn.execute(
+                "INSERT INTO pages
+                 (id, path, canonical_name, meta_json, content_hash)
+                 VALUES ('page-1', 'page.md', 'page', '{}', 'hash')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO pages_fts (page_id, path, title, body)
+                 VALUES ('page-1', 'page.md', 'Page', 'legacy body')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let index = VaultIndex::open_bare(&db_path).unwrap();
+        let body: String = index
+            .connection()
+            .query_row(
+                "SELECT body FROM page_bodies WHERE page_id = 'page-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(body, "legacy body");
     }
 }
 
