@@ -222,7 +222,12 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
 
                 {/* DISPOSITION */}
                 <span className="flex items-center gap-[7px] tracking-[0.1em] text-[var(--ink-2)]">
-                  <InlineEditPopover task={t} field="status" testIdPrefix="bk">
+                  <InlineEditPopover
+                    task={t}
+                    field="status"
+                    testIdPrefix="bk"
+                    colLabel={colLabel}
+                  >
                     <span className="flex items-center gap-[7px]">
                       <StatePip col={t.status} />
                       <span className="overflow-hidden text-ellipsis whitespace-nowrap">

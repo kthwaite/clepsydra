@@ -8,6 +8,7 @@ import { Button, Dialog, DialogTrigger } from "react-aria-components";
 import type { BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
 import { Popover } from "#/components/ui/popover";
+import type { ColLabelFn } from "./board-constants";
 import { DispositionRow, PriorityRow } from "./fields";
 
 export function InlineEditPopover({
@@ -15,11 +16,14 @@ export function InlineEditPopover({
   field,
   children,
   testIdPrefix,
+  colLabel,
 }: {
   task: BoardTask;
   field: "status" | "priority";
   children: React.ReactNode;
   testIdPrefix: string;
+  /** Only consulted when field === "status"; forwarded to DispositionRow. */
+  colLabel?: ColLabelFn;
 }) {
   const [open, setOpen] = useState(false);
   const patch = usePatchTask();
@@ -56,6 +60,7 @@ export function InlineEditPopover({
               value={task.status}
               onChange={commit}
               testIdPrefix="inline"
+              colLabel={colLabel}
             />
           ) : (
             <PriorityRow

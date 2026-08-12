@@ -236,6 +236,7 @@ export function TaskingScreen({
                 showOp={opFilter === "ALL"}
                 activeProject={activeOp?.project ?? undefined}
                 onOpenDossier={onOpenDossier}
+                colLabel={colLabel}
               />
             )}
             {mode === "backlog" && (

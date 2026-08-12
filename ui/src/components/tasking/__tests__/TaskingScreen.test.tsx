@@ -585,6 +585,29 @@ describe("TaskingScreen — column labels come from the server", () => {
     expect(within(row).getByText("DEPLOYED")).toBeInTheDocument();
     expect(within(row).queryByText("IN-FIELD")).not.toBeInTheDocument();
   });
+
+  it("inline status popover on a backlog row shows the server's column label, not the raw id", async () => {
+    const relabeled: BoardResponse = {
+      ...BOARD_FIXTURE,
+      columns: BOARD_FIXTURE.columns.map((c) =>
+        c.id === "FIELD" ? { ...c, label: "DEPLOYED" } : c,
+      ),
+    };
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch(relabeled);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    // t1 is FIELD-status — open its inline status-edit popover chip
+    await userEvent.click(screen.getByTestId("bk-inline-status-t1"));
+
+    // The testid is on the underlying <input>; its visible label text (the
+    // column-label span) is on the wrapping <label>.
+    const fieldOption = screen.getByTestId("inline-status-FIELD");
+    const fieldLabel = fieldOption.closest("label");
+    expect(fieldLabel).toHaveTextContent("DEPLOYED");
+    expect(fieldLabel).not.toHaveTextContent("FIELD");
+  });
 });
 
 // ── stale opFilter self-heal ──────────────────────────────────────────────────

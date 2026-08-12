@@ -6,7 +6,7 @@
  */
 
 import type { BoardTask } from "#/api/board";
-import { priColor, StatePip } from "./board-constants";
+import { type ColLabelFn, priColor, StatePip } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
@@ -22,6 +22,8 @@ export interface TaskCardProps {
   onDragEnd: (e: React.DragEvent) => void;
   onClick: () => void;
   onOpenDossier?: (link: string) => void;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function TaskCard({
@@ -32,6 +34,7 @@ export function TaskCard({
   onDragEnd,
   onClick,
   onOpenDossier,
+  colLabel,
 }: TaskCardProps) {
   const {
     done,
@@ -91,7 +94,12 @@ export function TaskCard({
         <span className="cl-mono font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-2)]">
           {t.code}
         </span>
-        <InlineEditPopover task={t} field="priority" testIdPrefix="kb">
+        <InlineEditPopover
+          task={t}
+          field="priority"
+          testIdPrefix="kb"
+          colLabel={colLabel}
+        >
           <span
             className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
             style={{ color: priTextColor, borderColor: priTextColor }}
@@ -99,7 +107,12 @@ export function TaskCard({
             {t.priority}
           </span>
         </InlineEditPopover>
-        <InlineEditPopover task={t} field="status" testIdPrefix="kb">
+        <InlineEditPopover
+          task={t}
+          field="status"
+          testIdPrefix="kb"
+          colLabel={colLabel}
+        >
           <StatePip col={t.status} />
         </InlineEditPopover>
         {showOp && t.project && (

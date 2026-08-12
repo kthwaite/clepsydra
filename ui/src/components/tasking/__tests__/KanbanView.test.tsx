@@ -19,6 +19,7 @@ import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
   CLOSED_CYCLE,
+  FIXTURE_COL_LABEL,
   SEALED_IN_CLOSED_CYCLE_TASK,
 } from "./fixtures";
 
@@ -132,6 +133,7 @@ describe("KanbanView — column rendering", () => {
   it("renders one column per board.columns entry", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -146,6 +148,7 @@ describe("KanbanView — column rendering", () => {
   it("renders — NONE — in columns with no tasks", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -160,6 +163,7 @@ describe("KanbanView — column rendering", () => {
   it("buckets tasks into the correct columns by status", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -180,6 +184,7 @@ describe("KanbanView — column rendering", () => {
     // Both t2 (P2) and t4 (P3) are in INTAKE; they should appear P2 then P3
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -202,6 +207,7 @@ describe("KanbanView — sealed-in-closed-cycle exclusion", () => {
       BOARD_FIXTURE_WITH_CLOSED_CYCLE;
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={augTasks}
         cycles={augCycles}
@@ -216,6 +222,7 @@ describe("KanbanView — sealed-in-closed-cycle exclusion", () => {
     const closedCycleOnlyTasks = [SEALED_IN_CLOSED_CYCLE_TASK];
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={closedCycleOnlyTasks}
         cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
@@ -235,6 +242,7 @@ describe("KanbanView — WIP count and over-capacity", () => {
     );
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={wipColumns}
         tasks={tasks}
         cycles={cycles}
@@ -251,6 +259,7 @@ describe("KanbanView — WIP count and over-capacity", () => {
     );
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={wipColumns}
         tasks={tasks}
         cycles={cycles}
@@ -268,6 +277,7 @@ describe("KanbanView — WIP count and over-capacity", () => {
     // BOARD_FIXTURE has wip=0 on all columns
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -286,6 +296,7 @@ describe("TaskCard — card anatomy", () => {
     // t2 has hold="blocker"
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -321,6 +332,7 @@ describe("TaskCard — card anatomy", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskWithChecks]}
         cycles={cycles}
@@ -340,6 +352,7 @@ describe("TaskCard — card anatomy", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskDone]}
         cycles={cycles}
@@ -359,6 +372,7 @@ describe("TaskCard — card anatomy", () => {
     // t1 has checks=[] — no d/total text
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[tasks[0]]}
         cycles={cycles}
@@ -376,6 +390,7 @@ describe("KanbanView — card interactions", () => {
   it("clicking a card calls setEditTaskId with the task id", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -398,6 +413,7 @@ describe("KanbanView — card interactions", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskWithLink]}
         cycles={cycles}
@@ -421,6 +437,7 @@ describe("TaskCard — inline editing", () => {
     const stub = makeStub();
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -453,6 +470,7 @@ describe("TaskCard — inline editing", () => {
     const stub = makeStub();
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -476,6 +494,7 @@ describe("TaskCard — keyboard activation", () => {
   it("card has role=button and tabIndex=0", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -490,6 +509,7 @@ describe("TaskCard — keyboard activation", () => {
   it("Enter key on card opens the edit panel", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -505,6 +525,7 @@ describe("TaskCard — keyboard activation", () => {
   it("Space key on card opens the edit panel", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -528,6 +549,7 @@ describe("TaskCard — keyboard activation", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskWithLink]}
         cycles={cycles}
@@ -560,6 +582,7 @@ describe("TaskCard — keyboard activation", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskWithLink]}
         cycles={cycles}
@@ -583,6 +606,7 @@ describe("TaskCard — keyboard activation", () => {
   it("card responds to Enter/Space only when card div itself is focused", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -603,6 +627,7 @@ describe("KanbanView — column + button", () => {
   it("clicking + in a column opens taskModal with that column's status", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -617,6 +642,7 @@ describe("KanbanView — column + button", () => {
   it("clicking + in INTAKE opens taskModal with status INTAKE", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -630,6 +656,7 @@ describe("KanbanView — column + button", () => {
   it("includes project preset when activeProject is set", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -647,6 +674,7 @@ describe("KanbanView — column + button", () => {
   it("omits the project key entirely when activeProject is undefined", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -666,6 +694,7 @@ describe("KanbanView — drag-and-drop", () => {
   it("writes the task id to dataTransfer on drag start", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -695,6 +724,7 @@ describe("KanbanView — drag-and-drop", () => {
     render(
       <QueryClientProvider client={qc}>
         <KanbanView
+          colLabel={FIXTURE_COL_LABEL}
           columns={columns}
           tasks={tasks}
           cycles={cycles}
@@ -742,6 +772,7 @@ describe("KanbanView — drag-and-drop", () => {
     render(
       <QueryClientProvider client={qc}>
         <KanbanView
+          colLabel={FIXTURE_COL_LABEL}
           columns={columns}
           tasks={tasks}
           cycles={cycles}
@@ -772,6 +803,7 @@ describe("KanbanView — drag-and-drop", () => {
   it("dragEnd clears the drag state (card no longer has dragging style)", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -796,6 +828,7 @@ describe("KanbanView — QuickAddRow wiring", () => {
   it("renders a QuickAddRow at the bottom of each column body with status preset", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -813,6 +846,7 @@ describe("KanbanView — QuickAddRow wiring", () => {
   it("passes the correct status preset to each column's QuickAddRow", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -826,6 +860,7 @@ describe("KanbanView — QuickAddRow wiring", () => {
   it("includes activeProject in the preset when provided", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}

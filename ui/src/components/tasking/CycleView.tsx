@@ -423,6 +423,7 @@ export function CycleView({
                         task={t}
                         field="status"
                         testIdPrefix="cv"
+                        colLabel={colLabel}
                       >
                         <StatePip col={t.status} />
                       </InlineEditPopover>

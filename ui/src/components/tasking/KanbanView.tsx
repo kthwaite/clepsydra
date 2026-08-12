@@ -15,7 +15,7 @@ import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { PRI_ORDER } from "./board-constants";
+import { type ColLabelFn, PRI_ORDER } from "./board-constants";
 import { QuickAddRow } from "./QuickAddRow";
 import { TaskCard } from "./TaskCard";
 
@@ -61,6 +61,8 @@ export interface KanbanViewProps {
    */
   activeProject?: string;
   onOpenDossier?: (link: string) => void;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function KanbanView({
@@ -70,6 +72,7 @@ export function KanbanView({
   showOp,
   activeProject,
   onOpenDossier,
+  colLabel,
 }: KanbanViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const openTaskModal = useBoardStore((s) => s.openTaskModal);
@@ -213,6 +216,7 @@ export function KanbanView({
                     }}
                     onClick={() => setEditTaskId(t.id)}
                     onOpenDossier={onOpenDossier}
+                    colLabel={colLabel}
                   />
                 ))
               )}
