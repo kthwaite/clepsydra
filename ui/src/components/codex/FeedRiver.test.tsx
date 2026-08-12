@@ -298,8 +298,11 @@ describe("FeedRiver", () => {
   });
 
   it("pins an unread selected row through optimistic removal and rollback without moving the scroll container", async () => {
-    const deferredPatch = Promise.withResolvers<FeedEntry>();
-    riverMocks.patchEntryAsync.mockReturnValue(deferredPatch.promise);
+    let rejectPatch!: (reason?: unknown) => void;
+    const patchPromise = new Promise<FeedEntry>((_resolve, reject) => {
+      rejectPatch = reject;
+    });
+    riverMocks.patchEntryAsync.mockReturnValue(patchPromise);
     const onSelectEntry = vi.fn();
     const page = renderRiver(
       { view: "unread" },
@@ -327,9 +330,7 @@ describe("FeedRiver", () => {
     expect(selected).toHaveTextContent("Unread entry");
     expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
     expect(river.scrollTop).toBe(211);
-    await act(async () =>
-      deferredPatch.reject(new Error("read patch failed")),
-    );
+    await act(async () => rejectPatch(new Error("read patch failed")));
     setEntries([entry()]);
     page.rerender(
       <FeedRiver
