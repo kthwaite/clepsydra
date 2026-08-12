@@ -174,14 +174,39 @@ describe("searchDocs", () => {
     expect(searchDocs(index, "missing token")).toEqual([]);
   });
 
-  it("ranks title matches ahead of heading, description, and body matches", () => {
-    const bodyMatch = page("body", "Body guide", "Unrelated guide", "The needle appears in body copy.");
-    const descriptionMatch = page("description", "Description guide", "Needle reference", "Unrelated copy.");
-    const headingMatch = page("heading", "Heading guide", "Unrelated guide", "## Needle\n\nUnrelated copy.");
+  it("ranks title matches ahead of heading, description, keywords, and body matches", () => {
+    const bodyMatch = page(
+      "body",
+      "Body guide",
+      "Unrelated guide",
+      "The needle appears in body copy.",
+    );
+    const keywordMatch = {
+      ...page("keyword", "Keyword guide", "Unrelated guide", "Unrelated copy."),
+      keywords: ["needle"],
+    };
+    const descriptionMatch = page(
+      "description",
+      "Description guide",
+      "Needle reference",
+      "Unrelated copy.",
+    );
+    const headingMatch = page(
+      "heading",
+      "Heading guide",
+      "Unrelated guide",
+      "## Needle\n\nUnrelated copy.",
+    );
     const titleMatch = page("title", "Needle", "Unrelated guide", "Unrelated copy.");
 
     const results = searchDocs(
-      buildDocsIndex([bodyMatch, descriptionMatch, headingMatch, titleMatch]),
+      buildDocsIndex([
+        bodyMatch,
+        keywordMatch,
+        descriptionMatch,
+        headingMatch,
+        titleMatch,
+      ]),
       "needle",
     );
 
@@ -189,10 +214,29 @@ describe("searchDocs", () => {
       "title",
       "heading",
       "description",
+      "keyword",
       "body",
     ]);
-    expect(results.map((result) => result.score)).toEqual([11_000, 300, 100, 10]);
+    expect(results.map((result) => result.score)).toEqual([
+      11_000,
+      300,
+      100,
+      50,
+      10,
+    ]);
     expect(searchDocs(buildDocsIndex([titleMatch]), "need")[0]?.score).toBe(6_000);
+  });
+
+  it("finds a registry guide by keyword and uses its description excerpt", () => {
+    expect(searchDocs(buildDocsIndex(DOC_PAGES), "database")).toEqual([
+      expect.objectContaining({
+        page: expect.objectContaining({ slug: "bases" }),
+        heading: undefined,
+        headingId: undefined,
+        excerpt: "Define typed fields and filtered table views.",
+        score: 50,
+      }),
+    ]);
   });
 
   it("returns one page-level result when metadata alone satisfies the query", () => {

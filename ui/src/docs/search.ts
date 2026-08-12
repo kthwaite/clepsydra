@@ -13,6 +13,7 @@ const SCORE = {
   titleToken: 1_000,
   headingToken: 300,
   descriptionToken: 100,
+  keywordToken: 50,
   bodyToken: 10,
 } as const;
 
@@ -29,6 +30,7 @@ type RankedSection = {
 type NormalizedPage = {
   title: string;
   description: string;
+  keywords: readonly string[];
   metadataOnly: boolean;
 };
 
@@ -137,6 +139,7 @@ function rankSection(
       (token) =>
         page.title.includes(token) ||
         page.description.includes(token) ||
+        page.keywords.some((keyword) => keyword.includes(token)) ||
         heading.includes(token) ||
         body.includes(token),
     )
@@ -168,6 +171,10 @@ function rankSection(
       score += SCORE.descriptionToken;
       scoreClass = Math.max(scoreClass, SCORE.descriptionToken);
     }
+    if (page.keywords.some((keyword) => keyword.includes(token))) {
+      score += SCORE.keywordToken;
+      scoreClass = Math.max(scoreClass, SCORE.keywordToken);
+    }
     if (body.includes(token)) {
       score += SCORE.bodyToken;
       scoreClass = Math.max(scoreClass, SCORE.bodyToken);
@@ -178,6 +185,12 @@ function rankSection(
   if (tokens.some((token) => body.includes(token))) {
     excerptText = section.text;
   } else if (tokens.some((token) => page.description.includes(token))) {
+    excerptText = section.page.description;
+  } else if (
+    tokens.some((token) =>
+      page.keywords.some((keyword) => keyword.includes(token)),
+    )
+  ) {
     excerptText = section.page.description;
   } else if (tokens.some((token) => heading.includes(token))) {
     excerptText = section.heading ?? "";
@@ -302,11 +315,16 @@ export function searchDocs(
     }
     const title = normalize(section.page.title);
     const description = normalize(section.page.description);
+    const keywords = section.page.keywords.map(normalize);
     normalizedPages.set(section.page, {
       title,
       description,
+      keywords,
       metadataOnly: tokens.every(
-        (token) => title.includes(token) || description.includes(token),
+        (token) =>
+          title.includes(token) ||
+          description.includes(token) ||
+          keywords.some((keyword) => keyword.includes(token)),
       ),
     });
   }
