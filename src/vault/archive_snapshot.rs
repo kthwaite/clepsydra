@@ -12,6 +12,8 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use regex::Regex;
+use std::collections::BTreeMap;
+use url::Url;
 
 use crate::vault::cas::ContentStore;
 
@@ -103,6 +105,98 @@ fn content_type_of(media_type: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// One HTML tag, so an original URL is only ever paired with a `cas:` reference
+/// that sits on the same element.
+fn tag_regex() -> &'static Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"<[^>]+>").unwrap())
+}
+
+/// `data-sf-original-src="…"`, written by SingleFile's `saveOriginalURLs`.
+fn original_src_regex() -> &'static Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"data-sf-original-src\s*=\s*["']([^"']*)["']"#).unwrap())
+}
+
+/// `src="cas:…"`. The leading `(?:^|\s)` keeps this off `data-sf-original-src`,
+/// which ends in `-src`; anchoring `src\s*=` keeps it off `srcset`.
+fn cas_src_regex() -> &'static Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"(?:^|\s)src\s*=\s*["']cas:([^"']*)["']"#).unwrap())
+}
+
+/// A markdown inline image, with an optional quoted title.
+fn markdown_image_regex() -> &'static Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"!\[([^\]]*)\]\(\s*([^()\s]+)((?:\s+"[^"]*")?)\s*\)"#).unwrap())
+}
+
+/// Absolute original URL → the hash of the blob that replaced it.
+///
+/// Call this on the **deconstructed** snapshot: it pairs the
+/// `data-sf-original-src` SingleFile recorded with the `cas:` reference
+/// `deconstruct` left in that element's `src`. That pairing is the only link
+/// between the markdown — which still carries live URLs — and the blobs.
+pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for tag in tag_regex().find_iter(html) {
+        let tag = tag.as_str();
+        let (Some(original), Some(hash)) = (
+            original_src_regex().captures(tag),
+            cas_src_regex().captures(tag),
+        ) else {
+            continue;
+        };
+        let raw = original[1].trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let key = absolutise(raw, base_url).unwrap_or_else(|| raw.to_string());
+        map.insert(key, hash[1].to_string());
+    }
+    map
+}
+
+/// Point every archived image in `markdown` at its blob.
+///
+/// An image whose URL is not in the map is left exactly as it was. Dropping it
+/// would be a silent lie about what the archive holds; leaving it is at least an
+/// honest reference to the live web.
+pub fn rewrite_markdown_images(
+    markdown: &str,
+    map: &BTreeMap<String, String>,
+    base_url: &str,
+) -> String {
+    markdown_image_regex()
+        .replace_all(markdown, |caps: &regex::Captures<'_>| {
+            let alt = &caps[1];
+            let url = &caps[2];
+            let title = &caps[3];
+            match lookup(map, url, base_url) {
+                Some(hash) => format!("![{alt}](cas:{hash}{title})"),
+                None => caps[0].to_string(),
+            }
+        })
+        .into_owned()
+}
+
+fn lookup(map: &BTreeMap<String, String>, url: &str, base_url: &str) -> Option<String> {
+    if let Some(hash) = map.get(url) {
+        return Some(hash.clone());
+    }
+    let absolute = absolutise(url, base_url)?;
+    map.get(&absolute).cloned()
+}
+
+fn absolutise(raw: &str, base_url: &str) -> Option<String> {
+    let base = Url::parse(base_url).ok()?;
+    base.join(raw).ok().map(String::from)
 }
 
 #[cfg(test)]
@@ -222,5 +316,149 @@ mod tests {
 
         assert!(result.resources.is_empty());
         assert_eq!(result.html, html);
+    }
+
+    const BASE: &str = "https://example.com/posts/one";
+
+    #[test]
+    fn maps_an_original_url_to_the_hash_that_replaced_it() {
+        let html =
+            r#"<img data-sf-original-src="https://cdn.example.com/a.png" src="cas:sha256:aa">"#;
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(
+            map.get("https://cdn.example.com/a.png"),
+            Some(&"sha256:aa".to_string())
+        );
+    }
+
+    #[test]
+    fn absolutises_a_relative_original_url() {
+        // SingleFile records the raw attribute value, so it is relative whenever
+        // the page's markup was. The markdown carries absolute URLs, because
+        // Readability resolves them. The map is what has to bridge that.
+        let html = r#"<img data-sf-original-src="/img/a.png" src="cas:sha256:bb">"#;
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(
+            map.get("https://example.com/img/a.png"),
+            Some(&"sha256:bb".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_an_element_whose_src_was_not_deconstructed() {
+        let html = r#"<img data-sf-original-src="https://cdn.example.com/a.png" src="data:,">"#;
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn does_not_confuse_srcset_with_src() {
+        let html = concat!(
+            r#"<img data-sf-original-srcset="https://cdn.example.com/wide.png 2x" "#,
+            r#"data-sf-original-src="https://cdn.example.com/a.png" src="cas:sha256:cc" "#,
+            r#"srcset="cas:sha256:dd 2x">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://cdn.example.com/a.png"),
+            Some(&"sha256:cc".to_string())
+        );
+    }
+
+    #[test]
+    fn pairs_within_one_tag_only() {
+        let html = concat!(
+            r#"<img data-sf-original-src="https://cdn.example.com/a.png">"#,
+            r#"<img src="cas:sha256:ee">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    fn one_entry(url: &str, hash: &str) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
+        map.insert(url.to_string(), hash.to_string());
+        map
+    }
+
+    #[test]
+    fn rewrites_a_markdown_image_to_its_blob() {
+        let map = one_entry("https://cdn.example.com/a.png", "sha256:aa");
+
+        let out = rewrite_markdown_images(
+            "text\n\n![a cat](https://cdn.example.com/a.png)\n",
+            &map,
+            BASE,
+        );
+
+        assert_eq!(out, "text\n\n![a cat](cas:sha256:aa)\n");
+    }
+
+    #[test]
+    fn preserves_an_image_title() {
+        let map = one_entry("https://cdn.example.com/a.png", "sha256:aa");
+
+        let out = rewrite_markdown_images(
+            r#"![a cat](https://cdn.example.com/a.png "Fig 1")"#,
+            &map,
+            BASE,
+        );
+
+        assert_eq!(out, r#"![a cat](cas:sha256:aa "Fig 1")"#);
+    }
+
+    #[test]
+    fn leaves_an_unmatched_image_intact() {
+        // Silently dropping it would produce markdown that claims an image was
+        // archived when it was not.
+        let map = one_entry("https://cdn.example.com/a.png", "sha256:aa");
+
+        let out = rewrite_markdown_images("![b](https://cdn.example.com/b.png)", &map, BASE);
+
+        assert_eq!(out, "![b](https://cdn.example.com/b.png)");
+    }
+
+    #[test]
+    fn leaves_ordinary_links_alone() {
+        // A link should still point at the live web; only images become blobs.
+        let map = one_entry("https://cdn.example.com/a.png", "sha256:aa");
+
+        let out = rewrite_markdown_images("[see it](https://cdn.example.com/a.png)", &map, BASE);
+
+        assert_eq!(out, "[see it](https://cdn.example.com/a.png)");
+    }
+
+    #[test]
+    fn matches_a_relative_markdown_url_against_an_absolute_map_key() {
+        let map = one_entry("https://example.com/img/a.png", "sha256:aa");
+
+        let out = rewrite_markdown_images("![a](/img/a.png)", &map, BASE);
+
+        assert_eq!(out, "![a](cas:sha256:aa)");
+    }
+
+    #[test]
+    fn deconstruct_and_map_compose_end_to_end() {
+        let html = format!(
+            r#"<img data-sf-original-src="https://cdn.example.com/a.png" src="data:image/png;base64,{PNG}">"#
+        );
+
+        let deconstructed = deconstruct(&html);
+        let map = original_url_map(&deconstructed.html, BASE);
+        let out = rewrite_markdown_images("![a](https://cdn.example.com/a.png)", &map, BASE);
+
+        let hash = &deconstructed.resources[0].hash;
+        assert_eq!(out, format!("![a](cas:{hash})"));
     }
 }
