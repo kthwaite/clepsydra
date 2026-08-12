@@ -9,6 +9,7 @@ import {
 } from "#/api/academic";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
@@ -360,27 +361,19 @@ export function WorkDetail({ workId }: { workId: string }) {
             value={year}
             onChange={setYear}
           />
-          <div>
-            <label
-              htmlFor={`${id}-status`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
-              Reading status
-            </label>
-            <select
-              id={`${id}-status`}
-              value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as ReadingStatus | "")
-              }
-              className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="">Unspecified</option>
-              <option value="unread">Unread</option>
-              <option value="reading">Reading</option>
-              <option value="done">Done</option>
-            </select>
-          </div>
+          <Select
+            label="Reading status"
+            selectedKey={status}
+            onSelectionChange={(key) =>
+              setStatus(key as ReadingStatus | "")
+            }
+            className="w-full"
+          >
+            <SelectItem id="">Unspecified</SelectItem>
+            <SelectItem id="unread">Unread</SelectItem>
+            <SelectItem id="reading">Reading</SelectItem>
+            <SelectItem id="done">Done</SelectItem>
+          </Select>
           <TextField
             label="Rating"
             type="number"
@@ -441,25 +434,17 @@ export function WorkDetail({ workId }: { workId: string }) {
         }
       >
         <div className="space-y-3">
-          <div>
-            <label
-              htmlFor={`${id}-annotation-type`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
-              Annotation type
-            </label>
-            <select
-              id={`${id}-annotation-type`}
-              value={annotationType}
-              onChange={(event) =>
-                setAnnotationType(event.target.value as AnnotationType)
-              }
-              className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="highlight">Highlight</option>
-              <option value="note">Note</option>
-            </select>
-          </div>
+          <Select
+            label="Annotation type"
+            selectedKey={annotationType}
+            onSelectionChange={(key) =>
+              setAnnotationType(key as AnnotationType)
+            }
+            className="w-full"
+          >
+            <SelectItem id="highlight">Highlight</SelectItem>
+            <SelectItem id="note">Note</SelectItem>
+          </Select>
           <div>
             <label
               htmlFor={`${id}-annotation-body`}

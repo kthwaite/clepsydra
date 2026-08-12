@@ -8,8 +8,10 @@ import {
   useImportZotero,
 } from "#/api/academic";
 import { Button } from "#/components/ui/button";
+import { Checkbox } from "#/components/ui/checkbox";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
+import { Select, SelectItem } from "#/components/ui/select";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 type ImportMode = "bibtex" | "doi" | "isbn" | "zotero";
@@ -166,26 +168,18 @@ export function ImportDialog({
       }
     >
       <div className="space-y-4">
-        <div>
-          <label
-            htmlFor={`${id}-source`}
-            className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-          >
-            Import source
-          </label>
-          <select
-            id={`${id}-source`}
-            value={mode}
-            onChange={(event) => changeMode(event.target.value as ImportMode)}
-            disabled={isPending}
-            className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-          >
-            <option value="bibtex">BibTeX</option>
-            <option value="doi">DOI</option>
-            <option value="isbn">ISBN</option>
-            <option value="zotero">Zotero</option>
-          </select>
-        </div>
+        <Select
+          label="Import source"
+          selectedKey={mode}
+          onSelectionChange={(key) => changeMode(key as ImportMode)}
+          isDisabled={isPending}
+          className="w-full"
+        >
+          <SelectItem id="bibtex">BibTeX</SelectItem>
+          <SelectItem id="doi">DOI</SelectItem>
+          <SelectItem id="isbn">ISBN</SelectItem>
+          <SelectItem id="zotero">Zotero</SelectItem>
+        </Select>
 
         {mode === "bibtex" ? (
           <div>
@@ -243,47 +237,33 @@ export function ImportDialog({
               description="Optional timestamp; otherwise the saved checkpoint is used."
               isDisabled={isPending}
             />
-            <div>
-              <label
-                htmlFor={`${id}-conflict`}
-                className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-              >
-                Conflict policy
-              </label>
-              <select
-                id={`${id}-conflict`}
-                value={conflictPolicy}
-                onChange={(event) =>
-                  setConflictPolicy(event.target.value as ConflictPolicy)
-                }
-                disabled={isPending}
-                className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="skip">Skip existing works</option>
-                <option value="source_wins">Zotero metadata wins</option>
-                <option value="manual">Report conflicts only</option>
-              </select>
-            </div>
-            <label className="flex items-start gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={dryRun}
-                onChange={(event) => setDryRun(event.target.checked)}
-                disabled={isPending}
-                className="mt-0.5"
-              />
+            <Select
+              label="Conflict policy"
+              selectedKey={conflictPolicy}
+              onSelectionChange={(key) =>
+                setConflictPolicy(key as ConflictPolicy)
+              }
+              isDisabled={isPending}
+              className="w-full"
+            >
+              <SelectItem id="skip">Skip existing works</SelectItem>
+              <SelectItem id="source_wins">Zotero metadata wins</SelectItem>
+              <SelectItem id="manual">Report conflicts only</SelectItem>
+            </Select>
+            <Checkbox
+              isSelected={dryRun}
+              onChange={setDryRun}
+              isDisabled={isPending}
+            >
               Dry run — inspect results without writing pages
-            </label>
-            <label className="flex items-start gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={autoCheckpoint}
-                onChange={(event) => setAutoCheckpoint(event.target.checked)}
-                disabled={isPending}
-                className="mt-0.5"
-              />
+            </Checkbox>
+            <Checkbox
+              isSelected={autoCheckpoint}
+              onChange={setAutoCheckpoint}
+              isDisabled={isPending}
+            >
               Use and update the Zotero import checkpoint
-            </label>
+            </Checkbox>
           </div>
         ) : null}
 

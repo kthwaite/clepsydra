@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type ReadingStatus,
   useCreateWork,
@@ -11,6 +11,7 @@ import { WorkDetail } from "#/components/academic/WorkDetail";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { SearchField } from "#/components/ui/search-field";
+import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 import { cn } from "#/lib/cn";
 
@@ -52,7 +53,6 @@ function matchesSearch(work: WorkSummary, query: string): boolean {
 }
 
 export function AcademicLibrary() {
-  const id = useId();
   const [limit, setLimit] = useState(PAGE_SIZE);
   const worksQuery = useWorks({ limit });
   const createWork = useCreateWork();
@@ -277,26 +277,18 @@ export function AcademicLibrary() {
         }
       >
         <div className="grid gap-3 md:grid-cols-2">
-          <div>
-            <label
-              htmlFor={`${id}-work-type`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
-              Work type
-            </label>
-            <select
-              id={`${id}-work-type`}
-              value={workType}
-              onChange={(event) => setWorkType(event.target.value as WorkType)}
-              className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="paper">Paper</option>
-              <option value="book">Book</option>
-              <option value="thesis">Thesis</option>
-              <option value="report">Report</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
+          <Select
+            label="Work type"
+            selectedKey={workType}
+            onSelectionChange={(key) => setWorkType(key as WorkType)}
+            className="w-full"
+          >
+            <SelectItem id="paper">Paper</SelectItem>
+            <SelectItem id="book">Book</SelectItem>
+            <SelectItem id="thesis">Thesis</SelectItem>
+            <SelectItem id="report">Report</SelectItem>
+            <SelectItem id="other">Other</SelectItem>
+          </Select>
           <TextField
             label="Year"
             type="number"
@@ -317,26 +309,16 @@ export function AcademicLibrary() {
             description="Separate names with commas."
             className="md:col-span-2"
           />
-          <div>
-            <label
-              htmlFor={`${id}-new-status`}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
-              Reading status
-            </label>
-            <select
-              id={`${id}-new-status`}
-              value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as ReadingStatus)
-              }
-              className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="unread">Unread</option>
-              <option value="reading">Reading</option>
-              <option value="done">Done</option>
-            </select>
-          </div>
+          <Select
+            label="Reading status"
+            selectedKey={status}
+            onSelectionChange={(key) => setStatus(key as ReadingStatus)}
+            className="w-full"
+          >
+            <SelectItem id="unread">Unread</SelectItem>
+            <SelectItem id="reading">Reading</SelectItem>
+            <SelectItem id="done">Done</SelectItem>
+          </Select>
           <TextField
             label="Citation key"
             value={citeKey}
