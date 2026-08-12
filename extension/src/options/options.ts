@@ -2,6 +2,20 @@ import { ClepsydraClient } from "#/lib/api-client";
 import type { ExtensionSettings } from "#/lib/types";
 import { DEFAULT_SETTINGS } from "#/lib/types";
 
+function input(id: string): HTMLInputElement {
+	return document.getElementById(id) as HTMLInputElement;
+}
+
+function element(id: string): HTMLElement {
+	return document.getElementById(id) as HTMLElement;
+}
+
+/** Read a positive integer field, falling back to the default when unusable. */
+function positiveNumber(id: string, fallback: number): number {
+	const value = Number.parseInt(input(id).value, 10);
+	return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 async function init() {
 	const stored = await chrome.storage.sync.get("settings");
 	const settings: ExtensionSettings = {
@@ -10,44 +24,36 @@ async function init() {
 	};
 
 	// Populate form
-	(document.getElementById("server-url") as HTMLInputElement).value =
-		settings.server_url;
-	(document.getElementById("default-tags") as HTMLInputElement).value =
-		settings.default_tags.join(", ");
-	(document.getElementById("notify-success") as HTMLInputElement).checked =
-		settings.notify_on_success;
-	(document.getElementById("notify-duplicate") as HTMLInputElement).checked =
-		settings.notify_on_duplicate;
-	(document.getElementById("on-changed") as HTMLSelectElement).value =
-		settings.on_content_changed;
+	input("server-url").value = settings.server_url;
+	input("default-tags").value = settings.default_tags.join(", ");
+	input("notify-success").checked = settings.notify_on_success;
+	input("notify-duplicate").checked = settings.notify_on_duplicate;
+	input("max-blob-mb").value = String(settings.max_blob_size_mb);
+	input("max-request-mb").value = String(settings.max_request_size_mb);
 
 	// Save handler
-	document.getElementById("save-btn")!.addEventListener("click", async () => {
+	element("save-btn").addEventListener("click", async () => {
 		const newSettings: ExtensionSettings = {
-			server_url: (
-				document.getElementById("server-url") as HTMLInputElement
-			).value.replace(/\/$/, ""),
-			default_tags: (
-				document.getElementById("default-tags") as HTMLInputElement
-			).value
-				.split(",")
+			server_url: input("server-url").value.replace(/\/$/, ""),
+			default_tags: input("default-tags")
+				.value.split(",")
 				.map((t) => t.trim())
 				.filter(Boolean),
-			archive_path_prefix: "archive",
-			notify_on_success: (
-				document.getElementById("notify-success") as HTMLInputElement
-			).checked,
-			notify_on_duplicate: (
-				document.getElementById("notify-duplicate") as HTMLInputElement
-			).checked,
-			on_content_changed: (
-				document.getElementById("on-changed") as HTMLSelectElement
-			).value as ExtensionSettings["on_content_changed"],
+			notify_on_success: input("notify-success").checked,
+			notify_on_duplicate: input("notify-duplicate").checked,
+			max_blob_size_mb: positiveNumber(
+				"max-blob-mb",
+				DEFAULT_SETTINGS.max_blob_size_mb,
+			),
+			max_request_size_mb: positiveNumber(
+				"max-request-mb",
+				DEFAULT_SETTINGS.max_request_size_mb,
+			),
 		};
 
 		await chrome.storage.sync.set({ settings: newSettings });
 
-		const savedMsg = document.getElementById("saved-msg")!;
+		const savedMsg = element("saved-msg");
 		savedMsg.style.display = "inline";
 		setTimeout(() => {
 			savedMsg.style.display = "none";
@@ -60,7 +66,7 @@ async function init() {
 }
 
 async function checkStatus(serverUrl: string) {
-	const statusBox = document.getElementById("status-box")!;
+	const statusBox = element("status-box");
 	const client = new ClepsydraClient(serverUrl);
 	try {
 		const status = await client.getStatus();

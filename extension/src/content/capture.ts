@@ -15,6 +15,22 @@ export interface CaptureResult {
 	singlefile_html: string;
 	article_html: string | null;
 	article_text_length: number;
+	/**
+	 * Provenance Readability already parses out of the page. It used to be
+	 * discarded along with the rest of the parse result, losing author and
+	 * publication date for every archived page.
+	 */
+	byline?: string;
+	site_name?: string;
+	published_time?: string;
+	lang?: string;
+	excerpt?: string;
+}
+
+/** Trim to a non-empty string, or drop it. */
+function clean(value: string | null | undefined): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : undefined;
 }
 
 async function capture(): Promise<CaptureResult> {
@@ -44,6 +60,13 @@ async function capture(): Promise<CaptureResult> {
 		singlefile_html,
 		article_html: article?.content || null,
 		article_text_length: article?.textContent?.length || 0,
+		byline: clean(article?.byline),
+		site_name: clean(article?.siteName),
+		published_time: clean(article?.publishedTime),
+		// Readability does not report the document language; take it from the
+		// document element, which is where pages actually declare it.
+		lang: clean(article?.lang ?? document.documentElement.lang),
+		excerpt: clean(article?.excerpt),
 	};
 }
 

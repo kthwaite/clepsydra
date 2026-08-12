@@ -371,11 +371,28 @@ async fn archive_page_is_readable_via_pages_api() {
         page_body["body"]
     );
 
-    // Verify tags include "archive"
+    // The page declares Kind::Archive, whose computed tag is "archive". The
+    // extension still sends that tag, but it is now the canonical classification
+    // rather than a user-editable one, so it is reported under computed_tags and
+    // deduplicated out of the editable list instead of appearing twice.
+    assert_eq!(page_body["kind"], "ARCHIVE");
+    assert_eq!(
+        page_body["inferred"], false,
+        "the archive endpoint declares the kind rather than leaving it to folder inference"
+    );
+    let computed = page_body["computed_tags"].as_array().unwrap();
+    assert!(
+        computed.iter().any(|t| t == "archive"),
+        "expected 'archive' among computed tags, got: {computed:?}"
+    );
     let tags = page_body["meta"]["tags"].as_array().unwrap();
     assert!(
-        tags.iter().any(|t| t == "archive"),
-        "expected 'archive' tag, got: {tags:?}"
+        !tags.iter().any(|t| t == "archive"),
+        "'archive' must not be duplicated into editable tags, got: {tags:?}"
+    );
+    assert!(
+        tags.iter().any(|t| t == "example.com"),
+        "domain tag should remain editable, got: {tags:?}"
     );
 }
 
@@ -587,4 +604,282 @@ async fn delete_folder_recursive_runs_delete_hooks() {
             "blob should be gone from CAS after recursive folder delete + GC"
         );
     }
+}
+
+/// Ingest a single blob of the given content type and return its CAS URL.
+async fn ingest_blob(server: &TestServer, url: &str, content_type: &str, data: &[u8]) -> String {
+    let hash = sha256_hash(data);
+    let body = "# Snapshot\n\nbody";
+    let payload = serde_json::json!({
+        "url": url,
+        "domain": "evil.example",
+        "title": "Snapshot",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(body),
+        "snapshot_hash": hash,
+        "markdown_body": body,
+        "tags": ["archive"],
+        "blobs": [{
+            "hash": hash,
+            "content_type": content_type,
+            "data": BASE64.encode(data),
+        }],
+    });
+    server
+        .post("/api/vault/archive")
+        .json(&payload)
+        .await
+        .assert_status(StatusCode::CREATED);
+    format!("/api/vault/cas/{hash}")
+}
+
+#[tokio::test]
+async fn serve_blob_sets_sandbox_csp_and_nosniff() {
+    let (server, _tmp, _state) = setup_server();
+    let url = ingest_blob(
+        &server,
+        "https://evil.example/a",
+        "image/png",
+        b"\x89PNG fake bytes",
+    )
+    .await;
+
+    let res = server.get(&url).await;
+    res.assert_status(StatusCode::OK);
+
+    let csp = res
+        .headers()
+        .get("content-security-policy")
+        .expect("blobs must carry a CSP")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(csp.contains("sandbox"), "CSP was {csp:?}");
+    assert!(csp.contains("default-src 'none'"), "CSP was {csp:?}");
+
+    assert_eq!(
+        res.headers()
+            .get("x-content-type-options")
+            .map(|v| v.to_str().unwrap()),
+        Some("nosniff")
+    );
+}
+
+#[tokio::test]
+async fn serve_blob_forces_download_for_active_content_types() {
+    let (server, _tmp, _state) = setup_server();
+
+    for (index, content_type) in [
+        "text/html",
+        "text/html; charset=utf-8",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "application/xml",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let url = ingest_blob(
+            &server,
+            &format!("https://evil.example/active-{index}"),
+            content_type,
+            format!("<script>alert({index})</script>").as_bytes(),
+        )
+        .await;
+
+        let res = server.get(&url).await;
+        res.assert_status(StatusCode::OK);
+        assert_eq!(
+            res.headers()
+                .get("content-disposition")
+                .map(|v| v.to_str().unwrap()),
+            Some("attachment"),
+            "{content_type} must not render inline from the vault origin"
+        );
+    }
+}
+
+#[tokio::test]
+async fn serve_blob_keeps_images_inline() {
+    let (server, _tmp, _state) = setup_server();
+    let url = ingest_blob(
+        &server,
+        "https://evil.example/inline",
+        "image/png",
+        b"\x89PNG other bytes",
+    )
+    .await;
+
+    let res = server.get(&url).await;
+    res.assert_status(StatusCode::OK);
+    assert!(
+        res.headers().get("content-disposition").is_none(),
+        "images must stay inline so archived markdown still renders"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Read-only archive bodies
+// ---------------------------------------------------------------------------
+
+/// Ingest an archive and return its vault path.
+async fn ingest_simple(server: &TestServer, url: &str, body: &str) -> String {
+    let payload = serde_json::json!({
+        "url": url,
+        "domain": "example.com",
+        "title": "Protected Article",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(body),
+        "snapshot_hash": "sha256:00000000000000000000000000000000000000000000000000000000000000ff",
+        "markdown_body": body,
+        "tags": ["archive"],
+        "blobs": [],
+    });
+    let res = server.post("/api/vault/archive").json(&payload).await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    body["vault_path"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn archived_page_reports_itself_read_only() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-1", "# Article\n\nOriginal.").await;
+
+    let page = server.get(&format!("/api/vault/pages/{path}")).await;
+    page.assert_status(StatusCode::OK);
+    let body: serde_json::Value = page.json();
+    assert_eq!(body["readonly"], true);
+    assert_eq!(body["kind"], "ARCHIVE");
+}
+
+#[tokio::test]
+async fn editing_an_archived_body_is_refused() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-2", "# Article\n\nOriginal.").await;
+
+    let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    let res = server
+        .put(&format!("/api/vault/pages/{path}"))
+        .json(&serde_json::json!({
+            "body": "# Article\n\nTampered.",
+            "expected_revision": page["revision"],
+        }))
+        .await;
+
+    res.assert_status(StatusCode::FORBIDDEN);
+
+    // And the stored body is untouched.
+    let after: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    assert!(
+        after["body"].as_str().unwrap().contains("Original."),
+        "body should be unchanged, got: {}",
+        after["body"]
+    );
+}
+
+#[tokio::test]
+async fn metadata_edits_to_an_archived_page_still_work() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-3", "# Article\n\nOriginal.").await;
+
+    let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    // Filing and tagging an archive is the whole point of having it in a vault,
+    // so protection must not extend to metadata.
+    let res = server
+        .put(&format!("/api/vault/pages/{path}"))
+        .json(&serde_json::json!({
+            "expected_revision": page["revision"],
+            "tags": ["archive", "example.com", "to-read"],
+        }))
+        .await;
+
+    assert!(
+        res.status_code().is_success(),
+        "metadata-only update should succeed, got {}: {}",
+        res.status_code(),
+        res.text()
+    );
+}
+
+#[tokio::test]
+async fn clearing_readonly_unlocks_the_body() {
+    let (server, _tmp, _state) = setup_server();
+    let path = ingest_simple(&server, "https://example.com/ro-4", "# Article\n\nOriginal.").await;
+    let url = format!("/api/vault/pages/{path}");
+
+    // Unlock. This is a metadata-only write, so the guard lets it through even
+    // though the page is protected at the moment it is made.
+    let page: serde_json::Value = server.get(&url).await.json();
+    let unlock = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": page["revision"],
+            "readonly": false,
+        }))
+        .await;
+    assert!(
+        unlock.status_code().is_success(),
+        "unlocking should succeed, got {}: {}",
+        unlock.status_code(),
+        unlock.text()
+    );
+
+    let unlocked: serde_json::Value = server.get(&url).await.json();
+    assert_eq!(unlocked["readonly"], false);
+
+    // Now the body may be edited.
+    let edit = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": unlocked["revision"],
+            "body": "# Article\n\nAnnotated by hand.",
+        }))
+        .await;
+    assert!(
+        edit.status_code().is_success(),
+        "editing an unlocked archive should succeed, got {}: {}",
+        edit.status_code(),
+        edit.text()
+    );
+
+    let after: serde_json::Value = server.get(&url).await.json();
+    assert!(after["body"].as_str().unwrap().contains("Annotated by hand."));
+}
+
+#[tokio::test]
+async fn readonly_can_be_declared_on_any_page() {
+    let (server, _tmp, _state) = setup_server();
+    let create = server
+        .post("/api/vault/pages")
+        .json(&serde_json::json!({
+            "title": "Locked Note",
+            "body": "Do not edit.",
+        }))
+        .await;
+    assert!(create.status_code().is_success(), "{}", create.text());
+    let created: serde_json::Value = create.json();
+    let url = format!("/api/vault/pages/{}", created["path"].as_str().unwrap());
+
+    let page: serde_json::Value = server.get(&url).await.json();
+    assert_eq!(page["readonly"], false, "notes are editable by default");
+
+    let lock = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": page["revision"],
+            "readonly": true,
+        }))
+        .await;
+    assert!(lock.status_code().is_success(), "{}", lock.text());
+
+    let locked: serde_json::Value = server.get(&url).await.json();
+    let res = server
+        .put(&url)
+        .json(&serde_json::json!({
+            "expected_revision": locked["revision"],
+            "body": "Edited anyway.",
+        }))
+        .await;
+    res.assert_status(StatusCode::FORBIDDEN);
 }

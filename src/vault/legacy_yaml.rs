@@ -122,6 +122,7 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
         created_at: strict.created_at,
         updated_at: strict.updated_at,
         encryption: None,
+        readonly: None,
         extra: convert_extra(strict.extra),
     };
     Ok((meta, body.to_string()))
@@ -149,6 +150,7 @@ pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Op
                 created_at: loose.created_at,
                 updated_at: loose.updated_at,
                 encryption: None,
+                readonly: None,
                 extra: convert_extra(loose.extra),
             };
             let _ = ensure_populated_meta(&mut meta);

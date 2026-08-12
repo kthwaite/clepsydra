@@ -1521,12 +1521,22 @@ export interface components {
         };
         ArchiveRequest: {
             blobs: components["schemas"]["BlobUpload"][];
+            /** @description Article byline, as parsed by Readability in the page context. */
+            byline?: string | null;
             canonical_url?: string | null;
             captured_at: string;
             content_hash: string;
             description?: string | null;
             domain: string;
+            /** @description Short summary extracted from the article body. */
+            excerpt?: string | null;
+            /** @description BCP-47 language tag declared by the document. */
+            lang?: string | null;
             markdown_body: string;
+            /** @description Publication timestamp declared by the page, verbatim. */
+            published_time?: string | null;
+            /** @description Publication name (og:site_name or equivalent). */
+            site_name?: string | null;
             snapshot_hash: string;
             tags: string[];
             title: string;
@@ -2211,7 +2221,7 @@ export interface components {
          *     vocabulary instead of hardcoding it.
          * @enum {string}
          */
-        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "AI_CONVERSATION";
+        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "ARCHIVE" | "AI_CONVERSATION";
         LocationResponse: {
             /** @description Optional human-readable label (e.g. `"London"`). */
             label?: string | null;
@@ -2283,6 +2293,12 @@ export interface components {
             meta: components["schemas"]["PageMetaResponse"];
             path: string;
             project?: string | null;
+            /**
+             * @description Effective body write-protection: the page's `readonly` if declared,
+             *     otherwise its kind's default. Clients should render a protected body
+             *     non-editable; the server rejects the write regardless.
+             */
+            readonly: boolean;
             revision: string;
         };
         /** @description OpenAPI schema for page metadata exposed in `PageDetail`. */
@@ -2703,6 +2719,12 @@ export interface components {
             aliases?: string[] | null;
             body?: string | null;
             expected_revision: string;
+            /**
+             * @description Declare or clear body write-protection. Sending `false` for a page whose
+             *     kind protects bodies by default is how a reader unlocks it; the change is
+             *     metadata-only, so it is permitted even while the page is still protected.
+             */
+            readonly?: boolean | null;
             tags?: string[] | null;
             title?: string | null;
         };

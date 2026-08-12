@@ -10,7 +10,8 @@
 		"outDir": "dist",
 		"rootDir": "src",
 		"paths": {
-			"#/*": ["./src/*"]
+			"#/*": ["./src/*"],
+			"@mixmark-io/domino": ["./src/types/domino.d.ts"]
 		},
 		"types": ["chrome-types"]
 	},

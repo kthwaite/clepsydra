@@ -1,10 +1,15 @@
-import TurndownService from "turndown";
 import type { CaptureResult } from "#/content/capture";
 import { ArchiveConflictError, ClepsydraClient } from "#/lib/api-client";
+import { type CapturePhase, badgeFor, isTerminal } from "#/lib/badge";
+import { CaptureQueue } from "#/lib/capture-queue";
 import { sha256, sha256String } from "#/lib/hasher";
+import { executeCaptureScript } from "#/lib/inject-capture";
+import { describeInjectionFailure } from "#/lib/injection";
+import { fetchRemoteImages } from "#/lib/remote-resources";
 import { extractDataUris } from "#/lib/resource-extractor";
-import { addCasImageRule, addDemoteHeadingsRule } from "#/lib/turndown-rules";
+import { convertArchiveHtml } from "#/lib/turndown-rules";
 import type {
+	ArchiveConflictDetail,
 	ArchiveManifest,
 	BlobUpload,
 	ExtensionSettings,
@@ -49,36 +54,16 @@ function uint8ToBase64(bytes: Uint8Array): string {
 	return btoa(parts.join(""));
 }
 
-interface LegacyTabsApi {
-	executeScript?: (
-		tabId: number,
-		details: { file: string },
-		callback?: () => void,
-	) => void;
-}
-
 interface LegacyToolbarActionApi {
 	onClicked?: {
 		addListener: (callback: (tab: chrome.tabs.Tab) => void) => void;
 	};
 }
 
-/** Execute content capture script in a tab across MV3 and MV2 APIs. */
-function executeCaptureScript(tabId: number): void {
-	if (chrome.scripting?.executeScript) {
-		chrome.scripting.executeScript({
-			target: { tabId },
-			files: ["content/capture.js"],
-		});
-		return;
-	}
-
-	const legacyTabs = chrome.tabs as typeof chrome.tabs & LegacyTabsApi;
-	legacyTabs.executeScript?.(tabId, { file: "content/capture.js" });
-}
-
 const IMG_SRC_REGEX = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
 const MAX_REMOTE_IMAGES = 50;
+/** Bound on a single resource fetch, so one hung CDN cannot stall a capture. */
+const RESOURCE_TIMEOUT_MS = 15_000;
 
 function extractImageSources(articleHtml: string): string[] {
 	const sources = new Set<string>();
@@ -91,12 +76,11 @@ function extractImageSources(articleHtml: string): string[] {
 	return [...sources];
 }
 
-function resolveAbsoluteUrl(url: string, baseUrl: string): string | null {
-	try {
-		return new URL(url, baseUrl).href;
-	} catch {
-		return null;
-	}
+interface ResourceBundle {
+	blobs: BlobUpload[];
+	resourceMap: Map<string, string>;
+	/** Images that were found but not archived, for any reason. */
+	skipped: number;
 }
 
 /** Build a resource map: original URI -> CAS hash. */
@@ -104,7 +88,8 @@ async function buildResourceMap(
 	html: string,
 	articleHtml: string | null,
 	pageUrl: string,
-): Promise<{ blobs: BlobUpload[]; resourceMap: Map<string, string> }> {
+	settings: ExtensionSettings,
+): Promise<ResourceBundle> {
 	const extracted = extractDataUris(html);
 	const blobs: BlobUpload[] = [];
 	const resourceMap = new Map<string, string>();
@@ -125,48 +110,30 @@ async function buildResourceMap(
 	}
 
 	// 2) Reader-mode image URLs in article HTML.
+	let skipped = 0;
 	if (articleHtml) {
-		const imageSources = extractImageSources(articleHtml).slice(
-			0,
-			MAX_REMOTE_IMAGES,
+		const { resources, skipped: dropped } = await fetchRemoteImages(
+			extractImageSources(articleHtml),
+			{
+				pageUrl,
+				maxImages: MAX_REMOTE_IMAGES,
+				perResourceTimeoutMs: RESOURCE_TIMEOUT_MS,
+				maxBlobBytes: settings.max_blob_size_mb * 1024 * 1024,
+				totalBudgetBytes: settings.max_request_size_mb * 1024 * 1024,
+				hash: sha256,
+				alreadyArchived: (src) => resourceMap.has(src),
+			},
 		);
+		skipped = dropped;
 
-		const results = await Promise.all(
-			imageSources.map(async (src) => {
-				if (src.startsWith("data:")) return null;
-
-				const absoluteSrc = resolveAbsoluteUrl(src, pageUrl);
-				if (!absoluteSrc) return null;
-
-				if (resourceMap.has(src) || resourceMap.has(absoluteSrc)) return null;
-
-				try {
-					const response = await fetch(absoluteSrc, { credentials: "include" });
-					if (!response.ok) return null;
-
-					const bytes = new Uint8Array(await response.arrayBuffer());
-					const hash = await sha256(bytes);
-					const contentType =
-						response.headers.get("content-type")?.split(";")[0] ||
-						"application/octet-stream";
-
-					return { src, absoluteSrc, hash, contentType, bytes };
-				} catch {
-					return null;
-				}
-			}),
-		);
-
-		for (const result of results) {
-			if (result) {
-				resourceMap.set(result.src, result.hash);
-				resourceMap.set(result.absoluteSrc, result.hash);
-				blobs.push({
-					hash: result.hash,
-					content_type: result.contentType,
-					data: uint8ToBase64(result.bytes),
-				});
-			}
+		for (const resource of resources) {
+			resourceMap.set(resource.src, resource.hash);
+			resourceMap.set(resource.absoluteSrc, resource.hash);
+			blobs.push({
+				hash: resource.hash,
+				content_type: resource.contentType,
+				data: uint8ToBase64(resource.bytes),
+			});
 		}
 	}
 
@@ -178,21 +145,7 @@ async function buildResourceMap(
 		return true;
 	});
 
-	return { blobs: uniqueBlobs, resourceMap };
-}
-
-/** Convert article HTML to markdown with CAS image references */
-function convertToMarkdown(
-	articleHtml: string,
-	resourceMap: Map<string, string>,
-): string {
-	const td = new TurndownService({
-		headingStyle: "atx",
-		codeBlockStyle: "fenced",
-	});
-	addCasImageRule(td, resourceMap);
-	addDemoteHeadingsRule(td);
-	return td.turndown(articleHtml);
+	return { blobs: uniqueBlobs, resourceMap, skipped };
 }
 
 /** Build fallback markdown when Readability fails */
@@ -203,15 +156,28 @@ function buildFallbackMarkdown(
 ): string {
 	return [
 		"> Automated reader-mode extraction failed for this page.",
-		`> [View the archived HTML snapshot](cas:${snapshotHash})`,
+		`> [Download the archived HTML snapshot](cas:${snapshotHash})`,
 		"",
 		`**URL:** ${url}`,
 		`**Captured:** ${capturedAt}`,
 	].join("\n");
 }
 
+/**
+ * Record that the archive is incomplete. A partial capture that looks complete
+ * is worse than one that admits what it is missing.
+ */
+function appendIncompleteNote(markdown: string, skipped: number): string {
+	if (skipped <= 0) return markdown;
+	const plural = skipped === 1 ? "resource" : "resources";
+	return `${markdown}\n\n> ${skipped} ${plural} could not be archived (too large, unreachable, or beyond the per-capture limit).`;
+}
+
 /** Main pipeline: process a capture result and send to server */
-async function processCaptureResult(result: CaptureResult): Promise<void> {
+async function processCaptureResult(
+	result: CaptureResult,
+	tabId: number | undefined,
+): Promise<void> {
 	const settings = await loadSettings();
 	const client = new ClepsydraClient(settings.server_url);
 	const capturedAt = new Date().toISOString();
@@ -222,11 +188,14 @@ async function processCaptureResult(result: CaptureResult): Promise<void> {
 	const snapshotHash = await sha256(snapshotData);
 
 	// Extract and hash resources
-	const { blobs, resourceMap } = await buildResourceMap(
+	const { blobs, resourceMap, skipped } = await buildResourceMap(
 		result.singlefile_html,
 		result.article_html,
 		result.url,
+		settings,
 	);
+
+	reportPhase(tabId, "uploading");
 
 	// Add snapshot itself as a blob
 	const snapshotBlob: BlobUpload = {
@@ -239,10 +208,11 @@ async function processCaptureResult(result: CaptureResult): Promise<void> {
 	// Convert to markdown
 	let markdownBody: string;
 	if (result.article_html && result.article_text_length >= 200) {
-		markdownBody = convertToMarkdown(result.article_html, resourceMap);
+		markdownBody = convertArchiveHtml(result.article_html, resourceMap);
 	} else {
 		markdownBody = buildFallbackMarkdown(result.url, snapshotHash, capturedAt);
 	}
+	markdownBody = appendIncompleteNote(markdownBody, skipped);
 
 	const contentHash = await sha256String(markdownBody);
 
@@ -262,74 +232,207 @@ async function processCaptureResult(result: CaptureResult): Promise<void> {
 		markdown_body: markdownBody,
 		tags,
 		blobs: allBlobs,
+		byline: result.byline,
+		site_name: result.site_name,
+		published_time: result.published_time,
+		lang: result.lang,
+		excerpt: result.excerpt,
 	};
 
 	// Send to server
 	try {
 		const response = await client.ingestArchive(manifest);
 
-		if (response.status === "already_exists" && settings.notify_on_duplicate) {
-			showNotification(
-				"Already Archived",
-				`${result.title} was already saved.`,
-			);
-		} else if (response.status === "created" && settings.notify_on_success) {
-			showNotification(
-				"Page Archived",
-				`${result.title} → ${response.vault_path}`,
-			);
+		if (response.status === "already_exists") {
+			reportPhase(tabId, "duplicate");
+			if (settings.notify_on_duplicate) {
+				showNotification(
+					"Already Archived",
+					`${result.title} was already saved.`,
+				);
+			}
+		} else {
+			reportPhase(tabId, "done");
+			if (settings.notify_on_success) {
+				showNotification(
+					"Page Archived",
+					`${result.title} → ${response.vault_path}`,
+				);
+			}
 		}
 	} catch (err) {
 		if (err instanceof ArchiveConflictError) {
-			showNotification(
-				"Content Changed",
-				`${result.title} has changed since last capture.`,
-			);
+			reportPhase(tabId, "conflict");
+			showNotification("Content Changed", describeConflict(result.title, err));
 		} else {
+			reportPhase(tabId, "error");
 			showNotification("Archive Failed", String(err));
 		}
 	}
 }
 
+/**
+ * The server already tells us where the previous capture lives; saying so is
+ * the difference between an actionable notification and a shrug.
+ */
+function describeConflict(title: string, err: ArchiveConflictError): string {
+	const detail = err.detail as ArchiveConflictDetail | undefined;
+	const path = detail?.vault_path;
+	return path
+		? `${title} changed since it was archived at ${path}. The existing page was left untouched.`
+		: `${title} has changed since last capture. The existing page was left untouched.`;
+}
+
 function showNotification(title: string, message: string): void {
-	chrome.notifications.create({
-		type: "basic",
-		iconUrl: "icons/icon-128.png",
-		title,
-		message,
+	// The worker lives at /background/, so a relative icon path resolves to
+	// /background/icons/... and Chrome rejects the whole notification with
+	// "Unable to download all specified images". Always use an extension URL.
+	void Promise.resolve(
+		chrome.notifications.create({
+			type: "basic",
+			iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+			title,
+			message,
+		}),
+	).catch(() => {
+		// Notifications are best-effort; the badge is the reliable signal.
 	});
 }
 
-// Listen for capture results from content script
+const legacyChrome = chrome as typeof chrome & {
+	browserAction?: LegacyToolbarActionApi;
+};
+
+interface ToolbarBadgeApi {
+	setBadgeText: (details: { text: string; tabId?: number }) => void;
+	setBadgeBackgroundColor: (details: {
+		color: string;
+		tabId?: number;
+	}) => void;
+	setTitle: (details: { title: string; tabId?: number }) => void;
+}
+
+function badgeApi(): ToolbarBadgeApi | undefined {
+	const api = chrome.action ?? legacyChrome.browserAction;
+	return api as unknown as ToolbarBadgeApi | undefined;
+}
+
+/** Where each tab is in its capture, so the popup can report it. */
+const phases = new Map<number, CapturePhase>();
+
+/**
+ * Drive the toolbar badge. This is the primary progress signal: notifications
+ * only fire at the end, and can be suppressed by the OS entirely.
+ */
+function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
+	if (tabId === undefined) return;
+	phases.set(tabId, phase);
+
+	const api = badgeApi();
+	if (!api) return;
+	const badge = badgeFor(phase);
+	try {
+		api.setBadgeText({ text: badge.text, tabId });
+		api.setBadgeBackgroundColor({ color: badge.color, tabId });
+		api.setTitle({ title: badge.title, tabId });
+	} catch {
+		// Badge APIs are unavailable on some platforms (e.g. mobile Firefox).
+		return;
+	}
+
+	if (isTerminal(phase) && badge.clearAfterMs !== null) {
+		setTimeout(() => {
+			if (phases.get(tabId) !== phase) return;
+			phases.delete(tabId);
+			try {
+				api.setBadgeText({ text: "", tabId });
+				api.setTitle({ title: "", tabId });
+			} catch {
+				// ignored
+			}
+		}, badge.clearAfterMs);
+	}
+}
+
+chrome.tabs.onRemoved?.addListener((tabId) => phases.delete(tabId));
+
+/**
+ * Guards every capture: suppresses duplicates for a URL already being captured,
+ * and keeps the service worker alive while asynchronous work is outstanding.
+ */
+const captureQueue = new CaptureQueue({
+	keepAlive: () => {
+		// Any extension API call resets the service worker's idle timer. The
+		// result is irrelevant; only the call matters.
+		try {
+			void Promise.resolve(chrome.runtime.getPlatformInfo()).catch(() => {});
+		} catch {
+			// MV2 background pages are not suspended, so a failure here is benign.
+		}
+	},
+});
+
+type WorkerMessage =
+	| CaptureResult
+	| { type: "capture_error"; error: string }
+	| { type: "capture_status"; tabId: number };
+
+// Listen for capture results from content script, and status queries from the popup
 chrome.runtime.onMessage.addListener(
 	(
-		message: CaptureResult | { type: "capture_error"; error: string },
-		_sender: chrome.runtime.MessageSender,
-		_sendResponse: (response?: unknown) => void,
+		message: WorkerMessage,
+		sender: chrome.runtime.MessageSender,
+		sendResponse: (response?: unknown) => void,
 	): undefined => {
+		if (message.type === "capture_status") {
+			// Answered synchronously, so no need to hold the channel open.
+			sendResponse({ phase: phases.get(message.tabId) ?? null });
+			return undefined;
+		}
+
+		const tabId = sender.tab?.id;
+
 		if (message.type === "capture_result") {
-			void processCaptureResult(message).catch((err) => {
-				showNotification("Archive Failed", String(err));
-			});
+			reportPhase(tabId, "processing");
+			const started = captureQueue.run(message.url, () =>
+				processCaptureResult(message, tabId).catch((err) => {
+					reportPhase(tabId, "error");
+					showNotification("Archive Failed", String(err));
+				}),
+			);
+			if (!started) {
+				showNotification(
+					"Capture In Progress",
+					`${message.title} is already being archived.`,
+				);
+			}
 		} else if (message.type === "capture_error") {
+			reportPhase(tabId, "error");
 			showNotification("Capture Failed", message.error);
 		}
 		return undefined;
 	},
 );
 
+/** Inject the capture script, reporting why if the page forbids it. */
+async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
+	if (!tab.id) return;
+	reportPhase(tab.id, "capturing");
+	try {
+		await executeCaptureScript(tab.id);
+	} catch (err) {
+		reportPhase(tab.id, "error");
+		showNotification("Capture Failed", describeInjectionFailure(tab.url, err));
+	}
+}
+
 // Handle toolbar button click
 // Note: onClicked only fires when there is NO default_popup set in the manifest.
 // Our manifest has a default_popup, so this is a no-op fallback for API completeness.
-const legacyChrome = chrome as typeof chrome & {
-	browserAction?: LegacyToolbarActionApi;
-};
 const toolbarAction = chrome.action ?? legacyChrome.browserAction;
 if (toolbarAction?.onClicked) {
 	toolbarAction.onClicked.addListener((tab) => {
-		if (tab.id) {
-			executeCaptureScript(tab.id);
-		}
+		void startCapture(tab);
 	});
 }
 
@@ -338,9 +441,7 @@ chrome.commands.onCommand.addListener((command) => {
 	if (command === "capture-page") {
 		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
 			const tab = tabs[0];
-			if (tab?.id) {
-				executeCaptureScript(tab.id);
-			}
+			if (tab) void startCapture(tab);
 		});
 	}
 });

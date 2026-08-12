@@ -63,6 +63,10 @@ pub struct PageDetail {
     pub revision: String,
     pub kind: String,
     pub inferred: bool,
+    /// Effective body write-protection: the page's `readonly` if declared,
+    /// otherwise its kind's default. Clients should render a protected body
+    /// non-editable; the server rejects the write regardless.
+    pub readonly: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     pub encrypted: bool,
@@ -105,6 +109,10 @@ pub struct PageDetailResponse {
     #[schema(value_type = crate::vault::kind::Kind)]
     pub kind: String,
     pub inferred: bool,
+    /// Effective body write-protection: the page's `readonly` if declared,
+    /// otherwise its kind's default. Clients should render a protected body
+    /// non-editable; the server rejects the write regardless.
+    pub readonly: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     pub encrypted: bool,
@@ -151,6 +159,10 @@ pub struct UpdatePageRequest {
     pub tags: Option<Vec<String>>,
     pub aliases: Option<Vec<String>>,
     pub body: Option<String>,
+    /// Declare or clear body write-protection. Sending `false` for a page whose
+    /// kind protects bodies by default is how a reader unlocks it; the change is
+    /// metadata-only, so it is permitted even while the page is still protected.
+    pub readonly: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -323,6 +335,7 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         .map(CanonicalName::from_title)
         .unwrap_or_else(|| CanonicalName::from_filename(page.path.filename()));
     let (kind, inferred) = crate::vault::kind::resolve(page.path.as_str(), page.meta.kind);
+    let readonly = crate::vault::page::body_is_protected(page.path.as_str(), &page.meta);
     let project = page.meta.project.clone();
     let encryption = page
         .meta
@@ -347,6 +360,7 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
         revision,
         kind: kind.as_str().to_string(),
         inferred,
+        readonly,
         project,
         encrypted,
         encryption,
@@ -1089,6 +1103,9 @@ async fn update_page_at_path(
     }
     if let Some(aliases) = body.aliases {
         meta.aliases = aliases;
+    }
+    if let Some(readonly) = body.readonly {
+        meta.readonly = Some(readonly);
     }
     if let Some(new_body) = body.body {
         page_body = new_body;

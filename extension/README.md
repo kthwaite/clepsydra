@@ -62,7 +62,9 @@ bun run build:firefox
 
 1. Click the extension icon, then open **Settings**.
 2. Set **Server URL** (default: `http://localhost:3000`).
-3. (Optional) Set default tags + notification preferences.
+3. (Optional) Set default tags, notification preferences, and the size
+   limits. The two size fields should match the server's
+   `archive.max_blob_size_mb` / `archive.max_request_size_mb`.
 4. Click **Save**.
 5. Confirm the status box shows **Connected**.
 
@@ -106,7 +108,19 @@ Then reload the temporary add-on from
   - Verify `http://localhost:3000/api/vault/archive/status` is reachable
 - **Capture doesn’t appear to run**
   - Reload extension after rebuild
-  - Ensure you are on a normal web page (`http://` or `https://`)
+  - The popup disables the capture button and explains why on pages that cannot
+    be scripted (browser pages, the add-on store, `file://` without “Allow
+    access to file URLs”)
+- **“Capture In Progress”**
+  - A capture for that URL is already running. Duplicate captures of the same
+    page are suppressed rather than raced
 - **Conflict notification (“Content Changed”)**
-  - When `POST /api/vault/archive` returns `HTTP 409`, current behavior is notification only: the extension shows **Content Changed** and does not update or retry the existing archive
-  - Settings saves an `on_content_changed` value, but capture does not consume it, so changing it currently has no effect on conflict behavior
+  - When `POST /api/vault/archive` returns `HTTP 409`, behaviour is notification
+    only: the existing page is left untouched, and the notification names the
+    vault path it lives at
+  - Updating in place would need a server-side update endpoint; there is none
+    today, so the extension deliberately exposes no conflict-resolution setting
+- **“N resources could not be archived”**
+  - Appended to the page body when images were skipped — too large for
+    `max_blob_size_mb`, beyond the per-capture budget, unreachable, or past the
+    50-image cap. The archive records this rather than looking complete

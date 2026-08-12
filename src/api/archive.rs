@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use base64::Engine;
@@ -17,6 +17,7 @@ use super::AppState;
 use super::error::ApiError;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_policy::IndexMutation;
+use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
 use crate::vault::page::{PageMeta, write_page_content};
 use crate::vault::path::VaultPath;
@@ -34,6 +35,21 @@ pub struct ArchiveRequest {
     pub markdown_body: String,
     pub tags: Vec<String>,
     pub blobs: Vec<BlobUpload>,
+    /// Article byline, as parsed by Readability in the page context.
+    #[serde(default)]
+    pub byline: Option<String>,
+    /// Publication name (og:site_name or equivalent).
+    #[serde(default)]
+    pub site_name: Option<String>,
+    /// Publication timestamp declared by the page, verbatim.
+    #[serde(default)]
+    pub published_time: Option<String>,
+    /// BCP-47 language tag declared by the document.
+    #[serde(default)]
+    pub lang: Option<String>,
+    /// Short summary extracted from the article body.
+    #[serde(default)]
+    pub excerpt: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, ToSchema)]
@@ -224,6 +240,30 @@ pub fn cas_router() -> Router<Arc<AppState>> {
     Router::new().route("/{hash}", get(serve_blob))
 }
 
+const OCTET_STREAM: &str = "application/octet-stream";
+
+/// Content types that execute script when navigated to directly. These are
+/// forced to download rather than render, so archived page markup can never run
+/// on the vault origin. Images stay inline so archived markdown still renders.
+fn is_active_content(content_type: &str) -> bool {
+    let base = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        base.as_str(),
+        "text/html"
+            | "application/xhtml+xml"
+            | "image/svg+xml"
+            | "text/xml"
+            | "application/xml"
+            | "application/rdf+xml"
+            | "text/xsl"
+    )
+}
+
 /// Convert a title to a URL-safe slug, truncated to `max_len` characters.
 pub(crate) fn slugify(title: &str, max_len: usize) -> String {
     let slug: String = title
@@ -339,6 +379,9 @@ fn build_archive_meta(
     let mut meta = PageMeta::new();
     meta.title = Some(req.title.clone());
     meta.tags = req.tags.clone();
+    // Declared explicitly rather than left to folder inference, so an archived
+    // page is distinguishable from an ordinary note wherever it is filed.
+    meta.kind = Some(Kind::Archive);
 
     let mut archive_map = toml::Table::new();
     archive_map.insert("url".into(), ts(&req.url));
@@ -351,6 +394,17 @@ fn build_archive_meta(
     archive_map.insert("snapshot_hash".into(), ts(&req.snapshot_hash));
     if let Some(ref description) = req.description {
         archive_map.insert("description".into(), ts(description));
+    }
+    for (key, value) in [
+        ("byline", &req.byline),
+        ("site_name", &req.site_name),
+        ("published_time", &req.published_time),
+        ("lang", &req.lang),
+        ("excerpt", &req.excerpt),
+    ] {
+        if let Some(value) = value.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            archive_map.insert(key.into(), ts(value));
+        }
     }
 
     let non_snapshot_blobs: Vec<toml::Value> = decoded_blobs
@@ -439,7 +493,31 @@ pub async fn serve_blob(
         .retrieve(&hash)
         .map_err(|_| ApiError::not_found(format!("blob not found: {hash}")))?;
 
-    Ok((StatusCode::OK, [(header::CONTENT_TYPE, content_type)], data).into_response())
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&content_type)
+            .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
+    );
+    // Blob bytes are authored by whatever page was archived. They are served
+    // from the vault's own origin, alongside an unauthenticated API, so they
+    // must never be treated as trusted same-origin content.
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("sandbox; default-src 'none'"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if is_active_content(&content_type) {
+        headers.insert(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment"),
+        );
+    }
+
+    Ok((StatusCode::OK, headers, data).into_response())
 }
 
 #[utoipa::path(
@@ -887,6 +965,94 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     #[test]
+    fn archive_kind_folder_matches_configured_prefix() {
+        // If these drift, declaring Kind::Archive would relocate every existing
+        // archived page on the next projection sweep.
+        assert_eq!(
+            Kind::Archive.canonical_folder(),
+            crate::vault::config::ArchiveSection::default().default_path_prefix,
+        );
+    }
+
+    #[test]
+    fn declaring_archive_kind_leaves_existing_pages_in_place() {
+        use crate::vault::projection::project_path;
+        assert_eq!(
+            project_path("archive/example.com/a-post.md", Some(Kind::Archive), None),
+            None,
+            "an archived page must not move when its kind is declared"
+        );
+    }
+
+    #[test]
+    fn build_archive_meta_declares_the_archive_kind() {
+        let req = request_fixture();
+        let meta = build_archive_meta(&req, &[]);
+        assert_eq!(meta.kind, Some(Kind::Archive));
+    }
+
+    #[test]
+    fn build_archive_meta_carries_readability_provenance() {
+        let mut req = request_fixture();
+        req.byline = Some("Ada Lovelace".to_string());
+        req.site_name = Some("Example Weekly".to_string());
+        req.published_time = Some("2026-07-01T09:30:00Z".to_string());
+        req.lang = Some("en-GB".to_string());
+        req.excerpt = Some("A short summary.".to_string());
+
+        let meta = build_archive_meta(&req, &[]);
+        let archive = match meta.extra.get("archive") {
+            Some(toml::Value::Table(m)) => m,
+            other => panic!("expected archive mapping, got {other:?}"),
+        };
+        let get = |k: &str| archive.get(k).and_then(|v| v.as_str());
+        assert_eq!(get("byline"), Some("Ada Lovelace"));
+        assert_eq!(get("site_name"), Some("Example Weekly"));
+        assert_eq!(get("published_time"), Some("2026-07-01T09:30:00Z"));
+        assert_eq!(get("lang"), Some("en-GB"));
+        assert_eq!(get("excerpt"), Some("A short summary."));
+    }
+
+    #[test]
+    fn build_archive_meta_omits_blank_provenance_fields() {
+        let mut req = request_fixture();
+        req.byline = Some("   ".to_string());
+        req.lang = None;
+
+        let meta = build_archive_meta(&req, &[]);
+        let archive = match meta.extra.get("archive") {
+            Some(toml::Value::Table(m)) => m,
+            other => panic!("expected archive mapping, got {other:?}"),
+        };
+        assert!(
+            !archive.contains_key("byline"),
+            "blank byline must be dropped"
+        );
+        assert!(!archive.contains_key("lang"), "absent lang must be dropped");
+    }
+
+    fn request_fixture() -> ArchiveRequest {
+        ArchiveRequest {
+            url: "https://example.com/test".to_string(),
+            canonical_url: None,
+            domain: "example.com".to_string(),
+            title: "Test Article".to_string(),
+            description: None,
+            captured_at: "2026-01-01T00:00:00Z".to_string(),
+            content_hash: "sha256:abc".to_string(),
+            snapshot_hash: "sha256:def".to_string(),
+            markdown_body: "# Test".to_string(),
+            tags: vec!["archive".to_string()],
+            blobs: vec![],
+            byline: None,
+            site_name: None,
+            published_time: None,
+            lang: None,
+            excerpt: None,
+        }
+    }
+
+    #[test]
     fn build_archive_meta_sets_archive_key() {
         let req = ArchiveRequest {
             url: "https://example.com/test".to_string(),
@@ -900,6 +1066,7 @@ mod tests {
             markdown_body: "# Test".to_string(),
             tags: vec!["archive".to_string()],
             blobs: vec![],
+            ..request_fixture()
         };
         let meta = build_archive_meta(&req, &[]);
         assert!(
@@ -923,6 +1090,7 @@ mod tests {
             markdown_body: "# Test".to_string(),
             tags: vec![],
             blobs: vec![],
+            ..request_fixture()
         };
         // One ordinary blob plus the snapshot blob; only the former should appear.
         let decoded = vec![
