@@ -1827,10 +1827,12 @@ Refuse a capture that is corrupt or is an error page wearing an HTTP 200. Each c
 - Test: `extension/src/lib/__tests__/capture-hygiene.test.ts`
 
 **Interfaces:**
-- Produces: `snapshotRejection(snapshotHtml: string, articleTextLength: number): string | null` — the reason to refuse, or `null` to proceed.
+- Produces: `snapshotRejection(snapshotHtml: string, articleText: string): string | null` — the reason to refuse, or `null` to proceed.
 - Consumed by: Task 7 (content script).
 
-Note the deviation recorded in **Global Constraints → Deliberate deviations #4**: gwern greps the raw snapshot unconditionally and accepts false positives because he reviews every capture in a browser. We gate the marker check on a short article, so a piece *about* HTTP status codes still archives.
+Note the deviation recorded in **Global Constraints → Deliberate deviations #4**: gwern greps the raw snapshot unconditionally and accepts false positives because he reviews every capture in a browser.
+
+We do two things differently, and the second was a correction. First, the marker check is gated on a short article, so a piece *about* HTTP status codes still archives. Second — and this is the part the first draft got wrong — the markers are matched against **Readability's extracted article text, not the raw snapshot**. The length gate alone protects only the long-article case; a *short, valid* page whose nav, footer or cookie banner happens to contain "Access Denied" would still have been refused. Nav and footers are not the article, and a marker there is not evidence of an error page. Matching the extraction also makes detection sharper, not blunter: a real error page yields almost no article text, and what little it yields is the marker.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1840,8 +1842,8 @@ import { describe, expect, it } from "vitest";
 
 import { snapshotRejection } from "#/lib/capture-hygiene";
 
-const LONG_ARTICLE = 5000;
-const SHORT_ARTICLE = 100;
+const LONG_ARTICLE = "Real prose about something. ".repeat(200); // 5600 chars
+const SHORT_ARTICLE = "A short but real post.";
 
 function snapshot(body: string): string {
 	return `<html><body>${body}${"x".repeat(2000)}</body></html>`;
@@ -1859,7 +1861,7 @@ describe("snapshotRejection", () => {
 	});
 
 	it("refuses an error page that returned HTTP 200", () => {
-		const reason = snapshotRejection(snapshot("<h1>404 Not Found</h1>"), SHORT_ARTICLE);
+		const reason = snapshotRejection(snapshot("<h1>404 Not Found</h1>"), "404 Not Found");
 
 		expect(reason).toMatch(/404 Not Found/);
 	});
@@ -1871,15 +1873,24 @@ describe("snapshotRejection", () => {
 		"Instance has been rate limited",
 		"Token is required",
 	])("refuses a page reading %s", (marker) => {
-		expect(snapshotRejection(snapshot(`<h1>${marker}</h1>`), SHORT_ARTICLE)).toContain(marker);
+		expect(snapshotRejection(snapshot(`<h1>${marker}</h1>`), marker)).toContain(marker);
 	});
 
 	it("archives a long article that merely discusses an error code", () => {
 		// The marker check is what makes false positives possible, so it only
 		// fires on a page that also yielded almost no article text.
-		expect(
-			snapshotRejection(snapshot("<p>On seeing 404 Not Found in the wild…</p>"), LONG_ARTICLE),
-		).toBeNull();
+		const article = `On seeing 404 Not Found in the wild. ${LONG_ARTICLE}`;
+
+		expect(snapshotRejection(snapshot("<p>On 404s…</p>"), article)).toBeNull();
+	});
+
+	it("archives a short page whose chrome mentions an error, not its article", () => {
+		// The case matching raw HTML got wrong: nav, footers and cookie banners
+		// are not the article, and a marker in them is not evidence of an error
+		// page. Only the extraction is consulted.
+		const withChrome = snapshot("<nav>Access Denied</nav><p>A short but real post.</p>");
+
+		expect(snapshotRejection(withChrome, SHORT_ARTICLE)).toBeNull();
 	});
 
 	it("accepts a short capture with no error marker", () => {
@@ -1928,15 +1939,20 @@ const ERROR_PAGE_MARKERS = [
 /** Why this capture must not be archived, or null to proceed. */
 export function snapshotRejection(
 	snapshotHtml: string,
-	articleTextLength: number,
+	articleText: string,
 ): string | null {
 	if (snapshotHtml.length < MIN_SNAPSHOT_BYTES) {
 		return `The capture is only ${snapshotHtml.length} bytes — under 1 KB, so it is truncated or empty rather than a page.`;
 	}
 
-	if (articleTextLength >= ARTICLE_TEXT_FLOOR) return null;
+	if (articleText.length >= ARTICLE_TEXT_FLOOR) return null;
 
-	const marker = ERROR_PAGE_MARKERS.find((m) => snapshotHtml.includes(m));
+	// Match the extraction, not the raw page. Nav, footers and cookie banners
+	// are not the article, and a marker sitting in them is not evidence that the
+	// server returned an error page. Consulting the extraction also sharpens
+	// detection rather than blunting it: a real error page extracts almost
+	// nothing, and what little it does extract is the marker itself.
+	const marker = ERROR_PAGE_MARKERS.find((m) => articleText.includes(m));
 	if (marker) {
 		return `The page reads as an error page ("${marker}") despite loading successfully. Nothing was archived.`;
 	}
@@ -1948,7 +1964,7 @@ export function snapshotRejection(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `bun run test capture-hygiene`
-Expected: 10 passed (5 plain cases plus the 5-marker `it.each`).
+Expected: 11 passed (6 plain cases plus the 5-marker `it.each`).
 
 - [ ] **Step 5: Commit**
 
@@ -2262,7 +2278,7 @@ async function capture(): Promise<void> {
 	const article = new Readability(clonedDoc).parse();
 	const articleTextLength = article?.textContent?.length || 0;
 
-	const rejection = snapshotRejection(snapshotHtml, articleTextLength);
+	const rejection = snapshotRejection(snapshotHtml, article?.textContent ?? "");
 	if (rejection) {
 		await send({ type: "capture_error", error: rejection });
 		return;
