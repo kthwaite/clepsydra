@@ -6,9 +6,9 @@
 
 ### 1. TaskCard keyboard activation
 
-**Status: DONE** (commit: task-20; 2026-08-12)
+**Status: DONE** (commits: 91f95eab–1f29d4e8; 2026-08-12)
 
-`TaskCard` now renders with `role="button"`, `tabIndex={0}`, and a `keyDown` handler for Enter/Space to open the edit panel. The dossier footer link is now a real `<button>` element. Regression test ensures RAC Buttons (priority badge, state pip) don't bubble keyboard activation to the card.
+`TaskCard` now renders with `role="button"`, `tabIndex={0}`, and a `keyDown` handler for Enter/Space to open the edit panel. Target guard prevents the handler from firing when focus is on a descendant (dossier button, priority/status chips). The dossier footer link is now a real `<button>` element. Regression test ensures RAC Buttons (priority badge, state pip) don't bubble keyboard activation to the card. Keyboard tests verify dossier button isolation.
 
 ### 2. Keyboard DnD for TaskCard
 
