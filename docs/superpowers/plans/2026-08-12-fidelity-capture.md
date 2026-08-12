@@ -2877,26 +2877,27 @@ git diff --stat ui/src/api/schema.d.ts
 
 Expected: tens of lines. **A diff of thousands of lines means biome reformatted the file** — restore it from HEAD and regenerate without running any formatter over it.
 
-- [ ] **Step 2: Update the options copy**
+- [ ] **Step 2: Fix the options copy, and remove the control that no longer does anything**
 
-The two size fields no longer skip an image; they fail a capture. `extension/src/options/options.html`:
+`max_blob_size_mb` is still live: Task 7 feeds it to SingleFile as `maxResourceSize`, so a resource over it is declined at capture time. Its description was wrong, though — it never "skipped an image and carried on".
+
+`max_request_size_mb` is now **inert on the client**. Its only consumer was `buildResourceMap`'s total budget, which Task 8 deleted; nothing in the capture path reads it any more, and the server enforces the real budget. Leaving a control that silently does nothing is worse than not having it, so remove the field rather than rewording it.
+
+In `extension/src/options/options.html`, replace both blocks with:
 
 ```html
   <label for="max-blob-mb">Maximum resource size (MB)</label>
   <input type="number" id="max-blob-mb" min="1" step="1" />
   <p class="hint">
-    A resource larger than this is left out of the capture. Match the server's
-    <code>archive.max_blob_size_mb</code>.
-  </p>
-
-  <label for="max-request-mb">Maximum total capture size (MB)</label>
-  <input type="number" id="max-request-mb" min="1" step="1" />
-  <p class="hint">
-    A capture over this size is refused outright rather than trimmed — a snapshot
-    missing arbitrary resources is not a snapshot. Match the server's
-    <code>archive.max_request_size_mb</code>.
+    A resource larger than this is declined during capture, so the page is
+    archived without it. Match the server's <code>archive.max_blob_size_mb</code>.
+    The total capture budget is enforced by the server alone.
   </p>
 ```
+
+In `extension/src/options/options.ts`, drop the `max-request-mb` read and the `max_request_size_mb` line from the saved settings object. **Keep the field on `ExtensionSettings` and in `DEFAULT_SETTINGS`** — removing it from the type would break any stored settings object round-tripping through `{ ...DEFAULT_SETTINGS, ...stored.settings }`, and it costs nothing to retain. Add a comment on the type saying it is server-enforced and no longer read by the extension.
+
+Verify with `grep -rn 'max_request_size_mb' extension/src` that the only remaining references are the type, the default, and that comment.
 
 - [ ] **Step 3: Update the docs**
 
